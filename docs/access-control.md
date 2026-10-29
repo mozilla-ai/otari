@@ -147,6 +147,61 @@ named `*`.
 Deleting or deactivating a user prevents future access but preserves historical
 usage.
 
+### MCP server access
+
+Each of a workspace's [stored MCP servers](mcp.md#workspace-scoped-servers) has an
+ACL, which decides which keys reach it and which of its tools they may run. It works
+like a firewall, with keys as the source:
+
+- **Rules** each match one source, a single key or a user (which covers every key
+  that user owns, including keys they create later), and either allow tools or
+  deny. On the API a rule is a grant, and its `tools` are the tool patterns it
+  allows; `[]` denies.
+- **The default policy** (`everyone_tools` on the server) applies to every key no
+  rule matches. `["*"]`, the default, allows every tool; `[]` denies.
+- **Match order:** the rule for the key, else the rule for the user who owns it,
+  else the default policy. There is no ordering to manage, so "deny by default, then
+  allow these keys" and "allow by default, except this key" are both a policy and a
+  rule.
+
+A tool pattern is a tool name, `*` for every tool, or a name prefix ending in `*`
+(`get_*`); a pattern with `*` anywhere else is refused. The master key and a
+dashboard session, which the Playground runs as, are not bound by any ACL.
+
+- **A server's own `allowed_tools` is a ceiling.** It decides which of the server's
+  tools Otari exposes at all, beneath every rule and the default policy. A disabled server stays unreachable.
+- **A server that denies a key does not exist for it.** The completion
+  endpoints answer a `mcp_server_ids` entry naming one as they answer an unknown id
+  (`404`), `GET /api/v1/mcp/servers` leaves it out, and the stateless discovery and
+  execution routes answer `404 mcp_server_not_found`. A tool outside the matching
+  rule is not offered to the model and, on `POST /api/v1/mcp/execute`, is refused
+  with `403 mcp_tool_not_allowed`, the code the server's own list uses.
+- **Rules follow the server, the key and the user.** They name the server by id,
+  so renaming a server keeps them, and deleting the server, the key or the user
+  deletes them.
+- **Servers named in a request.** `mcp_servers` in a completion request names a server
+  by URL, which no ACL covers. A workspace allows it by default; turning off
+  `request_mcp_servers_allowed` with `PATCH /api/v1/workspaces/{workspace_id}` refuses
+  such a request with a `400`, so that a workspace's ACLs cannot be stepped around. The master key and a dashboard session may still name servers.
+
+The ACL is managed under
+`/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}`, by organization
+owners/admins or the workspace's owners/admins:
+
+| Route | Does |
+|---|---|
+| `PATCH /` with `everyone_tools` | change the default policy |
+| `GET /access` | the default policy and every rule, each naming its key (with its name, owner and whether it is active) or its user |
+| `POST /access/grants` | add the same rule for several `api_key_ids` and `user_ids`; a key or user that already has a rule gets this one instead. A key must belong to the workspace and a user must own a key in it |
+| `PATCH /access/grants/{grant_id}` | change one rule's `tools` |
+| `DELETE /access/grants/{grant_id}` | delete one rule, so its key or user matches the next rule down |
+| `GET /access/check?api_key_id=&tool=` | trace one call: whether a key may call a tool, and what matched (`key`, `user`, `everyone` for the default policy, or `server` when the server is disabled or does not expose the tool) |
+
+`GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access` answers
+the other way round: what one key reaches on each of the workspace's servers, and which
+rule matched. A server holds at most 1000 rules; write a rule for a user rather than
+one for each of their keys.
+
 ## API keys
 
 API keys are workload credentials. Each key has a fixed user and workspace and
@@ -154,6 +209,7 @@ may also define:
 
 - expiration and active status
 - allowed models
+- allowed search tools
 - budget exemption
 - a budget of its own: a spend ceiling on the key, which its owner's budget does
   not replace (both apply)

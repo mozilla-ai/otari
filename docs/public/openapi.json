@@ -11349,6 +11349,55 @@
         "title": "McpServerConfig",
         "type": "object"
       },
+      "McpServerSummary": {
+        "description": "A stored server as a caller sees it: enough to name it in ``mcp_server_ids``, never its URL or token.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "purpose_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose Hint"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "purpose_hint"
+        ],
+        "title": "McpServerSummary",
+        "type": "object"
+      },
+      "McpServersResponse": {
+        "description": "The enabled stored servers the authenticated key can reach.",
+        "properties": {
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerSummary"
+            },
+            "title": "Servers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "servers"
+        ],
+        "title": "McpServersResponse",
+        "type": "object"
+      },
       "McpToolDefinition": {
         "description": "One live tool a caller-orchestrated application may expose to its model.\n\n``annotations`` is the remote server's own metadata, passed through as\nuntrusted data. Otari never turns ``readOnlyHint`` into an authorization\ndecision; each application owns its risk policy, and a server\ncannot waive an application's approval gate by labeling itself read-only.",
         "properties": {
@@ -25327,6 +25376,80 @@
         "title": "WorkspaceCreate",
         "type": "object"
       },
+      "WorkspaceMcpServerAccess": {
+        "description": "A stored server's access list: what everyone may call, and the exceptions for keys and users.\n\nA key's own grant decides over its owner's, and either decides over ``everyone_tools``. The\nserver's ``allowed_tools`` is a ceiling over all of them.",
+        "properties": {
+          "everyone_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Everyone Tools",
+            "type": "array"
+          },
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceMcpServerGrantPublic"
+            },
+            "title": "Grants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "everyone_tools",
+          "grants"
+        ],
+        "title": "WorkspaceMcpServerAccess",
+        "type": "object"
+      },
+      "WorkspaceMcpServerAccessCheck": {
+        "description": "Whether one key may call one tool on a server, and which rule says so.",
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "decided_by": {
+            "description": "The key's own grant, its owner's, the server's everyone_tools, or the server itself (disabled, or its allowed_tools leaves the tool out)",
+            "enum": [
+              "key",
+              "user",
+              "everyone",
+              "server"
+            ],
+            "title": "Decided By",
+            "type": "string"
+          },
+          "grant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The deciding grant, when a grant decided",
+            "title": "Grant Id"
+          },
+          "tools": {
+            "description": "The deciding rule's tool patterns; the server's allowed_tools when it decided",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "allowed",
+          "decided_by",
+          "grant_id",
+          "tools"
+        ],
+        "title": "WorkspaceMcpServerAccessCheck",
+        "type": "object"
+      },
       "WorkspaceMcpServerCheckRequest": {
         "description": "Connection details to check without storing them, for a form to test before it saves.\n\n``server_id`` names a stored server whose token stands in when\n``authorization_token`` is omitted, so an edit form can test a new URL with\na token it was never shown. ``\"\"`` checks with no token at all.",
         "properties": {
@@ -25426,6 +25549,14 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "everyone_tools": {
+            "description": "What every key of the workspace may call on this server: tool names, '*' for every tool, or 'prefix*'; [] denies everyone. A grant for a key or its owner overrides it",
+            "items": {
+              "type": "string"
+            },
+            "title": "Everyone Tools",
+            "type": "array"
+          },
           "name": {
             "description": "Label for the server, unique within the workspace",
             "maxLength": 128,
@@ -25459,6 +25590,154 @@
           "url"
         ],
         "title": "WorkspaceMcpServerCreate",
+        "type": "object"
+      },
+      "WorkspaceMcpServerGrantPublic": {
+        "description": "One exception to a server's ``everyone_tools``: for a key, or for a user and so every key they own.",
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key a key grant names; null on a user's grant",
+            "title": "Api Key Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether a key grant's key is active",
+            "title": "Key Active"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Name"
+          },
+          "subject": {
+            "enum": [
+              "key",
+              "user"
+            ],
+            "title": "Subject",
+            "type": "string"
+          },
+          "tools": {
+            "description": "Tool patterns: names, '*' or 'prefix*'; [] denies",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user a grant names, or the owner of a key grant's key",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "subject",
+          "api_key_id",
+          "user_id",
+          "tools",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkspaceMcpServerGrantPublic",
+        "type": "object"
+      },
+      "WorkspaceMcpServerGrantUpdate": {
+        "description": "New tools for one grant.",
+        "properties": {
+          "tools": {
+            "description": "Tool patterns: names, '*' or 'prefix*'; [] denies",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools"
+        ],
+        "title": "WorkspaceMcpServerGrantUpdate",
+        "type": "object"
+      },
+      "WorkspaceMcpServerGrantsCreate": {
+        "description": "Grant the same tools to several keys and users at once; a subject that already has a grant gets these tools.",
+        "properties": {
+          "api_key_ids": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Api Key Ids",
+            "type": "array"
+          },
+          "tools": {
+            "description": "Tool patterns: names, '*' or 'prefix*'; [] denies",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "user_ids": {
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "User Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools"
+        ],
+        "title": "WorkspaceMcpServerGrantsCreate",
         "type": "object"
       },
       "WorkspaceMcpServerHealth": {
@@ -25535,6 +25814,79 @@
         "title": "WorkspaceMcpServerHealth",
         "type": "object"
       },
+      "WorkspaceMcpServerKeyAccess": {
+        "description": "What one key reaches on one stored server, and which rule decides it.",
+        "properties": {
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The server's own ceiling; null exposes every tool",
+            "title": "Allowed Tools"
+          },
+          "decided_by": {
+            "enum": [
+              "key",
+              "user",
+              "everyone"
+            ],
+            "title": "Decided By",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "grant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grant Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "server_id": {
+            "format": "uuid",
+            "title": "Server Id",
+            "type": "string"
+          },
+          "tools": {
+            "description": "The deciding rule's tool patterns; [] means the key cannot reach the server",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "server_id",
+          "name",
+          "enabled",
+          "decided_by",
+          "grant_id",
+          "tools",
+          "allowed_tools"
+        ],
+        "title": "WorkspaceMcpServerKeyAccess",
+        "type": "object"
+      },
       "WorkspaceMcpServerPublic": {
         "description": "The API-facing shape. Never carries the token, only whether one is set.\n\nNo ``last4``-style prefix either, unlike `OrgProviderKeyPublic`: a provider\nkey's last four digits let an operator match a stored key against the one\nin their provider's console, and there is no equivalent workflow for an MCP\nbearer token.",
         "properties": {
@@ -25559,6 +25911,14 @@
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
+          },
+          "everyone_tools": {
+            "description": "What every key of the workspace may call; [] denies everyone",
+            "items": {
+              "type": "string"
+            },
+            "title": "Everyone Tools",
+            "type": "array"
           },
           "has_token": {
             "title": "Has Token",
@@ -25617,6 +25977,7 @@
           "purpose_hint",
           "allowed_tools",
           "enabled",
+          "everyone_tools",
           "has_token",
           "health",
           "created_at",
@@ -25659,6 +26020,13 @@
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
+          },
+          "everyone_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Everyone Tools",
+            "type": "array"
           },
           "name": {
             "maxLength": 128,
@@ -26149,6 +26517,12 @@
             "title": "Organization Id",
             "type": "string"
           },
+          "request_mcp_servers_allowed": {
+            "default": true,
+            "description": "Whether this workspace's keys may name MCP servers by URL in a request.",
+            "title": "Request Mcp Servers Allowed",
+            "type": "boolean"
+          },
           "trace_content_enabled": {
             "default": false,
             "description": "Whether this workspace keeps what its agent sessions were about.",
@@ -26202,6 +26576,18 @@
               }
             ],
             "title": "Name"
+          },
+          "request_mcp_servers_allowed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Let this workspace's keys name MCP servers by URL in a request (mcp_servers), beside the stored servers whose access lists the workspace controls.",
+            "title": "Request Mcp Servers Allowed"
           },
           "trace_content_enabled": {
             "anyOf": [
@@ -33639,6 +34025,86 @@
           }
         ],
         "summary": "Execute Mcp Tool",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/api/v1/mcp/servers": {
+      "get": {
+        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.",
+        "operationId": "mcp-list_mcp_servers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Mcp Servers",
         "tags": [
           "mcp"
         ]
@@ -50494,6 +50960,71 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access": {
+      "get": {
+        "description": "What one key reaches on each of the workspace's MCP servers.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nFor each server, oldest first: the rule that decides (the key's own grant, its owner's, or the\nserver's `everyone_tools`) and that rule's tool patterns, beside the server's own `allowed_tools`\nceiling. A key of another workspace is refused with a 400.",
+        "operationId": "mcp-servers-get_workspace_mcp_key_access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "title": "Api Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkspaceMcpServerKeyAccess"
+                  },
+                  "title": "Response Mcp-Servers-Get Workspace Mcp Key Access",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Mcp Key Access",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}": {
       "delete": {
         "description": "Delete a server and the token stored with it. Organization owners/admins or this workspace's owners/admins.",
@@ -50555,8 +51086,68 @@
           "mcp-servers"
         ]
       },
+      "get": {
+        "description": "One MCP server of a workspace. Readable by any member who can see the workspace, as the list is.",
+        "operationId": "mcp-servers-get_workspace_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
       "patch": {
-        "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it. A change to the URL, the token or the allow-list checks the\nserver again, as creating it does.",
+        "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it. A change to the URL, the token or the allow-list checks the\nserver again, as creating it does. `everyone_tools` is what every key of\nthe workspace may call; the server's grants override it per key or user.",
         "operationId": "mcp-servers-update_workspace_mcp_server",
         "parameters": [
           {
@@ -50621,6 +51212,380 @@
           }
         ],
         "summary": "Update Workspace Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access": {
+      "get": {
+        "description": "A server's access list. Organization owners/admins or this workspace's owners/admins.\n\n`everyone_tools` is what every key of the workspace may call. Each grant overrides it for one\nkey, or for one user and so every key they own; a key's own grant decides over its owner's.\nTool patterns are names, `*` or `prefix*`, and `[]` denies. The server's `allowed_tools` is a\nceiling over all of them. A server holds at most 1000 grants, returned oldest first.",
+        "operationId": "mcp-servers-get_workspace_mcp_server_access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerAccess"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Mcp Server Access",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/check": {
+      "get": {
+        "description": "Whether a key may call a tool on a server, and which rule decides.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nApplies the same order a request does: the server must be enabled and its `allowed_tools`\nmust include the tool, then the key's own grant decides, else its owner's, else the\nserver's `everyone_tools`. A key of another workspace is refused with a 400.",
+        "operationId": "mcp-servers-check_workspace_mcp_server_access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The key to test",
+            "in": "query",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "description": "The key to test",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Api Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The tool name to test",
+            "in": "query",
+            "name": "tool",
+            "required": true,
+            "schema": {
+              "description": "The tool name to test",
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Tool",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerAccessCheck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Workspace Mcp Server Access",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants": {
+      "post": {
+        "description": "Give keys and users the same tools on a server.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nA key or user that already has a grant on the server gets these tools instead. A key must\nbelong to this workspace, and a user must own a key in it; either is otherwise refused with\na 400. Answers with the server's whole access list.",
+        "operationId": "mcp-servers-add_workspace_mcp_server_grants",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerGrantsCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerAccess"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Add Workspace Mcp Server Grants",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}": {
+      "delete": {
+        "description": "Remove one grant, so its key or user falls back to the next rule.\n\nOrganization owners/admins or this workspace's owners/admins.",
+        "operationId": "mcp-servers-delete_workspace_mcp_server_grant",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Grant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerAccess"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Workspace Mcp Server Grant",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "patch": {
+        "description": "Change the tools of one grant. Organization owners/admins or this workspace's owners/admins.",
+        "operationId": "mcp-servers-update_workspace_mcp_server_grant",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Grant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerGrantUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerAccess"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Workspace Mcp Server Grant",
         "tags": [
           "mcp-servers"
         ]

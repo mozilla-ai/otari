@@ -66,6 +66,31 @@ authorization, credential storage, revocation, and allowlist policy on Otari's
 side of the boundary. Local `stdio` servers stay outside this: a remote Otari
 deployment cannot reach a machine-local process.
 
+### Listing the servers a key can reach
+
+```http
+GET /api/v1/mcp/servers
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "servers": [
+    {
+      "id": "2c948a61-dc96-4cd8-96bb-8e1434bf424e",
+      "name": "github",
+      "purpose_hint": "Use for repository and issue lookups"
+    }
+  ]
+}
+```
+
+The enabled stored servers of the key's workspace whose
+[ACL](access-control.md#mcp-server-access) grants it something, which is
+what to send in `mcp_server_ids`. The URL and the token are never returned. A master key has no
+workspace and is refused with `404`, as on the other routes of this section; the
+route is rate limited and refuses a blocked user as they are.
+
 ### Discovery
 
 ```http
@@ -242,9 +267,9 @@ exception text.
 | Payment required or insufficient funds | 402 | `payment_required` | `not_started` |
 | Authorization refused | 403 | `forbidden` | `not_started` |
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |
-| Server inaccessible to caller, or disabled | 404 | `mcp_server_not_found` | `not_started` |
+| Server inaccessible to caller (including one whose ACL denies the key), or disabled | 404 | `mcp_server_not_found` | `not_started` |
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
-| Tool absent from stored allowlist | 403 | `mcp_tool_not_allowed` | `not_started` |
+| Tool absent from stored allowlist, or outside the server's ACL for the key | 403 | `mcp_tool_not_allowed` | `not_started` |
 | Unsafe resolved URL | 400 | `unsafe_mcp_url` | `not_started` |
 | Authentication refused for any other reason | 502 | `mcp_resolution_failed` | `not_started` |
 | Stored credential unavailable | 500 | `mcp_credentials_unavailable` | `not_started` |
@@ -360,6 +385,14 @@ header. An id that names no server in that workspace returns `404`, and a
 server that is configured but disabled is skipped rather than refusing the
 request.
 
+Which stored servers a key reaches, and which of their tools, is each server's
+[ACL](access-control.md#mcp-server-access): a rule for the key, else a rule for
+the user who owns it, else the server's default policy. A new server's default
+policy allows every tool. A server that denies the key answers
+`404` exactly as an unknown id does, and the tools it may not run are never offered
+to the model. A workspace can refuse `mcp_servers` named in the request itself by
+turning off `request_mcp_servers_allowed`; the request is then refused with a `400`.
+
 The same stored servers are what
 [caller-orchestrated MCP](#caller-orchestrated-mcp) refers to by id, so a server
 registered once serves both integration modes. The two read a disabled server
@@ -409,6 +442,11 @@ an owner/admin of that workspace.
   the response. A URL sent in the request body is yours to fix and still fails
   with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
+- `everyone_tools` (default `["*"]`) is the server's default policy: what a key no
+  rule matches may call; `[]` denies until a rule lets a key or user in. The
+  rules and the routes that manage them are in
+  [MCP server access](access-control.md#mcp-server-access).
+- `GET /{server_id}` reads one server, for any member who can see the workspace.
 
 #### Connection checks
 

@@ -4220,6 +4220,26 @@
           }
         },
         {
+          "name": "List Mcp Servers",
+          "request": {
+            "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "mcp",
+                "servers"
+              ],
+              "raw": "{{baseUrl}}/api/v1/mcp/servers"
+            }
+          }
+        },
+        {
           "name": "List Mcp Tools",
           "request": {
             "description": "List the tools a stored MCP server exposes to the authenticated workspace.\n\nCall this once per server when preparing a model or workflow run, and reuse\nthe answer for every tool from that server for the length of the run: there\nis no cross-run cache in this version, so a later run rediscovers and\nstaleness stays bounded without any invalidation state to keep.\n\nThe response is the whole authorized catalog or an error. It is never\npartial, because a caller would read a short catalog as the complete input\nto its own authorization and risk policy. The single exception is\n``warnings``, which names a tool whose descriptor Otari could not carry.\n\nA tool the server removes after discovery may still be proposed from the\nrun's snapshot; execution then returns the remote server's own typed error.",
@@ -12835,7 +12855,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\",\n  \"trace_content_enabled\": false\n}"
+              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\",\n  \"request_mcp_servers_allowed\": false,\n  \"trace_content_enabled\": false\n}"
             },
             "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.\n\nTurning content off keeps nothing new from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
             "header": [
@@ -13408,6 +13428,76 @@
           }
         },
         {
+          "name": "Get Workspace Mcp Key Access",
+          "request": {
+            "description": "What one key reaches on each of the workspace's MCP servers.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nFor each server, oldest first: the rule that decides (the key's own grant, its owner's, or the\nserver's `everyone_tools`) and that rule's tool patterns, beside the server's own `allowed_tools`\nceiling. A key of another workspace is refused with a 400.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                "keys",
+                ":api_key_id",
+                "access"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/keys/:api_key_id/access",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "api_key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Workspace Mcp Server",
+          "request": {
+            "description": "One MCP server of a workspace. Readable by any member who can see the workspace, as the list is.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                ":server_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "server_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Update Workspace Mcp Server",
           "request": {
             "body": {
@@ -13417,9 +13507,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"authorization_token\": \"string\",\n  \"enabled\": false,\n  \"name\": \"string\",\n  \"purpose_hint\": \"string\",\n  \"url\": \"string\"\n}"
+              "raw": "{\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"authorization_token\": \"string\",\n  \"enabled\": false,\n  \"everyone_tools\": [\n    \"string\"\n  ],\n  \"name\": \"string\",\n  \"purpose_hint\": \"string\",\n  \"url\": \"string\"\n}"
             },
-            "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it. A change to the URL, the token or the allow-list checks the\nserver again, as creating it does.",
+            "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it. A change to the URL, the token or the allow-list checks the\nserver again, as creating it does. `everyone_tools` is what every key of\nthe workspace may call; the server's grants override it per key or user.",
             "header": [
               {
                 "key": "Content-Type",
@@ -13483,6 +13573,239 @@
                 {
                   "description": "path parameter",
                   "key": "server_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Workspace Mcp Server Access",
+          "request": {
+            "description": "A server's access list. Organization owners/admins or this workspace's owners/admins.\n\n`everyone_tools` is what every key of the workspace may call. Each grant overrides it for one\nkey, or for one user and so every key they own; a key's own grant decides over its owner's.\nTool patterns are names, `*` or `prefix*`, and `[]` denies. The server's `allowed_tools` is a\nceiling over all of them. A server holds at most 1000 grants, returned oldest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                ":server_id",
+                "access"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id/access",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "server_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Check Workspace Mcp Server Access",
+          "request": {
+            "description": "Whether a key may call a tool on a server, and which rule decides.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nApplies the same order a request does: the server must be enabled and its `allowed_tools`\nmust include the tool, then the key's own grant decides, else its owner's, else the\nserver's `everyone_tools`. A key of another workspace is refused with a 400.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                ":server_id",
+                "access",
+                "check"
+              ],
+              "query": [
+                {
+                  "description": "The key to test",
+                  "disabled": false,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "The tool name to test",
+                  "disabled": false,
+                  "key": "tool",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id/access/check?api_key_id=&tool=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "server_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add Workspace Mcp Server Grants",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"tools\": [\n    \"string\"\n  ]\n}"
+            },
+            "description": "Give keys and users the same tools on a server.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nA key or user that already has a grant on the server gets these tools instead. A key must\nbelong to this workspace, and a user must own a key in it; either is otherwise refused with\na 400. Answers with the server's whole access list.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                ":server_id",
+                "access",
+                "grants"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id/access/grants",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "server_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Workspace Mcp Server Grant",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"tools\": [\n    \"string\"\n  ]\n}"
+            },
+            "description": "Change the tools of one grant. Organization owners/admins or this workspace's owners/admins.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                ":server_id",
+                "access",
+                "grants",
+                ":grant_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id/access/grants/:grant_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "server_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "grant_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Workspace Mcp Server Grant",
+          "request": {
+            "description": "Remove one grant, so its key or user falls back to the next rule.\n\nOrganization owners/admins or this workspace's owners/admins.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "mcp-servers",
+                ":server_id",
+                "access",
+                "grants",
+                ":grant_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id/access/grants/:grant_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "server_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "grant_id",
                   "value": ""
                 }
               ]

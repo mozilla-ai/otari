@@ -78,6 +78,7 @@ GET /api/v1/models/{model_id}                       # redundant, list_models cov
 # mcp.list_tools and mcp.execute methods are the next step for the SDKs, and
 # execution needs one deliberate property no generated wrapper gives it for
 # free: exactly one HTTP attempt, never a retry.
+GET /api/v1/mcp/servers                             # not yet wrapped
 GET /api/v1/mcp/servers/{mcp_server_id}/tools       # not yet wrapped
 POST /api/v1/mcp/execute                            # not yet wrapped
 # Files API: added to the gateway spec, not yet wrapped by any SDK shell.
@@ -526,5 +527,12 @@ GET /api/v1/workspaces/{workspace_id}/mcp-servers                             # 
 POST /api/v1/workspaces/{workspace_id}/mcp-servers                            # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/check                      # operator surface
 PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}                  # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access          # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/check    # operator surface
+POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants  # operator surface
+PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}  # operator surface
+DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}  # operator surface
+GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access    # operator surface
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check          # operator surface

@@ -767,8 +767,9 @@ Bedrock's, or an upstream `504`), and `api_error` otherwise.
 
 ## Caller-orchestrated MCP
 
-Two stored-server endpoints let an application own its own MCP tool loop, as an
+Three stored-server endpoints let an application own its own MCP tool loop, as an
 alternative to sending `mcp_servers` with a completion and letting Otari own it.
+`GET /api/v1/mcp/servers` lists the enabled stored servers the key can reach,
 `GET /api/v1/mcp/servers/{mcp_server_id}/tools` returns the tool definitions a stored
 MCP server exposes to the authenticated workspace, and `POST /api/v1/mcp/execute`
 runs one exact caller-authorized call and returns the remote server's native MCP
@@ -777,8 +778,9 @@ result.
 Otari executes a caller-authorized call; it does not verify a user approval and
 does not claim to. The calling application is the authorization boundary and owns
 any human approval, argument editing, cancellation, and action history. Otari
-enforces authentication, stored-server access, the stored tool allowlist, URL
-safety, and its own execution bounds.
+enforces authentication, stored-server access, the stored tool allowlist and the
+server's [ACL](access-control.md#mcp-server-access), URL safety, and its own
+execution bounds.
 
 `POST /api/v1/mcp/execute` must never be retried automatically, including by a
 reverse proxy or service mesh: an `outcome_unknown` response means the tool may
