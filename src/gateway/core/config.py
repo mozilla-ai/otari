@@ -105,6 +105,7 @@ API_ROOT = f"/api/{API_VERSION}"
 # The mozilla-ai fork of models.dev: upstream's catalog, synced hourly, plus
 # fixes upstream has not published yet.
 MODELS_DEV_URL = "https://mozilla-ai.github.io/models.dev/api.json"
+MODELS_DEV_V2_URL = "https://mozilla-ai.github.io/models.dev/experimental_v2.0_api.json"
 # Base only: OTel exporters append /otlp/v1/traces and the other signal paths.
 OTLP_ROOT = "/otlp"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
@@ -1184,6 +1185,15 @@ class GatewayConfig(
             "fork, which syncs from upstream hourly and carries fixes upstream has not published "
             "yet; set https://models.dev/api.json to read upstream directly, or any mirror that "
             "serves the same api.json. Config file or environment only."
+        ),
+    )
+    models_dev_v2_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
+        default=MODELS_DEV_V2_URL,
+        description=(
+            "Where the price updates download the models.dev v2 catalog from, as an absolute http(s) URL. "
+            "It supplies the per-image price of image generation models, which the v1 catalog at "
+            "models_dev_url leaves out. Upstream serves it at https://models.dev/experimental/v2.0/api.json. "
+            "Config file or environment only."
         ),
     )
     public_catalog: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
@@ -2287,9 +2297,9 @@ class GatewayConfig(
             raise ValueError(msg)
         return normalized
 
-    @field_validator("models_dev_url")
+    @field_validator("models_dev_url", "models_dev_v2_url")
     @classmethod
-    def _validate_models_dev_url(cls, value: str) -> str:
+    def _validate_models_dev_url(cls, value: str, info: ValidationInfo) -> str:
         """Reject a catalog address the gateway could not fetch, or one carrying a credential.
 
         The settings view shows this field, so a username or password in it would
@@ -2298,10 +2308,10 @@ class GatewayConfig(
         normalized = value.strip()
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            msg = f"models_dev_url must be an absolute http(s) URL, got '{value}'"
+            msg = f"{info.field_name} must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
         if parsed.username is not None or parsed.password is not None:
-            msg = "models_dev_url must carry no username or password"
+            msg = f"{info.field_name} must carry no username or password"
             raise ValueError(msg)
         return normalized
 

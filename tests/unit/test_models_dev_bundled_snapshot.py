@@ -12,6 +12,7 @@ from gateway.services.pricing import (
     active_generations,
     bundled_generation,
     load_bundled_index,
+    merge_image_prices,
     reset_generations,
     set_accepted_generations,
     trim_catalog,
@@ -116,6 +117,38 @@ def test_trim_keeps_prices_and_drops_the_rest() -> None:
             },
         }
     }
+
+
+def test_merging_v2_adds_per_image_prices_beside_the_v1_rates() -> None:
+    v1: dict[str, Any] = {
+        "p": {"id": "p", "name": "P", "models": {"gpt-image": {"id": "gpt-image", "cost": {"input": 5, "output": 40}}}}
+    }
+    flat = {"unit": "image", "price": 0.04}
+    v2: dict[str, Any] = {
+        "p": {"id": "p", "models": {"gpt-image": {"type": "image", "cost": {"image": {"output": flat}}}}},
+        "new": {
+            "id": "new",
+            "name": "New",
+            "doc": "https://new.example",
+            "models": {
+                "flux": {"id": "flux", "type": "image", "name": "Flux", "cost": {"image": {"output": flat}}},
+                "chat": {"id": "chat", "type": "chat", "cost": {"text": {"input": {"price": 1}}}},
+            },
+        },
+    }
+
+    merged = merge_image_prices(v1, v2)
+
+    assert merged["p"]["models"]["gpt-image"]["cost"] == {"input": 5, "output": 40, "per_image": 0.04}
+    assert merged["new"] == {
+        "id": "new",
+        "name": "New",
+        "doc": "https://new.example",
+        "models": {"flux": {"id": "flux", "name": "Flux", "cost": {"per_image": 0.04}}},
+    }
+    # The v1 document is left as it was.
+    assert v1["p"]["models"]["gpt-image"]["cost"] == {"input": 5, "output": 40}
+    assert trim_catalog(merged)["new"]["models"]["flux"] == {"name": "Flux", "cost": {"per_image": 0.04}}
 
 
 def test_the_generation_list_falls_back_to_the_bundled_snapshot() -> None:

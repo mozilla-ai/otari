@@ -116,7 +116,8 @@ def _no_models_dev_fetch(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     its cache starts empty, so every listing read would otherwise fetch the live
     catalog: an outbound call from any test that lists a model, and limits that
     move whenever models.dev does. A test that wants metadata patches
-    ``model_catalog_service._fetch`` itself. The cache is cleared on both sides,
+    ``model_catalog_service._fetch`` itself. The price refresh's downloads fail
+    the same way unless the test fakes them. The cache is cleared on both sides,
     so one test's answer, a failure included, is never the next one's.
     """
     from gateway.services import model_catalog_service
@@ -124,8 +125,12 @@ def _no_models_dev_fetch(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     async def _unreachable(_url: str) -> None:
         return None
 
+    async def _offline(url: str) -> dict[str, object]:
+        raise model_catalog_service.ModelsDevFetchError(f"no network in tests: {url}")
+
     model_catalog_service.clear_catalog_cache()
     monkeypatch.setattr(model_catalog_service, "_fetch", _unreachable)
+    monkeypatch.setattr(model_catalog_service, "_download", _offline)
     yield
     model_catalog_service.clear_catalog_cache()
 

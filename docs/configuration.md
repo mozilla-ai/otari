@@ -1052,6 +1052,17 @@ serves the same `api.json`. It must be an absolute http(s) URL with no
 credentials in it. It is a startup setting: the dashboard shows it but cannot
 change it.
 
+The v1 catalog leaves image generation models out, so an update also downloads
+the v2 catalog from `models_dev_v2_url` (default
+`https://mozilla-ai.github.io/models.dev/experimental_v2.0_api.json`; upstream
+serves it at `https://models.dev/experimental/v2.0/api.json`) and adds each
+image model's price per generated image to the same snapshot, so a preview, a
+review and an approval cover both. A model whose image price varies by request
+option, such as a dearer 4K tier, or is quoted per megapixel, gets no default:
+a single figure would undercharge some requests. An update fails, and changes
+nothing, when either download fails. `models_dev_v2_url` follows the same
+rules as `models_dev_url`.
+
 To refresh the bundled snapshot, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (pass `--url` to fetch from a
 mirror or fork, or `--input FILE` with a saved `api.json`) and commit

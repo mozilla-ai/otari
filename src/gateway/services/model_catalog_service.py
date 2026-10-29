@@ -192,6 +192,14 @@ async def fetch_models_dev_document(*, url: str, reuse_within: float = 0.0, fill
         return data
 
 
+async def fetch_models_dev_v2_document(*, url: str) -> dict[str, Any]:
+    """Download the v2 ``api.json`` from ``url``, raising ``ModelsDevFetchError`` on failure.
+
+    Uncached: only the price refresh reads it, once per update.
+    """
+    return await _download(url)
+
+
 async def load_models_dev_catalog(
     config: GatewayConfig,
     *,

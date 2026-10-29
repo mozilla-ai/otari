@@ -12,11 +12,11 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import MODELS_DEV_URL, GatewayConfig
+from gateway.core.config import MODELS_DEV_URL, MODELS_DEV_V2_URL, GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
-from gateway.services.model_catalog_service import fetch_models_dev_document
+from gateway.services.model_catalog_service import fetch_models_dev_document, fetch_models_dev_v2_document
 from gateway.services.pricing import (
     MAX_RESIDENT_GENERATIONS,
     ModelsDevPriceIndex,
@@ -24,6 +24,7 @@ from gateway.services.pricing import (
     add_accepted_generation,
     current_index,
     invalid_rate_count,
+    merge_image_prices,
     reset_generations,
     set_accepted_generations,
     trim_catalog,
@@ -184,14 +185,22 @@ def _prepare_document(document: dict[str, object]) -> _PendingSnapshot:
 
 
 async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: float) -> _PendingSnapshot:
-    """Fetch the upstream catalog and cut it down to the price fields, without activating it."""
+    """Fetch the upstream catalog and cut it down to the price fields, without activating it.
 
-    document = await fetch_models_dev_document(
-        url=config.models_dev_url if config is not None else MODELS_DEV_URL,
-        reuse_within=reuse_within,
-        fill_cache=config is not None and config.models_dev_metadata,
+    The v1 catalog carries the token prices and the v2 catalog the per-image
+    ones. Either download failing fails the update, since a snapshot built
+    without v2 would drop every per-image price.
+    """
+
+    document, v2 = await asyncio.gather(
+        fetch_models_dev_document(
+            url=config.models_dev_url if config is not None else MODELS_DEV_URL,
+            reuse_within=reuse_within,
+            fill_cache=config is not None and config.models_dev_metadata,
+        ),
+        fetch_models_dev_v2_document(url=config.models_dev_v2_url if config is not None else MODELS_DEV_V2_URL),
     )
-    return await asyncio.to_thread(_prepare_document, document)
+    return await asyncio.to_thread(_prepare_document, merge_image_prices(document, v2))
 
 
 async def prepare_price_refresh(
