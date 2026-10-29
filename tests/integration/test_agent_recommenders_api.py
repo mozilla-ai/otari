@@ -137,7 +137,6 @@ def test_anyone_but_the_operator_finds_no_such_surface(
         ({"api_base": "http://proxy.example"}, "must use https"),
         ({"provider": "nope"}, "provider must be one of"),
         ({"provider": "llamacpp", "api_key": None}, "API base is required"),
-        ({"input_price_per_million": 0}, "above zero"),
     ],
 )
 def test_a_router_that_could_not_work_is_refused(

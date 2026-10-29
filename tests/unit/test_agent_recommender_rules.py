@@ -15,6 +15,12 @@ def test_a_keyed_provider_with_a_price_passes() -> None:
     check_recommender(provider="openrouter", has_api_key=True, api_base="https://proxy.example", price=PRICED)
 
 
+def test_a_router_with_both_rates_at_zero_is_free() -> None:
+    check_recommender(
+        provider="llamacpp", has_api_key=False, api_base="http://decisions.internal:8080", price=RecommenderPrice()
+    )
+
+
 def test_a_self_hosted_server_needs_no_key_but_an_address() -> None:
     check_recommender(provider="llamacpp", has_api_key=False, api_base="http://decisions.internal:8080", price=PRICED)
     with pytest.raises(ValueError, match="API base is required"):
@@ -29,7 +35,6 @@ def test_a_self_hosted_server_needs_no_key_but_an_address() -> None:
         ({"api_base": "ftp://proxy.example"}, "http or https"),
         ({"api_base": "http://proxy.example"}, "must use https when an API key is set"),
         ({"price": RecommenderPrice(input_price_per_million=Decimal("-1"))}, "cannot be negative"),
-        ({"price": RecommenderPrice()}, "above zero"),
     ],
 )
 def test_a_configuration_that_cannot_work_is_named(fields: dict[str, object], message: str) -> None:

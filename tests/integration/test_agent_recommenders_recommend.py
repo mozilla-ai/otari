@@ -3,8 +3,8 @@
 The upstream decision call is stubbed at ``request_decision`` where the core
 adapter calls it. These pin which router answers and what the caller is
 charged: the row switched on at its rates, the hold when the upstream reports
-no tokens, the configured model with no row stored, and nothing with every
-row off. Nothing the operator stored, and nothing the caller sent, reaches a
+no tokens, nothing for a free router, the configured model with no row stored,
+and nothing with every row off. Nothing the operator stored, and nothing the caller sent, reaches a
 log or a usage row.
 """
 
@@ -206,6 +206,25 @@ def test_with_every_router_off_nothing_answers(
     assert response.status_code == 400, response.text
     assert response.json()["detail"] == NOT_CONFIGURED
     mock.assert_not_awaited()
+
+
+def test_a_free_router_answers_at_no_charge(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    _store(client, master_key_header, input_price_per_million=0)
+
+    with _mock_decision():
+        response = client.post(RECOMMEND, json=_spawn(), headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    (row,) = _usage_rows(client, master_key_header, api_key_obj["user_id"])
+    assert (row["status"], row["provider"], row["model"]) == ("success", "otari", "subagent-router")
+    assert float(row["cost"]) == 0
+    user = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}", headers=master_key_header).json()
+    assert (user["spend"], user["reserved"]) == (pytest.approx(0.0), pytest.approx(0.0))
 
 
 def test_with_no_router_stored_the_configured_model_answers_unpriced(
