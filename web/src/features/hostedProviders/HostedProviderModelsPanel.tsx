@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { FiEdit2, FiPlus, FiRefreshCw } from "react-icons/fi"
+
 import type { HostedModel, HostedProvider } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -228,7 +229,13 @@ export function HostedProviderModelsPanel({
       ) : null}
 
       {/* A failed list is not an empty one. */}
-      {!models.error && rows.length === 0 && !term ? (
+      {/* Not while the rows are a previous search's held as placeholder data:
+          clearing a search that matched nothing would otherwise flash this
+          panel, and take the field being typed in with it. */}
+      {!models.error &&
+      rows.length === 0 &&
+      !term &&
+      !models.isPlaceholderData ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what the provider lists, or add a model to say what this provider serves and at what price."
@@ -257,7 +264,10 @@ export function HostedProviderModelsPanel({
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}
-              isLoading={models.isLoading}
+              isLoading={
+                models.isLoading ||
+                (models.isPlaceholderData && rows.length === 0)
+              }
               emptyContent="No models match this search."
             />
           </TableScrollFrame>
