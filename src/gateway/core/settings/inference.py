@@ -106,7 +106,7 @@ class InferenceSettings(BaseModel):
             "for the provider's first chunk, so a provider failure before any output is answered with "
             "its own HTTP status (and falls over in a routing policy) rather than as an error event "
             "after a 200. A provider slower than this still streams: the response is committed and "
-            "keeps waiting. Streams that run gateway tools are not held. 0 commits the response as "
+            "keeps waiting. Streams whose only gateway tools are MCP servers are not held. 0 commits the response as "
             "soon as the stream opens."
         ),
     )

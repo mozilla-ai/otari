@@ -1131,6 +1131,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
     def inject_hints(
@@ -5482,11 +5483,13 @@ async def _eager_backend_stream(
     opened: _OpenedTools,
     stack: AsyncExitStack,
     tool_ctx: ToolContext,
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncIterator[ChunkT]:
     # The backends on ``stack`` were entered in ``open_stream``; this generator
     # closes them once the stream finishes or errors, and hands them the error
     # so a backend can abandon work nobody will read.
     kind = _ToolBackendKind.of(tool_ctx)
+    lock_in: dict[str, Any] = {"on_first_response": on_first_response} if on_first_response is not None else {}
     try:
         hinted = adapter.inject_hints(kwargs, opened.pool.purpose_hints(), header=tool_ctx.tools_header)
         async for event in adapter.open_tool_loop_stream(
@@ -5496,6 +5499,7 @@ async def _eager_backend_stream(
             **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
             **_container_loop_option(adapter, opened.sandbox),
+            **lock_in,
         ):
             yield event
     except BaseException as exc:
@@ -5509,19 +5513,15 @@ async def open_stream(
     adapter: FormatAdapter[Any, ChunkT],
     tool_ctx: ToolContext,
     call_kwargs: dict[str, Any],
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncIterator[ChunkT]:
     """Open the upstream stream for a single-attempt streaming request.
 
-    A provider stream is held for its first chunk (:func:`hold_for_first_chunk`),
-    so a provider failure before any output raises here, which is also what
-    lets a multi-candidate routing policy fall over to its next candidate:
-    :func:`gateway.api.routes._attempts.walk_attempts` only retries a failure
-    its ``run_attempt`` callback raises, and a generator it merely returns,
-    not yet iterated, is a success as far as the walk can tell. This applies
-    to the tool-loop path too, since ``_eager_backend_stream`` is an async
-    generator: without the hold, nothing in it, including the provider call
-    itself, runs until something downstream of the walk starts pulling
-    events, by which point failover has already committed to this candidate.
+    A provider stream, and a tool loop with eagerly opened backends, is held for
+    its first chunk (:func:`hold_for_first_chunk`), so a provider failure before
+    any output raises here, where a routing walk can still fall over. A tool loop
+    calls ``on_first_response`` once its first provider round has ended, since the
+    gateway's tools may run before anything reaches the hold.
 
     The sandbox and web_search backends are opened eagerly (their
     ``__aenter__`` runs before this function returns) so a backend-unreachable
@@ -5545,7 +5545,9 @@ async def open_stream(
     except BaseException as exc:
         await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(tool_ctx))
         raise
-    return await hold_for_first_chunk(_eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx), tool_ctx.config)
+    return await hold_for_first_chunk(
+        _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx, on_first_response), tool_ctx.config
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -6098,7 +6100,9 @@ async def run_single_attempt_stream(
                     await top_up_reservation_for_attempt(ctx, attempt)
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
                 _mark_dispatched(ctx)
-                return await open_stream(adapter=adapter, tool_ctx=served_tools, call_kwargs=attempt_kwargs)
+                return await open_stream(
+                    adapter=adapter, tool_ctx=served_tools, call_kwargs=attempt_kwargs, on_first_response=mark_locked_in
+                )
 
             absorbed_rows: list[asyncio.Task[None]] = []
             # Each absorbed failure is a candidate sent the request before the one that served.
@@ -6176,6 +6180,7 @@ async def run_single_attempt_stream(
             failure_error_message(exc),
             failure_status_code(exc),
             attribution=_failure_attribution(ctx),
+            tool_tally=tool_ctx.tally,
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)

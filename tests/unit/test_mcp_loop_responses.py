@@ -1014,6 +1014,42 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
+async def test_stream_fires_on_first_response_before_running_the_first_rounds_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lock-in fires once the first round ends, before a tool it hid from the stream runs."""
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, _function_call("call_1", "fetch_url", "")),
+                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _output_item_done(0, _function_call("call_1", "fetch_url", '{"u": "x"}')),
+                _response_completed(),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "done"), _response_completed()),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    tools_run_at_lock_in: list[int] = []
+
+    async for _ in responses_tool_loop_stream(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        on_first_response=lambda: tools_run_at_lock_in.append(len(pool.calls)),
+    ):
+        pass
+
+    assert tools_run_at_lock_in == [0]
+    assert len(pool.calls) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["incomplete", "failed"])
 async def test_stream_runs_no_gateway_call_from_a_round_that_ended_unfinished(
     monkeypatch: pytest.MonkeyPatch, status: str
