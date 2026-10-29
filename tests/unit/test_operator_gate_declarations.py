@@ -35,6 +35,7 @@ from gateway.api.deps import (
     verify_service_key,
 )
 from gateway.api.routes import (
+    agent_recommenders,
     agent_telemetry,
     aliases,
     budgets,
@@ -112,6 +113,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("hook_guardrails", hook_guardrails.router, verify_api_key_or_master_key),
     # Operator-only, with the 404 the admin surface answers rather than the 403:
     # the deployment's own credentials are not a surface to confirm to a member.
+    ("agent_recommenders", agent_recommenders.router, require_deployment_operator_or_absent),
     ("hosted_providers", hosted_providers.router, require_deployment_operator_or_absent),
 ]
 
