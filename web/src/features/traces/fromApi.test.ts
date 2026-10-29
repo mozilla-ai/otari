@@ -506,6 +506,27 @@ describe("toTrace", () => {
     })
   })
 
+  it("shows what a tool returned as its output, apart from its input", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "tool-1",
+            parent_span_id: "req-1",
+            kind: "tool",
+            tool_name: "ls",
+            content: { "tool.input": '{"p":"."}', "tool.output": "a.txt" },
+          }),
+        ],
+      }),
+    )
+    const tool = trace.observations.find((o) => o.id === "tool-1")
+
+    expect(tool).toMatchObject({ input: '{"p":"."}', output: "a.txt" })
+  })
+
   it("says a span's content is private where the reader may not open it", () => {
     const trace = toTrace(
       traceSummary(),

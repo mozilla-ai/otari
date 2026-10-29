@@ -160,9 +160,16 @@ export const PRIVATE_CONTENT =
 
 function spanInput(span: TraceSpan): unknown {
   if (span.content_private) return PRIVATE_CONTENT
-  const values = Object.values(span.content)
+  const { "tool.output": _output, ...input } = span.content
+  const values = Object.values(input)
   if (values.length === 0) return undefined
-  return values.length === 1 ? values[0] : span.content
+  return values.length === 1 ? values[0] : input
+}
+
+// What a tool returned, where the deployment keeps tool output.
+function spanOutput(span: TraceSpan): unknown {
+  if (span.content_private) return undefined
+  return span.content["tool.output"]
 }
 
 function stringAttribute(span: TraceSpan, key: string): string | null {
@@ -389,6 +396,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),
         input: spanInput(span),
+        output: spanOutput(span),
         gate: gateCheck(span, gateSummaries, checkEvidence),
         detail:
           span.operation === "tool.blocked_on_user" ||

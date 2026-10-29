@@ -151,7 +151,9 @@ LIST_SEPARATOR = ","
 # What a span may say it was about, when a deployment keeps content
 # (``trace_content_enabled``). Prose, so never a typed field or an attribute,
 # and never searched: shown on the span, and only there.
-SPAN_CONTENT_KEYS = frozenset({"prompt", "command", "file_path", "gate.evidence", "gate.detail"})
+SPAN_CONTENT_KEYS = frozenset(
+    {"prompt", "command", "file_path", "gate.evidence", "gate.detail", "tool.input", "tool.output"}
+)
 SPAN_CONTENT_MAX_LENGTH = 4_000
 # How long the note on a share of a session's content may be.
 SHARE_NOTE_MAX_LENGTH = 500

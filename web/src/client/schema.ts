@@ -17376,7 +17376,7 @@ export interface components {
             cache_write_tokens: number | null;
             /**
              * Content
-             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, tool.output), only where the workspace keeps content, the client sent it, and the reader may open it. Empty otherwise.
              */
             content: {
                 [key: string]: string;

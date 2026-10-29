@@ -70,6 +70,11 @@ ROUTER_HEADER = "Otari-Router"
 # conversation's opening messages, which cannot tell apart two conversations that
 # open identically. See docs/routing.md#per-request-control.
 CONVERSATION_HEADER = "Otari-Conversation-Id"
+# Request header a client sends as ``keep`` to have the content of a request it
+# routes kept on its session's trace, where the deployment and the workspace keep
+# content. The client answers for its users' consent. See docs/traces.md.
+TRACE_CONTENT_HEADER = "Otari-Trace-Content"
+TRACE_CONTENT_KEEP = "keep"
 # Routing-memory partition (use case / category) for this request. When set, the
 # router votes only over records carrying the same task label and stays in
 # pass-through until that partition alone is warm; records from other tasks never

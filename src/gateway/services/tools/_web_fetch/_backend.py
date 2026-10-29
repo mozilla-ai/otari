@@ -190,7 +190,12 @@ class WebFetchBackend:
             )
         if self._trace is not None:
             self._trace.record_tool_call(
-                tool_name=WEB_FETCH_TOOL_NAME, tool_type="otari_web_fetch", started=started, ok=not is_tool_error(text)
+                tool_name=WEB_FETCH_TOOL_NAME,
+                tool_type="otari_web_fetch",
+                started=started,
+                ok=not is_tool_error(text),
+                arguments=arguments,
+                result=text,
             )
         return text
 

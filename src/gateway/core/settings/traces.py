@@ -32,11 +32,19 @@ class TraceSettings(BaseModel):
     trace_content_enabled: Annotated[bool, OMITTED] = Field(
         default=False,
         description=(
-            "Keep what an instrumented coding agent reports a span was about: the prompt that opened a turn, the "
-            "command a tool ran or the file it touched, and what a guardrail gate checked. Stored encrypted under "
-            "the key trace_content_key_backend names, and not kept at all without one; the agent has to send it too "
-            "(Claude Code's OTEL_LOG_TOOL_DETAILS and OTEL_LOG_USER_PROMPTS, otari hook's OTARI_HOOK_REPORT_CONTENT). "
+            "Keep what an agent session's spans were about: the prompt that opened a turn, the command a tool ran "
+            "or the file it touched, a tool call's arguments, and what a guardrail gate checked. Stored encrypted "
+            "under the key trace_content_key_backend names, and not kept at all without one; the client has to send "
+            "it too (Claude Code's OTEL_LOG_TOOL_DETAILS and OTEL_LOG_USER_PROMPTS, otari hook's "
+            "OTARI_HOOK_REPORT_CONTENT, or the Otari-Trace-Content header on a request routed through the gateway). "
             "Off by default."
+        ),
+    )
+    trace_content_tool_output: Annotated[bool, OMITTED] = Field(
+        default=False,
+        description=(
+            "Also keep what each tool returned, on a request routed through the gateway that keeps content: the "
+            "results a client hands back and the output of a tool the gateway ran. Off by default."
         ),
     )
     trace_platform_break_glass_enabled: Annotated[bool, OMITTED] = Field(

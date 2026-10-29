@@ -72,6 +72,11 @@ Otari never guesses that two requests belong together from their content.
 A request that names no session is a trace of its own. To group a custom
 client's requests, send one of the signals above.
 
+A harness's own id and an OTLP session id name one session when they are the
+same id, so a Claude Code session routed through Otari and the spans exported
+for it (its own, or the gates `otari hook` reported) land on one trace. A
+client's chosen key never joins either.
+
 A session belongs to the user whose API key sent it: two people who choose the
 same label get two sessions, and a session id never reaches another workspace.
 
@@ -294,18 +299,32 @@ billing user no dashboard identity stands behind (as `POST /api/v1/keys` mints
 for any `user_id`), keeps no content, because nobody could ever read it. Mint
 tracing keys for real members.
 
-Content is kept only when the agent sends it too:
+Content is kept only when the client sends it too:
 
+- A request routed through Otari (`/v1/chat/completions`, `/v1/messages`,
+  `/v1/responses`) asks with the `Otari-Trace-Content: keep` header. Otari then
+  keeps the prompt that opened a turn, and for each tool call the request
+  answers, the call's arguments. The prompt is the text of the user message as
+  the client sent it, so it includes whatever the harness put there besides what
+  was typed: Claude Code adds `<system-reminder>` blocks and hook feedback. The
+  replayed history, the system prompt and attachments are never kept. The client that sends the header answers for its
+  own users' consent.
 - Claude Code sends the prompt that opened a turn with `OTEL_LOG_USER_PROMPTS=1`,
-  and each tool's command or file path with `OTEL_LOG_TOOL_DETAILS=1`. Otari
-  never keeps a tool's output, even when Claude Code exports it
-  (`OTEL_LOG_TOOL_CONTENT=1`).
+  and each tool's command or file path with `OTEL_LOG_TOOL_DETAILS=1`.
 - `otari hook` sends the command or paths a gate checked, and the gate's own
   detail, with `OTARI_HOOK_REPORT_CONTENT=1`.
 
-A span shows what it was about as its input, and a tool call is named for its
-command or file in the tree. A span's content is sealed for that span alone, and
-reads back empty once no configured key opens it, so keep a rotated-out key in
+What a tool returned is kept only where the deployment also sets
+`OTARI_TRACE_CONTENT_TOOL_OUTPUT=true`, and only from a routed request: the
+results the client hands back, and the output of a tool Otari ran itself (web
+search, web fetch, code execution, an MCP tool), whose arguments a routed
+request keeps either way. Otari never keeps tool output an agent exports over
+OTLP (Claude Code's `OTEL_LOG_TOOL_CONTENT=1`), nor a model's own output.
+
+A span shows what it was about as its input, and what a tool returned as its
+output, and a tool call is named for its command or file in the tree. A span's
+content is sealed for that span alone, and reads back empty once no configured
+key opens it, so keep a rotated-out key in
 `OTARI_SECRET_KEY`, or in `trace_content_kms_previous_key_ids`, for as long as
 you keep traces.
 
