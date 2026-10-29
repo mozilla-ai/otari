@@ -230,6 +230,31 @@ describe("HealthChecksPage", () => {
     expect(within(second).getByText("bedrock:model-29")).toBeInTheDocument()
   })
 
+  it("goes back to the first page of models when the search changes", async () => {
+    const failing = Array.from({ length: 30 }, (_, i) => ({
+      ...status().results[0],
+      selector: `bedrock:model-${String(i).padStart(2, "0")}`,
+    }))
+    mockApi(status({ results: failing }))
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("grid", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    // Still all thirty, so only a reset puts the first page back on screen.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers and models" }),
+      "bedrock",
+    )
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("grid", { name: "Models" })).getByText(
+          "bedrock:model-00",
+        ),
+      ).toBeInTheDocument(),
+    )
+  })
+
   it("keeps the pager away while every failing model fits one page", async () => {
     mockApi(status())
     await renderPage()
