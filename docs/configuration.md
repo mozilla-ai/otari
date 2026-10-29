@@ -1163,6 +1163,14 @@ A flat per-image or per-request rate cannot follow what the caller chooses: an
 image's size and quality, or an audio file's length. Set it at the dearest
 option you allow.
 
+With `default_pricing` on, image generation with no stored rate takes the
+models.dev price per image (see [Keeping the defaults current](#keeping-the-defaults-current)),
+billed per image returned like an `images` rate. It never takes a models.dev
+token rate, which read per image would bill a token price for each image. A
+hosted provider's image models, and those an organization's own key offers, are
+stored at that price in `images`, so they arrive switched on under
+`require_pricing`. The other endpoints in the table take no models.dev default.
+
 An unpriced request on audio or moderations is served at zero cost. Image
 generation, embeddings, rerank and direct search are subject to
 `require_pricing`, which also refuses a rate that cannot price the endpoint,

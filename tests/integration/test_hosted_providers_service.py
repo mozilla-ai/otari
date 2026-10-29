@@ -6,9 +6,10 @@ are stubbed; a case that dialed for real would be testing the network.
 """
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from any_llm import LLMProvider
@@ -547,6 +548,21 @@ async def test_an_offer_without_a_price_seeds_the_default(
 
     assert (public.price_source, public.input_price_per_million, public.enabled) == ("defaults", 3.0, True)
     assert len(await _versions(async_db, "openai:gpt-5")) == 1
+
+
+async def test_an_offered_image_model_is_seeded_at_its_per_image_price(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, install_models_dev: Callable[[dict[str, Any]], object]
+) -> None:
+    _defaults(monkeypatch, {})
+    install_models_dev({"openai": {"id": "openai", "models": {"painter": {"cost": {"per_image": 0.03}}}}})
+    service = _service(async_db)
+    await _provider(service, monkeypatch)
+
+    public = await service.add_model("openai", HostedModelCreateRequest(model="painter"))
+
+    assert (public.price_source, public.unit, public.enabled) == ("defaults", "images", True)
+    [seeded] = await _versions(async_db, "openai:painter")
+    assert (seeded.unit, seeded.input_price_per_million, seeded.origin) == ("images", Decimal(30000), SEED_ORIGIN)
 
 
 async def test_a_model_nothing_prices_arrives_disabled(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:

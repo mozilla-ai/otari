@@ -74,7 +74,7 @@ from gateway.schemas.providers import (
 )
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
-from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
+from gateway.services.pricing_service import default_offer_pricing, normalize_effective_at
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -124,6 +124,8 @@ def _same_rates(stored: OrganizationModelPricing, default: ModelPricing) -> bool
     would report a difference the database cannot hold and reprice every model
     on every refresh.
     """
+    if (stored.unit or "tokens") != (default.unit or "tokens"):
+        return False
     for field in _RATE_FIELDS:
         if _quantized(getattr(stored, field)) != _quantized(getattr(default, field)):
             return False
@@ -201,13 +203,14 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.cache_read_price_per_million = to_usd_or_none(as_float(default.cache_read_price_per_million))
     row.cache_write_price_per_million = to_usd_or_none(as_float(default.cache_write_price_per_million))
     row.pricing_tiers = list(default.pricing_tiers or [])
+    row.unit = default.unit or "tokens"
 
 
 def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> dict[str, ModelPricing]:
     """Community default rates for several models. Synchronous; run off the loop."""
     resolved: dict[str, ModelPricing] = {}
     for model in models:
-        default = default_model_pricing(provider, model, as_of)
+        default = default_offer_pricing(provider, model, as_of)
         if default is not None:
             resolved[model] = default
     return resolved

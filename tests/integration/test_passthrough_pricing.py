@@ -9,6 +9,7 @@ row and wrong on the budget is still a billing bug.
 import time
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -27,6 +28,13 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
 from gateway.services.budgets import reserve_budget
+from gateway.services.pricing import (
+    ModelsDevPriceIndex,
+    PriceGeneration,
+    reset_generations,
+    set_accepted_generations,
+)
+from gateway.services.pricing_service import configure_default_pricing
 
 from .conftest import build_test_client
 
@@ -279,6 +287,54 @@ def strict_client(postgres_url: str) -> Generator[TestClient]:
         providers={"openai": {"api_key": "sk-test"}},
     )
     yield from build_test_client(config)
+
+
+@contextmanager
+def _catalog_defaults(models: dict[str, Any]) -> Iterator[None]:
+    """Default pricing on, over a models.dev snapshot whose ``openai`` provider lists ``models``."""
+    index = ModelsDevPriceIndex.from_catalog({"openai": {"id": "openai", "models": models}})
+    set_accepted_generations([PriceGeneration(effective_at=datetime(2000, 1, 1, tzinfo=UTC), index=index)])
+    configure_default_pricing(True)
+    try:
+        yield
+    finally:
+        configure_default_pricing(False)
+        reset_generations()
+
+
+def test_a_per_image_default_prices_image_generation(
+    strict_client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    headers = _user_key(strict_client, master)
+
+    with _catalog_defaults({"dall-e-3": {"cost": {"per_image": 0.04}}}), _held() as held:
+        response = _generate(strict_client, headers, _images(2), n=3)
+
+    assert response.status_code == 200, response.text
+    assert held == [Decimal("0.12")]
+    row = _row(db_session_factory)
+    assert row.cost == Decimal("0.08")
+    assert row.pricing_source == "defaults"
+    assert row.pricing_reference == "models.dev:openai/dall-e-3"
+    assert row.billing_meters == {"images": 2}
+    _settled(strict_client, master, 0.08)
+
+
+def test_a_token_default_is_never_read_per_image(strict_client: TestClient) -> None:
+    """A catalog token rate (gpt-image-1 is 5.0 per million tokens) would bill $5.00 an image."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock(return_value=_images(1))
+
+    with _catalog_defaults({"dall-e-3": {"cost": {"input": 5, "output": 40}}}):
+        with patch("gateway.api.routes.images.aimage_generation", new=provider):
+            response = strict_client.post(
+                f"{API_ROOT}/images/generations", json={"model": "openai:dall-e-3", "prompt": "a cat"}, headers=headers
+            )
+
+    assert response.status_code == 402, response.text
+    provider.assert_not_called()
 
 
 def test_require_pricing_refuses_a_rate_the_endpoint_cannot_settle(strict_client: TestClient) -> None:

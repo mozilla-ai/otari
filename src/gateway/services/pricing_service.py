@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from sqlalchemy import ColumnElement, case, distinct, func, inspect, not_, or_, select, true, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +50,11 @@ from gateway.types.tool_charges import (
 # Bound on the model keys named in one ``IN()`` list, so a batched override load
 # stays under SQLite's default limit of 999 bind parameters in a statement.
 _KEY_CHUNK = 500
+
+_PER_MILLION = Decimal(1_000_000)
+
+# The unit a caller bills in, which decides which catalog price a default may come from.
+DefaultPricingUnit = Literal["tokens", "images"]
 
 
 # Process-wide toggle for the models.dev default fallback, set once at startup
@@ -192,11 +197,39 @@ def default_model_pricing(
     return None if resolved is None else resolved[0]
 
 
-def default_pricing_match(
+def default_offer_pricing(
     provider: str | None, model: str, as_of: datetime, *, implementation: str | None = None
+) -> ModelPricing | None:
+    """The community default an offered model is stored at, or ``None`` when the catalog prices it neither way.
+
+    An image model takes its per-image price, as an ``images`` rate: image
+    generation bills per image, so token rates the catalog also lists for it
+    would be read in the wrong unit. Every other model takes its token rates
+    (:func:`default_model_pricing`).
+    """
+    images = default_pricing_match(provider, model, as_of, implementation=implementation, unit="images")
+    if images is not None:
+        return images[0]
+    return default_model_pricing(provider, model, as_of, implementation=implementation)
+
+
+def default_pricing_match(
+    provider: str | None,
+    model: str,
+    as_of: datetime,
+    *,
+    implementation: str | None = None,
+    unit: DefaultPricingUnit = "tokens",
 ) -> tuple[ModelPricing, str] | None:
-    """:func:`default_model_pricing` with the reference of the entry that answered, from one resolution."""
+    """:func:`default_model_pricing` with the reference of the entry that answered, from one resolution.
+
+    ``unit`` is the unit the caller bills in. ``images`` answers only from an
+    entry's per-image price, as an ``images`` rate, and ``tokens`` only from its
+    token rates, so neither is ever read in the other's unit.
+    """
     entry = _resolve_default(provider, model, as_of, implementation)
+    if unit == "images":
+        return None if entry is None else _per_image_default(entry, provider, model, as_of)
     if entry is None or entry.input is None or entry.output is None:
         return None
 
@@ -215,6 +248,22 @@ def default_pricing_match(
         cache_read_price_per_million=entry.cache_read,
         cache_write_price_per_million=entry.cache_write,
         pricing_tiers=entry.pricing_tiers(),
+    )
+    return pricing, entry.reference
+
+
+def _per_image_default(
+    entry: ModelsDevPrice, provider: str | None, model: str, as_of: datetime
+) -> tuple[ModelPricing, str] | None:
+    if entry.per_image is None:
+        return None
+    pricing = ModelPricing(
+        model_key=f"{provider}:{model}" if provider else model,
+        effective_at=as_of,
+        # An images rate is USD per million images (``services.pricing``).
+        input_price_per_million=entry.per_image * _PER_MILLION,
+        output_price_per_million=Decimal(0),
+        unit="images",
     )
     return pricing, entry.reference
 
@@ -688,6 +737,7 @@ async def find_model_pricing(
     *,
     as_of: datetime | None = None,
     use_defaults: bool = True,
+    default_unit: DefaultPricingUnit = "tokens",
     organization_id: uuid.UUID | None = None,
     deployment_paid: bool = False,
 ) -> ModelPricing | None:
@@ -719,6 +769,10 @@ async def find_model_pricing(
     per-million-token rates, read under :func:`flat_request_cost` or
     :func:`per_image_cost`, become a per-request or per-image rate, writing a
     charge line at the wrong unit for a rate nobody configured.
+
+    ``default_unit="images"`` is the exception for image generation: the
+    fallback then answers only from a per-image price the catalog states as
+    one (see :func:`default_pricing_match`).
     """
 
     resolved = await resolve_model_pricing(
@@ -727,6 +781,7 @@ async def find_model_pricing(
         model,
         as_of=as_of,
         use_defaults=use_defaults,
+        default_unit=default_unit,
         organization_id=organization_id,
         deployment_paid=deployment_paid,
     )
@@ -777,6 +832,7 @@ async def resolve_model_pricing(
     *,
     as_of: datetime | None = None,
     use_defaults: bool = True,
+    default_unit: DefaultPricingUnit = "tokens",
     organization_id: uuid.UUID | None = None,
     deployment_paid: bool = False,
 ) -> ResolvedPricing | None:
@@ -811,7 +867,7 @@ async def resolve_model_pricing(
         return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
 
     if use_defaults and default_pricing_enabled():
-        matched = default_pricing_match(provider, model, lookup_time)
+        matched = default_pricing_match(provider, model, lookup_time, unit=default_unit)
         if matched is not None:
             return ResolvedPricing(matched[0], "defaults", matched[1])
 

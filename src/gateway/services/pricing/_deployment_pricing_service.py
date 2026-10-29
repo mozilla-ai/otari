@@ -41,11 +41,11 @@ def _resolve_defaults(
 ) -> dict[str, ModelPricing]:
     """Community default rates for several models. Synchronous; run off the loop."""
     # Deferred: the flat pricing module imports this package, so a top-level import closes a cycle.
-    from gateway.services.pricing_service import default_model_pricing
+    from gateway.services.pricing_service import default_offer_pricing
 
     resolved: dict[str, ModelPricing] = {}
     for model in models:
-        default = default_model_pricing(provider, model, as_of, implementation=implementation)
+        default = default_offer_pricing(provider, model, as_of, implementation=implementation)
         if default is not None:
             resolved[model] = default
     return resolved
@@ -129,6 +129,8 @@ class DeploymentPricingService:
         comparison would report a difference the database cannot hold and
         reprice every model on every refresh.
         """
+        if (stored.unit or "tokens") != (default.unit or "tokens"):
+            return False
         for field in _RATE_FIELDS:
             if _quantized(getattr(stored, field)) != _quantized(getattr(default, field)):
                 return False
