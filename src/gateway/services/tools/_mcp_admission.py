@@ -16,6 +16,7 @@ from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 if TYPE_CHECKING:
     from gateway.services._tool_loop import ToolBackend
+    from gateway.services.model_access import McpAccess
     from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
 
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
@@ -24,6 +25,10 @@ MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
     "A request-supplied MCP server name collides with one of this workspace's stored servers"
 )
 MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL = "Configured MCP servers do not have unique names"
+INLINE_MCP_SERVER_REFUSED_DETAIL = (
+    "This workspace does not let a request name MCP servers by URL. Use a stored server through mcp_server_ids, "
+    "or ask a workspace admin to allow request MCP servers."
+)
 MCP_TOOL_SHADOWS_BUILTIN_DETAIL_TEMPLATE = (
     "An MCP server exposes a tool named {name!r}, which this request also declares as a gateway tool. "
     "Leave it out of the server's allowed_tools, or drop one of the two from the request."
@@ -90,15 +95,24 @@ async def admit_mcp_servers(
     *,
     servers: WorkspaceMcpServers,
     workspace_id: uuid.UUID,
+    access: McpAccess,
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name.
+
+    ``access`` is the caller's MCP access. A stored ID whose access list grants the caller nothing is
+    answered as an unknown one, and the servers returned carry the tool patterns the caller holds on
+    them. A request's own servers are refused where the workspace has turned them off.
 
     Raises:
         McpServerDeclarationError: the request's own servers cannot be reached as declared.
         McpServerConfigurationError: the stored servers cannot be used.
-        WorkspaceMcpServerNotFoundError: an ID names no server this workspace holds.
+        WorkspaceMcpServerNotFoundError: an ID names no server this workspace holds, or none the caller may reach.
     """
     mcp_servers = inline_servers
+    if mcp_servers and not access.may_declare_servers:
+        raise McpServerDeclarationError(INLINE_MCP_SERVER_REFUSED_DETAIL)
+    for inline in mcp_servers or []:
+        inline.caller_tool_patterns = None
     # Each source is checked on its own, because a stored server's refusal carries a fixed detail.
     # A duplicate name collapses two servers into one client session, so each source refuses one.
     inline_names: set[str] = set()
@@ -111,7 +125,7 @@ async def admit_mcp_servers(
         await _validate_mcp_server_urls(mcp_servers)
     if server_ids:
         try:
-            stored_servers = await servers.resolve_many(workspace_id, server_ids)
+            stored_servers = await servers.resolve_many(workspace_id, server_ids, access)
         except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
             # The operator's problem, not the caller's, and the underlying message
             # names the environment variable, so it stays in the log.

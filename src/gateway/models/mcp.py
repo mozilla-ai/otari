@@ -7,6 +7,7 @@ import json
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic.json_schema import SkipJsonSchema
 
 # Ceiling on ``mcp_server_ids`` in one request. A workspace can hold at most 50
 # configured servers (``MAX_MCP_SERVERS_PER_WORKSPACE`` in
@@ -45,6 +46,10 @@ class McpServerConfig(BaseModel):
     authorization_token: str | None = None
     purpose_hint: str | None = Field(default=None, max_length=2000)
     allowed_tools: list[str] | None = None
+    # Admission's, never the caller's: the tool patterns the request's key may use on this stored
+    # server, ``None`` for every tool. Admission overwrites whatever a body carries, and it is on
+    # neither the wire nor a revision.
+    caller_tool_patterns: SkipJsonSchema[list[str] | None] = Field(default=None, exclude=True)
 
 
 class ResolvedMcpServer(BaseModel):
@@ -68,6 +73,8 @@ class ResolvedMcpServer(BaseModel):
     url: str = Field(min_length=1)
     authorization_token: str | None = None
     enabled: StrictBool = True
+    # Not part of the revision: who may reach a server is the caller's concern, not its configuration.
+    everyone_tools: list[str] = Field(default_factory=lambda: ["*"])
     purpose_hint: str | None = Field(default=None, max_length=2000)
     allowed_tools: list[str] | None = None
 

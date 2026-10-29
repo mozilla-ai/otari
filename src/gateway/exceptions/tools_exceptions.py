@@ -19,6 +19,15 @@ class WorkspaceMcpServerNotFoundError(TenancyNotFoundError):
         super().__init__(f"MCP server {mcp_server_id} not found")
 
 
+class WorkspaceMcpServerGrantNotFoundError(TenancyNotFoundError):
+    def __init__(self, grant_id: object):
+        super().__init__(f"MCP server grant {grant_id} not found")
+
+
+class WorkspaceMcpServerGrantSubjectError(TenancyValidationError):
+    """A grant names a key or user outside the server's workspace, or would pass a server's grant cap."""
+
+
 class WorkspaceMcpServerAlreadyExistsError(TenancyConflictError):
     """A workspace already has an MCP server under this name.
 

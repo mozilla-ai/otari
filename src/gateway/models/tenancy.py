@@ -947,6 +947,13 @@ class WorkspaceUpdate(SQLModel):
             "output. Turning it off keeps none from the next request on, whatever the deployment allows."
         ),
     )
+    request_mcp_servers_allowed: bool | None = Field(
+        default=None,
+        description=(
+            "Let this workspace's keys name MCP servers by URL in a request (mcp_servers), beside the stored servers "
+            "whose access lists the workspace controls."
+        ),
+    )
 
 
 class WorkspacePublic(WorkspaceBase):
@@ -962,6 +969,9 @@ class WorkspacePublic(WorkspaceBase):
             "Whether this workspace also keeps what each tool returned, where it keeps content and the deployment "
             "keeps tool output."
         ),
+    )
+    request_mcp_servers_allowed: bool = Field(
+        default=True, description="Whether this workspace's keys may name MCP servers by URL in a request."
     )
     created_at: datetime
     updated_at: datetime | None = None
@@ -1000,6 +1010,9 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     trace_content_enabled: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
     # A workspace may narrow the deployment's ``trace_content_tool_output``, never widen it, so on by default.
     trace_content_tool_output: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
+    # On as before stored-server access lists existed: a workspace that locks its
+    # stored servers down turns it off, or a key could name any server by URL.
+    request_mcp_servers_allowed: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
 
 
 class WorkspaceMemberBase(SQLModel):

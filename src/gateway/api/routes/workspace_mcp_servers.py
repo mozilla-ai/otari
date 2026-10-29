@@ -16,9 +16,14 @@ from fastapi import APIRouter, Depends, Query, status
 from gateway.api.deps import CurrentIdentity, WorkspaceMcpServerServiceDep, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.services.tenancy.workspace_mcp_server_service import (
+    WorkspaceMcpServerAccess,
+    WorkspaceMcpServerAccessCheck,
     WorkspaceMcpServerCheckRequest,
     WorkspaceMcpServerCreate,
+    WorkspaceMcpServerGrantsCreate,
+    WorkspaceMcpServerGrantUpdate,
     WorkspaceMcpServerHealth,
+    WorkspaceMcpServerKeyAccess,
     WorkspaceMcpServerPublic,
     WorkspaceMcpServersPublic,
     WorkspaceMcpServerUpdate,
@@ -87,13 +92,133 @@ async def update_workspace_mcp_server(
     Only the fields sent are applied. Omit `authorization_token` to leave the
     stored token alone, send an empty string to clear it, or send a value to
     rotate it. A change to the URL, the token or the allow-list checks the
-    server again, as creating it does.
+    server again, as creating it does. `everyone_tools` is what every key of
+    the workspace may call; the server's grants override it per key or user.
     """
     return await service.update_server(
         user=current_identity,
         workspace_id=workspace_id,
         server_id=server_id,
         request=body,
+    )
+
+
+@router.get("/keys/{api_key_id}/access")
+async def get_workspace_mcp_key_access(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    api_key_id: str,
+) -> list[WorkspaceMcpServerKeyAccess]:
+    """What one key reaches on each of the workspace's MCP servers.
+
+    Organization owners/admins or this workspace's owners/admins.
+
+    For each server, oldest first: the rule that decides (the key's own grant, its owner's, or the
+    server's `everyone_tools`) and that rule's tool patterns, beside the server's own `allowed_tools`
+    ceiling. A key of another workspace is refused with a 400.
+    """
+    return await service.key_access(user=current_identity, workspace_id=workspace_id, api_key_id=api_key_id)
+
+
+@router.get("/{server_id}")
+async def get_workspace_mcp_server(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerPublic:
+    """One MCP server of a workspace. Readable by any member who can see the workspace, as the list is."""
+    return await service.get_server(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+
+
+@router.get("/{server_id}/access")
+async def get_workspace_mcp_server_access(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerAccess:
+    """A server's access list. Organization owners/admins or this workspace's owners/admins.
+
+    `everyone_tools` is what every key of the workspace may call. Each grant overrides it for one
+    key, or for one user and so every key they own; a key's own grant decides over its owner's.
+    Tool patterns are names, `*` or `prefix*`, and `[]` denies. The server's `allowed_tools` is a
+    ceiling over all of them. A server holds at most 1000 grants, returned oldest first.
+    """
+    return await service.access(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+
+
+@router.post("/{server_id}/access/grants")
+async def add_workspace_mcp_server_grants(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+    body: WorkspaceMcpServerGrantsCreate,
+) -> WorkspaceMcpServerAccess:
+    """Give keys and users the same tools on a server.
+
+    Organization owners/admins or this workspace's owners/admins.
+
+    A key or user that already has a grant on the server gets these tools instead. A key must
+    belong to this workspace, and a user must own a key in it; either is otherwise refused with
+    a 400. Answers with the server's whole access list.
+    """
+    return await service.add_grants(user=current_identity, workspace_id=workspace_id, server_id=server_id, request=body)
+
+
+@router.patch("/{server_id}/access/grants/{grant_id}")
+async def update_workspace_mcp_server_grant(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+    grant_id: uuid.UUID,
+    body: WorkspaceMcpServerGrantUpdate,
+) -> WorkspaceMcpServerAccess:
+    """Change the tools of one grant. Organization owners/admins or this workspace's owners/admins."""
+    return await service.update_grant(
+        user=current_identity, workspace_id=workspace_id, server_id=server_id, grant_id=grant_id, request=body
+    )
+
+
+@router.delete("/{server_id}/access/grants/{grant_id}")
+async def delete_workspace_mcp_server_grant(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+    grant_id: uuid.UUID,
+) -> WorkspaceMcpServerAccess:
+    """Remove one grant, so its key or user falls back to the next rule.
+
+    Organization owners/admins or this workspace's owners/admins.
+    """
+    return await service.delete_grant(
+        user=current_identity, workspace_id=workspace_id, server_id=server_id, grant_id=grant_id
+    )
+
+
+@router.get("/{server_id}/access/check")
+async def check_workspace_mcp_server_access(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+    api_key_id: Annotated[str, Query(min_length=1, max_length=64, description="The key to test")],
+    tool: Annotated[str, Query(min_length=1, max_length=256, description="The tool name to test")],
+) -> WorkspaceMcpServerAccessCheck:
+    """Whether a key may call a tool on a server, and which rule decides.
+
+    Organization owners/admins or this workspace's owners/admins.
+
+    Applies the same order a request does: the server must be enabled and its `allowed_tools`
+    must include the tool, then the key's own grant decides, else its owner's, else the
+    server's `everyone_tools`. A key of another workspace is refused with a 400.
+    """
+    return await service.check_access(
+        user=current_identity, workspace_id=workspace_id, server_id=server_id, api_key_id=api_key_id, tool=tool
     )
 
 

@@ -29,6 +29,7 @@ from mcp.client.streamable_http import streamable_http_client
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
 from gateway.services.mcp_stateless import failure_class
+from gateway.services.model_access import is_mcp_tool_allowed
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
 from gateway.services.traces import RequestTrace, ToolSpans
 
@@ -240,6 +241,8 @@ class MCPClientPool:
         for tool in listed.tools:
             if allowed is not None and tool.name not in allowed:
                 continue
+            if cfg.caller_tool_patterns is not None and not is_mcp_tool_allowed(cfg.caller_tool_patterns, tool.name):
+                continue
             if tool.name in self._tool_owner:
                 # Tool-name collision policy: **first server wins**. Subsequent servers'
                 # tools with the same name are dropped entirely — they're not added to
@@ -284,10 +287,15 @@ class MCPClientPool:
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
-            self._spans.record(started, ok=False, arguments=arguments, tool_name=name)
+            self._spans.record(started, ok=False, arguments=arguments, tool_name=name, mcp_server=owner)
             raise
         self._spans.record(
-            started, ok=not result.is_error, arguments=arguments, result=_result_text(result), tool_name=name
+            started,
+            ok=not result.is_error,
+            arguments=arguments,
+            result=_result_text(result),
+            tool_name=name,
+            mcp_server=owner,
         )
         return result
 

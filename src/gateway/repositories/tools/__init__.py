@@ -11,6 +11,7 @@ from gateway.repositories.tools.web_search_key_repository import (
 from gateway.repositories.tools.workspace_code_execution_policy_repository import (
     WorkspaceCodeExecutionPolicyRepository,
 )
+from gateway.repositories.tools.workspace_mcp_server_grant_repository import WorkspaceMcpServerGrantRepository
 
 __all__ = [
     "OrgWebSearchKeyRepository",
@@ -20,5 +21,6 @@ __all__ = [
     "SearchToolRepository",
     "WebSearchKeyConflict",
     "WorkspaceCodeExecutionPolicyRepository",
+    "WorkspaceMcpServerGrantRepository",
     "WorkspaceWebSearchKeyOverrideRepository",
 ]

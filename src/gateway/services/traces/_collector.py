@@ -231,13 +231,18 @@ class RequestTrace:
         ok: bool,
         arguments: Mapping[str, Any] | None,
         result: str | None = None,
+        mcp_server: str | None = None,
     ) -> None:
         """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool).
 
-        ``arguments`` and ``result`` are kept only where the request keeps content.
+        ``arguments`` and ``result`` are kept only where the request keeps content. ``mcp_server`` names the MCP
+        server that owns the tool, since a tool's name alone does not.
         """
         ended = datetime.now(UTC)
         name = identifier_or_none(tool_name)
+        attributes: dict[str, str | int | float | bool] = {}
+        if mcp_server is not None and (safe_server := identifier_or_none(mcp_server)) is not None:
+            attributes["otari.mcp.server"] = safe_server
         self._add(
             SpanRecord(
                 span_id=_span_id(),
@@ -255,6 +260,7 @@ class RequestTrace:
                 tool_type=identifier_or_none(tool_type),
                 request_id=self.request_id,
                 content=self._tool_content(arguments_of(arguments) if self.keeps_content else None, result),
+                attributes=attributes,
             )
         )
 
@@ -431,10 +437,17 @@ class ToolSpans:
         arguments: Mapping[str, Any] | None,
         result: str | None = None,
         tool_name: str | None = None,
+        mcp_server: str | None = None,
     ) -> None:
         """One call: ``arguments`` as the model sent them, ``result`` as the model reads it, None where it failed."""
         name = tool_name or self.tool_name
         if self.trace is not None and name is not None:
             self.trace.record_tool_call(
-                tool_name=name, tool_type=self.tool_type, started=started, ok=ok, arguments=arguments, result=result
+                tool_name=name,
+                tool_type=self.tool_type,
+                started=started,
+                ok=ok,
+                arguments=arguments,
+                result=result,
+                mcp_server=mcp_server,
             )
