@@ -79,7 +79,7 @@ function mockApi({
   return calls
 }
 
-function renderCard(variant?: "card" | "page") {
+function renderCard(variant?: "card" | "page", url = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -90,6 +90,7 @@ function renderCard(variant?: "card" | "page") {
         <WorkspaceMcpServersCard variant={variant} />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
+    { url },
   )
 }
 
@@ -142,6 +143,18 @@ describe("WorkspaceMcpServersCard", () => {
       screen.getByRole("heading", { level: 2, name: "MCP servers" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+  })
+
+  it("keeps the field to clear a search that outlived every server", async () => {
+    mockApi()
+    await renderCard("page", "/?q=github")
+
+    expect(
+      await screen.findByText("No MCP servers match this search."),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("searchbox", { name: "Search MCP servers" }),
+    ).toHaveValue("github")
   })
 
   it("narrows its own page by name or URL, and not as a section of Tools", async () => {
