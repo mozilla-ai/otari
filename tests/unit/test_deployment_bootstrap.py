@@ -285,6 +285,7 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 # check is for is a surface whose API went away, and a name that reaches one
 # mounted route has not.
 SURFACE_ROUTE_PREFIXES = {
+    "agent_recommenders": f"{API_ROOT}/routing/recommenders",
     "hosted_providers": f"{API_ROOT}/hosted-providers",
     "health_checks": f"{API_ROOT}/health-checks",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",

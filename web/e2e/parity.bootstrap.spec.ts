@@ -17,6 +17,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // and a surface that quietly appears or disappears should fail here.
     surfaces: [
       "admin",
+      "agent_recommenders",
       "budgets",
       "health_checks",
       "hosted_providers",
