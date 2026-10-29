@@ -6,12 +6,14 @@ from another tenant answers 404 rather than reaching the service's logic.
 """
 
 import uuid
+from collections.abc import Awaitable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
 from gateway.api.deps import (
     CurrentIdentity,
+    TraceServiceDep,
     WorkspaceServiceDep,
     verify_master_key,
 )
@@ -76,16 +78,40 @@ async def get_workspace(
 @router.patch("/{workspace_id}")
 async def update_workspace(
     service: WorkspaceServiceDep,
+    traces: TraceServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     body: WorkspaceUpdate,
 ) -> WorkspacePublic:
-    """Rename a workspace or change its description."""
-    return await service.update_workspace(
-        user=current_identity,
-        workspace_id=workspace_id,
-        workspace_update=body,
+    """Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+
+    Turning content off keeps nothing new from the next export on; what is already
+    stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
+    """
+
+    def update() -> Awaitable[WorkspacePublic]:
+        return service.update_workspace(user=current_identity, workspace_id=workspace_id, workspace_update=body)
+
+    if body.trace_content_enabled is not False:
+        return await update()
+    return await traces.turn_content_off(
+        workspace_id,
+        authorize=lambda: service.require_management_access(user=current_identity, workspace_id=workspace_id),
+        switch=update,
     )
+
+
+@router.delete("/{workspace_id}/trace-content")
+async def delete_workspace_trace_content(
+    service: WorkspaceServiceDep,
+    traces: TraceServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+) -> Message:
+    """Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only."""
+    await service.require_management_access(user=current_identity, workspace_id=workspace_id)
+    await traces.forget_content(workspace_id)
+    return Message(message="Session content deleted")
 
 
 @router.delete("/{workspace_id}")

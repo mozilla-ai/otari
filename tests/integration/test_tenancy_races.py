@@ -573,6 +573,9 @@ class _PausingListener:
         await self._inner.workspace_deleted(workspace_id, member_ids)
         await self._let_the_writer_run()
 
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        await self._inner.member_lost_workspaces(user_id, workspace_ids)
+
 
 def _pausing(session: AsyncSession, let_the_writer_run: Callable[[], Awaitable[None]]) -> MembershipWrites:
     """The real Unit of Work and budget listener for ``session``, with the listener paused after a sweep."""

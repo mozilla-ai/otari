@@ -89,7 +89,7 @@
               },
               "raw": "{\n  \"is_active\": false,\n  \"is_superuser\": false\n}"
             },
-            "description": "Deactivate or reactivate an account, or change whether it may administer this deployment.\n\nBoth fields are optional and omitting one leaves it alone; a body naming\nneither is refused rather than treated as a no-op. Deactivating also ends\nthat account's dashboard sessions immediately, so a lost laptop stops\nworking now rather than when its cookie is next presented.\n\nTwo changes are refused to keep a deployment reachable: an operator may not\ndeactivate their own account or drop their own operator access, and neither\nmay be taken from the deployment's bootstrap operator, which is the identity\nmaster-key sign-in resolves to. Granting either is unguarded.",
+            "description": "Deactivate or reactivate an account, or change whether it may administer this deployment.\n\nBoth fields are optional and omitting one leaves it alone; a body naming\nneither is refused rather than treated as a no-op. Deactivating also ends\nthat account's dashboard sessions immediately, so a lost laptop stops\nworking now rather than when its cookie is next presented, and ends every\nshare of session content it made, which reactivating does not bring back.\n\nTwo changes are refused to keep a deployment reachable: an operator may not\ndeactivate their own account or drop their own operator access, and neither\nmay be taken from the deployment's bootstrap operator, which is the identity\nmaster-key sign-in resolves to. Granting either is unguarded.",
             "header": [
               {
                 "key": "Content-Type",
@@ -4328,7 +4328,7 @@
         {
           "name": "List Models",
           "request": {
-            "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's token limits: the context window from the live models.dev catalog,\nor from the pricing snapshot where it has none, and the output limit from the\nlive catalog alone. A limit neither knows is null. Models that only exist in the pricing\ntable are also included for backward compatibility.",
+            "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A limit nobody knows is null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4342,7 +4342,7 @@
               ],
               "query": [
                 {
-                  "description": "Filter models by provider name",
+                  "description": "Only the models this provider instance serves, described as served there.",
                   "disabled": true,
                   "key": "provider",
                   "value": ""
@@ -4403,7 +4403,7 @@
         {
           "name": "Get Model",
           "request": {
-            "description": "Get details for a specific model.",
+            "description": "Get details for a specific model, by catalog id, alias or `instance:model` selector.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7575,6 +7575,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -7599,7 +7605,44 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "List Organization Break Glass Reads",
+          "request": {
+            "description": "The organization's owners' break-glass openings, newest first. Owners only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                "audit",
+                "break-glass"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/audit/break-glass?skip=&limit="
             }
           }
         },
@@ -7653,6 +7696,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -7677,7 +7726,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -7767,6 +7816,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -7791,7 +7846,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -7826,6 +7881,261 @@
                 {
                   "description": "path parameter",
                   "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Organization Break Glass",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"reason\": \"string\"\n}"
+            },
+            "description": "Open a session's content without its owner's share, as an owner of the organization.\n\nFor an investigation the session's owner cannot be asked to share for, a member\nwho left included. The opening is recorded with its reason before anything\nopens, and listed for every owner at ``GET .../audit/break-glass``. The\nsession's owner is not told.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "break-glass"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/break-glass?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Trace Content Shares",
+          "request": {
+            "description": "The shares one of your sessions has had, ended ones included, newest first, each with its newest reads.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "shares"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares?workspace_id=&skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Share Trace Content",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"audience\": \"organization_admins\"\n}"
+            },
+            "description": "Let the organization's admins, or the deployment's operator, read what one of your sessions was about.\n\nA session's content is private to its own user. A share lets its audience read\nit until you end it or lose the workspace, and each read through it is recorded for you.\nOnly the session's own user can share it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "shares"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "End Trace Content Share",
+          "request": {
+            "description": "Stop a share letting its audience read what your session was about.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "shares",
+                ":share_id"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares/:share_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "share_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Trace Content Share Reads",
+          "request": {
+            "description": "Every read through one share of your session, newest first, a page at a time.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "shares",
+                ":share_id",
+                "reads"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/shares/:share_id/reads?workspace_id=&skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "share_id",
                   "value": ""
                 }
               ]
@@ -11078,6 +11388,26 @@
     {
       "item": [
         {
+          "name": "Get Trace Content Policy",
+          "request": {
+            "description": "What this deployment keeps of agent sessions, and who besides a session's owner can open it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "trace-content",
+                "policy"
+              ],
+              "raw": "{{baseUrl}}/api/v1/trace-content/policy"
+            }
+          }
+        },
+        {
           "name": "List Traces",
           "request": {
             "description": "List agent sessions, most recently active first unless ``sort`` says otherwise.",
@@ -11148,6 +11478,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -11172,7 +11508,42 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&sort=&order=&workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "List Break Glass Reads",
+          "request": {
+            "description": "The operator's recorded break-glass openings, in any organization, newest first.\n\nAn organization owner's openings are listed for that organization's owners\nalone, at ``GET /organizations/me/traces/audit/break-glass``: their reasons\ncan name the people under investigation, which is no business of the operator's.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                "audit",
+                "break-glass"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/audit/break-glass?skip=&limit="
             }
           }
         },
@@ -11224,6 +11595,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -11248,7 +11625,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -11334,6 +11711,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Sessions with an LLM call recorded under any of these model ids (exact match).",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
                   "description": "Agent harnesses.",
                   "disabled": true,
                   "key": "harness",
@@ -11358,7 +11741,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&model=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -11387,6 +11770,56 @@
                 }
               ],
               "raw": "{{baseUrl}}/api/v1/traces/:trace_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Platform Break Glass",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"reason\": \"string\",\n  \"reference\": \"string\"\n}"
+            },
+            "description": "Open a session's content in any organization without its owner's share, as the deployment's operator.\n\nOnly where ``trace_platform_break_glass_enabled`` is on; a 404 otherwise. The\nopening is recorded with its reason and reference before anything opens, and\nlisted at ``GET /traces/audit/break-glass``.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                ":trace_id",
+                "break-glass"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the session is in.",
+                  "disabled": false,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/:trace_id/break-glass?workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -12402,9 +12835,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\",\n  \"trace_content_enabled\": false\n}"
             },
-            "description": "Rename a workspace or change its description.",
+            "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.\n\nTurning content off keeps nothing new from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
             "header": [
               {
                 "key": "Content-Type",
@@ -12614,6 +13047,34 @@
                 {
                   "description": "path parameter",
                   "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Workspace Trace Content",
+          "request": {
+            "description": "Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "trace-content"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/trace-content",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
                   "value": ""
                 }
               ]

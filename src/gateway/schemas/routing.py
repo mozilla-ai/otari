@@ -86,7 +86,7 @@ class AgentModelRecommendation(BaseModel):
         json_schema_extra={
             "example": {
                 "model": "sonnet",
-                "reason": "jev-1.13.0 chose sonnet with 72%",
+                "reason": "sonnet with 72%",
                 "probabilities": {"haiku": 0.21, "sonnet": 0.72, "opus": 0.07},
             }
         }

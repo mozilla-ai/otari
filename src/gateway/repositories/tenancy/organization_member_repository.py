@@ -65,6 +65,23 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
+    async def get_active_roles(
+        self, organization_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID]
+    ) -> dict[tuple[uuid.UUID, uuid.UUID], str]:
+        """Return the role of each active membership joining one of these users to one of these organizations."""
+        if not organization_ids or not user_ids:
+            return {}
+        result = await self.db.execute(
+            select(
+                col(OrganizationMember.organization_id), col(OrganizationMember.user_id), col(OrganizationMember.role)
+            ).where(
+                col(OrganizationMember.organization_id).in_(list(organization_ids)),
+                col(OrganizationMember.user_id).in_(list(user_ids)),
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        return {(organization_id, user_id): role for organization_id, user_id, role in result.tuples().all()}
+
     async def get_by_id_and_organization(
         self,
         organization_member_id: uuid.UUID,

@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, IdentityServiceDep, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, IdentityServiceDep, TraceServiceDep, get_db, verify_master_key
 from gateway.core.surface import Surface
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import (
@@ -104,6 +104,7 @@ async def list_deployment_users(
 @router.patch("/users/{user_id}")
 async def update_deployment_user(
     service: DeploymentUserServiceDep,
+    traces: TraceServiceDep,
     current_identity: CurrentIdentity,
     user_id: uuid.UUID,
     body: DeploymentUserUpdateRequest,
@@ -113,14 +114,18 @@ async def update_deployment_user(
     Both fields are optional and omitting one leaves it alone; a body naming
     neither is refused rather than treated as a no-op. Deactivating also ends
     that account's dashboard sessions immediately, so a lost laptop stops
-    working now rather than when its cookie is next presented.
+    working now rather than when its cookie is next presented, and ends every
+    share of session content it made, which reactivating does not bring back.
 
     Two changes are refused to keep a deployment reachable: an operator may not
     deactivate their own account or drop their own operator access, and neither
     may be taken from the deployment's bootstrap operator, which is the identity
     master-key sign-in resolves to. Granting either is unguarded.
     """
-    return await service.update_user(actor=current_identity, user_id=user_id, request=body)
+    updated = await service.update_user(actor=current_identity, user_id=user_id, request=body)
+    if body.is_active is False:
+        await traces.end_shares_of(user_id)
+    return updated
 
 
 @router.post(

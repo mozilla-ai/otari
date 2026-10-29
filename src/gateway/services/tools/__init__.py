@@ -101,20 +101,9 @@ from gateway.services.tools._sandbox_credential import (
     store_sandbox_api_key,
 )
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
-from gateway.services.tools._search_tool_connection import (
-    check_test_input,
-    instance_to_test,
-    run_connection_test,
-    unsaved_instance_to_test,
-)
-from gateway.services.tools._search_tool_writes import (
-    DefaultPin,
-    check_kind_unchanged,
-    check_tool_entry,
-    check_tool_name_is_free,
-    check_tool_write,
-    default_to_pin,
-)
+from gateway.services.tools._search_tool_connection import check_test_input, run_connection_test
+from gateway.services.tools._search_tool_overlay import reset_search_tool_cache, run_search_tool_refresher
+from gateway.services.tools._search_tool_service import ReadToolSettings, SearchToolService, StageToolSetting
 from gateway.services.tools._tool_prices import (
     PricedTool,
     admitted_tools,
@@ -256,16 +245,13 @@ __all__ = [
     "DEFAULT_MAX_RESULTS",
     "web_search_max_results_baseline",
     "search_provider_catalog",
-    "DefaultPin",
-    "check_kind_unchanged",
+    "ReadToolSettings",
+    "SearchToolService",
+    "StageToolSetting",
     "check_test_input",
-    "check_tool_entry",
-    "check_tool_name_is_free",
-    "check_tool_write",
-    "default_to_pin",
-    "instance_to_test",
+    "reset_search_tool_cache",
     "run_connection_test",
-    "unsaved_instance_to_test",
+    "run_search_tool_refresher",
     "SANDBOX_KEY_ENV",
     "SandboxCredentialStatus",
     "clear_sandbox_api_key",

@@ -46,7 +46,12 @@ does not belong to answers 404, and reads that user's own `allowed_models` as
 the effective allow-list. Review a change here against those three. A session
 principal that took a `user_id` from the body, defaulted the workspace without
 the membership check, or left the allow-list unset would each reopen exactly the
-escalation the rule above describes.
+escalation the rule above describes. It also refuses a viewer, of the
+organization or of the workspace, with 403 through
+`OrganizationService.require_workspace_contributor_access`, because a viewer is
+read-only and a completion or an upload spends as a key would. The member key
+surface (`api/routes/organization_keys.py`) applies the same check to key
+create, update, rotate and delete.
 
 Using the operator gate on a tenant route is also wrong; it prevents members
 from managing resources their role permits.

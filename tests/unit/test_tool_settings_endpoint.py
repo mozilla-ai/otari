@@ -14,6 +14,7 @@ from gateway.api.routes import tool_settings
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
 from gateway.models.tools import SearchToolCredential
+from gateway.services.tools import SearchToolService
 
 AUTH = {"Authorization": "Bearer sk-test-master"}
 
@@ -429,7 +430,7 @@ def test_a_database_timeout_while_checking_a_default_is_a_clean_500(
     async def _times_out(*_args: Any) -> set[str]:
         raise TimeoutError
 
-    monkeypatch.setattr(tool_settings, "refresh_search_tool_cache", _times_out)
+    monkeypatch.setattr(SearchToolService, "refresh_rows", _times_out)
     with _client(tmp_path, search_tools={"exa": {"provider": "exa", "api_key": "k"}}) as client:
         resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_default_tool": "exa"})
         assert resp.status_code == 500

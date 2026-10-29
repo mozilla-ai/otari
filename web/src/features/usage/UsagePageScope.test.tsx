@@ -122,4 +122,15 @@ describe("UsagePage scope", () => {
       expect(url).not.toContain(`${API_ROOT}/organizations/me/usage/`)
     }
   })
+
+  it("reads the caller's role once outside the Overview", async () => {
+    const fetchMock = mockApi(false)
+    renderPage(<UsagePage />)
+    await screen.findByText("$1,240.50")
+
+    const urls = fetchMock.mock.calls.map(([input]) => String(input))
+    expect(
+      urls.filter((u) => u.endsWith(`${API_ROOT}/organizations/me`)),
+    ).toHaveLength(1)
+  })
 })

@@ -2378,8 +2378,7 @@ main {
  * in by adding its own hook to these selectors rather than by this reaching
  * pages whose design does not exist yet.
  * ============================================================= */
-.otari-breakdown .otari-table.table-root,
-.otari-overview-activity .otari-table.table-root {
+.otari-breakdown .otari-table.table-root {
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
@@ -2391,17 +2390,14 @@ main {
    lines below at equal specificity, where the later source position won and put
    the doubled border back. Keeping all three together is what stops the next
    edit from reintroducing it: there is one place to look. */
-.otari-breakdown .otari-table .table__header,
-.otari-overview-activity .otari-table .table__header {
+.otari-breakdown .otari-table .table__header {
   border-top: 0;
 }
-/* Only the breakdown tables freeze a lane, and the Overview preview is ruled
-   *out* rather than pending: it is a few rows of narrow lanes that fit the
-   page, and Time leading is right for a chronology preview even though the
-   identity is Model. Where a table does scroll and its identity is not the
-   first lane, the frozen region runs from the first lane through the row header
-   inclusive; if that exceeds about a third of the table's width, the column
-   order is wrong and the order is the fix, so the pin doubles as a detector. */
+/* Only the breakdown tables freeze a lane. Where a table does scroll and its
+   identity is not the first lane, the frozen region runs from the first lane
+   through the row header inclusive; if that exceeds about a third of the
+   table's width, the column order is wrong and the order is the fix, so the pin
+   doubles as a detector. */
 .otari-breakdown .table__column:first-child,
 .otari-breakdown .table__row .table__cell:first-child {
   position: sticky;
@@ -2507,55 +2503,40 @@ main {
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
-/* The Overview's recent requests are this log a few rows long, built from the
-   same columns, so the two tables share these rules. It sits beside the
-   workspace rail and holds a smaller floor. */
-.otari-activity-table .table__content,
-.otari-overview-activity .table__content {
+.otari-activity-table .table__content {
   table-layout: fixed;
   width: 100%;
 }
 .otari-activity-table .table__content {
   min-width: 60rem;
 }
-.otari-overview-activity .table__content {
-  min-width: 40rem;
-}
-.otari-activity-table .table__row .table__cell,
-.otari-overview-activity .table__row .table__cell {
+.otari-activity-table .table__row .table__cell {
   height: 1.75rem;
   padding-block: 0;
 }
 /* Tighter than the base 1rem, which across ten lanes is 320px of padding. */
 .otari-activity-table .table__column,
-.otari-activity-table .table__cell[data-column],
-.otari-overview-activity .table__column,
-.otari-overview-activity .table__cell[data-column] {
+.otari-activity-table .table__cell[data-column] {
   padding-inline: 0.75rem;
   white-space: nowrap;
 }
-.otari-activity-table .table__column[data-key="time"],
-.otari-overview-activity .table__column[data-key="time"] {
+.otari-activity-table .table__column[data-key="time"] {
   width: 5.25rem;
 }
 .otari-activity-table .table__column[data-key="user"] {
   width: 8rem;
 }
-.otari-activity-table .table__column[data-key="input_tokens"],
-.otari-overview-activity .table__column[data-key="input_tokens"] {
+.otari-activity-table .table__column[data-key="input_tokens"] {
   width: 6rem;
 }
-.otari-activity-table .table__column[data-key="output_tokens"],
-.otari-overview-activity .table__column[data-key="output_tokens"] {
+.otari-activity-table .table__column[data-key="output_tokens"] {
   width: 5.5rem;
 }
 .otari-activity-table .table__column[data-key="cost"],
-.otari-activity-table .table__column[data-key="latency"],
-.otari-overview-activity .table__column[data-key="cost"] {
+.otari-activity-table .table__column[data-key="latency"] {
   width: 5.75rem;
 }
-.otari-activity-table .table__column[data-key="status"],
-.otari-overview-activity .table__column[data-key="status"] {
+.otari-activity-table .table__column[data-key="status"] {
   width: 6.5rem;
 }
 
@@ -2658,6 +2639,14 @@ main {
    paints its own background over the row's. */
 .otari-sessions-table .table__row.is-peeked .table__cell {
   background-color: var(--color-surface-subtle);
+}
+/* The request open in the panel. A translucent wash on the cells, so a failed or
+   absorbed row keeps its tint and a pinned cell keeps its own background. */
+.otari-activity-table .table__row.is-peeked .table__cell {
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--color-text) 6%, transparent),
+    color-mix(in oklab, var(--color-text) 6%, transparent)
+  );
 }
 /* The session panel's rows and resize handles sit flush with a scrolling
    pane, which would clip the base ring's outward 2px, so theirs is drawn

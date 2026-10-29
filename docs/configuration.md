@@ -110,6 +110,9 @@ the corresponding startup value after the database is available.
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
+| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths. Defaults to `false`. See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about). |
+| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](traces.md#who-reads-content). |
+| `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](traces.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -1039,7 +1042,7 @@ a key offers that nothing prices is switched on and served at no cost, where
 [Who is shown which models](models.md#who-is-shown-which-models)). The gateway logs a warning for each unpriced model at most once an
 hour per process, and the dashboard shows operators a banner naming the models
 that served unpriced traffic in the selected workspace in the last 24 hours
-and still have no stored price, linked to those requests in Activity, where
+and still have no stored price, linked to those requests on the Overview, where
 each can be priced.
 
 ### Keeping the defaults current
@@ -1202,7 +1205,12 @@ model price can never be read as the tool's. The same row can be set through
 is priced; a `price_per_call` in the file adds a new version at startup only
 when it differs from the rate in force, so a rate set through the API for a tool
 that has a `price_per_call` lasts until the next restart, as a `pricing:` entry
-without `effective_at` does for a model. That rate is what a search reserves
+without `effective_at` does for a model. A tool stored from the dashboard under
+the same name and kind replaces this entry, so its `price_per_call` is not
+written while the stored tool exists; a rate an earlier start wrote stays in
+force until a newer one, such as one set from the dashboard, replaces it. A
+start whose stored tools fail to load writes no `price_per_call` at all, and the
+next start that loads them does. That rate is what a search reserves
 against the caller's budget before it runs. A successful search settles at the
 provider's reported charge when it reports one, and at the rate otherwise. A
 search a workspace's organization search key served is priced under
@@ -1495,8 +1503,9 @@ The signup form needs mail configured in either case, because it sends a verific
 
 ## Built-in tools and guardrails variables
 
-The Tools pages and `GET /api/v1/tool-settings` show effective sandbox, web-search,
-and guardrail configuration. Common startup settings are:
+`GET /api/v1/tool-settings` shows effective sandbox, web-search, and guardrail
+configuration. On the dashboard, the Tools pages show the sandbox and guardrail
+settings, and the deployment's Web search page shows the web-search ones. Common startup settings are:
 
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`

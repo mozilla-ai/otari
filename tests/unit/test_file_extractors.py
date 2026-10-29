@@ -477,6 +477,66 @@ line 2</pre></body></html>"""
     assert result.text == "T\n## Heading\nOne paragraph\n- Item\n| A | B |\n| 1 | 2 |\nline 1\nline 2"
 
 
+def test_an_uploaded_html_file_keeps_its_chrome() -> None:
+    """Only a fetched page has its chrome left out; an upload is the caller's own document."""
+    html = b"<body><nav>Menu</nav><main><p>Body</p></main></body>"
+
+    assert file_extractors._extract_sync(html, ".html").text == "Menu\nBody"
+
+
+_ARTICLE = "<p>" + "The article's own text. " * 20 + "</p>"
+
+
+def test_a_web_page_is_its_main_without_the_chrome() -> None:
+    html = (
+        "<header>Site banner</header><nav><a>Home</a></nav>"
+        f"<main><article><header><h1>Title</h1></header>{_ARTICLE}<footer>By someone</footer></article>"
+        "<div role='navigation'><div>Breadcrumbs</div></div><p hidden>Modal</p>"
+        "<span aria-hidden='true'>icon</span></main>"
+        "<aside>Related</aside><footer>Copyright</footer>"
+    )
+
+    text = file_extractors.html_main_text(html)
+
+    # An article's own header and footer are its content; the page's are chrome.
+    assert text.startswith("# Title\nThe article's own text.")
+    assert text.endswith("By someone")
+    for chrome in ("Site banner", "Home", "Breadcrumbs", "Modal", "icon", "Related", "Copyright"):
+        assert chrome not in text
+
+
+def test_the_longer_of_main_and_the_articles_is_the_content() -> None:
+    """A front page may keep only its featured story in <main> and the others as articles beside it."""
+    html = f"<main><p>Featured</p></main><article>{_ARTICLE}</article><article>{_ARTICLE}</article>"
+
+    text = file_extractors.html_main_text(html)
+
+    assert "Featured" not in text
+    assert text.count("The article's own text.") == 40
+
+
+def test_a_main_holding_little_of_the_page_is_not_taken_for_its_content() -> None:
+    html = f"<main><p>Hero</p></main><div>{_ARTICLE}</div>"
+
+    assert file_extractors.html_main_text(html).startswith("Hero\nThe article's own text.")
+
+
+def test_a_page_without_landmarks_keeps_everything_but_its_chrome() -> None:
+    html = f"<div id='top'><nav>Menu</nav></div><div>{_ARTICLE}</div><div role='contentinfo'>Copyright</div>"
+
+    text = file_extractors.html_main_text(html)
+
+    assert text.startswith("The article's own text.")
+    assert "Menu" not in text and "Copyright" not in text
+
+
+def test_chrome_that_never_closes_falls_back_to_the_whole_page() -> None:
+    """An unclosed <nav> would otherwise swallow everything after it."""
+    html = f"<nav>Menu<div>{_ARTICLE}</div>"
+
+    assert file_extractors.html_main_text(html).startswith("Menu\nThe article's own text.")
+
+
 def _pdf(*pages: str | None) -> bytes:
     """A PDF of one page per argument, holding that text, or none for ``None``."""
     import pypdfium2 as pdfium

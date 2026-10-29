@@ -23,12 +23,12 @@ The records carry the privacy rules, so nothing downstream can weaken them:
 
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, Protocol
 
 from otari_agent.domain.definitions import GateDefinition
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
@@ -36,6 +36,9 @@ from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
 # The longest id the tables hold: a gateway request id (a UUID, 36), an OTel
 # trace id (32 hex) or span id (16 hex), and the hashes derived from them.
 TRACE_ID_MAX_LENGTH = 64
+
+# A trace's key: its workspace and its id.
+TraceKey = tuple[uuid.UUID, str]
 
 SpanKind = Literal["turn", "step", "llm", "tool", "routing_attempt", "guardrail", "mcp_connect", "agent", "other"]
 SPAN_KINDS: tuple[SpanKind, ...] = (
@@ -150,6 +153,12 @@ LIST_SEPARATOR = ","
 # and never searched: shown on the span, and only there.
 SPAN_CONTENT_KEYS = frozenset({"prompt", "command", "file_path", "gate.evidence", "gate.detail"})
 SPAN_CONTENT_MAX_LENGTH = 4_000
+# How long the note on a share of a session's content may be.
+SHARE_NOTE_MAX_LENGTH = 500
+# What opening a session's content without its owner's share has to say for itself.
+BREAK_GLASS_REASON_MIN_LENGTH = 10
+BREAK_GLASS_REASON_MAX_LENGTH = 1_000
+BREAK_GLASS_REFERENCE_MAX_LENGTH = 200
 
 
 class InvalidSpanError(ValueError):
@@ -243,6 +252,8 @@ class SpanRecord:
     otel_span_id: str | None = None
     attributes: Mapping[str, str | int | float | bool] = field(default_factory=dict)
     content: Mapping[str, str] = field(default_factory=dict)
+    # The span holds content the reader may not open: it is private to the session's owner.
+    content_private: bool = False
 
     def __post_init__(self) -> None:
         _check_choice("kind", self.kind, SPAN_KINDS)
@@ -306,6 +317,15 @@ class TraceWrite:
     spans: tuple[SpanRecord, ...]
     harness: str | None = None
     name: str | None = None
+    captured_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """When the gateway took these spans in, which an erasure of their user since then outranks."""
+    content_generation: int | None = None
+    """The workspace's content generation when its spans' content was captured.
+
+    Content is stored only while the workspace is still on that generation, so
+    content queued before the workspace turned content off, or deleted it, is
+    dropped however late it is written. None keeps no content.
+    """
 
     def __post_init__(self) -> None:
         _check_id("trace_id", self.trace_id)
@@ -327,6 +347,40 @@ class WriteResult:
     rejected: int = 0
 
 
+ShareAudience = Literal["organization_admins", "deployment_operator"]
+SHARE_AUDIENCES: tuple[ShareAudience, ...] = ("organization_admins", "deployment_operator")
+# How a read reached a session's content: as its owner, through a share, by
+# break-glass (an organization owner or the deployment's operator, recorded), or not at all.
+ContentAccess = Literal["owner", "share", "break_glass", "none"]
+BreakGlassKind = Literal["organization", "deployment"]
+
+
+@dataclass(frozen=True)
+class ContentReader:
+    """Who is reading a session's content, and which shares they may read it through."""
+
+    user_id: uuid.UUID
+    email: str
+    audiences: frozenset[ShareAudience] = frozenset()
+    """The shares this reader may read through: none for a member who manages nothing.
+
+    More than one where a reader is both, such as an operator who also owns or
+    administers the organization.
+    """
+
+
+class SessionOwners(Protocol):
+    """Who still belongs where a session was kept, asked before content opens for anyone but its owner."""
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        """Whether ``user_id`` names a person who currently sees ``workspace_id``."""
+        ...
+
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        """Which of these (workspace, user) pairs :meth:`is_member` holds for, asked at once."""
+        ...
+
+
 @dataclass(frozen=True)
 class TraceScope:
     """The tenants a read may touch, derived from the authenticated caller.
@@ -334,30 +388,36 @@ class TraceScope:
     Built through :meth:`deployment` or :meth:`workspaces`, never directly, so
     "every workspace" is always a deliberate choice: an empty workspace set
     matches nothing.
+
+    A session's content (prompts, commands, file paths) opens for the user it
+    belongs to and nobody else, managers and operators included, unless its owner
+    shared it with them while still a member. Content is kept only for a session
+    a current member owns, so no session's content belongs to nobody.
+    ``all_content`` is for the deployment's own reads, never a person's.
     """
 
     workspace_ids: frozenset[uuid.UUID]
     deployment_wide: bool = False
-    # A span's retained content (prompts, commands) goes to whoever manages the
-    # workspaces and to the user the trace belongs to; anyone else reads it empty.
     all_content: bool = False
-    content_user_id: str | None = None
+    reader: ContentReader | None = None
 
     @classmethod
     def deployment(cls) -> "TraceScope":
-        """Every workspace: only for a deployment operator."""
+        """Every workspace, with every session's content: for the deployment's own reads, never a person's."""
         return cls(workspace_ids=frozenset(), deployment_wide=True, all_content=True)
 
     @classmethod
-    def workspaces(
-        cls, workspace_ids: frozenset[uuid.UUID], *, all_content: bool = False, content_user_id: str | None = None
-    ) -> "TraceScope":
-        """Only these workspaces, with every trace's content or only ``content_user_id``'s own."""
-        return cls(workspace_ids=workspace_ids, all_content=all_content, content_user_id=content_user_id)
+    def workspaces(cls, workspace_ids: frozenset[uuid.UUID], *, reader: ContentReader | None = None) -> "TraceScope":
+        """Only these workspaces, read by ``reader``; without one, no session's content opens."""
+        return cls(workspace_ids=workspace_ids, reader=reader)
+
+    def owns(self, user_id: str | None) -> bool:
+        """Whether the reader is the user a session belongs to."""
+        return self.reader is not None and user_id is not None and user_id == str(self.reader.user_id)
 
     def reads_content_of(self, user_id: str | None) -> bool:
-        """Whether a read in this scope returns the content of a trace ``user_id`` owns."""
-        return self.all_content or (user_id is not None and user_id == self.content_user_id)
+        """Whether a read in this scope opens the content of a session ``user_id`` owns, without a share."""
+        return self.all_content or self.owns(user_id)
 
 
 @dataclass(frozen=True)
@@ -377,6 +437,7 @@ class TraceFilter:
     end: datetime | None = None
     user_ids: tuple[str, ...] = ()
     api_key_ids: tuple[str, ...] = ()
+    models: tuple[str, ...] = ()
     harnesses: tuple[str, ...] = ()
     session_sources: tuple[str, ...] = ()
     has_error: bool | None = None
@@ -475,3 +536,63 @@ class TraceDetail:
     spans: tuple[SpanRecord, ...]
     truncated: bool
     definitions: tuple[GuardrailDefinition, ...] = ()
+    content_access: ContentAccess = "none"
+    content_share: "ContentShare | None" = None
+    """The share the content was read through, where it was."""
+
+
+@dataclass(frozen=True)
+class BreakGlass:
+    """Why a session's content is being opened without its owner's share, and by whom."""
+
+    kind: BreakGlassKind
+    organization_id: uuid.UUID
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    reason: str
+    reference: str | None = None
+
+
+@dataclass(frozen=True)
+class BreakGlassRead:
+    """One recorded break-glass opening of a session's content."""
+
+    id: uuid.UUID
+    kind: BreakGlassKind
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID
+    trace_id: str
+    session_user_id: str | None
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    reason: str
+    reference: str | None
+    read_at: datetime
+
+
+@dataclass(frozen=True)
+class ContentRead:
+    """One read of a session's content through a share."""
+
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    read_at: datetime
+
+
+@dataclass(frozen=True)
+class ContentShare:
+    """A session's owner letting an audience read what it was about, and the reads made through it."""
+
+    id: uuid.UUID
+    audience: ShareAudience
+    note: str | None
+    created_at: datetime
+    revoked_at: datetime | None
+    reads: tuple[ContentRead, ...] = ()
+    """Its newest reads; ``read_count`` says how many there are in all."""
+    read_count: int = 0
+
+    @property
+    def active(self) -> bool:
+        """Whether it still lets its audience read."""
+        return self.revoked_at is None

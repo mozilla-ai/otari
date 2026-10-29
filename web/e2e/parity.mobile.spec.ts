@@ -36,10 +36,10 @@ const PAGES = [
   {
     route: "/",
     heading: "Overview",
-    // The spend chart's date labels are what overhung the plot.
+    // The usage tab's tiles and the tab row are the widest rows on the page.
     ready: (page: Page) =>
       expect(
-        page.getByRole("heading", { name: "Spend, last 30 days" }),
+        page.getByRole("navigation", { name: "Overview views" }),
       ).toBeVisible(),
   },
   {
@@ -49,8 +49,8 @@ const PAGES = [
       expect(page.getByRole("textbox").first()).toBeVisible(),
   },
   {
-    route: "/activity",
-    heading: "Activity",
+    route: "/requests",
+    heading: "Overview",
     // A paginated table: the pager row is what could not wrap.
     ready: async (page: Page) => {
       await expect(table(page, "Activity log")).toBeVisible()
@@ -69,7 +69,7 @@ const PAGES = [
 
 test.describe("a phone-width page does not pan sideways", () => {
   for (const { route, heading, ready } of PAGES) {
-    test(`${heading} at 390px`, async ({ page }) => {
+    test(`${heading} (${route}) at 390px`, async ({ page }) => {
       await login(page)
       await gotoRoute(page, route)
       await expect(pageHeading(page, heading)).toBeVisible()

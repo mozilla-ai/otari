@@ -34,6 +34,7 @@ from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRec
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
+from gateway.adapters.content_key_adapter import build_content_key_port
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
@@ -50,6 +51,7 @@ from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
@@ -410,6 +412,27 @@ def _file_storage_port_factory(config: GatewayConfig | None) -> PortFactory[File
     return factory
 
 
+def _content_key_port_factory(config: GatewayConfig | None) -> PortFactory[ContentKeyPort]:
+    """The core ``ContentKeyPort`` factory, closed over this app's config.
+
+    Built on first resolve and reused, so a process holds one KMS client.
+    A container built without config resolves this port only to raise.
+    """
+    keys: ContentKeyPort | None = None
+
+    def factory(session: AsyncSession | None) -> ContentKeyPort:
+        del session
+        nonlocal keys
+        if config is None:
+            msg = "ContentKeyPort needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        if keys is None:
+            keys = build_content_key_port(config)
+        return keys
+
+    return factory
+
+
 def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[RateLimitStorePort]:
     """The core ``RateLimitStorePort`` factory, closed over this app's config.
 
@@ -529,6 +552,9 @@ def build_container(
     # bucket or any fsspec filesystem, whichever ``files_backend`` names. An
     # overlay binds a store of its own and changes nothing above the port.
     container.bind(FileStoragePort, _file_storage_port_factory(config))
+    # Stored content's data keys: the base wraps them with OTARI_SECRET_KEY, or
+    # has AWS KMS make them, whichever ``trace_content_key_backend`` names.
+    container.bind(ContentKeyPort, _content_key_port_factory(config))
     # A provider's own files: the base reaches them through any-llm with the
     # credential a request dispatches with. An overlay that must not hand a
     # managed credential to this process binds a transfer of its own.

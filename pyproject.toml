@@ -98,7 +98,6 @@ dependencies = [
     "pyyaml>=6.0",
     "sqlalchemy[asyncio]>=2.1.5",
     "sqlmodel>=0.0.24",
-    "trafilatura>=2.0.0",
     "uvicorn[standard]>=0.54.0",
     "opentelemetry-proto>=1.39.1",
     "webauthn>=2.5.0",
@@ -117,6 +116,11 @@ ocr = [
 # stays decoupled from that implementation detail.
 s3 = [
     "boto3>=1.43.115",
+]
+# AWS KMS as the source of trace content's data keys (trace_content_key_backend:
+# aws_kms). Present transitively too, for the reason the s3 extra gives.
+kms = [
+    "boto3>=1.42.0",
 ]
 # The generic files backend (`FsspecFileStore`): one URL reaches whichever
 # filesystem the operator has an fsspec implementation installed for. fsspec
@@ -176,7 +180,7 @@ dev = [
     # uses it: the gateway parses that contract with its own Pydantic models.
     "jsonschema>=4.26.0",
     "types-jsonschema",
-    "moto[s3]>=5.2.4",
+    "moto[s3,kms]>=5.2.4",
     "mypy",
     # Parses the mcp dependency spec straight out of this file's own
     # [project.dependencies], in the regression test for #689, instead of
@@ -321,10 +325,6 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["testcontainers.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["trafilatura.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

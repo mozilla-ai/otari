@@ -1,18 +1,32 @@
-"""Data access for ``trace_spans``. Flushes, never commits; a span once stored is never updated."""
+"""Data access for ``trace_spans``. Flushes, never commits; a span once stored changes only by losing its content."""
 
 import uuid
 from collections.abc import Collection, Sequence
 from typing import Any, Never
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, exists, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import InstrumentedAttribute
 
 from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import TraceSpan
 from gateway.repositories.base_repository import BaseRepository
-from gateway.repositories.traces.trace_repository import TraceKey
+from gateway.types.traces import TraceKey
+
+
+def has_span_on_models(
+    workspace_id: InstrumentedAttribute[uuid.UUID], trace_id: InstrumentedAttribute[str], models: Collection[str]
+) -> ColumnElement[bool]:
+    """Match a trace, keyed by the outer query's columns, that holds a span on any of ``models``.
+
+    The probe seeks on the ``(workspace_id, trace_id)`` prefix of ``ix_trace_spans_trace_start`` and
+    filters ``model`` on the rows it finds there.
+    """
+    return exists().where(
+        TraceSpan.workspace_id == workspace_id, TraceSpan.trace_id == trace_id, TraceSpan.model.in_(list(models))
+    )
 
 
 class SpanRepository(BaseRepository[TraceSpan, Never, Never]):
@@ -20,6 +34,20 @@ class SpanRepository(BaseRepository[TraceSpan, Never, Never]):
 
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, TraceSpan)
+
+    async def clear_content(self, workspace_id: uuid.UUID, *, limit: int) -> int:
+        """Drop the sealed content of up to ``limit`` spans in the workspace, returning how many held any."""
+        held = (
+            select(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id)
+            .where(TraceSpan.workspace_id == workspace_id, TraceSpan.content_sealed.is_not(None))
+            .limit(limit)
+        )
+        result = await self.db.execute(
+            update(TraceSpan)
+            .where(tuple_(TraceSpan.workspace_id, TraceSpan.trace_id, TraceSpan.span_id).in_(held))
+            .values(content_sealed=None)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def insert_new(self, rows: Sequence[dict[str, Any]]) -> set[tuple[uuid.UUID, str, str]]:
         """Stage the spans not stored yet, in one statement, and return the keys of those it inserted.

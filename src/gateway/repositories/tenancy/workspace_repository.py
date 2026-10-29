@@ -244,6 +244,21 @@ class WorkspaceMemberRepository:
         )
         return result.scalars().first()
 
+    async def get_active_pairs(
+        self, workspace_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID]
+    ) -> set[tuple[uuid.UUID, uuid.UUID]]:
+        """Return each (workspace, user) of these that an *active* membership joins, in one query."""
+        if not workspace_ids or not user_ids:
+            return set()
+        result = await self.db.execute(
+            select(col(WorkspaceMember.workspace_id), col(WorkspaceMember.user_id)).where(
+                col(WorkspaceMember.workspace_id).in_(list(workspace_ids)),
+                col(WorkspaceMember.user_id).in_(list(user_ids)),
+                col(WorkspaceMember.status) == "active",
+            )
+        )
+        return set(result.tuples().all())
+
     async def get_by_workspaces_and_user(
         self,
         workspace_ids: Collection[uuid.UUID],

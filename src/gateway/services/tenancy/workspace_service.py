@@ -235,6 +235,15 @@ class WorkspaceService:
             count=count,
         )
 
+    async def require_management_access(self, *, user: User, workspace_id: uuid.UUID) -> None:
+        """Refuse unless ``user`` manages this workspace of their active organization.
+
+        Raises the workspace's not-found error for a workspace outside it, and the
+        management error for a member who does not manage it.
+        """
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        await self._require_workspace_management_access(user=user, workspace=workspace)
+
     async def update_workspace(
         self,
         *,
@@ -242,11 +251,13 @@ class WorkspaceService:
         workspace_id: uuid.UUID,
         workspace_update: WorkspaceUpdate,
     ) -> WorkspacePublic:
-        """Rename a workspace or change its description."""
+        """Rename a workspace, change its description, or turn keeping its trace content on or off."""
         workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
+        if update_data.get("trace_content_enabled", False) is None:
+            del update_data["trace_content_enabled"]
         if "name" in update_data:
             new_name = self._validated_name(update_data["name"])
             update_data["name"] = new_name

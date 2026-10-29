@@ -137,6 +137,9 @@ class RecordingListener:
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         self.deleted.append((workspace_id, sorted(member_ids)))
 
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        return None
+
 
 async def _membership_id(db: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
     member = await WorkspaceMemberRepository(db).get_by_workspace_and_user(workspace_id, user_id)

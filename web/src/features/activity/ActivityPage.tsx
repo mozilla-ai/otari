@@ -1,11 +1,7 @@
 import { Button } from "@heroui/react"
+import { useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type {
-  SummaryDimension,
-  UsageEntry,
-  UsageFilters,
-  UsageGroupRow,
-} from "@/client"
+import type { SummaryDimension, UsageEntry, UsageFilters } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
@@ -13,13 +9,15 @@ import {
   TablePagination,
 } from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   type FilterChip,
   FilterChips,
 } from "@/design-system/navigation/FilterChips"
-import { FilterMultiComboBox } from "@/design-system/navigation/FilterMultiComboBox"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   type PricingUnit,
@@ -29,6 +27,7 @@ import {
   type ManualRates,
   SetPriceDialog,
 } from "@/features/models/SetPriceDialog"
+import { useObserveScope } from "@/features/observe/useObserveScope"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { useSetPricing } from "@/shared/api/pricing"
@@ -42,6 +41,7 @@ import {
   useUsageSummary,
 } from "@/shared/api/usage"
 import { formatNumber } from "@/shared/helpers/format"
+import type { DashboardSearch } from "@/shared/helpers/search"
 import {
   ACTIVITY_DEFAULT_KEY,
   ACTIVITY_PRESETS,
@@ -63,12 +63,10 @@ import {
   PRICED_OPTIONS,
   resolveExtentWindow,
   resolveWindow,
-  STATUS_OPTIONS,
   TOOL_OPTIONS,
 } from "./activityModel"
 import { InFlightControl } from "./InFlightControl"
-import { RequestDetail } from "./RequestDetail"
-import { RequestTraceLink } from "./RequestTraceLink"
+import { RequestPeek } from "./RequestPeek"
 import { RoutingCell } from "./RoutingCell"
 import {
   API_KEY_COLUMN,
@@ -86,17 +84,7 @@ const TOOL_BREAKDOWN: SummaryDimension[] = ["tool"]
 
 const DEFAULT_PAGE_SIZE = 50
 
-// The only breakdown this page reads: the in-window models behind the typeahead.
-// The typeahead reads `by_model`; the source picker's option list piggybacks on
-// the same query's `by_source` while no source is picked (see the source
-// suggestion note below), so both breakdowns ride one request.
-const MODEL_AND_SOURCE_BREAKDOWNS: SummaryDimension[] = ["model", "source"]
-
-// The user and key pickers read these two. by_user and by_api_key carry each
-// entity's display name, resolved server-side in the same GROUP BY, so naming an
-// option costs nothing beyond the breakdown itself. The alternative is paging
-// the whole users and api_keys tables on every visit.
-const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"]
+// The source picker's option list: the sources with usage in the window.
 const SOURCE_BREAKDOWN: SummaryDimension[] = ["source"]
 
 // All filter + pagination state, with defaults, kept in the URL.
@@ -116,9 +104,31 @@ const URL_DEFAULTS = {
   tool: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
+  // The usage row open in the panel.
+  request: "",
 } as const
 
-export function ActivityPage() {
+/** Inside the Overview the page waits for its scope, so it never fetches the wrong one. */
+export function ActivityPage({
+  embedded = false,
+}: {
+  embedded?: boolean
+} = {}) {
+  const observe = useObserveScope(embedded)
+  return observe.isResolved ? (
+    <ActivityPageContent embedded={embedded} observe={observe} />
+  ) : (
+    <PageLoading />
+  )
+}
+
+function ActivityPageContent({
+  embedded = false,
+  observe,
+}: {
+  embedded?: boolean
+  observe: ReturnType<typeof useObserveScope>
+}) {
   // Who the people behind the owner ids are. The log already carries the alias
   // the gateway was told; the roster is who the person is, so it wins.
   const memberLabels = useMemberAttributionLabels()
@@ -133,15 +143,16 @@ export function ActivityPage() {
   // wire, so a comparison ("these two models") is one view rather than several, and
   // a drill-down from the analytics page can carry its whole selection across.
   const modelFilters = url.getAll("model")
-  const userFilters = url.getAll("user_id")
+  // Inside the Overview the scope decides this; elsewhere it is the URL's own.
+  const { userIds: userFilters, scope: observeScope } = observe
   const apiKeyFilters = url.getAll("api_key_id")
   const pricedFilter = url.get("priced")
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source")
-  // The Usage-page secondary breakdowns (session / endpoint / provider) drill in
-  // the same way: no select of their own, carried as a chip so the scoping is
-  // visible and one click removes it.
+  // The Usage breakdowns (session / endpoint / provider) drill in the same way:
+  // no select of their own, carried as a chip so the scoping is visible and one
+  // click removes it.
   const sessionFilter = url.get("source_label")
   const endpointFilter = url.get("endpoint")
   const providerFilter = url.get("provider")
@@ -270,7 +281,7 @@ export function ActivityPage() {
   useEffect(() => {
     if (prevFiltersKey.current !== filtersKey) {
       prevFiltersKey.current = filtersKey
-      url.patch({ page: 0 })
+      url.patch({ page: 0, request: "" })
     }
   }, [filtersKey, url])
 
@@ -304,80 +315,12 @@ export function ActivityPage() {
   const newRowsRelevant = page === 0 && !filters.end_date
   const liveCount = useLiveUsageCount(filters, newRowsRelevant)
 
-  // Model suggestions: models with usage in the window (other filters applied, the
-  // model filter omitted so the full list stays offered).
-  const modelSuggestFilters: UsageFilters = useMemo(
-    () => ({
-      workspace_id: workspace?.workspace_id,
-      start_date: win.start,
-      end_date: win.end,
-      status: statusFilter || undefined,
-      user_id: userFilters.length > 0 ? userFilters : undefined,
-      api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
-      source: sourceFilter || undefined,
-      source_label: sessionFilter || undefined,
-      endpoint: endpointFilter || undefined,
-      provider: providerFilter || undefined,
-      tool: (toolFilter || undefined) as UsageFilters["tool"],
-    }),
-    [
-      workspace?.workspace_id,
-      win,
-      statusFilter,
-      userFilters,
-      apiKeyFilters,
-      sourceFilter,
-      sessionFilter,
-      endpointFilter,
-      providerFilter,
-      toolFilter,
-    ],
-  )
-  // Two breakdowns are read here (model typeahead, source picker); the rest are
-  // not requested.
-  const modelSummary = useUsageSummary(
-    modelSuggestFilters,
-    "day",
-    MODEL_AND_SOURCE_BREAKDOWNS,
-  )
-  const realGroups = (rows: UsageGroupRow[] | undefined) =>
-    (rows ?? []).filter((group) => !group.is_other && group.key !== null)
-  const modelOptions = realGroups(modelSummary.data?.by_model).map(
-    (group) => group.key as string,
-  )
-
-  // The user and key pickers need their own window: each must keep offering the
-  // *other* values of its own dimension, so both entity filters come off. That
-  // cannot share the model/source query above, which has to keep them applied,
-  // or filtering Activity to one user would make the typeahead suggest only the
-  // models other users called and picking one would return an empty table.
-  const entitySuggestFilters: UsageFilters = useMemo(
-    () => ({ ...filters, user_id: undefined, api_key_id: undefined }),
-    [filters],
-  )
-  const entitySummary = useUsageSummary(
-    entitySuggestFilters,
-    "day",
-    ENTITY_BREAKDOWNS,
-  )
-  const keyOptions = realGroups(entitySummary.data?.by_api_key).map(
-    (group) => ({
-      value: group.key as string,
-      label: group.label ?? `${(group.key as string).slice(0, 8)}…`,
-    }),
-  )
-
-  // Source options: the sources with usage in the window. Like the model
-  // suggestions, this must ignore the source filter itself, or picking Claude Code
-  // would hide every other source and switching would mean clearing first.
-  //
-  // While no source is picked the model-suggestion summary is already computed
-  // without one, so its provenance breakdown is that full list and no second query
-  // is needed. Only a picked source needs its own, so it is fetched then and only
-  // then (each summary runs four grouped aggregations plus the series).
-  // Deliberately broader than modelSuggestFilters: the session/endpoint/provider
-  // drill-down chips are not applied here, so the source list stays complete
-  // (and the picker stays useful) while a drill-down narrows everything else.
+  // Source options: the sources with usage in the window. This must ignore the
+  // source filter itself, or picking Claude Code would hide every other source
+  // and switching would mean clearing first. The session/endpoint/provider
+  // drill-down chips are not applied either, so the list stays complete (and the
+  // picker useful) while a drill-down narrows everything else. The model, user
+  // and key pickers are the Overview's, which fetches their options.
   const sourceSuggestFilters: UsageFilters = useMemo(
     () => ({
       workspace_id: workspace?.workspace_id,
@@ -401,13 +344,10 @@ export function ActivityPage() {
     sourceSuggestFilters,
     "day",
     SOURCE_BREAKDOWN,
-    Boolean(sourceFilter),
   )
-  const sourceBreakdown = (
-    sourceFilter ? sourceSummary.data : modelSummary.data
-  )?.by_source
   // A drill-down can name a source with no rows in the window; keep it listed so
   // the select shows the filter that is actually applied.
+  const sourceBreakdown = sourceSummary.data?.by_source
   const sourceOptions = useMemo(() => {
     const seen = (sourceBreakdown ?? [])
       .filter((group) => !group.is_other && group.key !== null)
@@ -570,7 +510,7 @@ export function ActivityPage() {
   const anyFilter = Boolean(
     statusFilter ||
       modelFilters.length ||
-      userFilters.length ||
+      (observeScope === "everyone" && userFilters.length) ||
       apiKeyFilters.length ||
       pricedFilter ||
       sourceFilter ||
@@ -581,67 +521,14 @@ export function ActivityPage() {
       timeFiltered,
   )
 
-  // Active entity filters as removable chips (time is driven by the timeline, so
-  // it is not a chip). Values show the human label where one exists.
+  // This page's own filters as removable chips (time is driven by the timeline,
+  // and model, user, key and status are the Overview's). Values show the human label
+  // where one exists.
   const labelFrom = (
     options: { value: string; label: string }[],
     value: string,
   ) => options.find((option) => option.value === value)?.label ?? value
-  // Name first, id in parentheses: the id is what the filter submits, and two
-  // people can share a name. Resolved the way the User column resolves it, so
-  // the same person reads the same in the picker, the chip and the row.
-  const userOptionsList = realGroups(entitySummary.data?.by_user).map(
-    (group) => {
-      const name = userDisplay(group.key as string, group.label, memberLabels)
-      return {
-        value: group.key as string,
-        label: name.id ? `${name.label} (${name.id})` : name.label,
-      }
-    },
-  )
-  const clearEntityFilters = () =>
-    url.patch({
-      status: "",
-      priced: "",
-      model: [],
-      user_id: [],
-      api_key_id: [],
-      source: "",
-      source_label: "",
-      endpoint: "",
-      provider: "",
-      tool: "",
-    })
-  // One chip per picked value of a repeatable filter, each clearing only itself.
-  const valueChips = (
-    dimension: string,
-    label: string,
-    param: "model" | "user_id" | "api_key_id",
-    values: string[],
-    display: (value: string) => string,
-  ): FilterChip[] =>
-    values.map((value) => ({
-      key: `${dimension}:${value}`,
-      label,
-      value: display(value),
-      // Several chips share a dimension, so the value has to be part of the name.
-      clearLabel: `Remove ${label} filter ${display(value)}`,
-      onClear: () =>
-        url.patch({
-          [param]: values.filter((optionValue) => optionValue !== value),
-        }),
-    }))
   const filterChips: FilterChip[] = [
-    ...(statusFilter
-      ? [
-          {
-            key: "status",
-            label: "Status",
-            value: labelFrom(STATUS_OPTIONS, statusFilter),
-            onClear: () => url.patch({ status: "" }),
-          },
-        ]
-      : []),
     ...(pricedFilter
       ? [
           {
@@ -652,13 +539,6 @@ export function ActivityPage() {
           },
         ]
       : []),
-    ...valueChips("user", "User", "user_id", userFilters, (value) =>
-      labelFrom(userOptionsList, value),
-    ),
-    ...valueChips("model", "Model", "model", modelFilters, (value) => value),
-    ...valueChips("key", "API key", "api_key_id", apiKeyFilters, (value) =>
-      labelFrom(keyOptions, value),
-    ),
     ...(sourceFilter
       ? [
           {
@@ -721,48 +601,54 @@ export function ActivityPage() {
   // unset when that dialog is closed.
   const [modelPriceKey, setModelPriceKey] = useState<string>()
   const [modelPriceUnit, setModelPriceUnit] = useState<PricingUnit>("tokens")
-  const [expandedId, setExpandedId] = useState<string>()
+  const priceModel = scope.isDeploymentWide
+    ? (model: string, endpoint: string) => {
+        setPriceOpenCount((count) => count + 1)
+        setModelPriceUnit(pricingUnitForEndpoint(endpoint))
+        setModelPriceKey(model)
+      }
+    : undefined
 
-  // Inline accordion panel under the clicked row (DataTable renderDetail).
-  // Was a setter-only closure with empty dependencies, so the row cache held for
-  // the life of the page; see the DataTable docstring. It now depends on the
-  // operator flag as well, which is not a setter and cannot be read from the
-  // closure: it is false until the organization context resolves, so a stale one
-  // would leave a real operator without the price control for the session. It
-  // flips at most once, so the cache it invalidates is rebuilt once.
-  const renderDetail = useCallback(
-    (entry: UsageEntry) => (
-      <div>
-        <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-          {/* Left, by the title: the header spans the table's scroll width,
-              so its right end can sit off screen. */}
-          <div className="flex items-center gap-3">
-            <span className="text-body">Request detail</span>
-            <RequestTraceLink entry={entry} />
-          </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() => setExpandedId(undefined)}
-          >
-            Close
-          </Button>
-        </div>
-        <RequestDetail
-          entry={entry}
-          onPriceModel={
-            scope.isDeploymentWide
-              ? (model, endpoint) => {
-                  setPriceOpenCount((count) => count + 1)
-                  setModelPriceUnit(pricingUnitForEndpoint(endpoint))
-                  setModelPriceKey(model)
-                }
-              : null
-          }
-        />
-      </div>
-    ),
-    [scope.isDeploymentWide],
+  // The open request lives in the URL, so it is linkable. Opening one from the
+  // list is a history entry, so Back closes it; walking and closing replace it.
+  const navigate = useNavigate()
+  const requestId = url.get("request")
+  const openIndex = rows.findIndex((row) => row.id === requestId)
+  const openEntry = openIndex >= 0 ? rows[openIndex] : undefined
+  const openRequest = (id: string) => {
+    if (id === requestId) return
+    navigate({
+      to: ".",
+      search: (prev) => ({ ...(prev as DashboardSearch), request: id }),
+    })
+  }
+  // Previous and next walk the loaded page only: J/K stop at its edges.
+  const previousEntry = openIndex > 0 ? rows[openIndex - 1] : undefined
+  const nextEntry =
+    openIndex >= 0 && openIndex < rows.length - 1
+      ? rows[openIndex + 1]
+      : undefined
+  // A link to a row that is not on this page opens nothing; say so rather than
+  // ignore it. Only once the page has settled, or a loading page would flash it.
+  const requestMissing =
+    requestId !== "" &&
+    openEntry === undefined &&
+    !usage.isLoading &&
+    !usage.isPlaceholderData
+  // Below md the panel covers the page, which then takes no focus or presses.
+  const isMobile = useIsMobile()
+  // Stable per open row, so DataTable's row cache holds while the page polls.
+  // `is-peeked` washes the cells (see globals.css) and composes with the row's
+  // own failure tint.
+  const rowClassName = useCallback(
+    (entry: UsageEntry) =>
+      [
+        getActivityRowClassName(entry),
+        entry.id === requestId ? "is-peeked" : undefined,
+      ]
+        .filter(Boolean)
+        .join(" ") || undefined,
+    [requestId],
   )
 
   // Sets the model's own price (a ModelPricing row), which is what future
@@ -806,14 +692,7 @@ export function ActivityPage() {
     }
     void inFlight.refetch()
     void contextSummary.refetch()
-    void modelSummary.refetch()
-    void entitySummary.refetch()
-    // Guarded because refetch() ignores `enabled`: without a picked source the
-    // query is disabled by design and refetching it would fire a pointless
-    // extra summary request.
-    if (sourceFilter) {
-      void sourceSummary.refetch()
-    }
+    void sourceSummary.refetch()
   }
 
   // A rolling preset clears any explicit bounds; a timeline selection sets them
@@ -892,203 +771,201 @@ export function ActivityPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Activity">
-        A per-request log of what the gateway served: tokens, cost, latency, and
-        failures. No request or response content is stored.
-      </PageIntro>
+      <div
+        className="flex flex-col"
+        inert={openEntry !== undefined && isMobile}
+      >
+        {/* Inside the Overview the layout owns the heading. */}
+        {embedded ? null : (
+          <PageIntro title="Activity">
+            A per-request log of what the gateway served: tokens, cost, latency,
+            and failures. No request or response content is stored.
+          </PageIntro>
+        )}
 
-      {/* The timeline's summary error is included so a failed series request
+        {/* The timeline's summary error is included so a failed series request
           reads as a failure, not as an empty "No activity in this range" strip. */}
-      {/* The in-flight error is last: a failure to read the log itself is the more
+        {/* The in-flight error is last: a failure to read the log itself is the more
           important thing to say. It is here at all so a live view that has gone
           quiet is distinguishable from a gateway that has, since the rows are
           dropped on failure rather than left to go stale. */}
-      <ErrorBanner
-        error={
-          usage.error ?? count.error ?? contextSummary.error ?? inFlight.error
-        }
-      />
-
-      <div className="flex flex-col gap-3">
-        <ActivityTimeline
-          presets={ACTIVITY_PRESETS}
-          extentKey={extentKey}
-          onPreset={pickPreset}
-          onSelectRange={pickCustom}
-          onSelectFull={() =>
-            extentPreset ? pickPreset(extentPreset) : undefined
+        <ErrorBanner
+          error={
+            usage.error ?? count.error ?? contextSummary.error ?? inFlight.error
           }
-          series={timelineSeries}
-          bucket={extentBucket}
-          windowStart={win.start}
-          windowEnd={win.end}
-          loading={contextSummary.isLoading}
-          ariaLabel="Activity request volume over the selected window"
-          action={
-            <span className="inline-flex items-center gap-2">
-              {/* Both live signals sit here, beside the control that acts on them:
+        />
+
+        <div className="flex flex-col gap-3">
+          <ActivityTimeline
+            presets={ACTIVITY_PRESETS}
+            extentKey={extentKey}
+            onPreset={pickPreset}
+            onSelectRange={pickCustom}
+            onSelectFull={() =>
+              extentPreset ? pickPreset(extentPreset) : undefined
+            }
+            series={timelineSeries}
+            bucket={extentBucket}
+            windowStart={win.start}
+            windowEnd={win.end}
+            loading={contextSummary.isLoading}
+            ariaLabel="Activity request volume over the selected window"
+            action={
+              <span className="inline-flex items-center gap-2">
+                {/* Both live signals sit here, beside the control that acts on them:
                   the table below never moves on its own, so this strip is the only
                   place the page says anything is still happening. */}
-              {/* Rendered whenever the poll is answering at all, not only when it
+                {/* Rendered whenever the poll is answering at all, not only when it
                   reports traffic: the control hides itself while idle, but has to
                   stay mounted to keep an open list open across the moment the last
                   request lands. It still goes on a failed poll, where `liveNow` is
                   undefined, since there is nothing trustworthy left to report. */}
-              {liveNow ? (
-                <InFlightControl
-                  data={liveNow}
-                  updatedAt={inFlight.dataUpdatedAt}
+                {liveNow ? (
+                  <InFlightControl
+                    data={liveNow}
+                    updatedAt={inFlight.dataUpdatedAt}
+                  />
+                ) : null}
+                {newRows > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onPress={refresh}
+                    isDisabled={usage.isFetching}
+                  >
+                    {formatNumber(newRows)} new · load
+                  </Button>
+                ) : null}
+                {newRowsUnknown ? (
+                  <span
+                    className="text-caption"
+                    title="The row count could not be read, so this page cannot tell whether newer requests have landed. Refresh to load whatever is there."
+                  >
+                    Newer rows unknown
+                  </span>
+                ) : null}
+                <RefreshButton
+                  onRefresh={refresh}
+                  isFetching={usage.isFetching}
+                  updatedAt={usage.dataUpdatedAt}
                 />
-              ) : null}
-              {newRows > 0 ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={refresh}
-                  isDisabled={usage.isFetching}
-                >
-                  {formatNumber(newRows)} new · load
-                </Button>
-              ) : null}
-              {newRowsUnknown ? (
-                <span
-                  className="text-caption"
-                  title="The row count could not be read, so this page cannot tell whether newer requests have landed. Refresh to load whatever is there."
-                >
-                  Newer rows unknown
-                </span>
-              ) : null}
-              <RefreshButton
-                onRefresh={refresh}
-                isFetching={usage.isFetching}
-                updatedAt={usage.dataUpdatedAt}
-              />
-            </span>
-          }
-        />
-        <FilterChips chips={filterChips} onClearAll={clearEntityFilters}>
-          <FilterSelect
-            label="Status"
-            value={statusFilter}
-            onChange={(value) => url.patch({ status: value })}
-            options={STATUS_OPTIONS}
+              </span>
+            }
           />
-          <FilterSelect
-            label="Priced?"
-            value={pricedFilter}
-            onChange={(value) => url.patch({ priced: value })}
-            options={PRICED_OPTIONS}
-          />
-          {/* Only offered once the window actually contains tool usage, following the
+          <FilterChips chips={filterChips} toggleLabel="More filters">
+            <FilterSelect
+              label="Priced?"
+              value={pricedFilter}
+              onChange={(value) => url.patch({ priced: value })}
+              options={PRICED_OPTIONS}
+            />
+            {/* Only offered once the window actually contains tool usage, following the
               source select below: a filter whose every option returns nothing is
               noise on the majority of gateways, which run no tools at all. */}
-          {toolFilter || contextSummary.data?.by_tool?.length ? (
-            <FilterSelect
-              label="Tool"
-              value={toolFilter}
-              onChange={(value) => url.patch({ tool: value })}
-              options={TOOL_OPTIONS}
-            />
-          ) : null}
-          {/* Provenance only earns a select once there is more than one source
+            {toolFilter || contextSummary.data?.by_tool?.length ? (
+              <FilterSelect
+                label="Tool"
+                value={toolFilter}
+                onChange={(value) => url.patch({ tool: value })}
+                options={TOOL_OPTIONS}
+              />
+            ) : null}
+            {/* Provenance only earns a select once there is more than one source
               to choose between: most gateways see only their own traffic, and a
               filter with a single option is noise. A drill-down that arrives
               with a source applied keeps the select so it stays clearable. */}
-          {sourceOptions.length > 1 || sourceFilter ? (
-            <FilterSelect
-              label="Source"
-              value={sourceFilter}
-              onChange={(value) => url.patch({ source: value })}
-              options={[
-                { value: "", label: "All" },
-                ...sourceOptions.map((source) => ({
-                  value: source,
-                  label: describeSource(source),
-                })),
-              ]}
-            />
+            {sourceOptions.length > 1 || sourceFilter ? (
+              <FilterSelect
+                label="Source"
+                value={sourceFilter}
+                onChange={(value) => url.patch({ source: value })}
+                options={[
+                  { value: "", label: "All" },
+                  ...sourceOptions.map((source) => ({
+                    value: source,
+                    label: describeSource(source),
+                  })),
+                ]}
+              />
+            ) : null}
+          </FilterChips>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          {requestMissing ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <InfoBanner>
+                That request is not in the current results.
+              </InfoBanner>
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() => url.patch({ request: "" })}
+              >
+                Dismiss
+              </Button>
+            </div>
           ) : null}
-          {/* allowsCustom on all three: the options are the in-window top spenders
-              (a breakdown capped at 100), so an entity that exists but ranks below
-              that, or has no traffic in the window, is not offered. Enter commits a
-              pasted id anyway, the way the Model box already accepts a name the
-              suggestions do not cover. */}
-          <FilterMultiComboBox
-            label="API key"
-            values={apiKeyFilters}
-            onChange={(values) => url.patch({ api_key_id: values })}
-            allowsCustom
-            placeholder="All keys"
-            options={keyOptions}
+          <TableScrollFrame className="otari-activity-table">
+            <DataTable
+              mobileLayout="cards"
+              ariaLabel="Activity log"
+              columns={columns}
+              rows={rows}
+              getRowKey={getActivityRowKey}
+              isLoading={usage.isLoading}
+              emptyContent={
+                anyFilter
+                  ? "No requests match these filters."
+                  : "No requests recorded yet."
+              }
+              onRowAction={openRequest}
+              rowClassName={rowClassName}
+            />
+          </TableScrollFrame>
+
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            rowsOnPage={rows.length}
+            // Paging re-reads the count as well as the rows. The total is a property of
+            // the filters, not of the page, so it is not in the count's key and a frozen
+            // page would carry whichever value it loaded with. That understates a table
+            // traffic has grown, and `TablePagination` derives `isLast` from the total
+            // whenever it has one, so the operator hits a wall short of the real end and
+            // the oldest rows sit past it, unreachable until a manual refresh. Paging is
+            // a deliberate act, so re-reading here keeps the total describing a set the
+            // operator can actually navigate, without putting a self-moving number under
+            // a table that deliberately holds still.
+            onPageChange={(next) => {
+              url.patch({ page: next, request: "" })
+              void count.refetch()
+            }}
+            onPageSizeChange={(size) =>
+              url.patch({ size, page: 0, request: "" })
+            }
+            isFetching={usage.isFetching}
+            hasNextFallback={rows.length === pageSize}
           />
-          <FilterMultiComboBox
-            label="User"
-            values={userFilters}
-            onChange={(values) => url.patch({ user_id: values })}
-            allowsCustom
-            placeholder="All users"
-            options={userOptionsList}
-          />
-          <FilterMultiComboBox
-            label="Model"
-            values={modelFilters}
-            onChange={(values) => url.patch({ model: values })}
-            allowsCustom
-            placeholder="Any model"
-            options={modelOptions.map((model) => ({
-              value: model,
-              label: model,
-            }))}
-          />
-        </FilterChips>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-3">
-        <TableScrollFrame className="otari-activity-table">
-          <DataTable
-            mobileLayout="cards"
-            ariaLabel="Activity log"
-            columns={columns}
-            rows={rows}
-            getRowKey={getActivityRowKey}
-            isLoading={usage.isLoading}
-            emptyContent={
-              anyFilter
-                ? "No requests match these filters."
-                : "No requests recorded yet."
-            }
-            onRowAction={(key) =>
-              setExpandedId((current) => (current === key ? undefined : key))
-            }
-            rowClassName={getActivityRowClassName}
-            detailKey={expandedId}
-            renderDetail={renderDetail}
-          />
-        </TableScrollFrame>
-
-        <TablePagination
-          page={page}
-          pageSize={pageSize}
-          total={total}
-          rowsOnPage={rows.length}
-          // Paging re-reads the count as well as the rows. The total is a property of
-          // the filters, not of the page, so it is not in the count's key and a frozen
-          // page would carry whichever value it loaded with. That understates a table
-          // traffic has grown, and `TablePagination` derives `isLast` from the total
-          // whenever it has one, so the operator hits a wall short of the real end and
-          // the oldest rows sit past it, unreachable until a manual refresh. Paging is
-          // a deliberate act, so re-reading here keeps the total describing a set the
-          // operator can actually navigate, without putting a self-moving number under
-          // a table that deliberately holds still.
-          onPageChange={(next) => {
-            url.patch({ page: next })
-            void count.refetch()
-          }}
-          onPageSizeChange={(size) => url.patch({ size, page: 0 })}
-          isFetching={usage.isFetching}
-          hasNextFallback={rows.length === pageSize}
+      {openEntry ? (
+        <RequestPeek
+          entry={openEntry}
+          onPriceModel={priceModel}
+          onClose={() => url.patch({ request: "" })}
+          onPrevious={
+            previousEntry
+              ? () => url.patch({ request: previousEntry.id })
+              : undefined
+          }
+          onNext={
+            nextEntry ? () => url.patch({ request: nextEntry.id }) : undefined
+          }
         />
-      </div>
+      ) : null}
 
       <SetPriceDialog
         key={`model-${priceOpenCount}`}

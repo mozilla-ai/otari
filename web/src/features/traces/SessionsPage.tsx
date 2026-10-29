@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
-import type { TraceSortKey, TraceSummary } from "@/client"
+import type { TraceDetail, TraceSortKey, TraceSummary } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
@@ -9,20 +9,26 @@ import {
   TablePagination,
 } from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
+import { useObserveScope } from "@/features/observe/useObserveScope"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   DEFAULT_TRACE_SORT,
   type TraceFilters,
   useTrace,
+  useTraceContentPolicy,
   useTraceCount,
   useTraceSeries,
   useTraces,
 } from "@/shared/api/traces"
+import { useWorkspaces } from "@/shared/api/workspaces"
 import { formatCost, formatNumber } from "@/shared/helpers/format"
 import {
   ACTIVITY_DEFAULT_KEY,
@@ -34,9 +40,11 @@ import {
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
-
+import { BreakGlassLog } from "./BreakGlassLog"
+import { exceptionalAccess } from "./exceptionalAccess"
 import { formatDuration, formatTraceTimestamp } from "./format"
 import { toTrace } from "./fromApi"
+import { SessionContent, ShareSessionAction } from "./SessionContent"
 import { TracePeek } from "./TracePeek"
 import {
   sessionDurationMs,
@@ -49,12 +57,17 @@ const DEFAULT_PAGE_SIZE = 50
 
 // The list's filters, window and page live in the URL beside the open session
 // and its picked span, so a shared link or Back returns to the list the panel
-// was opened from, and a link from Activity opens on one LLM call.
+// was opened from, and a link from Activity opens on one LLM call. `status`,
+// `model`, `user_id` and `api_key_id` are the keys the Overview tabs share.
 const URL_DEFAULTS = {
   range: ACTIVITY_DEFAULT_KEY,
   start_date: "",
   end_date: "",
   q: "",
+  status: "",
+  model: "",
+  user_id: "",
+  api_key_id: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
   peek: "",
@@ -85,6 +98,13 @@ const SEARCH_MAX_LENGTH = 128
 const MINUTE_MS = 60_000
 // Where "All" starts its chart when nothing has been recorded yet.
 const ALL_FALLBACK_MS = 30 * 24 * 3_600_000
+
+// What a status filter means for a session: one with an unrecovered error, or
+// one without. Any other request status has no session counterpart.
+const HAS_ERROR: Record<string, "true" | "false"> = {
+  error: "true",
+  success: "false",
+}
 
 const EMPTY = <span className="text-subtle">—</span>
 
@@ -195,11 +215,35 @@ interface TimeWindow {
 
 const iso = (ms: number) => new Date(ms).toISOString()
 
-export function SessionsPage() {
+/** Inside the Overview the page waits for its scope, so it never fetches the wrong one. */
+export function SessionsPage({ embedded = false }: { embedded?: boolean }) {
+  const { isResolved } = useObserveScope(embedded)
+  return isResolved ? (
+    <SessionsPageContent embedded={embedded} />
+  ) : (
+    <PageLoading />
+  )
+}
+
+function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const url = useUrlState(URL_DEFAULTS, { untracked: UNTRACKED })
   const { selected: workspace } = useSelectedWorkspace()
+  // Said on the page as well as in the workspace's settings, because a manager
+  // turns it on and a member may never have opted in themselves.
+  const workspaces = useWorkspaces()
+  const { policy } = useTraceContentPolicy()
+  const platformBreakGlass = policy.platform_break_glass
+  const keepsContent =
+    policy.content_available &&
+    (workspaces.data ?? []).some(
+      (candidate) =>
+        candidate.trace_content_enabled &&
+        (workspace ? candidate.id === workspace.workspace_id : true),
+    )
   const isMobile = useIsMobile()
   const [now, setNow] = useState(() => Date.now())
+  // The window a timeline selection asked for, until its list lands.
+  const pendingSelection = useRef("")
 
   const query = url.get("q")
   const page = Math.max(0, url.getNumber("page"))
@@ -213,13 +257,35 @@ export function SessionsPage() {
   )
   const startParam = url.get("start_date")
   const endParam = url.get("end_date")
+  // A start alone (Usage's Today, the attention strip's link) runs to now. A
+  // bound that does not parse (a hand-edited link) falls back to the preset.
+  const customStart = startParam ? Date.parse(startParam) : Number.NaN
+  const customEnd = endParam ? Date.parse(endParam) : now
   const custom: TimeWindow | undefined =
-    startParam && endParam
-      ? { start: Date.parse(startParam), end: Date.parse(endParam) }
+    Number.isFinite(customStart) && Number.isFinite(customEnd)
+      ? { start: customStart, end: customEnd }
       : undefined
 
+  const range = url.get("range")
+  const patch = url.patch
+  // A `range` carried over from a page with other presets (Usage's 90d) reads
+  // as the default window, so the URL is corrected to say so. Explicit bounds
+  // win over a range, which is then not read.
+  useEffect(() => {
+    if (startParam || endParam) return
+    if (range === CUSTOM_KEY || findPreset(SESSION_PRESETS, range)) return
+    patch({ range: ACTIVITY_DEFAULT_KEY })
+  }, [range, startParam, endParam, patch])
+
+  const statusFilter = url.get("status")
+  const modelFilters = url.getAll("model")
+  // Inside the Overview the scope decides this; elsewhere it is the URL's own.
+  const { userIds: userFilters } = useObserveScope(embedded)
+  const apiKeyFilters = url.getAll("api_key_id")
+  const hasError = HAS_ERROR[statusFilter] ?? ""
+
   const extent =
-    findPreset(SESSION_PRESETS, url.get("range")) ??
+    findPreset(SESSION_PRESETS, range) ??
     findPreset(SESSION_PRESETS, ACTIVITY_DEFAULT_KEY)
   const bucket = extent?.bucket ?? "hour"
   const extentSeconds = extent?.seconds ?? null
@@ -230,9 +296,13 @@ export function SessionsPage() {
       : Math.floor((now - extentSeconds * 1000) / MINUTE_MS) * MINUTE_MS
 
   const search = useDebounced(query.trim().slice(0, SEARCH_MAX_LENGTH))
-  const base = {
+  const base: Omit<TraceFilters, "start"> = {
     workspaceId: workspace?.workspace_id ?? "",
     q: search,
+    userIds: userFilters,
+    apiKeyIds: apiKeyFilters,
+    models: modelFilters,
+    hasError,
   }
   // The chart covers the whole extent; a range picked on it narrows the list.
   const seriesFilters: TraceFilters = {
@@ -276,6 +346,21 @@ export function SessionsPage() {
   const seriesQuery = useTraceSeries(seriesFilters, bucket)
   const peekId = url.get("peek")
   const detail = useTrace(peekId, url.get("peek_workspace"))
+  // An owner of the organization may open a private session by break-glass. What
+  // it opened is held here for the session it opened, never polled over, and
+  // dropped once the peek shows anything else or closes, so seeing it again takes
+  // a new opening, which is recorded again.
+  const isOwner = useOrganizationContext().data?.role === "owner"
+  const [opened, setOpened] = useState<TraceDetail>()
+  const peekWorkspace = url.get("peek_workspace")
+  const openedHere =
+    opened &&
+    opened.summary.trace_id === peekId &&
+    (!peekWorkspace || opened.summary.workspace_id === peekWorkspace)
+      ? opened
+      : undefined
+  if (opened && !openedHere) setOpened(undefined)
+  const shown = openedHere ?? detail.data
 
   const points = seriesQuery.data?.points
   const chartStart =
@@ -310,10 +395,10 @@ export function SessionsPage() {
   const rows = traces.data?.items ?? []
   const openIndex = rows.findIndex((session) => session.trace_id === peekId)
   // The row on screen, or the read's own summary for a link off this page.
-  const openSummary = rows[openIndex] ?? detail.data?.summary
+  const openSummary = rows[openIndex] ?? shown?.summary
   const open = useMemo(
-    () => (openSummary ? toTrace(openSummary, detail.data) : null),
-    [openSummary, detail.data],
+    () => (openSummary ? toTrace(openSummary, shown) : null),
+    [openSummary, shown],
   )
   // A trace is keyed by its workspace and its id, so the URL keeps both.
   const openPeek = (id: string) =>
@@ -329,6 +414,32 @@ export function SessionsPage() {
       ? rows[openIndex + 1].trace_id
       : null
 
+  // A bar picked on the timeline that holds one session opens it. Only the
+  // list answering that selection counts: a failed read or a filter change
+  // drops it, so a later list never opens a session nobody picked.
+  const listed = traces.data?.items
+  const settled = !traces.isFetching && !traces.isPlaceholderData
+  const filterKey = JSON.stringify(base)
+  const isListError = traces.isError
+  useEffect(() => {
+    if (!pendingSelection.current) return
+    if (isListError || !pendingSelection.current.endsWith(`|${filterKey}`)) {
+      pendingSelection.current = ""
+      return
+    }
+    if (!listed || !settled) return
+    if (!pendingSelection.current.startsWith(`${startParam}|${endParam}|`)) {
+      return
+    }
+    pendingSelection.current = ""
+    if (listed.length !== 1) return
+    patch({
+      peek: listed[0].trace_id,
+      peek_workspace: listed[0].workspace_id,
+      span: "",
+    })
+  }, [listed, settled, isListError, filterKey, startParam, endParam, patch])
+
   // A minute later is a new window; inside the same minute the key holds, so
   // the reads are refetched as well.
   const refresh = () => {
@@ -343,10 +454,20 @@ export function SessionsPage() {
       {/* Below md the panel covers the page, which then takes no focus or
           presses until it closes. */}
       <div className="flex flex-col" inert={open !== null && isMobile}>
-        <PageIntro title="Sessions">
-          Every agent session the gateway recorded: the turns, LLM calls and
-          tools behind each one. No request or response content is stored.
-        </PageIntro>
+        {embedded ? null : (
+          <PageIntro title="Sessions">
+            Every agent session the gateway recorded: the turns, LLM calls and
+            tools behind each one. No model response or tool output is stored.
+          </PageIntro>
+        )}
+        {keepsContent ? (
+          <InfoBanner>
+            {workspace ? "This workspace keeps" : "Your workspaces keep"} what
+            your sessions were about: the prompts, commands and file paths your
+            agents send. Otari shows yours only to you, unless you share a
+            session. {exceptionalAccess(platformBreakGlass)}
+          </InfoBanner>
+        ) : null}
 
         <div className="flex flex-col gap-3">
           {traces.isError && !traces.data ? (
@@ -361,20 +482,23 @@ export function SessionsPage() {
             extentKey={
               custom ? CUSTOM_KEY : (extent?.key ?? ACTIVITY_DEFAULT_KEY)
             }
-            onPreset={(preset) =>
+            onPreset={(preset) => {
+              pendingSelection.current = ""
               url.patch({
                 range: preset.key,
                 start_date: "",
                 end_date: "",
                 page: 0,
               })
-            }
-            onSelectRange={(startIso, endIso) =>
+            }}
+            onSelectRange={(startIso, endIso) => {
+              pendingSelection.current = `${startIso}|${endIso}|${filterKey}`
               url.patch({ start_date: startIso, end_date: endIso, page: 0 })
-            }
-            onSelectFull={() =>
+            }}
+            onSelectFull={() => {
+              pendingSelection.current = ""
               url.patch({ start_date: "", end_date: "", page: 0 })
-            }
+            }}
             series={series}
             bucket={bucket}
             windowStart={iso(win.start)}
@@ -418,6 +542,7 @@ export function SessionsPage() {
               }
             />
           </TableScrollFrame>
+          {isOwner ? <BreakGlassLog /> : null}
           <TablePagination
             page={page}
             pageSize={pageSize}
@@ -442,6 +567,15 @@ export function SessionsPage() {
           onClose={() => url.patch({ peek: "", peek_workspace: "", span: "" })}
           onPrevious={previous ? () => openPeek(previous) : undefined}
           onNext={next ? () => openPeek(next) : undefined}
+          notice={
+            shown ? (
+              <SessionContent
+                detail={shown}
+                onBreakGlass={isOwner ? setOpened : undefined}
+              />
+            ) : null
+          }
+          actions={shown ? <ShareSessionAction detail={shown} /> : null}
         />
       ) : null}
     </div>

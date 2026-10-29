@@ -44,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    SearchToolServiceDep,
     UnitOfWorkDep,
     get_config,
     get_db,
@@ -67,7 +68,6 @@ from gateway.services.guardrail_catalog import (
     fetch_guardrail_catalog,
 )
 from gateway.services.runtime_settings_service import SettingValue
-from gateway.services.search_tool_store_service import refresh_search_tool_cache
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tool_settings_service import (
     GUARDRAILS_URL,
@@ -339,6 +339,7 @@ async def update_tool_settings(
     request: UpdateToolSettingsRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    search_tools: SearchToolServiceDep,
 ) -> ToolSettingsResponse:
     """Persist and apply tool/guardrail setting changes.
 
@@ -355,7 +356,7 @@ async def update_tool_settings(
                 # A search tool stored through another replica since this worker's
                 # overlay last refreshed can be the one a search default names, or
                 # take a fetch default's name and so leave that fetch instance out.
-                await refresh_search_tool_cache(db, config)
+                await search_tools.refresh_rows()
             normalized = {key: await stage_override(db, key, value) for key, value in updates.items()}
             # Here rather than in the service's own check, which also runs at
             # startup, before the stored search tools a default may name.

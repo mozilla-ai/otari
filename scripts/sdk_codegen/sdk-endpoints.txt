@@ -179,11 +179,20 @@ GET /api/v1/traces/count                            # not yet wrapped
 GET /api/v1/traces/series                           # not yet wrapped
 GET /api/v1/traces/requests/{request_id}            # not yet wrapped
 GET /api/v1/traces/{trace_id}                       # not yet wrapped
+POST /api/v1/traces/{trace_id}/break-glass          # dashboard-only
+GET /api/v1/traces/audit/break-glass                # dashboard-only
 GET /api/v1/organizations/me/traces                 # not yet wrapped
 GET /api/v1/organizations/me/traces/count           # not yet wrapped
 GET /api/v1/organizations/me/traces/series          # not yet wrapped
 GET /api/v1/organizations/me/traces/requests/{request_id}  # not yet wrapped
 GET /api/v1/organizations/me/traces/{trace_id}      # not yet wrapped
+GET /api/v1/organizations/me/traces/{trace_id}/shares                 # dashboard-only
+POST /api/v1/organizations/me/traces/{trace_id}/break-glass           # dashboard-only
+GET /api/v1/organizations/me/traces/audit/break-glass                 # dashboard-only
+POST /api/v1/organizations/me/traces/{trace_id}/shares                # dashboard-only
+DELETE /api/v1/organizations/me/traces/{trace_id}/shares/{share_id}   # dashboard-only
+GET /api/v1/organizations/me/traces/{trace_id}/shares/{share_id}/reads  # dashboard-only
+GET /api/v1/trace-content/policy                    # dashboard-only
 # Other control-plane extensions of already-covered resources
 GET /api/v1/usage/count                             # not yet wrapped
 GET /api/v1/usage/requests/{request_id}            # not yet wrapped
@@ -362,6 +371,7 @@ GET /api/v1/workspaces                                          # dashboard-only
 GET /api/v1/workspaces/{workspace_id}                           # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}                         # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}                        # dashboard-only
+DELETE /api/v1/workspaces/{workspace_id}/trace-content          # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/members                   # dashboard-only
 POST /api/v1/workspaces/{workspace_id}/members/{user_id}        # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}/members/{user_id}       # dashboard-only

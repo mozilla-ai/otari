@@ -2100,15 +2100,18 @@ class OrganizationService:
         invitation, membership = await self._open_invitation(invitation_id, organization)
         # Only a membership still waiting on this invitation is suspended with it.
         # One that became active another way keeps its access; the stale link goes.
-        if membership is not None and membership.status == "invited":
+        suspended = membership if membership is not None and membership.status == "invited" else None
+        if suspended is not None:
             await self._validate_membership_update(
                 actor_membership=actor_membership,
-                target_membership=membership,
+                target_membership=suspended,
                 update_data={"status": "suspended"},
                 organization_id=organization.id,
             )
-            await self._update_membership(membership, {"status": "suspended"})
+        # Before the suspension, whose listener step commits what is staged so far.
         await self.invitations.update_status(invitation, {"status": "cancelled"})
+        if suspended is not None:
+            await self._update_membership(suspended, {"status": "suspended"})
         await self.db.commit()
 
     async def _open_invitation(
@@ -2209,6 +2212,7 @@ class OrganizationService:
         re-apply the parked workspace grants, undoing a removal, a decline or a
         revoke.
         """
+        was_manager = membership.status == "active" and membership.role in MANAGEMENT_ROLES
         updated = await self.members.update_membership(membership, update_data)
         if updated.status != "invited":
             pending = await self.invitations.get_pending_by_organization_members([updated.id])
@@ -2216,7 +2220,35 @@ class OrganizationService:
                 await self.invitations.update_status(invitation, {"status": "cancelled"})
         if updated.status == "suspended":
             await self._move_off_ended_membership(updated)
+            await self._tell_listener_workspaces_lost(updated, only_inherited=False)
+        elif was_manager and updated.status == "active" and updated.role not in MANAGEMENT_ROLES:
+            await self._tell_listener_workspaces_lost(updated, only_inherited=True)
         return updated
+
+    async def _tell_listener_workspaces_lost(self, membership: OrganizationMember, *, only_inherited: bool) -> None:
+        """Let the other domains react to a person losing workspaces, in the transaction that takes them.
+
+        Ending a membership takes every workspace of the organization. Losing a
+        management role takes the ones the role alone reached, those the person
+        is not an active member of. Skipped where this service was built without
+        a listener or a Unit of Work, which the read-only builds are.
+
+        Its block is the outermost one on these paths, so it commits what the caller
+        staged before it: a caller stages every other write first and calls this last.
+        """
+        if self._membership_listener is None or self._uow is None:
+            return
+        async with self._uow:
+            workspace_ids = await self.workspace_rows.get_ids_by_organization(membership.organization_id)
+            if only_inherited:
+                kept = set(
+                    await self.workspaces.get_workspace_ids_for_user(
+                        user_id=membership.user_id, organization_id=membership.organization_id
+                    )
+                )
+                workspace_ids = [workspace_id for workspace_id in workspace_ids if workspace_id not in kept]
+            if workspace_ids:
+                await self._membership_listener.member_lost_workspaces(membership.user_id, workspace_ids)
 
     async def _move_off_ended_membership(self, membership: OrganizationMember) -> None:
         """Stage the identity's active organization onto its oldest live membership, if it named the one that ended.

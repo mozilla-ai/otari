@@ -21,6 +21,7 @@ import posixpath
 import re
 import threading
 import zipfile
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -55,6 +56,9 @@ _CELL_SLOT_BYTES = 11
 # The most pages an uploaded PDF is read for. Every PDFium call in the process
 # shares one lock, so this bounds how long one upload holds up every other.
 _MAX_PDF_PAGES = 1_000
+# The share of a web page's text, chrome left out, that <main> or its <article>s
+# must hold to be taken as the page's content rather than one part of it.
+_MAIN_CONTENT_SHARE = 0.25
 # Column XFD, the last one a spreadsheet may address.
 _MAX_SHEET_COLUMNS = 16_384
 
@@ -512,7 +516,11 @@ _OFFICE_READERS: dict[str, Callable[[_Archive, _TextSink], None]] = {
 
 
 class _HTMLText(HTMLParser):
-    """The visible text of an HTML document as light Markdown: headings, list items and table rows."""
+    """The visible text of an HTML document as light Markdown: headings, list items and table rows.
+
+    One pass fills four renderings, and :meth:`main_text` picks among them:
+    everything, everything but the page's chrome, ``<main>``, and its ``<article>``s.
+    """
 
     _HIDDEN = frozenset({"script", "style", "noscript", "template"})
     _BLOCKS = frozenset(
@@ -523,22 +531,78 @@ class _HTMLText(HTMLParser):
     )  # fmt: skip
     _OPENERS = {"li": "\n- ", "tr": "\n|", "td": " ", "th": " "} | {f"h{n}": "\n" + "#" * n + " " for n in range(1, 7)}
     _CLOSERS = {"td": " |", "th": " |"}
+    # Elements that never close, so they can open no region.
+    _VOID = frozenset(
+        {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+    )
+    # The page's chrome rather than its content, by element and by ARIA role.
+    # <header> and <footer> count only outside <main> and <article>, where they
+    # are the page's banner and footer rather than an article's own.
+    _CHROME = frozenset({"nav", "aside", "dialog"})
+    _PAGE_CHROME = frozenset({"header", "footer"})
+    _CHROME_ROLES = frozenset(
+        {"navigation", "banner", "contentinfo", "complementary", "search", "dialog", "alertdialog"}
+    )
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self._parts: list[str] = []
+        self._everything: list[str] = []
+        self._content: list[str] = []
+        self._main: list[str] = []
+        self._articles: list[str] = []
+        # How many of each tag are open, and the regions each tag opened, as
+        # (that count when it opened, its kind). A region closes when the count
+        # of its tag drops below the one it opened at, so a <div role=navigation>
+        # closes at the </div> that balances it. Every step is constant time,
+        # whatever the nesting.
+        self._open: Counter[str] = Counter()
+        self._regions: dict[str, list[tuple[int, str]]] = {}
+        self._kinds: Counter[str] = Counter()
         self._hidden = 0
         self._preformatted = 0
 
+    def _within(self, kind: str) -> bool:
+        return self._kinds[kind] > 0
+
+    def _append(self, text: str) -> None:
+        self._everything.append(text)
+        if self._within("chrome"):
+            return
+        self._content.append(text)
+        if self._within("main"):
+            self._main.append(text)
+        if self._within("article"):
+            self._articles.append(text)
+
+    def _region_kind(self, tag: str, attrs: list[tuple[str, str | None]]) -> str | None:
+        attributes = dict(attrs)
+        role = (attributes.get("role") or "").lower()
+        if "hidden" in attributes or attributes.get("aria-hidden") == "true":
+            return "chrome"
+        if tag == "main" or role == "main":
+            return "main"
+        if tag == "article" or role == "article":
+            return "article"
+        if tag in self._CHROME or role in self._CHROME_ROLES:
+            return "chrome"
+        if tag in self._PAGE_CHROME and not (self._within("main") or self._within("article")):
+            return "chrome"
+        return None
+
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag not in self._VOID:
+            self._open[tag] += 1
+            if kind := self._region_kind(tag, attrs):
+                self._regions.setdefault(tag, []).append((self._open[tag], kind))
+                self._kinds[kind] += 1
         if tag == "pre":
             self._preformatted += 1
         if tag in self._HIDDEN:
             self._hidden += 1
         elif tag in self._OPENERS:
-            self._parts.append(self._OPENERS[tag])
+            self._append(self._OPENERS[tag])
         elif tag in self._BLOCKS:
-            self._parts.append("\n")
+            self._append("\n")
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "pre":
@@ -546,28 +610,63 @@ class _HTMLText(HTMLParser):
         if tag in self._HIDDEN:
             self._hidden = max(0, self._hidden - 1)
         elif tag in self._CLOSERS:
-            self._parts.append(self._CLOSERS[tag])
+            self._append(self._CLOSERS[tag])
         elif tag in self._BLOCKS or tag in self._OPENERS:
-            self._parts.append("\n")
+            self._append("\n")
+        if self._open[tag] > 0:
+            self._open[tag] -= 1
+            regions = self._regions.get(tag)
+            while regions and regions[-1][0] > self._open[tag]:
+                self._kinds[regions.pop()[1]] -= 1
 
     def handle_data(self, data: str) -> None:
         # Outside <pre>, a line break in the source is only whitespace.
         if not self._hidden:
-            self._parts.append(data if self._preformatted else " ".join(data.splitlines()))
+            self._append(data if self._preformatted else " ".join(data.splitlines()))
 
     def text(self) -> str:
-        lines: list[str] = []
-        marker = ""
-        for raw in "".join(self._parts).splitlines():
-            line = " ".join(raw.split())
-            # A list item or heading whose text sits in a nested block leaves
-            # its marker alone on a line; it belongs to the next one.
-            if line == "-" or (line and set(line) == {"#"}):
-                marker = line + " "
-            elif line:
-                lines.append(marker + line)
-                marker = ""
-        return "\n".join(lines)
+        """Every piece of visible text on the page."""
+        return _render_html_text(self._everything)
+
+    def main_text(self) -> str:
+        """The page's content without its chrome: navigation, banners, footers and sidebars.
+
+        The longer of ``<main>`` and the page's ``<article>``s is the content
+        where it holds a fair share of the page's text: a front page may keep
+        only its featured story in ``<main>`` and the rest as articles outside
+        it. A page marking neither keeps all of its text but its chrome, unless
+        leaving the chrome out removed nearly everything, which is how markup
+        that never closes a region shows.
+        """
+        content = _render_html_text(self._content)
+        marked = max(_render_html_text(self._main), _render_html_text(self._articles), key=len)
+        if marked and len(marked) >= _MAIN_CONTENT_SHARE * len(content):
+            return marked
+        everything = self.text()
+        return content if len(content) >= _MAIN_CONTENT_SHARE * len(everything) else everything
+
+
+def _render_html_text(parts: list[str]) -> str:
+    lines: list[str] = []
+    marker = ""
+    for raw in "".join(parts).splitlines():
+        line = " ".join(raw.split())
+        # A list item or heading whose text sits in a nested block leaves
+        # its marker alone on a line; it belongs to the next one.
+        if line == "-" or (line and set(line) == {"#"}):
+            marker = line + " "
+        elif line:
+            lines.append(marker + line)
+            marker = ""
+    return "\n".join(lines)
+
+
+def html_main_text(html: str) -> str:
+    """The content of a web page as light Markdown, its navigation and other chrome left out."""
+    parser = _HTMLText()
+    parser.feed(html)
+    parser.close()
+    return parser.main_text()
 
 
 def _decode_text(data: bytes, *, lenient: bool) -> str | None:

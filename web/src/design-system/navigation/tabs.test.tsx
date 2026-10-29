@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { Segmented } from "@/design-system/navigation/Segmented"
-import { Tab, TabRow } from "@/design-system/navigation/TabRow"
+import { Tab, TabRow, tabClassName } from "@/design-system/navigation/TabRow"
 
 /**
  * The two segmented shapes and the arguments their docstrings make.
@@ -140,6 +140,65 @@ describe("Tab", () => {
     const tab = screen.getByRole("button")
     expect([...tab.classList]).toContain("shrink-0")
     expect([...tab.classList]).toContain("whitespace-nowrap")
+  })
+})
+
+describe("a disabled Tab", () => {
+  it("stays focusable, ignores a press and points at its reason", async () => {
+    // `aria-disabled` rather than `disabled`: a natively disabled button drops
+    // out of the tab order, so nobody on a keyboard or a screen reader could
+    // reach the text saying why.
+    const user = userEvent.setup()
+    const onPress = vi.fn()
+    render(
+      <>
+        <Tab
+          isActive={false}
+          onPress={onPress}
+          isDisabled
+          describedBy="why-not"
+        >
+          Mine
+        </Tab>
+        <p id="why-not">Not yet.</p>
+      </>,
+    )
+    const tab = screen.getByRole("button", { name: "Mine" })
+    expect(tab).not.toBeDisabled()
+    expect(tab).toHaveAttribute("aria-disabled", "true")
+    expect(tab).toHaveAccessibleDescription("Not yet.")
+
+    await user.tab()
+    expect(tab).toHaveFocus()
+    await user.keyboard("{Enter}")
+    await user.click(tab)
+    expect(onPress).not.toHaveBeenCalled()
+  })
+
+  it("says nothing extra when enabled", () => {
+    render(
+      <Tab isActive={false} onPress={() => undefined}>
+        Mine
+      </Tab>,
+    )
+    const tab = screen.getByRole("button", { name: "Mine" })
+    expect(tab).not.toHaveAttribute("aria-disabled")
+    expect(tab).not.toHaveAttribute("aria-describedby")
+  })
+})
+
+describe("tabClassName", () => {
+  it("is the classes a Tab wears, for a tab that has to be a link", () => {
+    for (const isActive of [true, false]) {
+      render(
+        <Tab isActive={isActive} onPress={() => undefined}>
+          {`tab ${isActive}`}
+        </Tab>,
+      )
+      expect(
+        screen.getByRole("button", { name: `tab ${isActive}` }).className,
+      ).toBe(tabClassName(isActive))
+    }
   })
 })
 

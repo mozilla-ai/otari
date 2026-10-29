@@ -12,7 +12,7 @@ the same way.
 
 import asyncio
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Set
 from datetime import datetime
 from typing import Any
 
@@ -29,6 +29,7 @@ from gateway.services.catalog import (
     build_organization_selectors,
     build_selector_index,
     metadata_entry,
+    resolve_catalog_offerings,
     set_selector_index,
 )
 from gateway.services.merged_catalog_service import (
@@ -38,7 +39,7 @@ from gateway.services.merged_catalog_service import (
     build_merged_catalog,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
-from gateway.services.model_identity import ModelIdentity, OfferingSeed, group_offerings
+from gateway.services.model_identity import ModelIdentity, OfferingSeed, group_offerings, vendor_slug
 from gateway.services.pricing_service import (
     OverridePeriod,
     default_model_pricing,
@@ -48,6 +49,7 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
 )
+from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.tenancy.organization_model_access import (
     resolve_all_organizations_offered_keys,
     workspace_organizations,
@@ -96,6 +98,71 @@ def offering_seed(
     instance, model_id = split_offering_selector(obj)
     seed, metadata, provider_type = seed_for(config, catalog, obj.id, instance, model_id)
     return seed, metadata, instance, model_id, provider_type
+
+
+def answered_by_listing(model_id: str, aliases: Mapping[str, str]) -> bool:
+    """Whether a single-model read answers ``model_id`` from the per-model listing.
+
+    A catalog id or a routing policy is a row only the folded listing holds. A
+    selector names one offering and an alias resolves to its own entry, so
+    neither needs the whole catalog built.
+    """
+    return ":" not in model_id and model_id not in aliases
+
+
+def models_by_identity(
+    config: GatewayConfig,
+    catalog: dict[str, Any] | None,
+    listed: Iterable[ModelObject],
+    *,
+    organization_id: uuid.UUID | None = None,
+    alias_targets: Set[str] = frozenset(),
+) -> list[ModelObject]:
+    """Fold a flat listing into one row per model, keyed by catalog id, sorted by id.
+
+    Each model's row describes the offering a request sent by that id tries
+    first (:func:`resolve_catalog_offerings`), among the offerings in
+    ``listed``; while the index does not know the model yet, the cheapest
+    priced one. Aliases and policies are names rather than offerings and pass
+    through, and a model whose id one of them already takes is left to it.
+
+    An offering whose canonical key is in ``alias_targets`` still ranks, since
+    the catalog id reaches it, but a model offered only by alias targets gets
+    no row: the alias stands in for it.
+    """
+    names: dict[str, ModelObject] = {}
+    offerings: dict[str, ModelObject] = {}
+    for obj in listed:
+        if obj.owned_by == ALIAS_OWNED_BY or obj.pricing_source == "dynamic":
+            names[obj.id] = obj
+        else:
+            offerings[obj.id] = obj
+    seeds = [offering_seed(config, catalog, offerings[selector])[0] for selector in sorted(offerings)]
+    rows = dict(names)
+    for identity in group_offerings(seeds).values():
+        if identity.id in rows:
+            continue
+        members = set(identity.selectors)
+        if all(normalize_pricing_key(config, selector) in alias_targets for selector in members):
+            continue
+        ranked = [
+            selector
+            for selector in resolve_catalog_offerings(identity.id, organization_id=organization_id)
+            if selector in members
+        ] or sorted(members, key=lambda selector: _cheapest_first(offerings[selector]))
+        first = offerings[ranked[0]]
+        rows[identity.id] = first.model_copy(
+            update={
+                "id": identity.id,
+                "owned_by": vendor_slug(identity.vendor) if identity.vendor else first.owned_by,
+            }
+        )
+    return [rows[model_id] for model_id in sorted(rows)]
+
+
+def _cheapest_first(obj: ModelObject) -> tuple[bool, float, str]:
+    rate = obj.pricing.input_price_per_million if obj.pricing is not None else None
+    return (rate is None, 0.0 if rate is None else rate, obj.id)
 
 
 def _row(seed: OfferingSeed, instance: str, input_rate: float | None) -> OfferingRow:

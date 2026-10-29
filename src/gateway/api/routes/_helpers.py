@@ -57,8 +57,9 @@ def resolve_user_id(
        name any user (the master key is trusted to act on behalf of others).
     2. For a non-master key, spend is *always* bound to the key's own user.
        The request may echo the same user_id (e.g. OpenAI's ``user`` field for
-       tracking), but naming a *different* user is rejected — otherwise any key
-       could charge spend to, and exhaust the budget of, another user.
+       tracking). Naming a *different* user is rejected by default. That refusal
+       is a misuse signal, not a budget control: spend binds to the key's own user
+       whether the name is rejected or ignored.
 
     Args:
         user_id_from_request: User identifier extracted from the request body

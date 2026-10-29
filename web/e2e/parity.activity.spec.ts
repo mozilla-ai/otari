@@ -27,12 +27,11 @@ const SCOPED = `/activity?source=${PARITY.source}`
 // route resolves, so a bare read races the first paint and sees an empty table.
 const ALL = COUNTS.priced + COUNTS.unpriced + COUNTS.errors
 
-// The detail panel is rendered as an extra row under the one that was clicked
-// (DataTable's renderDetail), so it is reached through the wrapper that row
-// injects rather than by role: it is a panel, not a landmark.
-const detailPanel = (page: Page) => page.locator(".otari-detail-reveal")
+// A request opens in a panel beside the log, named for what it holds.
+const detailPanel = (page: Page) =>
+  page.getByRole("complementary", { name: "Request detail" })
 
-// Open a row's inline detail by pressing its row header (the Model cell).
+// Open a row in the panel by pressing its row header (the Model cell).
 async function openDetail(
   page: Page,
   row: ReturnType<typeof rows>,
@@ -47,7 +46,9 @@ async function openDetail(
   await expect(rows(page)).not.toHaveCount(0)
   await expect(row).toBeVisible()
   await row.getByRole("rowheader").click()
-  await expect(detailPanel(page).getByText("Request detail")).toBeVisible()
+  await expect(detailPanel(page)).toBeVisible()
+  // The open request is in the URL, so it is linkable and Back closes it.
+  await expect(page).toHaveURL(/[?&]request=/)
 }
 
 test.describe("activity log", () => {
@@ -99,7 +100,7 @@ test.describe("activity log", () => {
     }
   })
 
-  test("model and user filters compose, and Clear all drops them together", async ({
+  test("model and user filters compose, and Clear all drops the shared ones together", async ({
     page,
   }) => {
     await login(page)
@@ -120,15 +121,21 @@ test.describe("activity log", () => {
     await addFilterValue(page, "User", PARITY.users.heavy)
     await expect(rows(page)).toHaveCount(COUNTS.unpriced + COUNTS.errors)
 
-    // Clear all drops every filter in one press, the source scoping included, so
-    // the log widens past the fixture rather than back to it. The control removes
-    // itself once there is nothing left to clear, which is the tightest statement
-    // that no filter survived.
+    // Clear all drops the shared filters (model, user, key, status) in one press.
+    // The control removes itself once there is nothing left to clear, which is
+    // the tightest statement that none survived. The source scoping is the log's
+    // own filter, so it stays until its chip is cleared.
     await page.getByRole("button", { name: "Clear all" }).click()
     await expect(page.getByRole("button", { name: "Clear all" })).toBeHidden()
     await expect(
       filterChip(page, "Model", PARITY.models.unpriced.model),
     ).toBeHidden()
+    await expect(filterChip(page, "Source", PARITY.source)).toBeVisible()
+    await expect(rows(page)).toHaveCount(ALL)
+
+    // Clearing the source as well widens the log past the fixture rather than
+    // back to it.
+    await filterChip(page, "Source", PARITY.source).getByRole("button").click()
     await expect(filterChip(page, "Source", PARITY.source)).toBeHidden()
     await expect
       .poll(() => rows(page).count())
@@ -220,6 +227,7 @@ test.describe("activity log", () => {
 
     await detailPanel(page).getByRole("button", { name: "Close" }).click()
     await expect(detailPanel(page)).toHaveCount(0)
+    await expect(page).not.toHaveURL(/[?&]request=/)
   })
 
   // The "Price this model" button this detail offers is deliberately not pressed

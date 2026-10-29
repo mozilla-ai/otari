@@ -443,7 +443,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/pricing_service.py",
     "gateway/services/routing/knn.py",
     "gateway/services/runtime_settings_service.py",
-    "gateway/services/search_tool_store_service.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tenancy/authorization.py",
     "gateway/services/tenancy/deployment_user_service.py",
@@ -506,7 +505,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
     "gateway/api/routes/search.py",
-    "gateway/api/routes/search_tools.py",
     "gateway/api/routes/settings.py",
     "gateway/api/routes/tool_settings.py",
     "gateway/api/routes/usage.py",
@@ -603,7 +601,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/routing.py",
     "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
-    "gateway/api/routes/search_tools.py",
     "gateway/api/routes/settings.py",
     "gateway/api/routes/tool_settings.py",
     "gateway/api/routes/users.py",
@@ -980,7 +977,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/runtime_settings_service.py",
     "gateway/services/sandbox_backend.py",
     "gateway/services/search_backend.py",
-    "gateway/services/search_tool_store_service.py",
     "gateway/services/secret_box.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tool_format.py",
@@ -1691,7 +1687,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.tools.SearchToolCredential": {
         "repository": "gateway/repositories/tools/search_tool_repository.py",
-        "baseline": ("gateway/services/search_tool_store_service.py",),
+        "baseline": (),
     },
     "gateway.models.tools.WorkspaceCodeExecutionPolicy": {
         "repository": "gateway/repositories/tools/workspace_code_execution_policy_repository.py",
@@ -1725,6 +1721,26 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.traces.TraceGuardrailDefinition": {
         "repository": "gateway/repositories/traces/definition_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceContentShare": {
+        "repository": "gateway/repositories/traces/share_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceContentRead": {
+        "repository": "gateway/repositories/traces/share_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceContentBarrier": {
+        "repository": "gateway/repositories/traces/barrier_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceUserBarrier": {
+        "repository": "gateway/repositories/traces/barrier_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceBreakGlassRead": {
+        "repository": "gateway/repositories/traces/break_glass_repository.py",
         "baseline": (),
     },
     "gateway.models.usage.AgentTelemetry": {

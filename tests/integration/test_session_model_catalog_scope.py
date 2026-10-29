@@ -59,6 +59,20 @@ _OPENAI_OTHER = "openai:gpt-4o"
 _ANTHROPIC_MODEL = "anthropic:claude-3-5-haiku-latest"
 _MISTRAL_MODEL = "mistral:mistral-small-latest"
 _ALL_MODELS = (_OPENAI_MODEL, _OPENAI_OTHER, _ANTHROPIC_MODEL, _MISTRAL_MODEL)
+_LISTED_AS = {
+    _OPENAI_MODEL: "openai/gpt-4o-mini",
+    _OPENAI_OTHER: "openai/gpt-4o",
+    _ANTHROPIC_MODEL: "anthropic/claude-3-5-haiku-latest",
+    _MISTRAL_MODEL: "mistralai/mistral-small-latest",
+    "openai:gpt-5-adopted": "openai/gpt-5-adopted",
+    "mistral:open-mistral-free": "open-mistral-free",
+    "mistral:open-mistral-defaulted": "open-mistral-defaulted",
+}
+"""The catalog id ``GET /api/v1/models`` lists each selector under. Every model here has one offering."""
+
+
+def _ids(*selectors: str) -> set[str]:
+    return {_LISTED_AS[selector] for selector in selectors}
 
 
 @pytest.fixture(autouse=True)
@@ -253,12 +267,12 @@ def test_the_master_key_still_sees_every_priced_model(
     """The control: the deployment credential is not narrowed by anyone's membership."""
     response = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert {model["id"] for model in response.json()["data"]} == set(_ALL_MODELS)
+    assert {model["id"] for model in response.json()["data"]} == _ids(*_ALL_MODELS)
 
 
 def test_a_member_sees_only_their_organizations_providers(client: TestClient, world: _World) -> None:
     listed = _catalog_as(client, world, "alpha_member")
-    assert listed == {_OPENAI_MODEL, _OPENAI_OTHER}
+    assert listed == _ids(_OPENAI_MODEL, _OPENAI_OTHER)
     assert _ANTHROPIC_MODEL not in listed
     assert _MISTRAL_MODEL not in listed
 
@@ -276,7 +290,7 @@ def test_an_admin_is_answered_from_the_organizations_providers_not_one_workspace
     An implementation that walked the caller's workspace memberships would show
     them nothing, which is the failure this pins.
     """
-    assert _catalog_as(client, world, "alpha_owner") == {_OPENAI_MODEL, _OPENAI_OTHER}
+    assert _catalog_as(client, world, "alpha_owner") == _ids(_OPENAI_MODEL, _OPENAI_OTHER)
 
 
 def test_a_member_of_no_workspace_sees_no_byo_models_rather_than_a_refusal(client: TestClient, world: _World) -> None:
@@ -286,7 +300,7 @@ def test_a_member_of_no_workspace_sees_no_byo_models_rather_than_a_refusal(clien
 
 def test_a_deployment_operator_session_is_not_narrowed(client: TestClient, world: _World) -> None:
     """A superuser operates the deployment, so the catalog is the deployment's."""
-    assert _catalog_as(client, world, "superuser") == set(_ALL_MODELS)
+    assert _catalog_as(client, world, "superuser") == _ids(*_ALL_MODELS)
 
 
 def test_a_workspace_model_restriction_narrows_a_members_catalog(
@@ -307,10 +321,10 @@ def test_a_workspace_model_restriction_narrows_a_members_catalog(
     finally:
         session.close()
 
-    assert _catalog_as(client, world, "alpha_member") == {_OPENAI_MODEL}
+    assert _catalog_as(client, world, "alpha_member") == _ids(_OPENAI_MODEL)
     # The admin still reads the organization's whole provider, because lifting one
     # workspace's restriction is theirs to do.
-    assert _catalog_as(client, world, "alpha_owner") == {_OPENAI_MODEL, _OPENAI_OTHER}
+    assert _catalog_as(client, world, "alpha_owner") == _ids(_OPENAI_MODEL, _OPENAI_OTHER)
 
 
 def test_an_offered_model_narrows_the_catalog_and_appears_in_it(
@@ -339,8 +353,8 @@ def test_an_offered_model_narrows_the_catalog_and_appears_in_it(
     finally:
         session.close()
 
-    assert _catalog_as(client, world, "alpha_member") == {"openai:gpt-5-adopted"}
-    assert _catalog_as(client, world, "alpha_owner") == {"openai:gpt-5-adopted"}
+    assert _catalog_as(client, world, "alpha_member") == _ids("openai:gpt-5-adopted")
+    assert _catalog_as(client, world, "alpha_owner") == _ids("openai:gpt-5-adopted")
 
 
 def test_a_model_switched_off_leaves_the_catalog(
@@ -370,7 +384,7 @@ def test_a_model_switched_off_leaves_the_catalog(
     finally:
         session.close()
 
-    assert _catalog_as(client, world, "alpha_member") == {_OPENAI_MODEL}
+    assert _catalog_as(client, world, "alpha_member") == _ids(_OPENAI_MODEL)
 
 
 def test_the_two_narrowings_intersect_rather_than_widen(
@@ -407,10 +421,10 @@ def test_the_two_narrowings_intersect_rather_than_widen(
         session.close()
 
     # The member is in the restricted workspace, so they get the intersection.
-    assert _catalog_as(client, world, "alpha_member") == {_OPENAI_MODEL}
+    assert _catalog_as(client, world, "alpha_member") == _ids(_OPENAI_MODEL)
     # The admin reads the organization whole, so the workspace's own list does
     # not bind them, but what the organization withdrew still does.
-    assert _catalog_as(client, world, "alpha_owner") == {_OPENAI_MODEL, _OPENAI_OTHER}
+    assert _catalog_as(client, world, "alpha_owner") == _ids(_OPENAI_MODEL, _OPENAI_OTHER)
 
 
 def test_another_organization_never_sees_an_offered_model(
@@ -430,15 +444,17 @@ def test_another_organization_never_sees_an_offered_model(
     finally:
         session.close()
 
-    assert "openai:gpt-5-adopted" not in _catalog_as(client, world, "beta_member")
+    assert _LISTED_AS["openai:gpt-5-adopted"] not in _catalog_as(client, world, "beta_member")
 
 
 def test_a_single_model_read_agrees_with_the_listing(client: TestClient, world: _World) -> None:
     """A model withheld from the listing is 404 by id, never a different answer."""
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     try:
-        assert client.get(f"{API_ROOT}/models/{_OPENAI_MODEL}").status_code == status.HTTP_200_OK
-        assert client.get(f"{API_ROOT}/models/{_ANTHROPIC_MODEL}").status_code == status.HTTP_404_NOT_FOUND
+        for spelling in (_OPENAI_MODEL, _LISTED_AS[_OPENAI_MODEL]):
+            assert client.get(f"{API_ROOT}/models/{spelling}").status_code == status.HTTP_200_OK, spelling
+        for spelling in (_ANTHROPIC_MODEL, _LISTED_AS[_ANTHROPIC_MODEL]):
+            assert client.get(f"{API_ROOT}/models/{spelling}").status_code == status.HTTP_404_NOT_FOUND, spelling
     finally:
         client.cookies.clear()
 
@@ -478,7 +494,7 @@ def test_a_foreign_workspaces_alias_names_are_not_listed(
     # names, not a tenant's models. The target stays listed for the member, and
     # correctly so: an alias withholds its target to keep the indirection intact,
     # and there is no indirection here for a caller who is shown no alias.
-    assert listed == {_OPENAI_MODEL, _OPENAI_OTHER}
+    assert listed == _ids(_OPENAI_MODEL, _OPENAI_OTHER)
 
     # The control: an operator is answered from the workspace the alias lives in,
     # so the name is still there for the caller it belongs to.
@@ -511,12 +527,12 @@ def test_an_alias_leaves_its_organization_key_target_in_the_grouped_catalog(
     assert _OPENAI_MODEL in _grouped_selectors_as(client, world, "superuser")
     flat = _catalog_as(client, world, "superuser")
     assert "fast" in flat
-    assert _OPENAI_MODEL not in flat
+    assert _LISTED_AS[_OPENAI_MODEL] not in flat
 
     deleted = client.delete(f"{API_ROOT}/aliases/fast", headers=master_key_header)
     assert deleted.status_code == status.HTTP_204_NO_CONTENT, deleted.text
     assert _OPENAI_MODEL in _grouped_selectors_as(client, world, "superuser")
-    assert _OPENAI_MODEL in _catalog_as(client, world, "superuser")
+    assert _LISTED_AS[_OPENAI_MODEL] in _catalog_as(client, world, "superuser")
 
 
 def test_a_provider_whose_only_key_will_not_decrypt_is_withheld(
@@ -541,8 +557,8 @@ def test_a_provider_whose_only_key_will_not_decrypt_is_withheld(
         session.close()
 
     listed = _catalog_as(client, world, "beta_member")
-    assert _ANTHROPIC_MODEL in listed, "beta's decryptable key still counts"
-    assert _MISTRAL_MODEL not in listed, "the undecryptable key's provider is withheld"
+    assert _LISTED_AS[_ANTHROPIC_MODEL] in listed, "beta's decryptable key still counts"
+    assert _LISTED_AS[_MISTRAL_MODEL] not in listed, "the undecryptable key's provider is withheld"
 
 
 def test_a_hosted_provider_is_listed_for_a_member_of_an_organization_holding_no_key_for_it(
@@ -553,9 +569,9 @@ def test_a_hosted_provider_is_listed_for_a_member_of_an_organization_holding_no_
     bind_model_provider(client, port)
 
     listed = _listing_as(client, world, "alpha_member")
-    assert set(listed) == {_OPENAI_MODEL, _OPENAI_OTHER, _MISTRAL_MODEL}
-    assert listed[_MISTRAL_MODEL]["deployment_managed"] is True, "the deployment pays the mistral bill"
-    assert listed[_OPENAI_MODEL]["deployment_managed"] is False, "alpha's own key pays the openai bill"
+    assert set(listed) == _ids(_OPENAI_MODEL, _OPENAI_OTHER, _MISTRAL_MODEL)
+    assert listed[_LISTED_AS[_MISTRAL_MODEL]]["deployment_managed"] is True, "the deployment pays the mistral bill"
+    assert listed[_LISTED_AS[_OPENAI_MODEL]]["deployment_managed"] is False, "alpha's own key pays the openai bill"
     assert port.asked_for == [world.alpha], "the port is asked for the caller's organization, once"
 
 
@@ -566,12 +582,12 @@ def test_a_hosted_provider_the_organization_also_holds_a_key_for_is_the_organiza
     bind_model_provider(client, HostedModelProvider("openai"))
 
     alpha = _listing_as(client, world, "alpha_member")
-    assert alpha[_OPENAI_MODEL]["deployment_managed"] is False
+    assert alpha[_LISTED_AS[_OPENAI_MODEL]]["deployment_managed"] is False
 
     beta = _listing_as(client, world, "beta_member")
-    assert set(beta) == {_OPENAI_MODEL, _OPENAI_OTHER, _ANTHROPIC_MODEL}
-    assert beta[_OPENAI_MODEL]["deployment_managed"] is True
-    assert beta[_ANTHROPIC_MODEL]["deployment_managed"] is False
+    assert set(beta) == _ids(_OPENAI_MODEL, _OPENAI_OTHER, _ANTHROPIC_MODEL)
+    assert beta[_LISTED_AS[_OPENAI_MODEL]]["deployment_managed"] is True
+    assert beta[_LISTED_AS[_ANTHROPIC_MODEL]]["deployment_managed"] is False
 
 
 @pytest.mark.parametrize(
@@ -609,7 +625,7 @@ def test_the_deployment_managed_flag_agrees_with_the_rate_override_gate(
             session.close()
 
     listed = _listing_as(client, world, "alpha_owner")
-    assert listed[model]["deployment_managed"] is deployment_managed
+    assert listed[_LISTED_AS[model]]["deployment_managed"] is deployment_managed
 
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
     try:
@@ -686,17 +702,19 @@ def test_a_hosted_provider_is_listed_only_where_dispatch_would_ask_the_port(
     finally:
         session.close()
 
-    assert _catalog_as(client, world, who) == expected
+    assert _catalog_as(client, world, who) == _ids(*expected)
 
 
 def test_the_single_model_read_agrees_with_the_listing_about_a_hosted_model(client: TestClient, world: _World) -> None:
     bind_model_provider(client, HostedModelProvider("mistral"))
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     try:
-        response = client.get(f"{API_ROOT}/models/{_MISTRAL_MODEL}")
-        assert response.status_code == status.HTTP_200_OK, response.text
-        assert response.json()["deployment_managed"] is True
-        assert client.get(f"{API_ROOT}/models/{_ANTHROPIC_MODEL}").status_code == status.HTTP_404_NOT_FOUND
+        for spelling in (_MISTRAL_MODEL, _LISTED_AS[_MISTRAL_MODEL]):
+            response = client.get(f"{API_ROOT}/models/{spelling}")
+            assert response.status_code == status.HTTP_200_OK, response.text
+            assert response.json()["deployment_managed"] is True, spelling
+        for spelling in (_ANTHROPIC_MODEL, _LISTED_AS[_ANTHROPIC_MODEL]):
+            assert client.get(f"{API_ROOT}/models/{spelling}").status_code == status.HTTP_404_NOT_FOUND, spelling
     finally:
         client.cookies.clear()
 
@@ -751,8 +769,8 @@ def test_an_operator_session_flags_no_hosted_model(client: TestClient, world: _W
     """An operator sees every model and may price any of them."""
     bind_model_provider(client, HostedModelProvider("mistral"))
     listed = _listing_as(client, world, "superuser")
-    assert set(listed) == set(_ALL_MODELS)
-    assert listed[_MISTRAL_MODEL]["deployment_managed"] is False
+    assert set(listed) == _ids(*_ALL_MODELS)
+    assert listed[_LISTED_AS[_MISTRAL_MODEL]]["deployment_managed"] is False
 
 
 _OPENAI_ADVERTISED = {"openai": {"gpt-4o-mini"}}
@@ -813,8 +831,8 @@ def test_the_deployment_advertises_which_hosted_models_a_member_is_shown(client:
     """
     bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
     listed = _listing_as(client, world, "beta_member")
-    assert set(listed) == {_OPENAI_MODEL, _ANTHROPIC_MODEL}
-    assert listed[_OPENAI_MODEL]["deployment_managed"] is True
+    assert set(listed) == _ids(_OPENAI_MODEL, _ANTHROPIC_MODEL)
+    assert listed[_LISTED_AS[_OPENAI_MODEL]]["deployment_managed"] is True
 
 
 def test_an_organization_holding_its_own_key_still_sees_an_unadvertised_model(
@@ -822,8 +840,8 @@ def test_an_organization_holding_its_own_key_still_sees_an_unadvertised_model(
 ) -> None:
     """Alpha calls openai on its own key, so a model the deployment switched off is still its to reach."""
     bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
-    assert _OPENAI_OTHER in _catalog_as(client, world, "alpha_member")
-    assert _OPENAI_OTHER in _catalog_as(client, world, "alpha_owner")
+    assert _LISTED_AS[_OPENAI_OTHER] in _catalog_as(client, world, "alpha_member")
+    assert _LISTED_AS[_OPENAI_OTHER] in _catalog_as(client, world, "alpha_owner")
 
 
 def test_an_unadvertised_model_is_withheld_from_the_operator_and_the_master_key(
@@ -838,13 +856,13 @@ def test_an_unadvertised_model_is_withheld_from_the_operator_and_the_master_key(
     port = HostedModelProvider("openai", models=_OPENAI_ADVERTISED)
     bind_model_provider(client, port)
 
-    assert _catalog_as(client, world, "superuser") == set(_ALL_MODELS)
-    assert _catalog_as(client, world, "beta_root") == set(_ALL_MODELS) - {_OPENAI_OTHER}
+    assert _catalog_as(client, world, "superuser") == _ids(*_ALL_MODELS)
+    assert _catalog_as(client, world, "beta_root") == _ids(*_ALL_MODELS) - _ids(_OPENAI_OTHER)
     assert [world.alpha, world.beta] == port.asked_for
 
     response = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert {model["id"] for model in response.json()["data"]} == set(_ALL_MODELS) - {_OPENAI_OTHER}
+    assert {model["id"] for model in response.json()["data"]} == _ids(*_ALL_MODELS) - _ids(_OPENAI_OTHER)
     assert port.asked_for[-1] is None, "the master key asks for the deployment-wide answer"
 
 
@@ -861,15 +879,15 @@ def test_a_hosted_model_switched_on_unpriced_is_listed_for_every_caller_it_serve
 
     for who in ("alpha_member", "beta_member", "alpha_owner", "superuser", "beta_root"):
         listed = _listing_as(client, world, who)
-        assert unpriced in listed, who
-        assert listed[unpriced]["pricing"] is None, who
+        assert _LISTED_AS[unpriced] in listed, who
+        assert listed[_LISTED_AS[unpriced]]["pricing"] is None, who
         # The roster is the deployment's whole say on the provider: the priced
         # model it switched off stays withheld.
-        assert _MISTRAL_MODEL not in listed, who
+        assert _LISTED_AS[_MISTRAL_MODEL] not in listed, who
 
     response = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert unpriced in {model["id"] for model in response.json()["data"]}
+    assert _LISTED_AS[unpriced] in {model["id"] for model in response.json()["data"]}
 
 
 def test_with_require_pricing_on_a_hosted_model_is_listed_only_once_a_default_prices_it(
@@ -902,14 +920,14 @@ def test_with_require_pricing_on_a_hosted_model_is_listed_only_once_a_default_pr
 
     for who in ("alpha_member", "beta_member", "superuser"):
         listed = _listing_as(client, world, who)
-        assert "mistral:open-mistral-free" not in listed, who
-        assert listed["mistral:open-mistral-defaulted"]["pricing_source"] == "default", who
+        assert _LISTED_AS["mistral:open-mistral-free"] not in listed, who
+        assert listed[_LISTED_AS["mistral:open-mistral-defaulted"]]["pricing_source"] == "default", who
 
     response = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
     ids = {model["id"] for model in response.json()["data"]}
-    assert "mistral:open-mistral-free" not in ids
-    assert "mistral:open-mistral-defaulted" in ids
+    assert _LISTED_AS["mistral:open-mistral-free"] not in ids
+    assert _LISTED_AS["mistral:open-mistral-defaulted"] in ids
 
 
 def test_a_hosted_model_priced_under_its_legacy_spelling_is_listed_once_with_its_rate(
@@ -963,8 +981,8 @@ def test_the_master_key_keeps_a_model_its_default_workspace_reaches_on_its_own_k
 
     listing = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert listing.status_code == status.HTTP_200_OK, listing.text
-    assert _OPENAI_OTHER in {model["id"] for model in listing.json()["data"]}
-    detail = client.get(f"{API_ROOT}/models/{_OPENAI_OTHER}", headers=master_key_header)
+    assert _LISTED_AS[_OPENAI_OTHER] in {model["id"] for model in listing.json()["data"]}
+    detail = client.get(f"{API_ROOT}/models/{_LISTED_AS[_OPENAI_OTHER]}", headers=master_key_header)
     assert detail.status_code == status.HTTP_200_OK, detail.text
 
 
@@ -1010,9 +1028,9 @@ def test_an_api_key_is_exempted_only_by_the_key_active_in_its_own_workspace(
         assert response.status_code == status.HTTP_200_OK, response.text
         return {model["id"] for model in response.json()["data"]}
 
-    assert _OPENAI_OTHER in listing_with_key_in("alpha_one")
-    assert _OPENAI_OTHER not in listing_with_key_in("alpha_two")
-    assert _OPENAI_MODEL in listing_with_key_in("alpha_two")
+    assert _LISTED_AS[_OPENAI_OTHER] in listing_with_key_in("alpha_one")
+    assert _LISTED_AS[_OPENAI_OTHER] not in listing_with_key_in("alpha_two")
+    assert _LISTED_AS[_OPENAI_MODEL] in listing_with_key_in("alpha_two")
 
 
 def test_the_single_model_read_agrees_with_the_listing_about_an_unadvertised_model(
@@ -1026,12 +1044,15 @@ def test_the_single_model_read_agrees_with_the_listing_about_an_unadvertised_mod
     ):
         client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
         try:
-            assert client.get(f"{API_ROOT}/models/{_OPENAI_OTHER}").status_code == expected, who
-            assert client.get(f"{API_ROOT}/models/{_OPENAI_MODEL}").status_code == status.HTTP_200_OK, who
+            for spelling in (_OPENAI_OTHER, _LISTED_AS[_OPENAI_OTHER]):
+                assert client.get(f"{API_ROOT}/models/{spelling}").status_code == expected, (who, spelling)
+            for spelling in (_OPENAI_MODEL, _LISTED_AS[_OPENAI_MODEL]):
+                assert client.get(f"{API_ROOT}/models/{spelling}").status_code == status.HTTP_200_OK, (who, spelling)
         finally:
             client.cookies.clear()
-    withheld = client.get(f"{API_ROOT}/models/{_OPENAI_OTHER}", headers=master_key_header)
-    assert withheld.status_code == status.HTTP_404_NOT_FOUND, withheld.text
+    for spelling in (_OPENAI_OTHER, _LISTED_AS[_OPENAI_OTHER]):
+        withheld = client.get(f"{API_ROOT}/models/{spelling}", headers=master_key_header)
+        assert withheld.status_code == status.HTTP_404_NOT_FOUND, withheld.text
 
 
 def test_the_grouped_catalog_omits_an_unadvertised_model(client: TestClient, world: _World) -> None:

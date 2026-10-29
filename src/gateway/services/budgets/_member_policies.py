@@ -98,6 +98,9 @@ class BudgetMembershipListener:
         """Delete the ceilings that would outlive the workspace."""
         await self._repositories.ceilings.delete_for_workspace(workspace_id, member_ids)
 
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        """Nothing: ceilings are keyed on workspace memberships, which losing access this way leaves in place."""
+
 
 class _MemberPolicies:
     """A workspace's member budget policy use cases, each run inside the caller's Unit of Work block.

@@ -50,6 +50,7 @@ Calling the gateway from your own code.
   and what each harness can see at each event.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
 - [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API, or import its usage without routing.
+- [Use with Junie](use-with-junie.md): point the Junie CLI or JetBrains AI Assistant at Otari.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
 - [Use with Pydantic AI](use-with-pydantic-ai.md), [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md): point an agent framework's model at Otari, with tools, structured output and streaming.
 - [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.

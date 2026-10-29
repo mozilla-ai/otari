@@ -5,7 +5,12 @@ Each carries the HTTP status it renders as.
 
 from fastapi import status
 
-from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
+from gateway.exceptions import (
+    TenancyConflictError,
+    TenancyForbiddenError,
+    TenancyNotFoundError,
+    TenancyValidationError,
+)
 
 
 class TraceNotFoundError(TenancyNotFoundError):
@@ -43,3 +48,31 @@ class GuardrailVersionLimitError(TenancyConflictError):
 
     def __init__(self, limit: int) -> None:
         super().__init__(f"This workspace already keeps {limit} guardrail versions; no more are stored.")
+
+
+class TraceContentShareForbiddenError(TenancyForbiddenError):
+    """Only the user a session belongs to shares its content, or sees and ends its shares."""
+
+    def __init__(self) -> None:
+        super().__init__("Only the session's own user can share its content")
+
+
+class TraceContentShareNotFoundError(TenancyNotFoundError):
+    """No share with this id on the session."""
+
+    def __init__(self, share_id: str):
+        super().__init__(f"Share '{share_id}' not found")
+
+
+class TraceBreakGlassUnnamedError(TenancyForbiddenError):
+    """A break-glass opening is recorded against a named person, which a header master key is not."""
+
+    def __init__(self) -> None:
+        super().__init__("Sign in to open a session's content this way: a master key names nobody to record")
+
+
+class TraceBreakGlassForbiddenError(TenancyForbiddenError):
+    """Only an organization's owners open its sessions' content without a share."""
+
+    def __init__(self) -> None:
+        super().__init__("Only an owner of the organization can open a session's content this way")

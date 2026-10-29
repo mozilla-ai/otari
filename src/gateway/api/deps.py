@@ -1,26 +1,28 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy import ColumnElement, Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
-from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
+from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db, release_session
 from gateway.core.feature import CoreFeature
-from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
+from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError, TraceBreakGlassUnnamedError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
+from gateway.models.tenancy import MANAGEMENT_ROLES, Workspace
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
@@ -61,11 +63,14 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
     OrgProviderKeyRepository,
+    UserRepository,
+    WorkspaceMemberRepository,
     WorkspaceRepository,
     ids_in_organization,
 )
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
+    SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
@@ -138,18 +143,20 @@ from gateway.services.tenancy.workspace_activation_service import WorkspaceActiv
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers, WorkspaceMcpServerService
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
+from gateway.services.tool_settings_service import load_overrides, stage_override
 from gateway.services.tools import (
+    SearchToolService,
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceSearchKeys,
     web_search_configured,
 )
-from gateway.services.traces import TraceService
+from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
-from gateway.types.traces import TraceScope
+from gateway.types.traces import ContentReader, SessionOwners, ShareAudience, TraceScope
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -888,9 +895,9 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
     return FileService(uow, FileRepositories.on(uow), backends, config, reject_unscoped_upload)
 
 
-def build_trace_service(uow: UnitOfWork) -> TraceService:
-    """Build the traces operations for a request or a worker job."""
-    return TraceService(uow, TracesRepositories.on(uow), model_context_window)
+def build_trace_service(uow: UnitOfWork, content: SpanContent, owners: SessionOwners) -> TraceService:
+    """Build the traces operations for a request or a worker job, sealing and opening content with ``content``."""
+    return TraceService(uow, TracesRepositories.on(uow), content, owners, model_context_window)
 
 
 def _file_backends(request: Request) -> FileBackends | None:
@@ -989,13 +996,14 @@ UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings and own keys in step with their memberships.
+    """Return the listener that keeps members' budget ceilings, own keys and session shares in step with memberships.
 
     It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
     """
     return MembershipListeners(
         BudgetMembershipListener(BudgetRepositories.on(uow)),
         ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
+        TraceMembershipListener(TracesRepositories.on(uow)),
     )
 
 
@@ -1735,6 +1743,60 @@ def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
     return run
 
 
+def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config: GatewayConfig) -> SearchToolService:
+    """Build the search-tool service on ``uow``.
+
+    ``session`` is the session ``uow`` runs on. The runtime tool settings are
+    read and staged through it, so a default a create stores lands in the
+    create's commit.
+    """
+    return SearchToolService(
+        uow,
+        config=config,
+        tools=SearchToolRepository(uow),
+        read_settings=lambda: load_overrides(session, report_invalid=False),
+        stage_setting=lambda key, value: stage_override(session, key, value),
+    )
+
+
+def get_search_tool_service(
+    uow: UnitOfWorkDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SearchToolService:
+    """Build the search-tool service on the request's unit of work."""
+    return build_search_tool_service(uow, db, config=config)
+
+
+SearchToolServiceDep = Annotated[SearchToolService, Depends(get_search_tool_service)]
+
+
+async def get_search_tool_tester(
+    uow: UnitOfWorkDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SearchToolService:
+    """Build the search-tool service for a connection test, once authentication's database work has ended.
+
+    A test calls a provider, so no pooled connection is held across the call.
+    """
+    await release_session(db)
+    return build_search_tool_service(uow, db, config=config)
+
+
+SearchToolTesterDep = Annotated[SearchToolService, Depends(get_search_tool_tester)]
+
+
+def build_search_tool_refresh(config: GatewayConfig) -> Callable[[], Awaitable[set[str]]]:
+    """Build the search-tool refresher's tick, each on a unit of work of its own."""
+
+    async def refresh() -> set[str]:
+        async with create_unit_of_work_with_session() as (session, uow):
+            return await build_search_tool_service(uow, session, config=config).refresh()
+
+    return refresh
+
+
 def build_hosted_discovery(config: GatewayConfig) -> HostedDiscovery:
     """Build the discovery worker's read of the hosted providers' dials.
 
@@ -1789,9 +1851,138 @@ HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_s
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
-def get_trace_service(uow: UnitOfWorkDep) -> TraceService:
-    """Build the request's traces service on the request's Unit of Work."""
-    return build_trace_service(uow)
+async def is_workspace_member(
+    db: AsyncSession, workspace_id: uuid.UUID, user_id: str | None, workspace: Workspace | None = None
+) -> bool:
+    """Whether ``user_id`` names a person who currently sees the workspace.
+
+    An active owner or admin of its organization, or an active member of the
+    workspace itself: the people whose own sessions' content they can read. A
+    billing user no dashboard identity stands behind is none of them, and nor is
+    a deactivated account, which can no longer sign in to read or manage it.
+    """
+    person = _person(user_id)
+    if person is None:
+        return False
+    if workspace is None:
+        workspace = await WorkspaceRepository(db).get(workspace_id)
+    if workspace is None:
+        return False
+    account = await UserRepository(db).get(person)
+    if account is None or not account.is_active:
+        return False
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        workspace.organization_id, person
+    )
+    if membership is None:
+        return False
+    if membership.role in MANAGEMENT_ROLES:
+        return True
+    member = await WorkspaceMemberRepository(db).get_by_workspace_and_user(workspace_id, person)
+    return member is not None and member.status == "active"
+
+
+def _person(user_id: str | None) -> uuid.UUID | None:
+    """The identity a trace's user id names, or None for one that names no person.
+
+    The canonical spelling only: ownership compares the id as a string, so another
+    spelling of the same id would keep content its owner could never open.
+    """
+    if user_id is None:
+        return None
+    try:
+        person = uuid.UUID(user_id)
+    except ValueError:
+        return None
+    return person if str(person) == user_id else None
+
+
+async def workspace_members(
+    db: AsyncSession, pairs: Collection[tuple[uuid.UUID, str | None]]
+) -> set[tuple[uuid.UUID, str | None]]:
+    """Which of these (workspace, user) pairs :func:`is_workspace_member` holds for, in four queries."""
+    people = {pair: person for pair in pairs if (person := _person(pair[1])) is not None}
+    if not people:
+        return set()
+    workspaces = {
+        workspace.id: workspace.organization_id
+        for workspace in await WorkspaceRepository(db).get_by_ids({workspace_id for workspace_id, _ in people})
+    }
+    active = await UserRepository(db).get_active_ids(set(people.values()))
+    candidates = {pair: person for pair, person in people.items() if pair[0] in workspaces and person in active}
+    roles = await OrganizationMemberRepository(db).get_active_roles(
+        {workspaces[workspace_id] for workspace_id, _ in candidates}, set(candidates.values())
+    )
+    by_organization = {pair: roles.get((workspaces[pair[0]], person)) for pair, person in candidates.items()}
+    explicit = await WorkspaceMemberRepository(db).get_active_pairs(
+        {workspace_id for (workspace_id, _), role in by_organization.items() if role is not None},
+        {candidates[pair] for pair, role in by_organization.items() if role is not None},
+    )
+    return {
+        pair
+        for pair, role in by_organization.items()
+        if role is not None and (role in MANAGEMENT_ROLES or (pair[0], candidates[pair]) in explicit)
+    }
+
+
+class DatabaseSessionOwners:
+    """:class:`SessionOwners` over this deployment's memberships, on the request's session."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        return await is_workspace_member(self._db, workspace_id, user_id)
+
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        return await workspace_members(self._db, pairs)
+
+
+class NoSessionOwners:
+    """:class:`SessionOwners` for work that never opens a share: nobody is anybody's member."""
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        return False
+
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        return set()
+
+
+async def workspace_keeps_trace_content(
+    db: AsyncSession, config: GatewayConfig, workspace_id: uuid.UUID, user_id: str | None
+) -> bool:
+    """Whether what a span in this workspace was about is kept for this exporter.
+
+    The deployment allows it, the workspace turned it on, and the key exports for a
+    current member of the workspace: content nobody could ever read is not kept, so
+    a key with no user, or one for a billing user no person stands behind, keeps none.
+
+    Read fresh, not cached, so a workspace that turns it off keeps nothing from its next export on.
+    Fails closed: where any of it cannot be read, nothing is kept. The transaction the reads
+    open is ended at once, so no connection idles while the export's spans are handed on.
+    """
+    if not config.trace_content_enabled:
+        return False
+    try:
+        workspace = await WorkspaceRepository(db).get(workspace_id)
+        keeps = (
+            workspace is not None
+            and workspace.trace_content_enabled
+            and await is_workspace_member(db, workspace_id, user_id, workspace)
+        )
+        await release_session(db)
+    except DATABASE_ERRORS as exc:
+        logger.warning("Could not read whether a workspace keeps trace content (%s)", describe_database_error(exc))
+        return False
+    return keeps
+
+
+def get_trace_service(
+    uow: UnitOfWorkDep, request: Request, db: Annotated[AsyncSession, Depends(get_db)]
+) -> TraceService:
+    """Build the request's traces service on the request's Unit of Work, with the process's content keys."""
+    content: SpanContent = getattr(request.app.state, "trace_content", None) or SpanContent.disabled()
+    return build_trace_service(uow, content, DatabaseSessionOwners(db))
 
 
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
@@ -1832,13 +2023,98 @@ async def get_visible_workspaces(
 VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspaces)]
 
 
-async def get_organization_trace_scope(visible: VisibleWorkspacesDep, identity: CurrentIdentity) -> TraceScope:
+async def get_organization_trace_scope(
+    visible: VisibleWorkspacesDep,
+    identity: CurrentIdentity,
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> TraceScope:
     """The workspaces of their active organization this caller may read traces in.
 
-    An owner or admin reads every trace's content; anyone else only their own traces'.
+    Each reads their own sessions' content. An owner or admin also reads what a
+    session's user shared with the organization's admins. A header master key
+    names no person to record a read against, so it reads no content at all.
     """
+    if session_identity is None:
+        return TraceScope.workspaces(visible.workspace_ids)
     return TraceScope.workspaces(
-        visible.workspace_ids, all_content=visible.whole_organization, content_user_id=str(identity.id)
+        visible.workspace_ids,
+        reader=ContentReader(
+            user_id=identity.id,
+            email=identity.email or str(identity.id),
+            audiences=frozenset({"organization_admins"}) if visible.whole_organization else frozenset(),
+        ),
+    )
+
+
+async def require_signed_in_reader(
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> None:
+    """Refuse a break-glass opening that a header master key, which names nobody, would make.
+
+    The record has to say which person opened the content; the bootstrap operator
+    a master key falls back to is an account, not a person.
+    """
+    if session_identity is None:
+        raise TraceBreakGlassUnnamedError
+
+
+@dataclass(frozen=True)
+class OrganizationBreakGlass:
+    """An organization owner about to open a session's content without its owner's share."""
+
+    scope: TraceScope
+    organization_id: uuid.UUID
+    reader: ContentReader
+
+
+async def get_organization_break_glass(
+    visible: VisibleWorkspacesDep, identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
+) -> OrganizationBreakGlass:
+    """The caller as an owner of their active organization, over every workspace in it.
+
+    Owners only, not admins: break-glass is kept to the smallest group that can answer for it.
+    """
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        visible.organization_id, identity.id
+    )
+    if membership is None or membership.role != "owner":
+        raise TraceBreakGlassForbiddenError
+    reader = ContentReader(user_id=identity.id, email=identity.email or str(identity.id))
+    return OrganizationBreakGlass(
+        scope=TraceScope.workspaces(visible.workspace_ids, reader=reader),
+        organization_id=visible.organization_id,
+        reader=reader,
+    )
+
+
+@dataclass(frozen=True)
+class PlatformBreakGlass:
+    """The deployment's operator about to open a session's content in a named workspace of any organization."""
+
+    reader: ContentReader
+    workspace_id: uuid.UUID
+    organization_id: uuid.UUID
+
+
+async def get_platform_break_glass(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_id: Annotated[uuid.UUID, Query(description="The workspace the session is in.")],
+) -> PlatformBreakGlass:
+    """The deployment's operator, where the deployment lets them open any organization's session content.
+
+    Answers 404 where it does not, as a path nothing serves would, and for a workspace that does not exist.
+    """
+    if not config.trace_platform_break_glass_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    workspace = await WorkspaceRepository(db).get(workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    return PlatformBreakGlass(
+        reader=ContentReader(user_id=identity.id, email=identity.email or str(identity.id)),
+        workspace_id=workspace_id,
+        organization_id=workspace.organization_id,
     )
 
 
@@ -2026,9 +2302,33 @@ def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]
 CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
 
 
-def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
-    """The scope of the deployment-operator trace routes: every workspace in the caller's organization."""
-    return TraceScope.workspaces(workspace_ids, all_content=True)
+async def get_deployment_trace_scope(
+    workspace_ids: CallerWorkspaces,
+    organization_id: CallerOrganization,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> TraceScope:
+    """The scope of the deployment-operator trace routes: every workspace in the caller's organization.
+
+    The operator reads a session's content where it is their own, where its user shared it with the
+    operator, and, as an owner or admin of that organization too, where its user shared it with them.
+    A header master key names no person to record a read against, so it reads no content at all.
+    """
+    if session_identity is None:
+        return TraceScope.workspaces(workspace_ids)
+    audiences: set[ShareAudience] = {"deployment_operator"}
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        organization_id, identity.id
+    )
+    if membership is not None and membership.role in MANAGEMENT_ROLES:
+        audiences.add("organization_admins")
+    return TraceScope.workspaces(
+        workspace_ids,
+        reader=ContentReader(
+            user_id=identity.id, email=identity.email or str(identity.id), audiences=frozenset(audiences)
+        ),
+    )
 
 
 async def get_feedback_service(
@@ -2063,6 +2363,8 @@ __all__ = [
     "InferenceServiceDep",
     "ModelProviderPortDep",
     "HostedProviderServiceDep",
+    "SearchToolServiceDep",
+    "SearchToolTesterDep",
     "OrgProviderModelServiceDep",
     "RateLimitServiceDep",
     "HealthCheckServiceDep",

@@ -77,7 +77,7 @@ async def test_recommend_puts_one_question_to_the_configured_model() -> None:
         recommendation = await _recommender().recommend(SPAWN, candidates=CANDIDATES)
 
     assert recommendation.model == "sonnet"
-    assert recommendation.reason == "jev-1.13.0 chose sonnet with 70%"
+    assert recommendation.reason == "sonnet with 70%"
     assert recommendation.usage == RecommendationUsage(input_tokens=800, output_tokens=0, charge=None)
     provider, sent = mock.await_args.args
     assert provider.name == "typesafe"

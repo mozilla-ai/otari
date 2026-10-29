@@ -48,7 +48,7 @@ One hooks module with two hooks:
    its token counts, so the pick can be checked against what it cost.
 
 Each spawn leaves a dim transcript line such as
-`Explore agent-… starts on claude-haiku-4-5, Otari's choice (jev-1.13.0 chose haiku with 81%)`.
+`Explore agent-… starts on claude-haiku-4-5, Otari's choice (haiku with 81%)`.
 
 ## Requirements
 

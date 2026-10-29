@@ -190,7 +190,7 @@ curl "$OTARI_URL/api/v1/routing/recommend" \
 ```json
 {
   "model": "haiku",
-  "reason": "jev-1.13.0 chose haiku with 81%",
+  "reason": "haiku with 81%",
   "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
 }
 ```
@@ -391,7 +391,7 @@ payloads are never opened out of a transcript, and the endpoint rejects them.
 
 Each event carries a `session_label` of `<hostname>:<project>`, where the project
 is the session's working directory with the home-directory prefix dropped, so
-usage can be grouped per repository. Filter on it in Activity and Usage.
+usage can be grouped per repository. Filter on it on the Overview.
 
 Rows are unique on `(source, source_event_id)`, and the source event id here is the
 Anthropic response id, so re-running imports only what is new and reports the rest

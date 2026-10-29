@@ -162,21 +162,6 @@ class UpdateOwnKeyRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid.UUID, str]:
-    """The organization this request acts in, and the owner id it acts as.
-
-    The organization is the caller's own ``active_organization_id``, resolved
-    through ``get_active_organization_for_user``: a pointer with no live
-    membership behind it falls back to the caller's oldest live membership, and
-    refuses when there is none; moving between
-    organizations is ``POST /api/v1/organizations/me/switch``. The owner id is the
-    identity's UUID rendered as a string, the attribution convention
-    ``get_or_create_attribution_user`` documents.
-    """
-    organization = await OrganizationService(db, membership_listener=None).get_active_organization_for_user(identity)
-    return organization.id, str(identity.id)
-
-
 async def _load_own_writable_key(
     db: AsyncSession,
     organizations: OrganizationService,
@@ -356,6 +341,7 @@ async def create_own_key(
 async def list_own_keys(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     workspace_id: Annotated[uuid.UUID | None, Query(description="Only keys in this workspace.")] = None,
@@ -367,12 +353,13 @@ async def list_own_keys(
     workspace outside their organization lists nothing rather than refusing, so
     the filter reports no more than the unfiltered read does.
     """
-    organization_id, owner_user_id = await _caller_context(db, identity)
+    organization = await organizations.get_active_organization_for_user(identity)
+    owner_user_id = str(identity.id)
     statement = (
         select(APIKey)
         .join(Workspace, col(Workspace.id) == col(APIKey.workspace_id))
         .where(
-            col(Workspace.organization_id) == organization_id,
+            col(Workspace.organization_id) == organization.id,
             col(APIKey.user_id) == owner_user_id,
         )
     )

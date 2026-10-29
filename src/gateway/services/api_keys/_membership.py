@@ -53,5 +53,8 @@ class ApiKeyMembershipListener:
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         """Nothing: a workspace that still holds keys cannot be deleted."""
 
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        """Nothing here: ``organization_member_changed`` already switched off what the change takes away."""
+
 
 __all__ = ["ApiKeyMembershipListener"]

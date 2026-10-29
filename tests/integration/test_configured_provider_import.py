@@ -115,11 +115,11 @@ def test_a_copied_entry_keeps_its_models_in_the_catalog(start: Start, monkeypatc
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
     with start() as client:
-        listed = client.get(f"{API_ROOT}/models", headers=MASTER)
+        listed = client.get(f"{API_ROOT}/models", params={"provider": "openai-eu"}, headers=MASTER)
         catalog = client.get(f"{API_ROOT}/catalog/models", headers=MASTER)
 
     assert listed.status_code == 200, listed.text
-    assert "openai-eu:gpt-4o" in {model["id"] for model in listed.json()["data"]}
+    assert "openai/gpt-4o" in {model["id"] for model in listed.json()["data"]}
     assert catalog.status_code == 200, catalog.text
     assert "openai-eu:gpt-4o" in {selector for model in catalog.json()["models"] for selector in model["selectors"]}
 

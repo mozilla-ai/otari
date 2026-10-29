@@ -79,6 +79,15 @@ function SpanProbe() {
   )
 }
 
+function RangeProbe() {
+  const { searchStr } = useLocation()
+  return (
+    <output aria-label="Range in the URL">
+      {new URLSearchParams(searchStr).get("range") ?? ""}
+    </output>
+  )
+}
+
 async function openFirstSession(user: Pick<UserEvent, "click"> = userEvent) {
   const sessions = await screen.findByRole("grid", { name: "Sessions" })
   await user.click(
@@ -140,6 +149,67 @@ describe("SessionsPage", () => {
         screen.getByRole("status", { name: "Span in the URL" }),
       ).toHaveTextContent(/^$/),
     )
+  })
+
+  it("forgets a break-glass opening once the peek closes, so seeing it again is a new recorded opening", async () => {
+    const user = userEvent.setup()
+    const privateDetail = traceDetail({
+      spans: traceDetail().spans.map((span) =>
+        span.span_id === "call-toolu_1"
+          ? { ...span, content: {}, content_private: true }
+          : span,
+      ),
+    })
+    const openedDetail = traceDetail({
+      content_access: "break_glass",
+      spans: traceDetail().spans.map((span) =>
+        span.span_id === "call-toolu_1"
+          ? { ...span, content: { command: "pytest -x" } }
+          : span,
+      ),
+    })
+    const { mock } = mockApi({
+      traces: [traceSummary()],
+      traceDetail: privateDetail,
+    })
+    const answer = mock.getMockImplementation() as typeof fetch
+    let openings = 0
+    mock.mockImplementation(async (input, init) => {
+      if (!/\/break-glass/.test(String(input)) || init?.method !== "POST") {
+        return answer(input, init)
+      }
+      openings += 1
+      return jsonResponse(openedDetail)
+    })
+    renderPage(<SessionsPage />, "/sessions")
+
+    const peek = await openFirstSession(user)
+    await user.click(
+      await screen.findByRole("button", { name: "Open by break-glass" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: /Reason/ }),
+      "HR investigation 2026-17, approved by legal",
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Open and record" }),
+    )
+    expect(await screen.findByText(/Opened by break-glass/)).toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Trace claude-code" }),
+      ).toBeNull(),
+    )
+    await openFirstSession(user)
+
+    expect(
+      await screen.findByRole("button", { name: "Open by break-glass" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Opened by break-glass/)).toBeNull()
+    expect(openings).toBe(1)
   })
 
   it("lists sessions from the trace API and opens one into its spans", async () => {
@@ -1088,6 +1158,116 @@ describe("SessionsPage", () => {
     const [params] = listReads(calls)
     expect(params.get("start")).toBe(start)
     expect(params.get("end")).toBe(end)
+  })
+
+  it("reads a window with only a start as running to now", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+    const start = "2026-10-01T00:00:00.000Z"
+
+    renderPage(<SessionsPage />, `/sessions?start_date=${start}`)
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    const [params] = listReads(calls)
+    expect(params.get("start")).toBe(start)
+    expect(Date.parse(params.get("end") ?? "")).toBeGreaterThan(
+      Date.parse(start),
+    )
+  })
+
+  it("sends the filters the Overview tabs share with the list, count and chart", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(
+      <SessionsPage />,
+      "/sessions?user_id=u1&user_id=u2&api_key_id=k1&status=error",
+    )
+
+    await waitFor(() =>
+      expect(
+        ["/traces?", "/traces/count", "/traces/series"].every((route) =>
+          calls.some((call) => call.url.includes(route)),
+        ),
+      ).toBe(true),
+    )
+    for (const call of calls.filter((c) => c.url.includes("/traces"))) {
+      if (/\/traces\/[^?]+/.test(call.url) && !/count|series/.test(call.url))
+        continue
+      const params = new URL(call.url, "http://localhost").searchParams
+      expect(params.getAll("user_id")).toEqual(["u1", "u2"])
+      expect(params.getAll("api_key_id")).toEqual(["k1"])
+      expect(params.get("has_error")).toBe("true")
+    }
+  })
+
+  it("reads status=success as sessions without an error", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?status=success")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].get("has_error")).toBe("false")
+  })
+
+  it("sends a model filter with the list", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?model=gpt-5.6&model=claude-x")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].getAll("model")).toEqual(["gpt-5.6", "claude-x"])
+  })
+
+  it("sends no has_error for a status with no session meaning", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?status=absorbed")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].has("has_error")).toBe(false)
+  })
+
+  it("corrects a range this page has no preset for", async () => {
+    mockApi({ traces: [traceSummary()] })
+
+    renderPage(
+      <>
+        <SessionsPage />
+        <RangeProbe />
+      </>,
+      "/sessions?range=90d",
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status", { name: "Range in the URL" }),
+      ).not.toHaveTextContent("90d"),
+    )
+  })
+
+  it("keeps the range alone when explicit bounds are present", async () => {
+    mockApi({ traces: [traceSummary()] })
+
+    renderPage(
+      <>
+        <SessionsPage />
+        <RangeProbe />
+      </>,
+      "/sessions?range=90d&start_date=2026-10-01T00:00:00.000Z&end_date=2026-10-02T00:00:00.000Z",
+    )
+
+    await screen.findByRole("grid", { name: "Sessions" })
+    expect(
+      screen.getByRole("status", { name: "Range in the URL" }),
+    ).toHaveTextContent("90d")
+  })
+
+  it("omits its heading when embedded", async () => {
+    mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage embedded />, "/sessions")
+
+    await screen.findByRole("grid", { name: "Sessions" })
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
   })
 
   it("asks for the next page of sessions", async () => {
