@@ -368,7 +368,6 @@ describe("DeploymentAccountsPage", () => {
       requests.filter((request) => request.url.includes("search=")),
     ).toHaveLength(1)
 
-    // The count is the server's total for the term, beside the field.
     expect(await screen.findByText("2 matches")).toBeInTheDocument()
   })
 
