@@ -1085,18 +1085,8 @@
         "type": "object"
       },
       "AgentRecommendersPublic": {
-        "description": "Every stored subagent router, oldest first, and the configured decision model, where it resolves.",
+        "description": "Every stored subagent router, oldest first.",
         "properties": {
-          "configured": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConfiguredRecommenderPublic"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "data": {
             "items": {
               "$ref": "#/components/schemas/AgentRecommenderPublic"
@@ -1106,8 +1096,7 @@
           }
         },
         "required": [
-          "data",
-          "configured"
+          "data"
         ],
         "title": "AgentRecommendersPublic",
         "type": "object"
@@ -4844,30 +4833,6 @@
           "has_api_key"
         ],
         "title": "ConfigSearchToolSchema",
-        "type": "object"
-      },
-      "ConfiguredRecommenderPublic": {
-        "description": "The decision model ``agent_recommender_model`` names, which answers unpriced while no router is stored.",
-        "properties": {
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "selector": {
-            "title": "Selector",
-            "type": "string"
-          }
-        },
-        "required": [
-          "selector",
-          "provider",
-          "model"
-        ],
-        "title": "ConfiguredRecommenderPublic",
         "type": "object"
       },
       "ContentReadListPublic": {
@@ -18426,6 +18391,21 @@
           "rules"
         ],
         "title": "RateLimitRulesPublic",
+        "type": "object"
+      },
+      "RecommendationRefusal": {
+        "description": "The body of a recommendation request the gateway refuses.",
+        "properties": {
+          "detail": {
+            "description": "Why the request was refused.",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "RecommendationRefusal",
         "type": "object"
       },
       "RecordedPool": {
@@ -44954,7 +44934,7 @@
     },
     "/api/v1/routing/recommend": {
       "post": {
-        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the subagent router an operator switched on\nin the dashboard to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
         "operationId": "routing-recommend_model_for_agent",
         "requestBody": {
           "content": {
@@ -44976,6 +44956,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationRefusal"
+                }
+              }
+            },
+            "description": "No subagent router is switched on, or a master-key call names no `user`."
           },
           "422": {
             "content": {
@@ -45004,7 +44994,7 @@
     },
     "/api/v1/routing/recommenders": {
       "get": {
-        "description": "List the subagent routers, and the configured decision model that answers while none is stored.",
+        "description": "List the subagent routers.",
         "operationId": "agent-recommenders-list_agent_recommenders",
         "responses": {
           "200": {
@@ -45082,7 +45072,7 @@
     },
     "/api/v1/routing/recommenders/{recommender_id}": {
       "delete": {
-        "description": "Remove a subagent router and its key. With none left, the configured decision model answers again.",
+        "description": "Remove a subagent router and its key. With none left, no recommendation is served.",
         "operationId": "agent-recommenders-delete_agent_recommender",
         "parameters": [
           {

@@ -1,9 +1,9 @@
-"""Unit tests for the core recommender adapter: the deployment's decision model, asked one question.
+"""Unit tests for the core recommender adapter: the deployment's subagent router, asked one question.
 
 The upstream call is stubbed at ``request_decision``, so these cover what the
 adapter sends, what it makes of the answer, how an upstream's failure reaches
-the port's caller, and which decision model answers: the stored router
-switched on at its rates, or the configured one at no price of its own.
+the port's caller, and which router answers: the stored one switched on, at
+its rates, and none at all with no row stored or every row off.
 """
 
 import asyncio
@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from gateway.adapters.agent_model_recommender_adapter import NOT_CONFIGURED, DecisionProviderRecommender
-from gateway.core.config import GatewayConfig
 from gateway.exceptions.routing_exceptions import (
     RecommendationFailedError,
     RecommenderNotConfiguredError,
@@ -64,7 +63,13 @@ def _no_stored_routers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     reset_agent_recommenders()
 
 
-def _stored(*, enabled: bool = True, model: str = "stored-decider", api_base: str | None = None) -> AgentRecommender:
+def _stored(
+    *,
+    enabled: bool = True,
+    model: str = "stored-decider",
+    api_base: str | None = None,
+    input_price: Decimal = Decimal("20"),
+) -> AgentRecommender:
     return AgentRecommender(
         id=uuid.uuid4(),
         provider="openrouter",
@@ -72,19 +77,14 @@ def _stored(*, enabled: bool = True, model: str = "stored-decider", api_base: st
         api_base=api_base,
         encrypted_api_key=encrypt_secret(STORED_KEY),
         api_key_last4="1234",
-        input_price_per_million=Decimal("20"),
+        input_price_per_million=input_price,
         output_price_per_million=Decimal("0"),
         enabled=enabled,
     )
 
 
-def _recommender(**overrides: Any) -> DecisionProviderRecommender:
-    settings: dict[str, Any] = {
-        "decision_providers": {"typesafe": {"api_key": "ts-secret"}},
-        "agent_recommender_model": "typesafe:jev-latest",
-    }
-    settings.update(overrides)
-    return DecisionProviderRecommender(GatewayConfig(**settings))
+def _recommender() -> DecisionProviderRecommender:
+    return DecisionProviderRecommender()
 
 
 def _mock_decision(answer: dict[str, Any] | None = None, *, side_effect: Exception | None = None) -> Any:
@@ -92,28 +92,23 @@ def _mock_decision(answer: dict[str, Any] | None = None, *, side_effect: Excepti
     return patch("gateway.adapters.agent_model_recommender_adapter.request_decision", mock)
 
 
-def test_the_quote_is_the_configured_model_at_no_price_of_its_own() -> None:
-    assert _recommender().quote() == Quote(provider="typesafe", model="jev-latest", charge=None)
-
-
-def test_a_selector_naming_no_configured_provider_is_not_configured() -> None:
-    recommender = _recommender(agent_recommender_model="nope:jev")
-
-    with pytest.raises(RecommenderNotConfiguredError, match="decision provider"):
-        recommender.quote()
+def test_with_no_router_stored_nothing_answers() -> None:
+    with pytest.raises(RecommenderNotConfiguredError, match=NOT_CONFIGURED):
+        _recommender().quote()
 
 
 @pytest.mark.asyncio
-async def test_recommend_puts_one_question_to_the_configured_model() -> None:
+async def test_recommend_puts_one_question_to_the_stored_router() -> None:
+    apply_agent_recommenders([_stored()])
+
     with _mock_decision() as mock:
         recommendation = await _recommender().recommend(SPAWN, candidates=CANDIDATES)
 
     assert recommendation.model == "sonnet"
     assert recommendation.reason == "sonnet with 70%"
-    assert recommendation.usage == RecommendationUsage(input_tokens=800, output_tokens=0, charge=None)
     provider, sent = mock.await_args.args
-    assert provider.name == "typesafe"
-    assert sent["model"] == "jev-latest"
+    assert provider.name == "openrouter"
+    assert sent["model"] == "stored-decider"
     assert list(sent["questions"]) == [RECOMMENDATION_QUESTION]
     assert sent["questions"][RECOMMENDATION_QUESTION]["criteria"] == CANDIDATES
     assert "Subagent type: Explore" in sent["state"]
@@ -122,24 +117,17 @@ async def test_recommend_puts_one_question_to_the_configured_model() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_upstreams_own_charge_passes_through() -> None:
-    answer = {**ANSWER, "usage": {"input_tokens": 800, "output_tokens": 0, "cost": 0.0042}}
-    with _mock_decision(answer):
-        recommendation = await _recommender().recommend(SPAWN, candidates=CANDIDATES)
-
-    assert recommendation.usage.charge == Decimal("0.0042")
-
-
-@pytest.mark.asyncio
-async def test_recommend_on_an_unconfigured_provider_is_not_configured() -> None:
+async def test_recommend_with_no_router_stored_asks_nothing() -> None:
     with _mock_decision() as mock, pytest.raises(RecommenderNotConfiguredError):
-        await _recommender(agent_recommender_model="nope:jev").recommend(SPAWN, candidates=CANDIDATES)
+        await _recommender().recommend(SPAWN, candidates=CANDIDATES)
 
     mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_an_upstream_failure_keeps_its_status_and_names_no_body() -> None:
+    apply_agent_recommenders([_stored()])
+
     with (
         _mock_decision(side_effect=DecisionProviderError("typesafe decisions returned HTTP 429", status_code=429)),
         pytest.raises(RecommendationFailedError) as failure,
@@ -151,6 +139,7 @@ async def test_an_upstream_failure_keeps_its_status_and_names_no_body() -> None:
 
 @pytest.mark.asyncio
 async def test_an_answer_the_schema_refuses_is_unreadable() -> None:
+    apply_agent_recommenders([_stored()])
     answer = {"model": "jev", "answers": {}, "usage": {"input_tokens": 1, "output_tokens": 1, "cost": -1.0}}
     with _mock_decision(answer), pytest.raises(UnreadableRecommendationError, match="invalid field"):
         await _recommender().recommend(SPAWN, candidates=CANDIDATES)
@@ -158,6 +147,7 @@ async def test_an_answer_the_schema_refuses_is_unreadable() -> None:
 
 @pytest.mark.asyncio
 async def test_a_pick_outside_the_candidates_is_unreadable() -> None:
+    apply_agent_recommenders([_stored()])
     answer = {"model": "jev", "answers": {RECOMMENDATION_QUESTION: {"type": "choice", "choice": "gpt-5"}}}
     with _mock_decision(answer), pytest.raises(UnreadableRecommendationError):
         await _recommender().recommend(SPAWN, candidates=CANDIDATES)
@@ -178,6 +168,12 @@ def test_the_quote_is_the_stored_router_at_the_most_a_call_can_cost() -> None:
     assert quote == Quote(provider="otari", model="subagent-router", charge=Decimal("1.310720"), served_by="openrouter")
     assert recommender.quoted is not None
     assert recommender.quoted.model == "stored-decider"
+
+
+def test_a_free_router_quotes_and_charges_nothing() -> None:
+    apply_agent_recommenders([_stored(input_price=Decimal(0))])
+
+    assert _recommender().quote().charge == Decimal(0)
 
 
 def test_with_every_stored_router_off_nothing_answers() -> None:
@@ -266,23 +262,20 @@ async def test_a_slow_upstream_is_a_failure_that_names_no_vendor() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_upstream_failure_names_no_vendor_on_either_path() -> None:
-    for rows in ([_stored()], []):
-        apply_agent_recommenders(rows)
-        with (
-            _mock_decision(
-                side_effect=DecisionProviderError("openrouter decisions returned HTTP 500", status_code=500)
-            ),
-            pytest.raises(RecommendationFailedError) as failure,
-        ):
-            await _recommender().recommend(SPAWN, candidates=CANDIDATES)
-        assert str(failure.value) == "The recommender failed (500)"
-        assert failure.value.upstream_status == 500
-        with (
-            _mock_decision(side_effect=DecisionProviderError("openrouter decisions could not be reached")),
-            pytest.raises(RecommendationFailedError, match="could not be reached"),
-        ):
-            await _recommender().recommend(SPAWN, candidates=CANDIDATES)
+async def test_an_upstream_failure_names_no_vendor() -> None:
+    apply_agent_recommenders([_stored()])
+    with (
+        _mock_decision(side_effect=DecisionProviderError("openrouter decisions returned HTTP 500", status_code=500)),
+        pytest.raises(RecommendationFailedError) as failure,
+    ):
+        await _recommender().recommend(SPAWN, candidates=CANDIDATES)
+    assert str(failure.value) == "The recommender failed (500)"
+    assert failure.value.upstream_status == 500
+    with (
+        _mock_decision(side_effect=DecisionProviderError("openrouter decisions could not be reached")),
+        pytest.raises(RecommendationFailedError, match="could not be reached"),
+    ):
+        await _recommender().recommend(SPAWN, candidates=CANDIDATES)
 
 
 @pytest.mark.asyncio

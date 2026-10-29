@@ -11,7 +11,6 @@ import pytest
 from gateway.models.routing import AgentRecommender
 from gateway.services.routing import (
     RecommenderPrice,
-    RecommenderSource,
     active_agent_recommender,
     apply_agent_recommenders,
     load_agent_recommenders_at_startup,
@@ -44,10 +43,10 @@ def _row(*, enabled: bool, key: str | None = "sk-decider-wxyz", model: str = "de
     )
 
 
-def test_with_no_rows_the_configured_model_answers() -> None:
+def test_with_no_rows_nothing_answers() -> None:
     apply_agent_recommenders([])
 
-    assert active_agent_recommender().source is RecommenderSource.CONFIGURED
+    assert active_agent_recommender() is None
 
 
 def test_the_row_switched_on_answers_with_its_key_read_back() -> None:
@@ -55,18 +54,17 @@ def test_the_row_switched_on_answers_with_its_key_read_back() -> None:
     apply_agent_recommenders([_row(enabled=False, model="other"), on])
 
     active = active_agent_recommender()
-    assert active.source is RecommenderSource.STORED
-    assert active.stored is not None
-    assert (active.stored.id, active.stored.provider, active.stored.model) == (on.id, "typesafe", "decider")
-    assert active.stored.api_key == "sk-decider-wxyz"
-    assert active.stored.price == RecommenderPrice(input_price_per_million=Decimal("3"))
-    assert "sk-decider" not in repr(active.stored)
+    assert active is not None
+    assert (active.id, active.provider, active.model) == (on.id, "typesafe", "decider")
+    assert active.api_key == "sk-decider-wxyz"
+    assert active.price == RecommenderPrice(input_price_per_million=Decimal("3"))
+    assert "sk-decider" not in repr(active)
 
 
 def test_with_every_row_off_nothing_answers() -> None:
     apply_agent_recommenders([_row(enabled=False), _row(enabled=False, model="other")])
 
-    assert active_agent_recommender() == snapshot_module._NONE
+    assert active_agent_recommender() is None
 
 
 def test_a_key_that_cannot_be_read_answers_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -75,15 +73,15 @@ def test_a_key_that_cannot_be_read_answers_nothing(monkeypatch: pytest.MonkeyPat
 
     apply_agent_recommenders([on])
 
-    assert active_agent_recommender().source is RecommenderSource.NONE
+    assert active_agent_recommender() is None
 
 
-def test_a_reset_hands_back_to_the_configured_model() -> None:
-    apply_agent_recommenders([_row(enabled=False)])
+def test_a_reset_forgets_the_row_switched_on() -> None:
+    apply_agent_recommenders([_row(enabled=True)])
 
     reset_agent_recommenders()
 
-    assert active_agent_recommender().source is RecommenderSource.CONFIGURED
+    assert active_agent_recommender() is None
 
 
 @pytest.mark.asyncio
@@ -95,17 +93,18 @@ async def test_a_failed_first_load_answers_nothing_until_a_load_succeeds(monkeyp
 
     monkeypatch.setattr(snapshot_module, "create_unit_of_work", database_down)
 
+    apply_agent_recommenders([_row(enabled=True)])
+
     await load_agent_recommenders_at_startup()
 
-    # The rows may have switched the configured model off.
-    assert active_agent_recommender().source is RecommenderSource.NONE
-    apply_agent_recommenders([])
-    assert active_agent_recommender().source is RecommenderSource.CONFIGURED
+    assert active_agent_recommender() is None
+    apply_agent_recommenders([_row(enabled=True)])
+    assert active_agent_recommender() is not None
 
 
 @pytest.mark.asyncio
 async def test_a_refresh_that_read_before_a_write_does_not_undo_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    switched_off = _row(enabled=False)
+    switched_on = _row(enabled=True)
 
     class ReadBeforeTheWrite:
         def __init__(self, _uow: object) -> None:
@@ -113,7 +112,7 @@ async def test_a_refresh_that_read_before_a_write_does_not_undo_it(monkeypatch: 
 
         async def list_all(self) -> list[AgentRecommender]:
             # The write commits and lands while this read is in flight.
-            apply_agent_recommenders([switched_off])
+            apply_agent_recommenders([switched_on])
             return []
 
     class Block:
@@ -127,4 +126,6 @@ async def test_a_refresh_that_read_before_a_write_does_not_undo_it(monkeypatch: 
 
     await refresh_agent_recommenders(Block())  # type: ignore[arg-type]
 
-    assert active_agent_recommender().source is RecommenderSource.NONE
+    active = active_agent_recommender()
+    assert active is not None
+    assert active.id == switched_on.id

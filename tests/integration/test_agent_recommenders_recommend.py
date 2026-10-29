@@ -3,8 +3,8 @@
 The upstream decision call is stubbed at ``request_decision`` where the core
 adapter calls it. These pin which router answers and what the caller is
 charged: the row switched on at its rates, the hold when the upstream reports
-no tokens, nothing for a free router, the configured model with no row stored,
-and nothing with every row off. Nothing the operator stored, and nothing the caller sent, reaches a
+no tokens, nothing for a free router, and nothing answering with no row
+stored or every row off. Nothing the operator stored, and nothing the caller sent, reaches a
 log or a usage row.
 """
 
@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.adapters.agent_model_recommender_adapter import NOT_CONFIGURED
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT
 from gateway.log_config import logger as gateway_logger
 from gateway.services.inference import DecisionProviderError
 from gateway.services.routing.recommend import RECOMMENDATION_QUESTION
@@ -44,21 +44,6 @@ ANSWER: dict[str, Any] = {
 def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     yield
-
-
-@pytest.fixture
-def test_config(postgres_url: str) -> GatewayConfig:
-    """A TypeSafe decisions provider, which answers only while no router is stored."""
-    return GatewayConfig(
-        database_url=postgres_url,
-        master_key="test-master-key",
-        host="127.0.0.1",
-        port=8000,
-        auto_migrate=False,
-        require_pricing=False,
-        decision_providers={"typesafe": {"api_key": "ts-secret"}},
-        agent_recommender_model="typesafe:jev-latest",
-    )
 
 
 @pytest.fixture
@@ -208,6 +193,28 @@ def test_with_every_router_off_nothing_answers(
     mock.assert_not_awaited()
 
 
+def test_with_no_router_stored_nothing_answers(client: TestClient, api_key_header: dict[str, str]) -> None:
+    with _mock_decision() as mock:
+        response = client.post(RECOMMEND, json=_spawn(), headers=api_key_header)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == NOT_CONFIGURED
+    mock.assert_not_awaited()
+
+
+def test_a_router_removed_leaves_nothing_to_answer(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str]
+) -> None:
+    stored = _store(client, master_key_header)
+    assert client.delete(f"{ROUTERS}/{stored['id']}", headers=master_key_header).status_code == 204
+
+    with _mock_decision() as mock:
+        response = client.post(RECOMMEND, json=_spawn(), headers=api_key_header)
+
+    assert response.status_code == 400, response.text
+    mock.assert_not_awaited()
+
+
 def test_a_free_router_answers_at_no_charge(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -225,35 +232,6 @@ def test_a_free_router_answers_at_no_charge(
     assert float(row["cost"]) == 0
     user = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}", headers=master_key_header).json()
     assert (user["spend"], user["reserved"]) == (pytest.approx(0.0), pytest.approx(0.0))
-
-
-def test_with_no_router_stored_the_configured_model_answers_unpriced(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    master_key_header: dict[str, str],
-    api_key_obj: dict[str, Any],
-) -> None:
-    with _mock_decision() as mock:
-        response = client.post(RECOMMEND, json=_spawn(), headers=api_key_header)
-
-    assert response.status_code == 200, response.text
-    provider, sent = mock.await_args.args
-    assert (provider.name, provider.api_key, sent["model"]) == ("typesafe", "ts-secret", "jev-latest")
-    (row,) = _usage_rows(client, master_key_header, api_key_obj["user_id"])
-    assert (row["provider"], row["model"], row["cost"]) == ("typesafe", "jev-latest", None)
-
-
-def test_a_router_removed_hands_back_to_the_configured_model(
-    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str]
-) -> None:
-    stored = _store(client, master_key_header)
-    assert client.delete(f"{ROUTERS}/{stored['id']}", headers=master_key_header).status_code == 204
-
-    with _mock_decision() as mock:
-        response = client.post(RECOMMEND, json=_spawn(), headers=api_key_header)
-
-    assert response.status_code == 200, response.text
-    assert mock.await_args.args[1]["model"] == "jev-latest"
 
 
 def test_neither_the_key_nor_the_task_reaches_a_log_or_a_usage_row(

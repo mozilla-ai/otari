@@ -3,8 +3,8 @@
 Who reaches it and how it refuses, that no response body ever carries key
 material, and what each route does to the rows: the first router added is
 on, a later one waits, switching one on switches the others off, a price
-change keeps the key, and with every row gone the configured model answers
-again. The decision call itself is covered by
+change keeps the key, and every row can be removed. The decision call
+itself is covered by
 ``test_agent_recommenders_recommend.py``.
 """
 
@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.repositories.routing import AgentRecommenderRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -34,21 +34,6 @@ SECOND_KEY = "ts-second-router-5678"
 def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     yield
-
-
-@pytest.fixture
-def test_config(postgres_url: str) -> GatewayConfig:
-    """A TypeSafe decisions provider, so the configured decision model resolves and is listed."""
-    return GatewayConfig(
-        database_url=postgres_url,
-        master_key="test-master-key",
-        host="127.0.0.1",
-        port=8000,
-        auto_migrate=False,
-        require_pricing=False,
-        decision_providers={"typesafe": {"api_key": "ts-secret"}},
-        agent_recommender_model="typesafe:jev-latest",
-    )
 
 
 def _create(client: TestClient, headers: dict[str, str], **fields: Any) -> dict[str, Any]:
@@ -99,16 +84,11 @@ def _session_for(session_factory: Callable[[], Session], *, email: str) -> str:
         session.close()
 
 
-def test_with_nothing_stored_the_configured_model_is_listed(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_with_nothing_stored_the_list_is_empty(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.get(PATH, headers=master_key_header)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {
-        "data": [],
-        "configured": {"selector": "typesafe:jev-latest", "provider": "typesafe", "model": "jev-latest"},
-    }
+    assert response.json() == {"data": []}
 
 
 def test_anyone_but_the_operator_finds_no_such_surface(
@@ -257,9 +237,7 @@ def test_a_router_that_is_not_there_is_not_found(client: TestClient, master_key_
     assert client.delete(f"{PATH}/{missing}", headers=master_key_header).status_code == 404
 
 
-def test_removing_every_router_hands_back_to_the_configured_model(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_every_router_can_be_removed(client: TestClient, master_key_header: dict[str, str]) -> None:
     first = _create(client, master_key_header)
     second = _create(client, master_key_header, provider="typesafe", model="second-decider", api_key=SECOND_KEY)
 
@@ -267,9 +245,7 @@ def test_removing_every_router_hands_back_to_the_configured_model(
     assert client.delete(f"{PATH}/{second['id']}", headers=master_key_header).status_code == 204
     assert client.delete(f"{PATH}/{second['id']}", headers=master_key_header).status_code == 404
 
-    listed = client.get(PATH, headers=master_key_header).json()
-    assert listed["data"] == []
-    assert listed["configured"]["selector"] == "typesafe:jev-latest"
+    assert client.get(PATH, headers=master_key_header).json() == {"data": []}
 
 
 def test_the_keys_are_stored_encrypted_and_never_answered(

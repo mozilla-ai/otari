@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
-from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.routing import AgentRecommenderRepository
 from gateway.schemas.routing import AgentRecommenderCreate, AgentRecommenderUpdate
@@ -39,7 +38,7 @@ async def service() -> AsyncIterator[AgentRecommenderService]:
             await conn.run_sync(SQLModel.metadata.create_all)
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             uow = UnitOfWork(session)
-            yield AgentRecommenderService(uow, AgentRecommenderRepository(uow), GatewayConfig())
+            yield AgentRecommenderService(uow, AgentRecommenderRepository(uow))
     finally:
         await engine.dispose()
 

@@ -1,12 +1,9 @@
-"""The core recommender: one choice question to the decision model this deployment chose.
+"""The core recommender: one choice question to the subagent router this deployment switched on.
 
-Which model that is follows the stored subagent routers
-(``services/routing``): the one switched on answers at the token rates stored
-with it, so the quote carries the most one call can cost and the usage reports
-what the tokens came to, under the label ``otari:subagent-router``. With none
-stored, ``agent_recommender_model``, a ``decision_providers`` selector, answers
-at no price of its own, and the usage reports the charge the upstream itself
-stated, where it stated one.
+The stored subagent router switched on (``services/routing``) answers at the
+token rates stored with it, so the quote carries the most one call can cost
+and the usage reports what the tokens came to, under the label
+``otari:subagent-router``. With none switched on, nothing answers.
 
 One instance per request: it keeps the router it quoted, so a change the
 operator makes before the call cannot send it elsewhere or reprice it. What
@@ -20,7 +17,6 @@ from collections.abc import Mapping
 
 from pydantic import ValidationError
 
-from gateway.core.config import GatewayConfig
 from gateway.exceptions.routing_exceptions import (
     RecommendationFailedError,
     RecommenderNotConfiguredError,
@@ -37,16 +33,13 @@ from gateway.schemas.inference import DecisionResponse
 from gateway.services.inference import (
     DecisionProvider,
     DecisionProviderError,
-    UnknownDecisionProviderError,
     decision_body,
     decision_provider_for,
     request_decision,
-    resolve_decision_provider,
 )
 from gateway.services.routing import (
     ROUTER_LABEL_MODEL,
     ROUTER_LABEL_PROVIDER,
-    RecommenderSource,
     StoredRecommender,
     active_agent_recommender,
     build_decision_request,
@@ -64,48 +57,27 @@ TIMEOUT_SECONDS = 2.5
 
 
 class DecisionProviderRecommender(AgentModelRecommenderPort):
-    """``AgentModelRecommenderPort`` adapter that asks the deployment's decision model."""
+    """``AgentModelRecommenderPort`` adapter that asks the deployment's subagent router."""
 
-    def __init__(self, config: GatewayConfig) -> None:
-        self._config = config
+    def __init__(self) -> None:
         self._stored: StoredRecommender | None = None
-        self._configured: tuple[DecisionProvider, str] | None = None
 
     @property
     def quoted(self) -> StoredRecommender | None:
-        """The stored router this instance quoted, or None where the configured model answers."""
+        """The stored router this instance quoted, or None before a quote."""
         return self._stored
 
     def quote(self) -> Quote:
-        active = active_agent_recommender()
-        if active.source is RecommenderSource.STORED and active.stored is not None:
-            self._stored = active.stored
-            return Quote(
-                provider=ROUTER_LABEL_PROVIDER,
-                model=ROUTER_LABEL_MODEL,
-                charge=active.stored.price.hold(),
-                served_by=active.stored.provider,
-            )
-        if active.source is RecommenderSource.NONE:
-            raise RecommenderNotConfiguredError(NOT_CONFIGURED)
-        provider, model = self._resolve_configured()
-        return Quote(provider=provider.name, model=model)
+        stored = self._router()
+        return Quote(
+            provider=ROUTER_LABEL_PROVIDER,
+            model=ROUTER_LABEL_MODEL,
+            charge=stored.price.hold(),
+            served_by=stored.provider,
+        )
 
     async def recommend(self, spawn: SubagentSpawn, *, candidates: Mapping[str, str | None]) -> ModelRecommendation:
-        if self._stored is None and self._configured is None:
-            self.quote()
-        if self._stored is not None:
-            return await self._ask_stored(self._stored, spawn, candidates)
-        provider, model = self._resolve_configured()
-        request = build_decision_request(
-            spawn, decision_model=self._config.agent_recommender_model, candidates=candidates
-        )
-        answer = await self._ask(provider, decision_body(request, model))
-        return recommendation_from_decision(answer, candidates=candidates)
-
-    async def _ask_stored(
-        self, stored: StoredRecommender, spawn: SubagentSpawn, candidates: Mapping[str, str | None]
-    ) -> ModelRecommendation:
+        stored = self._router()
         provider = decision_provider_for(
             stored.provider,
             stored.provider,
@@ -140,6 +112,15 @@ class DecisionProviderRecommender(AgentModelRecommenderPort):
             ),
         )
 
+    def _router(self) -> StoredRecommender:
+        """The router switched on when this instance first asked, kept for the rest of the request."""
+        if self._stored is None:
+            stored = active_agent_recommender()
+            if stored is None:
+                raise RecommenderNotConfiguredError(NOT_CONFIGURED)
+            self._stored = stored
+        return self._stored
+
     @staticmethod
     async def _ask(provider: DecisionProvider, body: dict[str, object]) -> DecisionResponse:
         """Put the question, within the deadline, and read the answer; the errors name no vendor."""
@@ -161,11 +142,3 @@ class DecisionProviderRecommender(AgentModelRecommenderPort):
             # The error's own text quotes the upstream body, so only its size is kept.
             msg = f"The recommender's answer was unreadable ({exc.error_count()} invalid field(s))"
             raise UnreadableRecommendationError(msg) from None
-
-    def _resolve_configured(self) -> tuple[DecisionProvider, str]:
-        if self._configured is None:
-            try:
-                self._configured = resolve_decision_provider(self._config, self._config.agent_recommender_model)
-            except UnknownDecisionProviderError as exc:
-                raise RecommenderNotConfiguredError(str(exc)) from exc
-        return self._configured

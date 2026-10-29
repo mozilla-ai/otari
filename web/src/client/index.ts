@@ -364,11 +364,9 @@ export type HostedModel = Schemas["HostedModelPublic"]
 // The decision models that pick a subagent's model when a coding agent asks,
 // and the two token rates a recommendation is charged at. Deployment-wide and
 // operator-only, like the hosted providers above, and keyed on a row id. A
-// stored key is known by its last four characters and nothing else. The list
-// also names the decision model config.yml falls back to while no row is stored.
+// stored key is known by its last four characters and nothing else.
 export type AgentRecommender = Schemas["AgentRecommenderPublic"]
 export type AgentRecommenders = Schemas["AgentRecommendersPublic"]
-export type ConfiguredRecommender = Schemas["ConfiguredRecommenderPublic"]
 export type CreateAgentRecommenderRequest = Schemas["AgentRecommenderCreate"]
 export type UpdateAgentRecommenderRequest = Schemas["AgentRecommenderUpdate"]
 export type HostedModels = Schemas["HostedModelsPublic"]

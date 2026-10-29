@@ -1718,12 +1718,9 @@ def get_hosted_provider_service(
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
 
 
-def get_agent_recommender_service(
-    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> AgentRecommenderService:
+def get_agent_recommender_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> AgentRecommenderService:
     """Build the subagent router service on the request's unit of work."""
-    return AgentRecommenderService(uow, AgentRecommenderRepository(uow), config)
+    return AgentRecommenderService(uow, AgentRecommenderRepository(uow))
 
 
 AgentRecommenderServiceDep = Annotated[AgentRecommenderService, Depends(get_agent_recommender_service)]
