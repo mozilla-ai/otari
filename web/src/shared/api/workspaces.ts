@@ -499,6 +499,26 @@ export function useSetWorkspaceTraceContent() {
   })
 }
 
+// Whether the workspace's keys may name MCP servers by URL in a request, beside
+// the stored servers whose access lists the workspace controls. A switch, like
+// the one above: it takes effect when flipped.
+export function useSetWorkspaceRequestMcpServers() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, allowed }: { id: string; allowed: boolean }) =>
+      apiFetch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ request_mcp_servers_allowed: allowed }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES],
+        exact: true,
+      })
+    },
+  })
+}
+
 // Deletes what the workspace's sessions were about; the sessions stay.
 export function useDeleteWorkspaceTraceContent() {
   const queryClient = useQueryClient()

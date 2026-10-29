@@ -2331,6 +2331,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mcp/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Servers
+         * @description List the enabled stored MCP servers this API key can reach.
+         *
+         *     A server appears when its access list grants the key something: the key's own grant, else its
+         *     owner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`
+         *     (or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and
+         *     the token are never returned. A master key has no workspace and is refused with a 404.
+         */
+        get: operations["mcp-list_mcp_servers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp/servers/{mcp_server_id}/tools": {
         parameters: {
             query?: never;
@@ -6901,6 +6926,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Mcp Key Access
+         * @description What one key reaches on each of the workspace's MCP servers.
+         *
+         *     Organization owners/admins or this workspace's owners/admins.
+         *
+         *     For each server, oldest first: the rule that decides (the key's own grant, its owner's, or the
+         *     server's `everyone_tools`) and that rule's tool patterns, beside the server's own `allowed_tools`
+         *     ceiling. A key of another workspace is refused with a 400.
+         */
+        get: operations["mcp-servers-get_workspace_mcp_key_access"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}": {
         parameters: {
             query?: never;
@@ -6908,7 +6959,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Workspace Mcp Server
+         * @description One MCP server of a workspace. Readable by any member who can see the workspace, as the list is.
+         */
+        get: operations["mcp-servers-get_workspace_mcp_server"];
         put?: never;
         post?: never;
         /**
@@ -6925,9 +6980,113 @@ export interface paths {
          *     Only the fields sent are applied. Omit `authorization_token` to leave the
          *     stored token alone, send an empty string to clear it, or send a value to
          *     rotate it. A change to the URL, the token or the allow-list checks the
-         *     server again, as creating it does.
+         *     server again, as creating it does. `everyone_tools` is what every key of
+         *     the workspace may call; the server's grants override it per key or user.
          */
         patch: operations["mcp-servers-update_workspace_mcp_server"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Mcp Server Access
+         * @description A server's access list. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     `everyone_tools` is what every key of the workspace may call. Each grant overrides it for one
+         *     key, or for one user and so every key they own; a key's own grant decides over its owner's.
+         *     Tool patterns are names, `*` or `prefix*`, and `[]` denies. The server's `allowed_tools` is a
+         *     ceiling over all of them. A server holds at most 1000 grants, returned oldest first.
+         */
+        get: operations["mcp-servers-get_workspace_mcp_server_access"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check Workspace Mcp Server Access
+         * @description Whether a key may call a tool on a server, and which rule decides.
+         *
+         *     Organization owners/admins or this workspace's owners/admins.
+         *
+         *     Applies the same order a request does: the server must be enabled and its `allowed_tools`
+         *     must include the tool, then the key's own grant decides, else its owner's, else the
+         *     server's `everyone_tools`. A key of another workspace is refused with a 400.
+         */
+        get: operations["mcp-servers-check_workspace_mcp_server_access"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Workspace Mcp Server Grants
+         * @description Give keys and users the same tools on a server.
+         *
+         *     Organization owners/admins or this workspace's owners/admins.
+         *
+         *     A key or user that already has a grant on the server gets these tools instead. A key must
+         *     belong to this workspace, and a user must own a key in it; either is otherwise refused with
+         *     a 400. Answers with the server's whole access list.
+         */
+        post: operations["mcp-servers-add_workspace_mcp_server_grants"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Mcp Server Grant
+         * @description Remove one grant, so its key or user falls back to the next rule.
+         *
+         *     Organization owners/admins or this workspace's owners/admins.
+         */
+        delete: operations["mcp-servers-delete_workspace_mcp_server_grant"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Workspace Mcp Server Grant
+         * @description Change the tools of one grant. Organization owners/admins or this workspace's owners/admins.
+         */
+        patch: operations["mcp-servers-update_workspace_mcp_server_grant"];
         trace?: never;
     };
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check": {
@@ -12708,6 +12867,29 @@ export interface components {
             purpose_hint?: string | null;
             /** Url */
             url: string;
+        };
+        /**
+         * McpServerSummary
+         * @description A stored server as a caller sees it: enough to name it in ``mcp_server_ids``, never its URL or token.
+         */
+        McpServerSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Purpose Hint */
+            purpose_hint: string | null;
+        };
+        /**
+         * McpServersResponse
+         * @description The enabled stored servers the authenticated key can reach.
+         */
+        McpServersResponse: {
+            /** Servers */
+            servers: components["schemas"]["McpServerSummary"][];
         };
         /**
          * McpToolDefinition
@@ -18967,6 +19149,43 @@ export interface components {
             name: string;
         };
         /**
+         * WorkspaceMcpServerAccess
+         * @description A stored server's access list: what everyone may call, and the exceptions for keys and users.
+         *
+         *     A key's own grant decides over its owner's, and either decides over ``everyone_tools``. The
+         *     server's ``allowed_tools`` is a ceiling over all of them.
+         */
+        WorkspaceMcpServerAccess: {
+            /** Everyone Tools */
+            everyone_tools: string[];
+            /** Grants */
+            grants: components["schemas"]["WorkspaceMcpServerGrantPublic"][];
+        };
+        /**
+         * WorkspaceMcpServerAccessCheck
+         * @description Whether one key may call one tool on a server, and which rule says so.
+         */
+        WorkspaceMcpServerAccessCheck: {
+            /** Allowed */
+            allowed: boolean;
+            /**
+             * Decided By
+             * @description The key's own grant, its owner's, the server's everyone_tools, or the server itself (disabled, or its allowed_tools leaves the tool out)
+             * @enum {string}
+             */
+            decided_by: "key" | "user" | "everyone" | "server";
+            /**
+             * Grant Id
+             * @description The deciding grant, when a grant decided
+             */
+            grant_id: string | null;
+            /**
+             * Tools
+             * @description The deciding rule's tool patterns; the server's allowed_tools when it decided
+             */
+            tools: string[];
+        };
+        /**
          * WorkspaceMcpServerCheckRequest
          * @description Connection details to check without storing them, for a form to test before it saves.
          *
@@ -19022,6 +19241,11 @@ export interface components {
              */
             enabled: boolean;
             /**
+             * Everyone Tools
+             * @description What every key of the workspace may call on this server: tool names, '*' for every tool, or 'prefix*'; [] denies everyone. A grant for a key or its owner overrides it
+             */
+            everyone_tools?: string[];
+            /**
              * Name
              * @description Label for the server, unique within the workspace
              */
@@ -19036,6 +19260,74 @@ export interface components {
              * @description Streamable HTTP MCP endpoint
              */
             url: string;
+        };
+        /**
+         * WorkspaceMcpServerGrantPublic
+         * @description One exception to a server's ``everyone_tools``: for a key, or for a user and so every key they own.
+         */
+        WorkspaceMcpServerGrantPublic: {
+            /**
+             * Api Key Id
+             * @description The key a key grant names; null on a user's grant
+             */
+            api_key_id: string | null;
+            /** Created At */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Key Active
+             * @description Whether a key grant's key is active
+             */
+            key_active?: boolean | null;
+            /** Key Name */
+            key_name?: string | null;
+            /**
+             * Subject
+             * @enum {string}
+             */
+            subject: "key" | "user";
+            /**
+             * Tools
+             * @description Tool patterns: names, '*' or 'prefix*'; [] denies
+             */
+            tools: string[];
+            /** Updated At */
+            updated_at: string;
+            /**
+             * User Id
+             * @description The user a grant names, or the owner of a key grant's key
+             */
+            user_id: string | null;
+        };
+        /**
+         * WorkspaceMcpServerGrantUpdate
+         * @description New tools for one grant.
+         */
+        WorkspaceMcpServerGrantUpdate: {
+            /**
+             * Tools
+             * @description Tool patterns: names, '*' or 'prefix*'; [] denies
+             */
+            tools: string[];
+        };
+        /**
+         * WorkspaceMcpServerGrantsCreate
+         * @description Grant the same tools to several keys and users at once; a subject that already has a grant gets these tools.
+         */
+        WorkspaceMcpServerGrantsCreate: {
+            /** Api Key Ids */
+            api_key_ids?: string[];
+            /**
+             * Tools
+             * @description Tool patterns: names, '*' or 'prefix*'; [] denies
+             */
+            tools: string[];
+            /** User Ids */
+            user_ids?: string[];
         };
         /**
          * WorkspaceMcpServerHealth
@@ -19077,6 +19369,38 @@ export interface components {
             tools?: string[];
         };
         /**
+         * WorkspaceMcpServerKeyAccess
+         * @description What one key reaches on one stored server, and which rule decides it.
+         */
+        WorkspaceMcpServerKeyAccess: {
+            /**
+             * Allowed Tools
+             * @description The server's own ceiling; null exposes every tool
+             */
+            allowed_tools: string[] | null;
+            /**
+             * Decided By
+             * @enum {string}
+             */
+            decided_by: "key" | "user" | "everyone";
+            /** Enabled */
+            enabled: boolean;
+            /** Grant Id */
+            grant_id: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /**
+             * Tools
+             * @description The deciding rule's tool patterns; [] means the key cannot reach the server
+             */
+            tools: string[];
+        };
+        /**
          * WorkspaceMcpServerPublic
          * @description The API-facing shape. Never carries the token, only whether one is set.
          *
@@ -19092,6 +19416,11 @@ export interface components {
             created_at: string;
             /** Enabled */
             enabled: boolean;
+            /**
+             * Everyone Tools
+             * @description What every key of the workspace may call; [] denies everyone
+             */
+            everyone_tools: string[];
             /** Has Token */
             has_token: boolean;
             /** @description The last connection check; null until one has run */
@@ -19133,6 +19462,8 @@ export interface components {
             authorization_token?: string | null;
             /** Enabled */
             enabled?: boolean;
+            /** Everyone Tools */
+            everyone_tools?: string[];
             /** Name */
             name?: string;
             /** Purpose Hint */
@@ -19342,6 +19673,12 @@ export interface components {
              */
             organization_id: string;
             /**
+             * Request Mcp Servers Allowed
+             * @description Whether this workspace's keys may name MCP servers by URL in a request.
+             * @default true
+             */
+            request_mcp_servers_allowed: boolean;
+            /**
              * Trace Content Enabled
              * @description Whether this workspace keeps what its agent sessions were about.
              * @default false
@@ -19356,6 +19693,11 @@ export interface components {
             description?: string | null;
             /** Name */
             name?: string | null;
+            /**
+             * Request Mcp Servers Allowed
+             * @description Let this workspace's keys name MCP servers by URL in a request (mcp_servers), beside the stored servers whose access lists the workspace controls.
+             */
+            request_mcp_servers_allowed?: boolean | null;
             /**
              * Trace Content Enabled
              * @description Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.
@@ -23379,6 +23721,71 @@ export interface operations {
             };
             /** @description Gateway Timeout */
             504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpErrorBody"];
+                };
+            };
+        };
+    };
+    "mcp-list_mcp_servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServersResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpErrorBody"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpErrorBody"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -31117,6 +31524,70 @@ export interface operations {
             };
         };
     };
+    "mcp-servers-get_workspace_mcp_key_access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                api_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerKeyAccess"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-get_workspace_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "mcp-servers-delete_workspace_mcp_server": {
         parameters: {
             query?: never;
@@ -31172,6 +31643,181 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-get_workspace_mcp_server_access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerAccess"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-check_workspace_mcp_server_access": {
+        parameters: {
+            query: {
+                /** @description The key to test */
+                api_key_id: string;
+                /** @description The tool name to test */
+                tool: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerAccessCheck"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-add_workspace_mcp_server_grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerGrantsCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerAccess"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-delete_workspace_mcp_server_grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerAccess"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-update_workspace_mcp_server_grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerGrantUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerAccess"];
                 };
             };
             /** @description Validation Error */

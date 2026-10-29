@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Outlet } from "@tanstack/react-router"
 
-import { McpServersPage } from "@/features/tools/McpServersPage"
-
+// A layout, not a page: the list lives in tools.mcp-servers.index.tsx and a
+// server's own page in tools.mcp-servers.$serverId.tsx; this only nests them.
 export const Route = createFileRoute("/tools/mcp-servers")({
-  component: McpServersPage,
+  component: Outlet,
 })

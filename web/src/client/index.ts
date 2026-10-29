@@ -658,6 +658,16 @@ export type GuardrailTestResult =
 export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
 export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
 export type WorkspaceMcpServerHealth = Schemas["WorkspaceMcpServerHealth"]
+// A stored server's access list (`everyone_tools` and the grants that override
+// it per key or per person), one key's verdict for one tool, and what one key
+// reaches on each server.
+export type WorkspaceMcpServerAccess = Schemas["WorkspaceMcpServerAccess"]
+export type WorkspaceMcpServerGrant = Schemas["WorkspaceMcpServerGrantPublic"]
+export type CreateWorkspaceMcpServerGrantsRequest =
+  Schemas["WorkspaceMcpServerGrantsCreate"]
+export type WorkspaceMcpServerAccessCheck =
+  Schemas["WorkspaceMcpServerAccessCheck"]
+export type WorkspaceMcpServerKeyAccess = Schemas["WorkspaceMcpServerKeyAccess"]
 export type McpServerCheckFailure = Schemas["CheckFailure"]
 export type CheckWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCheckRequest"]

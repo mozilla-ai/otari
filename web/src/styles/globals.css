@@ -2732,6 +2732,12 @@ main {
   width: 8.5rem;
   min-width: 8.5rem;
 }
+/* A server's exceptions: two 24px actions keep a fixed lane while who and
+   what share the rest. */
+.otari-mcp-grants-table .table__column[data-key="actions"] {
+  width: 6rem;
+  min-width: 6rem;
+}
 .otari-budgets-table .table__row .table__cell {
   height: 3.625rem;
   padding-block: 0;
