@@ -253,16 +253,40 @@ effective weighted shares, and mandatory guardrails. The API equivalent is
 
 A policy decides the model of a request that reaches Otari. A coding agent that
 talks to its provider directly can still ask Otari which model a new subagent
-should run on, through `POST /api/v1/routing/recommend`. A self-run
-deployment puts one choice question to the decision model it configured and
-recommends the candidate it picks; on otari.ai a managed recommender answers
-instead. The harness that asks picks the candidates: Claude Code chooses among
-its own `haiku`, `sonnet` and `opus` aliases, and pi, through
+should run on, through `POST /api/v1/routing/recommend`. Otari puts one
+choice question to a decision model and recommends the candidate it picks. The
+harness that asks picks the candidates: Claude Code chooses among its own
+`haiku`, `sonnet` and `opus` aliases, and pi, through
 [pi-otari](https://github.com/mozilla-ai/pi-otari), among the Otari model ids
-it sends with the request.
-Either way the recommendation is billed to the caller, and nothing
-else is dispatched. See
+it sends with the request. The recommendation is billed to the caller, and
+nothing else is dispatched. See
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
+
+### Subagent routers
+
+Which decision model answers is set on the **Subagent router** page of the
+deployment view (`/api/v1/routing/recommenders`, operator-only). A router is a
+decision provider (TypeSafe, OpenRouter or a llama.cpp server), a model, an
+optional API base, a key stored encrypted under `OTARI_SECRET_KEY`, and the
+price per million input and output tokens the caller is charged. Several may
+be stored and one is switched on at a time: the first one added is on, and
+switching a later one on switches the rest off.
+
+A router answers at its own price. Before the call Otari holds the most one
+recommendation can cost, 65,536 input and 1,024 output tokens at the router's
+rates, and after it charges the tokens the decision model reported, or the
+hold when it reported none. The usage row names `otari:subagent-router`, never
+the router's own provider or model, and that label is what an API key's
+allow-list has to admit. A router that does
+not answer within 2.5 seconds fails the call, uncharged, so the otari-router
+plugin can fall back in time. An operator who wants a margin on the decision
+model's own price puts it in the rates.
+
+With no router stored, the decision model `agent_recommender_model` names in
+`config.yml` answers, priced from the deployment's own `pricing` rows or not at
+all. With routers stored and every one switched off, nothing answers and the
+route refuses with 400. A write reaches its own gateway worker at once and
+every other worker or replica within 30 seconds.
 
 ## Managing policies at runtime
 

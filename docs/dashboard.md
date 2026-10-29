@@ -175,6 +175,16 @@ gateway process rather than to any organization on it:
   automatically at startup. Any that could not be moved are listed in a banner
   with the reason: once the cause is fixed, move it from there, or Discard it,
   since a row left behind serves nothing.
+- Subagent router, the decision models that pick the model a coding agent's
+  subagent runs on when the otari-router plugin for Claude Code, or pi-otari,
+  asks `POST /api/v1/routing/recommend`. A router is a provider (TypeSafe,
+  OpenRouter or a llama.cpp server), a model, an optional API base, a key stored
+  encrypted and shown by its last four characters, and the price per million
+  input and output tokens the caller is charged. Several may be added and one
+  is switched on at a time: the first one added is on, and the Serving switch
+  moves it. With none added, the decision model `agent_recommender_model` names
+  in `config.yml` answers, unpriced; with every router switched off, nothing
+  does. See [Subagent routers](routing.md#subagent-routers).
 - Web search, the search and fetch tools the deployment runs for every
   workspace and what each call costs. Its two tables list the search tools and
   the fetch tools, `builtin_fetch` first, each with its key's last four and its
