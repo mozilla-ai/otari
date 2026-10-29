@@ -1760,8 +1760,19 @@
         "type": "object"
       },
       "AppliedEntityPublic": {
-        "description": "One entity a budget applies to: the scope a ceiling caps, and the provider it narrows to.",
+        "description": "One entity a budget applies to: the scope a ceiling caps, and the provider or model it narrows to.",
         "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
           "name": {
             "anyOf": [
               {
@@ -1798,6 +1809,7 @@
           "scope_type",
           "scope_id",
           "provider_key_id",
+          "model",
           "name"
         ],
         "title": "AppliedEntityPublic",
@@ -5724,6 +5736,21 @@
             "minLength": 1,
             "title": "Budget Id",
             "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap every model. Requires provider_key_id, because a model id is only unique within its provider",
+            "title": "Model"
           },
           "name": {
             "anyOf": [
@@ -15608,6 +15635,21 @@
             "title": "Budget Id",
             "type": "string"
           },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap every model. Requires provider_key_id, because a model id is only unique within its provider",
+            "title": "Model"
+          },
           "name": {
             "anyOf": [
               {
@@ -15705,6 +15747,17 @@
               }
             ],
             "title": "Max Budget"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           },
           "name": {
             "anyOf": [
@@ -15868,6 +15921,7 @@
           "scope_type",
           "scope_id",
           "provider_key_id",
+          "model",
           "budget_id",
           "name",
           "max_budget",
@@ -19731,6 +19785,17 @@
             ],
             "title": "Max Budget"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
           "name": {
             "anyOf": [
               {
@@ -19893,6 +19958,7 @@
           "scope_type",
           "scope_id",
           "provider_key_id",
+          "model",
           "budget_id",
           "name",
           "max_budget",

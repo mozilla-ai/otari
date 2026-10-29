@@ -10,10 +10,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 from any_llm import LLMProvider
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -21,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from gateway.api.deps import get_budget_service
 from gateway.api.routes._pipeline import spend_ceiling_refusal
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
 from gateway.models.api_keys import APIKey
@@ -44,7 +46,7 @@ from gateway.services.budgets import _ledger as budget_ledger
 from gateway.services.budgets._periods import seconds_until
 from gateway.types.attempt import Attempt
 
-from .conftest import _to_async_url
+from .conftest import MODEL_NAME, _to_async_url
 
 
 class Fixture:
@@ -67,8 +69,8 @@ class Fixture:
         self.user_id = user_id
         self.api_key = api_key
 
-    def scope(self, provider: str | None = "openai") -> BudgetScopeRequest:
-        return BudgetScopeRequest(api_key=self.api_key, provider_instance=provider)
+    def scope(self, provider: str | None = "openai", model: str | None = None) -> BudgetScopeRequest:
+        return BudgetScopeRequest(api_key=self.api_key, provider_instance=provider, model=model)
 
 
 async def _build_tenancy(db: AsyncSession, slug: str) -> Fixture:
@@ -333,6 +335,52 @@ async def test_narrowed_and_aggregate_caps_both_apply(async_db: AsyncSession, te
     await refund_reservation(async_db, handle)
     assert await _counters(async_db, aggregate.id) == (0.0, 0.0)
     assert await _counters(async_db, narrowed.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_model_narrowed_cap_binds_only_that_model(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A cap narrowed to one model of a provider is invisible to its other models
+    and to the same model id on another provider, and names the model when it refuses."""
+    narrowed = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=1.0,
+        provider_key_id="openai",
+    )
+    narrowed.model = "gpt-4o"
+    async_db.add(narrowed)
+    await async_db.commit()
+
+    for scope in (tenancy.scope("openai", "gpt-4o-mini"), tenancy.scope("azure", "gpt-4o"), tenancy.scope("openai")):
+        handle = await reserve_budget(async_db, tenancy.user_id, 5.0, scope=scope)
+        assert handle.scoped_budget_ids == ()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await reserve_budget(async_db, tenancy.user_id, 5.0, scope=tenancy.scope("openai", "gpt-4o"))
+    assert exc_info.value.status_code == 403
+    assert "Workspace (this model)" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_model_provider_and_aggregate_caps_all_apply_most_specific_first(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    workspace_id = str(tenancy.workspace_id)
+    aggregate = await _scoped(async_db, scope_type="workspace", scope_id=workspace_id, max_budget=50.0)
+    provider = await _scoped(
+        async_db, scope_type="workspace", scope_id=workspace_id, max_budget=20.0, provider_key_id="openai"
+    )
+    model = await _scoped(
+        async_db, scope_type="workspace", scope_id=workspace_id, max_budget=5.0, provider_key_id="openai"
+    )
+    model.model = "gpt-4o"
+    async_db.add_all([aggregate, provider, model])
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai", "gpt-4o"))
+    assert handle.scoped_budget_ids == (model.id, provider.id, aggregate.id)
+    await refund_reservation(async_db, handle)
 
 
 @pytest.mark.asyncio
@@ -975,8 +1023,9 @@ def test_a_blank_provider_narrowing_is_refused(
     """A ceiling narrowed to nothing would be created, listed, and never enforced.
 
     ``get_provider_ceilings`` matches ``provider_key_id == provider_instance OR IS
-    NULL``, and a blank string is neither: it would store as a narrowed row
-    under ``uq_scoped_budgets_scope_with_key`` and bind to no request ever. That
+    NULL``, and a blank string is neither: it would store as a narrowed row that
+    binds to no request ever, and ``uq_scoped_budgets_entity`` would read it as
+    the provider-wide row. That
     is the same permissive-direction failure a scope naming nothing has, so it
     is refused at the schema rather than normalized, since folding it into null
     would quietly cap *more* than the caller asked for. Mirrors
@@ -1619,6 +1668,31 @@ async def test_a_moves_refusal_answers_as_the_caps_refusal_at_admission(
 
 
 @pytest.mark.asyncio
+async def test_a_move_to_another_model_holds_that_models_cap_and_frees_the_first(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A model-narrowed cap binds the model an attempt calls, so a fallback to another model moves off it."""
+    first = await _scoped(
+        async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=5.0, provider_key_id="openai"
+    )
+    first.model = "gpt-4o"
+    fallback = await _scoped(
+        async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=5.0, provider_key_id="openai"
+    )
+    fallback.model = "fallback"
+    async_db.add_all([first, fallback])
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai", "gpt-4o"))
+    assert handle.scoped_budget_ids == (first.id,)
+
+    await move(async_db, handle, "openai", cost=3.0)
+
+    assert handle.scoped_budget_ids == (fallback.id,)
+    assert await _counters(async_db, first.id) == (0.0, 0.0)
+    assert await _counters(async_db, fallback.id) == (0.0, 3.0)
+
+
+@pytest.mark.asyncio
 async def test_a_cheaper_fallback_keeps_the_hold_the_request_has(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A fallback chain's holds only grow, so a dearer candidate later in the chain finds them still in place."""
     aggregate, _, anthropic = await _caps_for_two_providers(async_db, tenancy)
@@ -1959,3 +2033,50 @@ async def test_a_move_after_the_sweep_reclaimed_the_reservation_takes_no_hold(
 
     assert anthropic.id in handle.scoped_budget_ids
     assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
+
+
+async def _completion(**_kwargs: Any) -> ChatCompletion:
+    return ChatCompletion(
+        id="chatcmpl-x",
+        object="chat.completion",
+        created=0,
+        model=MODEL_NAME,
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")],
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+
+@pytest.mark.parametrize(("ceiling_model", "refused"), [("own", True), ("another-model", False)])
+def test_a_chat_completion_is_held_to_its_models_ceiling(
+    client: Any, master_key_header: dict[str, str], ceiling_model: str, refused: bool
+) -> None:
+    """The gate passes the provider's own model id, so a ceiling naming it binds and one naming another does not."""
+    provider, model = MODEL_NAME.split(":", 1)
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 1.0, "output_price_per_million": 1.0},
+        headers=master_key_header,
+    )
+    key = client.post(f"{API_ROOT}/keys", json={"key_name": "model-capped"}, headers=master_key_header).json()
+    created = client.post(
+        f"{API_ROOT}/scoped-budgets",
+        json={
+            "scope_type": "api_token",
+            "scope_id": key["id"],
+            "provider_key_id": provider,
+            "model": model if ceiling_model == "own" else ceiling_model,
+            "budget_id": _a_budget_id(client, master_key_header, max_budget=0.0),
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+
+    with patch("gateway.api.routes.chat.acompletion", side_effect=_completion):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "hi"}]},
+            headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+        )
+    assert (response.status_code == 403) is refused, response.text
+    if refused:
+        assert "(this model)" in response.json()["detail"]
