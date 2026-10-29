@@ -46,9 +46,9 @@ The provider id is `otari` (from your config) and the model selector is whatever
 your deployment expects:
 
 - **On otari.ai:** any model your organization's catalog lists, which
-  `GET /api/v1/models` returns for your key, for example `otari/openai:gpt-4o`,
-  `otari/anthropic:claude-sonnet-4-6` or `otari/mistral:mistral-large-latest`.
-  `provider/model` works as well as `provider:model`.
+  `GET /api/v1/models` returns for your key, for example `otari/openai/gpt-4o` or
+  `otari/anthropic/claude-sonnet-4-6`, which let Otari choose the provider. A
+  `provider:model` selector such as `otari/anthropic:claude-sonnet-4-6` pins one.
 - **On your own gateway:** `provider:model` for any provider it is configured
   with, for example `otari/openai:gpt-4o`.
 

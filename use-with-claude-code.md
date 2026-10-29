@@ -190,7 +190,7 @@ curl "$OTARI_URL/api/v1/routing/recommend" \
 ```json
 {
   "model": "haiku",
-  "reason": "jev-1.13.0 chose haiku with 81%",
+  "reason": "haiku with 81%",
   "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
 }
 ```
@@ -222,7 +222,7 @@ must be `https` unless the gateway runs on the same machine, since the key
 travels in a header. The plugin is
 active from then on, in that session and
 every one after. The
-[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.33.0/plugins/otari-router/README.md) has the options, the
+[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.34.0/plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 The plugin hooks `agent.spawn`, sends the request above, and passes the
@@ -391,7 +391,7 @@ payloads are never opened out of a transcript, and the endpoint rejects them.
 
 Each event carries a `session_label` of `<hostname>:<project>`, where the project
 is the session's working directory with the home-directory prefix dropped, so
-usage can be grouped per repository. Filter on it in Activity and Usage.
+usage can be grouped per repository. Filter on it on the Overview.
 
 Rows are unique on `(source, source_event_id)`, and the source event id here is the
 Anthropic response id, so re-running imports only what is new and reports the rest

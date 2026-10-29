@@ -1,7 +1,7 @@
 # Quickstart
 
 This guide runs a persistent Otari with Docker Compose. For an
-ephemeral, no-clone example, use the [README quickstart](https://github.com/mozilla-ai/otari/blob/v0.33.0/README.md#quickstart).
+ephemeral, no-clone example, use the [README quickstart](https://github.com/mozilla-ai/otari/blob/v0.34.0/README.md#quickstart).
 
 ## Prerequisites
 
@@ -83,7 +83,7 @@ curl http://localhost:8000/api/v1/chat/completions \
 ```
 
 The request is authenticated, checked against applicable budgets, routed with
-the provider credential held by Otari, and recorded in Activity and Usage.
+the provider credential held by Otari, and recorded on the dashboard's Overview.
 
 ## Self-hosted llama.cpp
 

@@ -115,7 +115,8 @@ because their provider exists in any-llm.
 ## Model discovery
 
 `GET /api/v1/models` combines discoverable provider models, configured prices,
-aliases, and routing-policy names. A provider's embedding and rerank models are
+aliases, and routing-policy names, and lists each model once however many
+providers serve it (see [Listing available models](#listing-available-models)). A provider's embedding and rerank models are
 offered alongside its chat models. A provider that pages its listing, as Cohere
 does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
@@ -260,8 +261,9 @@ pricing, budgets, and usage use the resolved target, which the gateway
 names in the `Otari-Provider` and `Otari-Model` response headers. Configure the
 target's price, not a price under the alias.
 
-An alias also withholds its target from `GET /api/v1/models` in that workspace,
-where the alias is listed in its place. This does not apply to routing-policy
+An alias also withholds its target offering from `GET /api/v1/models` in that
+workspace, where the alias is listed in its place; the model stays listed while
+another provider serves it. This does not apply to routing-policy
 targets. The grouped catalog (`GET /api/v1/catalog/models` and the Models page)
 lists real models only and never an alias, so an aliased model stays in it.
 
@@ -299,7 +301,7 @@ models from the catalog.
 ## The catalog, grouped by model
 
 `GET /api/v1/catalog/models` reads the same merged catalog as `GET /api/v1/models` and
-folds it by model, so `nebius:zai-org/GLM-5.3` and
+folds it by model the same way, so `nebius:zai-org/GLM-5.3` and
 `fireworks:accounts/fireworks/models/glm-5p3` are two offerings of one entry.
 `?at_context=<tokens>` on the list takes each model's minimum from the pricing
 tier a request of that size would settle at, so tiered offerings compare at
@@ -424,6 +426,22 @@ signup is closed), and the dashboard reopens that model on their first sign-in.
 curl http://localhost:8000/api/v1/models \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
+
+The listing has one entry per model, and its `id` is the model's catalog id
+(`z-ai/glm-5.3`, `openai/gpt-4o`), not a `provider:model` selector. Send that id
+as `model` and Otari chooses the provider: it tries the model's offerings best
+first (priced before unpriced, then your organization's own key, then the
+model's own vendor, then the cheapest) and falls back to the next when one
+fails. A catalog id spelled like the legacy `provider/model` of one of its own
+offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
+offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
+of the offering tried first, and `owned_by` is the model's vendor.
+
+To pin a request to one provider, send its `provider:model` selector, which
+still works everywhere it did. `?provider=<instance>` lists only the models that
+instance serves, described as it serves them, and
+`GET /api/v1/catalog/models/{id}` lists every offering of one model.
+`GET /api/v1/models/{id}` answers for a catalog id, an alias, or a selector.
 
 On a deployment that hosts at least one provider, an organization API key is
 shown a priced model only where something would

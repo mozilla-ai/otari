@@ -50,6 +50,7 @@ Calling the gateway from your own code.
   and what each harness can see at each event.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
 - [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API, or import its usage without routing.
+- [Use with Junie](use-with-junie.md): point the Junie CLI or JetBrains AI Assistant at Otari.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
 - [Use with Pydantic AI](use-with-pydantic-ai.md), [Use with LangChain](use-with-langchain.md) and [Use with LangGraph](use-with-langgraph.md): point an agent framework's model at Otari, with tools, structured output and streaming.
 - [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
@@ -59,10 +60,10 @@ Calling the gateway from your own code.
 
 ### For platform builders
 
-- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.33.0/docs/public/code-execution-openapi.yaml).
+- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.34.0/docs/public/code-execution-openapi.yaml).
 
 ### For contributors
 
-- [Architecture](https://github.com/mozilla-ai/otari/blob/v0.33.0/ARCHITECTURE.md): one process over one database, and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
-- [Backend domains](https://github.com/mozilla-ai/otari/blob/v0.33.0/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
-- [Load test](https://github.com/mozilla-ai/otari/blob/v0.33.0/loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.
+- [Architecture](https://github.com/mozilla-ai/otari/blob/v0.34.0/ARCHITECTURE.md): one process over one database, and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
+- [Backend domains](https://github.com/mozilla-ai/otari/blob/v0.34.0/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
+- [Load test](https://github.com/mozilla-ai/otari/blob/v0.34.0/loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.

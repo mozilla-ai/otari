@@ -643,7 +643,10 @@ model-facing function accepts exactly one field:
 
 Otari retrieves one public HTTP or HTTPS URL, validates every redirect, and
 extracts HTML, textual formats (including Markdown, JSON, XML, and JavaScript),
-or text-bearing PDF content. Private, loopback, link-local, and otherwise unsafe
+or text-bearing PDF content. From an HTML page it keeps the content as light
+Markdown and leaves out the page's navigation, banners, footers and sidebars: the
+page's `<main>` or `<article>` elements where it marks them, its text without those
+landmarks otherwise. Private, loopback, link-local, and otherwise unsafe
 destinations are rejected. This is the built-in fetcher, `builtin_fetch`, which
 serves the tool unless `web_fetch_default_tool` names a fetch instance of a
 [fetch provider](#fetch-providers). Anthropic's own fetch keyword is passed through
