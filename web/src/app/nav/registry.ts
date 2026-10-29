@@ -20,6 +20,7 @@ import {
   FiUserCheck,
   FiUsers,
 } from "react-icons/fi"
+import { LuSplit } from "react-icons/lu"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "@/app/nav/overlayLabelOverrides"
 import { OVERLAY_NAV_ITEMS } from "@/app/nav/overlayNavItems"
 import {
@@ -383,6 +384,16 @@ const DEPLOYMENT_SECTIONS = [
         surface: "hosted_providers",
         operatorOnly: "unlisted",
         icon: FiCpu,
+      },
+      // The decision models that pick a subagent's model, and what a
+      // recommendation costs. Unlisted like Hosted providers: its API refuses
+      // a non-operator with the same 404.
+      {
+        to: "/admin/recommender",
+        label: "Subagent router",
+        surface: "agent_recommenders",
+        operatorOnly: "unlisted",
+        icon: LuSplit,
       },
       // The search and fetch tools the deployment runs for every workspace, and
       // their prices.

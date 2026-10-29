@@ -60,7 +60,7 @@ export function useDashboardBuild() {
 // 404: a gate cannot be built on a failed request, and hiding a destination
 // grants nothing either way.
 //
-// Read by the deployment accounts and hosted providers pages, to word their own
+// Read by the deployment accounts, hosted providers and subagent router pages, to word their own
 // refusal, and each holds that decision until this lands. Nothing else asks: the rail and the
 // Overview index need the answer before their first paint, so they take
 // `deployment_operator` off the organization context, which is the same
@@ -76,7 +76,7 @@ export function useDeploymentAdminAccess() {
       ),
     staleTime: 60_000,
     // No `enabled` parameter: both callers sit behind routes whose surfaces
-    // (`admin`, `hosted_providers`) every gateway publishes. Not inferred from a
+    // (`admin`, `hosted_providers`, `agent_recommenders`) every gateway publishes. Not inferred from a
     // 404 either: the ordinary retry policy applies, and a failure is a failure.
   })
 }
