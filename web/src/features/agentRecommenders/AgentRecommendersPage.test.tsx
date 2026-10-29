@@ -3,7 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { AgentRecommender, ConfiguredRecommender } from "@/client"
+import type { AgentRecommender } from "@/client"
 import { AgentRecommendersPage } from "@/features/agentRecommenders/AgentRecommendersPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -14,12 +14,6 @@ interface Request {
   url: string
   method: string
   body: unknown
-}
-
-const CONFIGURED: ConfiguredRecommender = {
-  selector: "typesafe:jev-latest",
-  provider: "typesafe",
-  model: "jev-latest",
 }
 
 function recommender(
@@ -54,7 +48,6 @@ function mockApi(
     /** Answers the list 404, as the router refusing a non-operator. */
     listRefused?: boolean
     rows?: AgentRecommender[]
-    configured?: ConfiguredRecommender | null
   } = {},
 ) {
   const granted = opts.granted ?? true
@@ -73,11 +66,7 @@ function mockApi(
     if (url.includes(`${API_ROOT}/routing/recommenders`)) {
       if (opts.listRefused) return jsonResponse({ detail: "Not found" }, 404)
       if (method === "GET") {
-        return jsonResponse({
-          data: rows,
-          configured:
-            opts.configured === undefined ? CONFIGURED : opts.configured,
-        })
+        return jsonResponse({ data: rows })
       }
       if (method === "DELETE") return new Response(null, { status: 204 })
       return jsonResponse(
@@ -186,16 +175,15 @@ describe("AgentRecommendersPage", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("says which configured decision model answers while no router is added", async () => {
+  it("says no model is picked while no router is added", async () => {
     mockApi({ rows: [] })
     await renderPage()
 
     expect(await screen.findByText("No router added")).toBeInTheDocument()
     expect(
-      screen.getByText(
-        /typesafe:jev-latest from config\.yml answers, unpriced/,
-      ),
+      screen.getByText(/Until one is added, no model is picked/),
     ).toBeInTheDocument()
+    expect(screen.queryByText(/config\.yml/)).not.toBeInTheDocument()
   })
 
   it("warns when every router is switched off", async () => {
@@ -249,7 +237,7 @@ describe("AgentRecommendersPage", () => {
     })
   })
 
-  it("adds a router with the trimmed fields and no margin, seeded from the configured model", async () => {
+  it("adds a router with the trimmed fields and no margin", async () => {
     const user = userEvent.setup()
     const requests = mockApi({ rows: [] })
     await renderPage()
@@ -258,9 +246,9 @@ describe("AgentRecommendersPage", () => {
       (await screen.findAllByRole("button", { name: "Add router" }))[0],
     )
     const dialog = await screen.findByRole("dialog", { name: "New router" })
-    expect(within(dialog).getByRole("textbox", { name: "Model" })).toHaveValue(
-      "jev-latest",
-    )
+    const model = within(dialog).getByRole("textbox", { name: "Model" })
+    expect(model).toHaveValue("")
+    await user.type(model, " jev-latest ")
     expect(within(dialog).queryByLabelText(/Margin/)).not.toBeInTheDocument()
     await user.type(
       within(dialog).getByLabelText("API key"),
@@ -288,7 +276,7 @@ describe("AgentRecommendersPage", () => {
 
   it("adds a free router with no price set", async () => {
     const user = userEvent.setup()
-    const requests = mockApi({ rows: [], configured: null })
+    const requests = mockApi({ rows: [] })
     await renderPage()
 
     await user.click(

@@ -8,7 +8,6 @@
 
 import type {
   AgentRecommender,
-  ConfiguredRecommender,
   CreateAgentRecommenderRequest,
   UpdateAgentRecommenderRequest,
 } from "@/client"
@@ -104,21 +103,6 @@ export function draftFrom(recommender: AgentRecommender): RecommenderDraft {
     apiKey: "",
     inputPrice: priceText(recommender.input_price_per_million),
     outputPrice: priceText(recommender.output_price_per_million),
-  }
-}
-
-/**
- * A draft started from the decision model config.yml names, so adding it here
- * with a price is one step. It carries no key and no price: those are what
- * the row adds.
- */
-export function draftFromConfigured(
-  configured: ConfiguredRecommender,
-): RecommenderDraft {
-  return {
-    ...EMPTY_DRAFT,
-    provider: configured.provider,
-    model: configured.model,
   }
 }
 

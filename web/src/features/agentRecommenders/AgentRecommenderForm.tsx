@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import type { AgentRecommender, ConfiguredRecommender } from "@/client"
+import type { AgentRecommender } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
@@ -17,7 +17,6 @@ import {
   DECISION_PROVIDERS,
   type DraftErrors,
   draftFrom,
-  draftFromConfigured,
   EMPTY_DRAFT,
   isSelfHosted,
   keyPlaceholder,
@@ -35,24 +34,20 @@ import {
 
 export function AgentRecommenderForm({
   recommender,
-  startFrom,
   isOpen,
   onClose,
 }: {
   /** The router to edit; absent adds a new one. */
   recommender?: AgentRecommender
-  /** What a new one starts from: the decision model config.yml names, so adding it here is one step. */
-  startFrom?: ConfiguredRecommender
   isOpen: boolean
   onClose: () => void
 }) {
   const add = useAddAgentRecommender()
   const update = useUpdateAgentRecommender()
   const write = recommender ? update : add
-  const [draft, setDraft] = useState<RecommenderDraft>(() => {
-    if (recommender) return draftFrom(recommender)
-    return startFrom ? draftFromConfigured(startFrom) : EMPTY_DRAFT
-  })
+  const [draft, setDraft] = useState<RecommenderDraft>(() =>
+    recommender ? draftFrom(recommender) : EMPTY_DRAFT,
+  )
   const [errors, setErrors] = useState<DraftErrors>({})
   const { isDirty } = useDirtySnapshot(draft)
 

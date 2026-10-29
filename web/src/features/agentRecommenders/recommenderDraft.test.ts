@@ -6,7 +6,6 @@ import {
   checkDraft,
   createBody,
   draftFrom,
-  draftFromConfigured,
   EMPTY_DRAFT,
   keyPlaceholder,
   parsePrice,
@@ -77,16 +76,6 @@ describe("draftFrom", () => {
       inputPrice: "20",
       outputPrice: "0",
     })
-  })
-
-  it("seeds only the provider and model from the configured decision model", () => {
-    expect(
-      draftFromConfigured({
-        selector: "typesafe:jev-latest",
-        provider: "typesafe",
-        model: "jev-latest",
-      }),
-    ).toEqual({ ...EMPTY_DRAFT, provider: "typesafe", model: "jev-latest" })
   })
 })
 

@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
-import type { AgentRecommender, ConfiguredRecommender } from "@/client"
+import type { AgentRecommender } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
@@ -36,12 +36,6 @@ import { priceSummary, providerLabel } from "./recommenderDraft"
 // refusal as the page not being theirs rather than as an error.
 
 const TITLE = "Subagent router"
-
-function configuredFallback(configured: ConfiguredRecommender | null): string {
-  return configured
-    ? `Until one is added, ${configured.selector} from config.yml answers, unpriced.`
-    : "Until one is added, the decision model agent_recommender_model names in config.yml answers, unpriced, if it is set."
-}
 
 export function AgentRecommendersPage() {
   const access = useDeploymentAdminAccess()
@@ -94,7 +88,6 @@ export function AgentRecommendersPage() {
   }
 
   const rows = recommenders.data?.data ?? []
-  const configured = recommenders.data?.configured ?? null
   const editing = rows.find((row) => row.id === editingId)
   const pendingRemove = rows.find((row) => row.id === pendingRemoveId)
   const isEmpty =
@@ -194,15 +187,13 @@ export function AgentRecommendersPage() {
       </PageIntro>
       {noneOn ? (
         <InfoBanner>
-          No router is switched on, so no model is picked, and the decision
-          model config.yml names is not asked either. The plugin starts each
-          subagent on its usual model.
+          No router is switched on, so no model is picked. The plugin starts
+          each subagent on its usual model.
         </InfoBanner>
       ) : null}
       <ErrorBanner error={recommenders.error ?? update.error} />
       <AgentRecommenderForm
         key={addOpenCount}
-        startFrom={rows.length === 0 && configured ? configured : undefined}
         isOpen={isAdding}
         onClose={() => setIsAdding(false)}
       />
@@ -218,7 +209,7 @@ export function AgentRecommendersPage() {
       {isEmpty ? (
         <EmptyState
           title="No router added"
-          description={`${configuredFallback(configured)} Otherwise the plugin starts each subagent on its usual model.`}
+          description="Until one is added, no model is picked, and the plugin starts each subagent on its usual model."
           actionLabel="Add router"
           onAction={openAdd}
         />
@@ -241,7 +232,7 @@ export function AgentRecommendersPage() {
         heading="Remove this router?"
         body={
           pendingRemove
-            ? `${pendingRemove.model} and its stored key are deleted. With no router left, the decision model config.yml names answers, unpriced, or nothing does if it is not set.`
+            ? `${pendingRemove.model} and its stored key are deleted. With no router left, no model is picked.`
             : ""
         }
         confirmLabel="Remove router"
