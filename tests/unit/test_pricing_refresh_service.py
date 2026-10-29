@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
+from gateway.core.config import MODELS_DEV_URL, GatewayConfig
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
 from gateway.services.pricing import (
     active_generations,
@@ -421,3 +422,12 @@ async def test_history_longer_than_the_resident_window_fails_closed_before_it(
     assert resolve_as_of(timeline, before, "openai", "gpt-4o") is None
     latest = resolve_as_of(timeline, datetime.now(UTC), "test", "model")
     assert latest is not None and latest.input == Decimal(3)
+
+
+@pytest.mark.asyncio
+async def test_the_fetch_reads_the_configured_catalog_url(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session)
+    mirror = "https://mirror.example/api.json"
+    await refresh.prepare_price_refresh(session, GatewayConfig(master_key="k", models_dev_url=mirror))
+
+    assert [call["url"] for call in upstream["calls"]] == [MODELS_DEV_URL, mirror]

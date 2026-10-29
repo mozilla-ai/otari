@@ -227,6 +227,7 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "provider_allow_private_hosts",
         "sandbox_url",
         "guardrails_url",
+        "models_dev_url",
     ):
         assert by_key[name]["settable"] is False, name
 

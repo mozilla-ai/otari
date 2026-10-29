@@ -24,8 +24,6 @@ import httpx
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 
-MODELS_DEV_URL = "https://models.dev/api.json"
-
 # The catalog is a few MB; a short read timeout keeps a slow models.dev from
 # stalling a dashboard load, and a failure just means "no enrichment this time".
 _FETCH_TIMEOUT_SECONDS = 15.0
@@ -135,12 +133,12 @@ class ModelsDevFetchError(Exception):
     """The models.dev catalog could not be downloaded or was not a JSON object."""
 
 
-async def _download() -> dict[str, Any]:
-    """One bounded download of ``api.json``; every failure is a ``ModelsDevFetchError``."""
+async def _download(url: str) -> dict[str, Any]:
+    """One bounded download of ``api.json`` from ``url``; every failure is a ``ModelsDevFetchError``."""
     try:
         async with (
             httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
-            client.stream("GET", MODELS_DEV_URL, headers={"User-Agent": "otari-gateway"}) as resp,
+            client.stream("GET", url, headers={"User-Agent": "otari-gateway"}) as resp,
         ):
             resp.raise_for_status()
             chunks: list[bytes] = []
@@ -160,9 +158,9 @@ async def _download() -> dict[str, Any]:
     return data
 
 
-async def _fetch() -> dict[str, Any] | None:
+async def _fetch(url: str) -> dict[str, Any] | None:
     try:
-        return await _download()
+        return await _download(url)
     except ModelsDevFetchError as exc:
         logger.warning("%s; ignoring", exc)
         return None
@@ -174,8 +172,8 @@ def _fresh_cached(reuse_within: float) -> dict[str, Any] | None:
     return None
 
 
-async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bool = False) -> dict[str, Any]:
-    """Download ``api.json`` for a caller that needs it now, raising on failure.
+async def fetch_models_dev_document(*, url: str, reuse_within: float = 0.0, fill_cache: bool = False) -> dict[str, Any]:
+    """Download ``api.json`` from ``url`` for a caller that needs it now, raising on failure.
 
     The price refresh uses this, so it works whether or not
     ``models_dev_metadata`` is on. A copy the metadata cache fetched within
@@ -186,7 +184,7 @@ async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bo
     async with _lock:
         if (reused := _fresh_cached(reuse_within)) is not None:
             return reused
-        data = await _download()
+        data = await _download(url)
         if fill_cache:
             _cache.data = data
             _cache.ok = True
@@ -226,7 +224,7 @@ async def load_models_dev_catalog(
         if (reused := _fresh_cached(reuse_within)) is not None:
             return reused
 
-        data = await _fetch()
+        data = await _fetch(config.models_dev_url)
         _cache.data = data
         _cache.ok = data is not None
         _cache.at = time.monotonic()
