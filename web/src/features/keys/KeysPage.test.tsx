@@ -531,9 +531,9 @@ describe("KeysPage", () => {
     expect(screen.getByText("raw")).toBeInTheDocument()
   })
 
-  it("keeps a bulk action to the keys the search leaves on screen", async () => {
-    stubRegionWidth(390)
-    const fetchMock = mockApi({
+  it("starts the selection over when the search changes", async () => {
+    stubRegionWidth(1440)
+    mockApi({
       keys: [
         apiKey({ id: "key-1", key_name: "prod-ingest", is_active: true }),
         apiKey({ id: "key-2", key_name: "staging-eval", is_active: true }),
@@ -541,26 +541,25 @@ describe("KeysPage", () => {
     })
     const usr = userEvent.setup()
     renderPage(<KeysPage />)
-    await screen.findByRole("button", { name: "Actions for prod-ingest" })
+    await screen.findByText("prod-ingest")
+    const search = screen.getByRole("searchbox", { name: "Search API keys" })
 
-    // Selected while both are listed, then narrowed to one.
-    await usr.click(screen.getByRole("checkbox", { name: "Select all keys" }))
-    await usr.type(
-      screen.getByRole("searchbox", { name: "Search API keys" }),
-      "prod",
-    )
+    // "Select all" under one search is not a selection of the next one's keys.
+    await usr.type(search, "prod")
     await waitFor(() =>
       expect(screen.queryByText("staging-eval")).not.toBeInTheDocument(),
     )
-    await usr.click(await screen.findByRole("button", { name: /^Disable/ }))
+    await usr.click(screen.getByRole("checkbox", { name: "Select all rows" }))
+    expect(
+      await screen.findByRole("button", { name: /^Disable/ }),
+    ).toBeInTheDocument()
 
-    await waitFor(() => {
-      const patches = fetchMock.mock.calls.filter(
-        ([, init]) => init?.method === "PATCH",
-      )
-      expect(patches).toHaveLength(1)
-      expect(String(patches[0][0])).toContain("key-1")
-    })
+    await usr.clear(search)
+    await usr.type(search, "staging")
+    expect(await screen.findByText("staging-eval")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Disable/ })).toBeNull(),
+    )
   })
 
   it("lists key fingerprints and supports keys without stored suffixes", async () => {
