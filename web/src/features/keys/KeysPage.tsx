@@ -1265,6 +1265,14 @@ export function KeysPage() {
   const editingKey = allKeys.find((apiKey) => apiKey.id === editing)
   const showOnboarding = !loading && allKeys.length === 0
   const selection = useTableSelection()
+  // A new term starts the selection over. The table can hold "select all" as
+  // the value `all` rather than a list of keys, and that would otherwise
+  // expand onto whatever the next search shows, keys nobody selected.
+  const [selectedUnder, setSelectedUnder] = useState(search.term)
+  if (selectedUnder !== search.term) {
+    setSelectedUnder(search.term)
+    selection.clear()
+  }
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkError, setBulkError] = useState<unknown>(undefined)
   const [bulkPending, setBulkPending] = useState(false)
