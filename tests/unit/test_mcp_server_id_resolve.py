@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from gateway.models.mcp import MAX_MCP_SERVER_IDS
+from gateway.services.model_access import McpAccess
 from gateway.services.tenancy import workspace_mcp_server_service
 from gateway.services.tenancy.workspace_mcp_server_service import MAX_MCP_SERVERS_PER_WORKSPACE, WorkspaceMcpServers
 
@@ -34,10 +35,12 @@ async def test_resolve_many_reads_the_workspaces_rows(monkeypatch: pytest.Monkey
     resolve = AsyncMock(return_value=stored)
     monkeypatch.setattr(workspace_mcp_server_service, "resolve_workspace_mcp_servers", resolve)
 
-    out = await WorkspaceMcpServers(session).resolve_many(workspace_id, ids)
+    out = await WorkspaceMcpServers(session).resolve_many(workspace_id, ids, McpAccess(unrestricted=True))
 
     assert out is stored
-    resolve.assert_awaited_once_with(session, workspace_id=workspace_id, server_ids=ids)
+    resolve.assert_awaited_once_with(
+        session, workspace_id=workspace_id, server_ids=ids, access=McpAccess(unrestricted=True)
+    )
 
 
 @pytest.mark.asyncio

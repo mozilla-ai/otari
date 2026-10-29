@@ -183,6 +183,16 @@ def test_a_tool_name_that_is_not_an_identifier_is_kept_out_of_the_span() -> None
     assert (span.name, span.tool_name) == ("execute_tool", None)
 
 
+def test_an_mcp_tool_call_names_the_server_that_owns_the_tool() -> None:
+    trace = _trace()
+
+    trace.record_tool_call(tool_name="search_issues", tool_type="mcp", started=_T0, ok=True, mcp_server="github")
+    trace.record_tool_call(tool_name="search_issues", tool_type="mcp", started=_T0, ok=True, mcp_server="not safe!")
+    trace.record_tool_call(tool_name="web_search", tool_type="web_search", started=_T0, ok=True)
+
+    assert [span.attributes.get("otari.mcp.server") for span in trace.spans] == ["github", None, None]
+
+
 def test_spans_past_the_cap_are_counted_not_kept() -> None:
     trace = _trace(max_spans=2)
 
