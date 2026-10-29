@@ -6,6 +6,7 @@ import {
   FiRotateCcw,
   FiSlash,
 } from "react-icons/fi"
+
 import type { OrgProviderKey, OrgProviderModel } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
@@ -354,7 +355,13 @@ export function ProviderModelsPanel({
 
       {/* A failed list is not an empty one: with a settled error, rendering
           "no models yet" would tell an admin their catalog is gone. */}
-      {!models.error && rows.length === 0 && !search.term ? (
+      {/* Not while the rows are a previous search's held as placeholder data:
+          clearing a search that matched nothing would otherwise flash this
+          panel, and take the field being typed in with it. */}
+      {!models.error &&
+      rows.length === 0 &&
+      !search.term &&
+      !models.isPlaceholderData ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what this provider lists, or add a model by name for a backend that publishes no list."
@@ -380,7 +387,10 @@ export function ProviderModelsPanel({
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}
-              isLoading={models.isLoading}
+              isLoading={
+                models.isLoading ||
+                (models.isPlaceholderData && rows.length === 0)
+              }
               emptyContent="No models match this search."
             />
           </TableScrollFrame>

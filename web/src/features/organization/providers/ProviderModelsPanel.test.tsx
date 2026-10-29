@@ -74,6 +74,7 @@ function renderPanel(
     onPageChange?: (page: number) => void
     onPageSizeChange?: (size: number) => void
   } = {},
+  url = "/",
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -90,6 +91,7 @@ function renderPanel(
         onPageSizeChange={pager.onPageSizeChange ?? vi.fn()}
       />
     </QueryClientProvider>,
+    { url },
   )
 }
 
@@ -98,6 +100,42 @@ afterEach(() => {
 })
 
 describe("ProviderModelsPanel", () => {
+  it("keeps the field, and its focus, when a search that matched nothing is cleared", async () => {
+    // Held, so the unsearched list is still in flight while the rows are the
+    // empty search's, kept as placeholder data.
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const models = [orgProviderModel({ id: "m-1", model: "gpt-4o" })]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes("search=")) {
+        return jsonResponse({ count: 0, data: [] })
+      }
+      await held
+      return jsonResponse({ count: models.length, data: models })
+    })
+    const user = userEvent.setup()
+    await renderPanel(true, vi.fn(), {}, "/?models_q=zzz")
+    expect(
+      await screen.findByText("No models match this search."),
+    ).toBeInTheDocument()
+    const search = screen.getByRole("searchbox", {
+      name: "Search models on Production",
+    })
+
+    await user.clear(search)
+    // The unsearched read has not landed: still the field, never the
+    // empty-catalog panel.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(screen.queryByText("No models offered yet")).toBeNull()
+    expect(search).toHaveFocus()
+
+    release()
+    expect(await screen.findByText("gpt-4o")).toBeInTheDocument()
+  })
+
   it("asks the endpoint to search, and keeps the field when nothing matches", async () => {
     const requests = mockApi({
       models: [
