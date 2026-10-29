@@ -142,11 +142,12 @@ priced from its target.
 
 The two surfaces differ on a value the gateway does not know.
 `GET /api/v1/models` and `GET /api/v1/models/{model_id}` leave the field out
-altogether, including a nested one such as a per-tier rate override. The grouped
-catalog under `GET /api/v1/catalog/models` sends `null` instead. Both model
-routes always send `pricing_source`, where `none` says nobody has priced the
-model. The grouped catalog's offering carries `price_source`, which is `null`
-when nothing prices it.
+altogether, an unset cache rate inside `pricing` included. The grouped catalog
+under `GET /api/v1/catalog/models` sends `null` instead. A rate a pricing tier
+does not override is the exception, because it is stored as absent rather than as
+null, so neither surface sends it. Both model routes always send
+`pricing_source`, where `none` says nobody has priced the model. The grouped
+catalog's offering carries `price_source`, which is `null` when nothing prices it.
 
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 so a client does not have to guess them. Both come from models.dev's entry for
