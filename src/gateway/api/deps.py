@@ -2017,7 +2017,7 @@ async def routed_trace_content_generation(
     if content is None or not content.sealing:
         return None
     try:
-        generation = await build_trace_service(uow, content, DatabaseSessionOwners(db)).content_generation(workspace_id)
+        generation = await build_trace_service(uow, content, NoSessionOwners()).content_generation(workspace_id)
     except DATABASE_ERRORS as exc:
         logger.warning("Could not read a workspace's trace content generation (%s)", describe_database_error(exc))
         return None

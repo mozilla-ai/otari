@@ -3009,7 +3009,7 @@ async def resolve_request_context(
     budget_exempt = (api_key is not None and api_key.exclude_from_budget) or (
         resolved_provider is not None and resolved_provider.owned_endpoint is not None
     )
-    # Before the rate limit and the reservation, so a read that fails or is cancelled holds nothing to give back,
+    # Before the rate limit and the reservation, so a read that fails or never finishes holds nothing to give back,
     # and before normalization, so the content is what the client sent and not an attachment rendered as text.
     content_generation = (
         await routed_trace_content_generation(raw_request, uow, db, config, workspace_id, user_id)
