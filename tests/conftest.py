@@ -121,7 +121,7 @@ def _no_models_dev_fetch(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     """
     from gateway.services import model_catalog_service
 
-    async def _unreachable() -> None:
+    async def _unreachable(_url: str) -> None:
         return None
 
     model_catalog_service.clear_catalog_cache()

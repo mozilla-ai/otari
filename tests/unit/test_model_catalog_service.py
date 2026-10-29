@@ -5,8 +5,9 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic import ValidationError
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import MODELS_DEV_URL, GatewayConfig
 from gateway.services import model_catalog_service as mcs
 from gateway.services.catalog import load_catalog_metadata, metadata_entry
 from gateway.services.model_catalog_service import build_metadata_map, parse_entry
@@ -223,8 +224,8 @@ async def test_catalog_metadata_fetches_only_when_a_read_may() -> None:
 async def test_the_shared_fetch_fills_the_metadata_cache_and_is_reused() -> None:
     mcs.clear_catalog_cache()
     with patch.object(mcs, "_download", new=AsyncMock(return_value={"openai": {}})) as download:
-        assert await mcs.fetch_models_dev_document(fill_cache=True) == {"openai": {}}
-        assert await mcs.fetch_models_dev_document(reuse_within=60) == {"openai": {}}
+        assert await mcs.fetch_models_dev_document(url=MODELS_DEV_URL, fill_cache=True) == {"openai": {}}
+        assert await mcs.fetch_models_dev_document(url=MODELS_DEV_URL, reuse_within=60) == {"openai": {}}
         assert download.await_count == 1
 
         # A catalog refresher tick right after reuses it too, instead of fetching again.
@@ -238,12 +239,34 @@ async def test_the_shared_fetch_fills_the_metadata_cache_and_is_reused() -> None
 async def test_the_shared_fetch_leaves_the_cache_alone_unless_asked_and_raises_on_failure() -> None:
     mcs.clear_catalog_cache()
     with patch.object(mcs, "_download", new=AsyncMock(return_value={"openai": {}})):
-        await mcs.fetch_models_dev_document()
+        await mcs.fetch_models_dev_document(url=MODELS_DEV_URL)
     assert mcs._cache.ok is False
 
     with (
         patch.object(mcs, "_download", new=AsyncMock(side_effect=mcs.ModelsDevFetchError("down"))),
         pytest.raises(mcs.ModelsDevFetchError),
     ):
-        await mcs.fetch_models_dev_document()
+        await mcs.fetch_models_dev_document(url=MODELS_DEV_URL)
     mcs.clear_catalog_cache()
+
+
+@pytest.mark.asyncio
+async def test_the_catalog_is_fetched_from_models_dev_url() -> None:
+    config = GatewayConfig(master_key="k", models_dev_url="https://mirror.example/api.json")
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value={"openai": {}})) as fetch:
+        assert await mcs.load_models_dev_catalog(config, force=True) == {"openai": {}}
+    fetch.assert_awaited_once_with("https://mirror.example/api.json")
+    mcs.clear_catalog_cache()
+
+
+def test_models_dev_url_defaults_to_upstream_and_refuses_an_address_it_cannot_use() -> None:
+    assert GatewayConfig(master_key="k").models_dev_url == MODELS_DEV_URL
+    mirror = GatewayConfig(master_key="k", models_dev_url=" https://mirror.example/api.json ")
+    assert mirror.models_dev_url == "https://mirror.example/api.json"
+
+    for value in ("mirror.example/api.json", "file:///etc/passwd", ""):
+        with pytest.raises(ValidationError, match="absolute http"):
+            GatewayConfig(master_key="k", models_dev_url=value)
+    with pytest.raises(ValidationError, match="no username or password") as error:
+        GatewayConfig(master_key="k", models_dev_url="https://user:hunter2@mirror.example/api.json")
+    assert "hunter2" not in error.value.errors()[0]["msg"]

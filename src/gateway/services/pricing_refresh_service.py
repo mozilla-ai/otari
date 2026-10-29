@@ -12,7 +12,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import MODELS_DEV_URL, GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
@@ -187,7 +187,9 @@ async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: flo
     """Fetch the upstream catalog and cut it down to the price fields, without activating it."""
 
     document = await fetch_models_dev_document(
-        reuse_within=reuse_within, fill_cache=config is not None and config.models_dev_metadata
+        url=config.models_dev_url if config is not None else MODELS_DEV_URL,
+        reuse_within=reuse_within,
+        fill_cache=config is not None and config.models_dev_metadata,
     )
     return await asyncio.to_thread(_prepare_document, document)
 

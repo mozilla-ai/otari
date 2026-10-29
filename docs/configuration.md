@@ -1043,9 +1043,19 @@ instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldes
 one for a time before the first. History therefore starts at the first accepted
 snapshot; models.dev publishes no dated price changes of its own.
 
+The prices and the model metadata both come from `models_dev_url`, which
+defaults to `https://mozilla-ai.github.io/models.dev/api.json`: the mozilla-ai
+fork of models.dev, which syncs from upstream every hour and carries price and
+model fixes before upstream publishes them. Set it to
+`https://models.dev/api.json` to read upstream directly, or to any mirror that
+serves the same `api.json`. It must be an absolute http(s) URL with no
+credentials in it. It is a startup setting: the dashboard shows it but cannot
+change it.
+
 To refresh the bundled snapshot, as a maintainer does at release, run
-`python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved `api.json`) and commit `src/gateway/data/models_dev_pricing.json`.
+`python scripts/update_models_dev_snapshot.py` (pass `--url` to fetch from a
+mirror or fork, or `--input FILE` with a saved `api.json`) and commit
+`src/gateway/data/models_dev_pricing.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still

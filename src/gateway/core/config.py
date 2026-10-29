@@ -102,6 +102,9 @@ TAGS_HEADER = "Otari-Tags"
 # segment sits in a path.
 API_VERSION = "v1"
 API_ROOT = f"/api/{API_VERSION}"
+# The mozilla-ai fork of models.dev: upstream's catalog, synced hourly, plus
+# fixes upstream has not published yet.
+MODELS_DEV_URL = "https://mozilla-ai.github.io/models.dev/api.json"
 # Base only: OTel exporters append /otlp/v1/traces and the other signal paths.
 OTLP_ROOT = "/otlp"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
@@ -1171,6 +1174,16 @@ class GatewayConfig(
             "catalog and GET /api/v1/models/metadata answer from the cache instead of waiting on the "
             "fetch; a failed fetch is held for one minute rather than the refresh interval. 0 "
             "disables caching, so every read fetches."
+        ),
+    )
+    models_dev_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
+        default=MODELS_DEV_URL,
+        description=(
+            "Where the gateway downloads the models.dev catalog from, as an absolute http(s) URL. "
+            "Both the model metadata and the price updates read it. The default is the mozilla-ai "
+            "fork, which syncs from upstream hourly and carries fixes upstream has not published "
+            "yet; set https://models.dev/api.json to read upstream directly, or any mirror that "
+            "serves the same api.json. Config file or environment only."
         ),
     )
     public_catalog: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
@@ -2271,6 +2284,24 @@ class GatewayConfig(
         if parsed.username is not None or parsed.password is not None:
             # The value is left out of the message: the offending part of it is the credential.
             msg = f"{info.field_name} must carry no username or password"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("models_dev_url")
+    @classmethod
+    def _validate_models_dev_url(cls, value: str) -> str:
+        """Reject a catalog address the gateway could not fetch, or one carrying a credential.
+
+        The settings view shows this field, so a username or password in it would
+        reach every operator who opened the page.
+        """
+        normalized = value.strip()
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = f"models_dev_url must be an absolute http(s) URL, got '{value}'"
+            raise ValueError(msg)
+        if parsed.username is not None or parsed.password is not None:
+            msg = "models_dev_url must carry no username or password"
             raise ValueError(msg)
         return normalized
 
