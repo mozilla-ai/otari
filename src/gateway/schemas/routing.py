@@ -1,5 +1,7 @@
 """Request and response models of the routing domain."""
 
+import uuid
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -140,3 +142,85 @@ class AutomaticFallbacksResponse(BaseModel):
 
     window_days: int = Field(description="How many days of traffic the counts cover.")
     models: list[AutomaticFallbackPublic] = Field(description="Most requested first.")
+
+
+# Subagent routers: the stored decision models that recommend a subagent's model
+#
+# No shape here carries key material: a stored key is known by whether there is
+# one and its last four characters, which a key of four or fewer goes without.
+# Prices are USD per million of the decision model's tokens, as floats, the way
+# every other rate on the wire is; the store keeps them exact.
+
+Rate = Annotated[float, Field(ge=0, le=1_000_000)]
+"""USD per million tokens. The ceiling keeps a typo inside the stored column."""
+
+
+class AgentRecommenderCreate(BaseModel):
+    """Add a subagent router. The first one added is switched on; a later one waits to be."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(
+        min_length=1, max_length=32, description="The decision provider: typesafe, openrouter or llamacpp."
+    )
+    model: str = Field(min_length=1, max_length=255, description="The decision model, as the provider names it.")
+    api_base: str | None = Field(
+        default=None, max_length=1024, description="Root URL of the provider; blank for its own."
+    )
+    api_key: str | None = Field(
+        default=None, min_length=1, max_length=1024, description="Stored encrypted, never returned."
+    )
+    input_price_per_million: Rate = 0.0
+    output_price_per_million: Rate = 0.0
+
+
+class AgentRecommenderUpdate(BaseModel):
+    """Change a subagent router. An omitted field keeps its stored value.
+
+    Omitting ``api_key`` keeps the stored key while the provider and the API
+    base stay the same, so a price change never has to re-send a secret. A new
+    provider or address needs its own key, unless it is a self-hosted server
+    that takes none. A blank ``api_base`` goes back to the provider's own
+    address. Switching one on switches every other one off.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str | None = Field(default=None, min_length=1, max_length=32)
+    model: str | None = Field(default=None, min_length=1, max_length=255)
+    api_base: str | None = Field(default=None, max_length=1024)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    input_price_per_million: Rate | None = None
+    output_price_per_million: Rate | None = None
+    enabled: bool | None = None
+
+
+class AgentRecommenderPublic(BaseModel):
+    """One stored subagent router, known by its provider, model and the tail of its key."""
+
+    id: uuid.UUID
+    provider: str
+    model: str
+    api_base: str | None
+    api_key_last4: str | None
+    has_api_key: bool
+    input_price_per_million: float
+    output_price_per_million: float
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+
+class ConfiguredRecommenderPublic(BaseModel):
+    """The decision model ``agent_recommender_model`` names, which answers unpriced while no router is stored."""
+
+    selector: str
+    provider: str
+    model: str
+
+
+class AgentRecommendersPublic(BaseModel):
+    """Every stored subagent router, oldest first, and the configured decision model, where it resolves."""
+
+    data: list[AgentRecommenderPublic]
+    configured: ConfiguredRecommenderPublic | None

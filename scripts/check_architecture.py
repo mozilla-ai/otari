@@ -1567,6 +1567,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/rate_limits/rate_limit_rule_repository.py",
         "baseline": ("gateway/services/rate_limits/_service.py",),
     },
+    "gateway.models.routing.AgentRecommender": {
+        "repository": "gateway/repositories/routing/agent_recommender_repository.py",
+        "baseline": (),
+    },
     "gateway.models.routing.RouterPreference": {
         "repository": None,
         "baseline": ("gateway/api/routes/routing_memory.py",),
