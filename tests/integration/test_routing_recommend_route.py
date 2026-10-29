@@ -76,7 +76,7 @@ def test_api_key_gets_the_decision_models_pick(client: TestClient, api_key_heade
     body = response.json()
     assert body["model"] == "sonnet"
     assert body["probabilities"] == {"haiku": 0.2, "sonnet": 0.7, "opus": 0.1}
-    assert body["reason"] == "jev-1.13.0 chose sonnet with 70%"
+    assert body["reason"] == "sonnet with 70%"
 
     provider, sent = mock.await_args.args
     assert provider.name == "typesafe"

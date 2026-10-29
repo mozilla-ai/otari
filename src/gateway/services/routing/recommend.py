@@ -102,7 +102,7 @@ def recommendation_from_decision(
         msg = "the decision model chose something that is not a candidate"
         raise UnreadableRecommendationError(msg)
     share = answer.probabilities.get(answer.choice) if answer.probabilities else None
-    reason = f"{response.model} chose {answer.choice}"
+    reason = answer.choice
     if share is not None:
         reason += f" with {share:.0%}"
     usage = response.usage
