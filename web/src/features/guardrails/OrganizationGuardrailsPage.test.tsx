@@ -78,7 +78,7 @@ function mockApi({
   return calls
 }
 
-function renderPage() {
+function renderPage(url = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -87,6 +87,7 @@ function renderPage() {
     <QueryClientProvider client={client}>
       <OrganizationGuardrailsPage />
     </QueryClientProvider>,
+    { url },
   )
 }
 
@@ -136,6 +137,21 @@ describe("OrganizationGuardrailsPage", () => {
     ).toBeInTheDocument()
     expect(definition.getByText("Api key set")).toBeInTheDocument()
     expect(definition.getByText("Active")).toBeInTheDocument()
+  })
+
+  it("keeps the field to clear a search once nothing is configured", async () => {
+    mockApi()
+    await renderPage("/?q=lakera")
+
+    // Nothing is configured, which is what the table says, not "no match".
+    expect(
+      await screen.findByText(
+        "None yet. Configure a guardrail to have Otari run a vendor's check itself.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("searchbox", { name: "Search guardrails" }),
+    ).toHaveValue("lakera")
   })
 
   it("narrows the configured guardrails by name", async () => {
