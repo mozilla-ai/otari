@@ -7,6 +7,7 @@ import {
   FiRefreshCw,
   FiTrash2,
 } from "react-icons/fi"
+
 import type {
   HostedCatalogRefresh,
   HostedProvider,
@@ -685,7 +686,9 @@ export function HostedProvidersPage() {
               ariaLabel="Hosted providers"
               columns={columns}
               rows={shownRows}
-              emptyContent="No providers match this search."
+              emptyContent={
+                search.term ? "No providers match this search." : undefined
+              }
               // The kind and the name, not the id: a configured provider has no
               // row id, and a hosted provider may share a configured instance's name.
               getRowKey={(row) => `${row.kind}:${row.name}`}
