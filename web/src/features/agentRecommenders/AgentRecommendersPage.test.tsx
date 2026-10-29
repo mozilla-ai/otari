@@ -286,7 +286,7 @@ describe("AgentRecommendersPage", () => {
     })
   })
 
-  it("holds a new router back until it names a price", async () => {
+  it("adds a free router with no price set", async () => {
     const user = userEvent.setup()
     const requests = mockApi({ rows: [], configured: null })
     await renderPage()
@@ -299,12 +299,13 @@ describe("AgentRecommendersPage", () => {
     await user.type(within(dialog).getByLabelText("API key"), "k")
     await user.click(within(dialog).getByRole("button", { name: "Add router" }))
 
-    expect(
-      await within(dialog).findByText(
-        "Set an input or output token price above zero.",
-      ),
-    ).toBeInTheDocument()
-    expect(routerRequests(requests, "POST")).toEqual([])
+    await waitFor(() => {
+      expect(routerRequests(requests, "POST")).toHaveLength(1)
+    })
+    expect(routerRequests(requests, "POST")[0].body).toMatchObject({
+      input_price_per_million: 0,
+      output_price_per_million: 0,
+    })
   })
 
   it("drops a typed key when the address it would be sent to changes", async () => {

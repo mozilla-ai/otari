@@ -143,12 +143,13 @@ describe("checkDraft", () => {
     })
   })
 
-  it("needs a rate above zero on the input or the output", () => {
+  it("passes a free router with both rates at zero", () => {
     expect(
       checkDraft(draft({ inputPrice: "", outputPrice: "" }), undefined),
-    ).toEqual({
-      inputPrice: "Set an input or output token price above zero.",
-    })
+    ).toEqual({})
+    expect(
+      checkDraft(draft({ inputPrice: "0", outputPrice: "0" }), undefined),
+    ).toEqual({})
     expect(
       checkDraft(draft({ inputPrice: "", outputPrice: "0.5" }), undefined),
     ).toEqual({})

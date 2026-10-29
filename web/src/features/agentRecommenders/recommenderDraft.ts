@@ -155,14 +155,11 @@ export function checkDraft(
     errors.apiBase = "Enter an http or https address."
   else if (hasKey && scheme.startsWith("http://"))
     errors.apiBase = "Use https: the API key is sent to this address."
-  const prices = (["inputPrice", "outputPrice"] as const).map((name) => {
+  // Both rates at zero is a free router, such as a local model.
+  for (const name of ["inputPrice", "outputPrice"] as const) {
     const parsed = parsePrice(draft[name])
     if (!parsed.ok) errors[name] = parsed.message
-    return parsed
-  })
-  // A stored router charges the caller, so it names a rate.
-  if (prices.every((parsed) => parsed.ok && parsed.value === 0))
-    errors.inputPrice = "Set an input or output token price above zero."
+  }
   return errors
 }
 

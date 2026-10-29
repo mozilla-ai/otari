@@ -153,7 +153,7 @@ export function AgentRecommenderForm({
         onChange={(outputPrice) => edit({ outputPrice })}
         placeholder="0"
         inputMode="decimal"
-        description="Charged for the tokens the decision model writes."
+        description="Charged for the tokens the decision model writes. Leave both prices at 0 for a free router."
         isInvalid={errors.outputPrice !== undefined}
         errorMessage={errors.outputPrice}
       />
