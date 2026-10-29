@@ -4,7 +4,7 @@
 Claude Code plugin hooked on ``agent.spawn``, in the moment between deciding to
 start a subagent and starting it. Whatever this build bound to
 ``AgentModelRecommenderPort`` answers: the core puts one choice question to the
-configured decision model, and a bootstrap may bind a recommender of its
+subagent router switched on in the dashboard, and a bootstrap may bind a recommender of its
 own. The harness runs the subagent on the answer against its own provider
 credentials.
 
@@ -42,8 +42,8 @@ from gateway.exceptions.routing_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort, ModelRecommendation, SubagentSpawn
-from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest
-from gateway.services.routing import build_decision_request, candidates_for
+from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest, RecommendationRefusal
+from gateway.services.routing import ROUTER_LABEL, build_decision_request, candidates_for
 
 router = APIRouter(prefix="/routing", tags=["routing"])
 
@@ -88,7 +88,15 @@ class _RecommenderCall:
         )
 
 
-@router.post("/recommend")
+@router.post(
+    "/recommend",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": RecommendationRefusal,
+            "description": "No subagent router is switched on, or a master-key call names no `user`.",
+        },
+    },
+)
 async def recommend_model_for_agent(
     raw_request: Request,
     response: Response,
@@ -104,8 +112,8 @@ async def recommend_model_for_agent(
     session and the spawning tool call, the subagent type, the task, the
     parent's model and the model the caller asked for, if any. The recommender
     this build binds picks one of the candidate models and the answer names it.
-    By default the deployment asks the decision model `agent_recommender_model`
-    names to choose among `agent_recommender_candidates` for Claude Code and
+    By default the deployment asks the subagent router an operator switched on
+    in the dashboard to choose among `agent_recommender_candidates` for Claude Code and
     among the request's own `candidates` for pi; a bootstrap may bind a
     recommender of its own, which the caller never configures. Where
     the recommender reports them, the answer also carries a one-line reason
@@ -133,12 +141,12 @@ async def recommend_model_for_agent(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     # The hold is sized from the question the core would put, description and
     # candidates included, which is also the best guess at what a bound recommender reads.
-    question = build_decision_request(spawn, decision_model=config.agent_recommender_model, candidates=candidates)
+    question = build_decision_request(spawn, decision_model=ROUTER_LABEL, candidates=candidates)
     recommendation = await scaffold.run_call(
         raw_request=raw_request,
         response=response,
         auth_result=auth_result,
-        selector=config.agent_recommender_model,
+        selector=ROUTER_LABEL,
         user=request.user,
         prompt_chars=decision_input_chars(question),
         default_output_tokens=ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,

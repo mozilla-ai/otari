@@ -6,7 +6,6 @@ import {
   checkDraft,
   createBody,
   draftFrom,
-  draftFromConfigured,
   EMPTY_DRAFT,
   keyPlaceholder,
   parsePrice,
@@ -78,16 +77,6 @@ describe("draftFrom", () => {
       outputPrice: "0",
     })
   })
-
-  it("seeds only the provider and model from the configured decision model", () => {
-    expect(
-      draftFromConfigured({
-        selector: "typesafe:jev-latest",
-        provider: "typesafe",
-        model: "jev-latest",
-      }),
-    ).toEqual({ ...EMPTY_DRAFT, provider: "typesafe", model: "jev-latest" })
-  })
 })
 
 describe("checkDraft", () => {
@@ -143,12 +132,13 @@ describe("checkDraft", () => {
     })
   })
 
-  it("needs a rate above zero on the input or the output", () => {
+  it("passes a free router with both rates at zero", () => {
     expect(
       checkDraft(draft({ inputPrice: "", outputPrice: "" }), undefined),
-    ).toEqual({
-      inputPrice: "Set an input or output token price above zero.",
-    })
+    ).toEqual({})
+    expect(
+      checkDraft(draft({ inputPrice: "0", outputPrice: "0" }), undefined),
+    ).toEqual({})
     expect(
       checkDraft(draft({ inputPrice: "", outputPrice: "0.5" }), undefined),
     ).toEqual({})

@@ -182,7 +182,7 @@ def _to_metadata_schema(entry: ModelCatalogEntry) -> ModelMetadata:
     )
 
 
-@catalog_router.get("/models")
+@catalog_router.get("/models", response_model_exclude_none=True)
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -199,7 +199,7 @@ async def list_models(
     request sends as `model` to let the gateway choose the provider: it tries the
     model's offerings best first and falls back down the list. An entry's price,
     token limits and capabilities are those of the offering tried first, at the
-    caller's own rate. A limit nobody knows is null.
+    caller's own rate. A value nobody knows is omitted rather than sent as null.
 
     Aliases and routing policies are listed beside the models. An
     `instance:model` selector still pins a request to one provider, and
@@ -314,7 +314,7 @@ async def list_model_metadata(
     )
 
 
-@catalog_router.get("/models/{model_id:path}")
+@catalog_router.get("/models/{model_id:path}", response_model_exclude_none=True)
 async def get_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -323,7 +323,10 @@ async def get_model(
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
 ) -> ModelObject:
-    """Get details for a specific model, by catalog id, alias or `instance:model` selector."""
+    """Get details for a specific model, by catalog id, alias or `instance:model` selector.
+
+    A value the gateway does not know is omitted rather than sent as null.
+    """
     scope, aliases = await _caller_scope(db, config, auth, session_identity, model_provider)
     if answered_by_listing(model_id, aliases):
         listed = await _listing(db, config, auth, session_identity, model_provider)

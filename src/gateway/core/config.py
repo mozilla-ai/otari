@@ -201,16 +201,8 @@ MAX_AGENT_MODEL_CANDIDATES = 255
 """The most options a choice question takes, so a longer list fails at startup, not per request."""
 
 
-def validate_agent_recommender(model: str, candidates: dict[str, str | None]) -> None:
-    """Validate the agent recommender's settings, raising ``ValueError`` on any problem.
-
-    The decision provider itself is resolved per request, so a deployment that
-    never asks for a recommendation need not configure one.
-    """
-    provider, _, bare_model = model.partition(":")
-    if not provider.strip() or not bare_model.strip():
-        msg = "agent_recommender_model must name a decision model as '<provider>:<model>'."
-        raise ValueError(msg)
+def validate_agent_recommender_candidates(candidates: dict[str, str | None]) -> None:
+    """Validate ``agent_recommender_candidates``, raising ``ValueError`` on any problem."""
     if len(candidates) < 2:
         msg = "agent_recommender_candidates needs at least two models to choose between."
         raise ValueError(msg)
@@ -1062,14 +1054,6 @@ class GatewayConfig(
             "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds."
-        ),
-    )
-    agent_recommender_model: Annotated[str, OMITTED] = Field(
-        default="typesafe:jev-latest",
-        description=(
-            "The decision model that recommends a subagent's model through POST /api/v1/routing/recommend, "
-            "as a decision_providers selector ('<provider>:<model>'). Resolved per request, so a deployment "
-            "that never asks need not configure the provider."
         ),
     )
     agent_recommender_candidates: Annotated[dict[str, str | None], OMITTED] = Field(
@@ -2200,7 +2184,7 @@ class GatewayConfig(
         """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
         for name, entry in self.decision_providers.items():
             validate_decision_provider_entry(name, entry)
-        validate_agent_recommender(self.agent_recommender_model, self.agent_recommender_candidates)
+        validate_agent_recommender_candidates(self.agent_recommender_candidates)
 
     @model_validator(mode="after")
     def _validate_database_timeout_ordering(self) -> "GatewayConfig":

@@ -6,18 +6,15 @@ request. This keeps a copy per worker: loaded when the app starts, reloaded
 every ``REFRESH_SECONDS``, and replaced at once by the worker that served a
 write. Another worker sees a write within ``REFRESH_SECONDS``.
 
-Which recommender answers follows the rows. With none stored, the decision
-model ``agent_recommender_model`` names answers, at no price of its own. With
-rows stored, the one switched on answers at its rates, and with every row off
-nothing does. Until the first load lands, nothing answers either, since the
-rows may have switched the configured model off.
+Which recommender answers follows the rows: the one switched on answers at
+its rates. With none stored, or every row off, nothing does, and nothing
+answers until the first load lands either.
 """
 
 import asyncio
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from enum import Enum
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
@@ -28,17 +25,6 @@ from gateway.services.routing._agent_recommender_price import RecommenderPrice
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 
 REFRESH_SECONDS = 30.0
-
-
-class RecommenderSource(Enum):
-    """Who answers a recommendation on this deployment right now."""
-
-    CONFIGURED = "configured"
-    """No row is stored: the ``agent_recommender_model`` setting answers, unpriced."""
-    STORED = "stored"
-    """The row switched on answers, at its rates."""
-    NONE = "none"
-    """Rows are stored and none can answer, or the rows have not been read yet."""
 
 
 @dataclass(frozen=True)
@@ -53,24 +39,13 @@ class StoredRecommender:
     api_key: str | None = field(default=None, repr=False)
 
 
-@dataclass(frozen=True)
-class ActiveRecommender:
-    """What :func:`active_agent_recommender` answers: the source, and the row where it is a stored one."""
-
-    source: RecommenderSource
-    stored: StoredRecommender | None = None
-
-
-_CONFIGURED = ActiveRecommender(RecommenderSource.CONFIGURED)
-_NONE = ActiveRecommender(RecommenderSource.NONE)
-
-_active: ActiveRecommender = _CONFIGURED
+_active: StoredRecommender | None = None
 # Counts replacements, so a reload that read before a write cannot undo it.
 _version = 0
 
 
-def active_agent_recommender() -> ActiveRecommender:
-    """The recommender to answer with now."""
+def active_agent_recommender() -> StoredRecommender | None:
+    """The recommender to answer with now, or None where none can answer."""
     return _active
 
 
@@ -101,12 +76,8 @@ def apply_agent_recommenders(rows: Sequence[AgentRecommender]) -> None:
     global _active, _version  # noqa: PLW0603
 
     _version += 1
-    if not rows:
-        _active = _CONFIGURED
-        return
     enabled = next((row for row in rows if row.enabled), None)
-    stored = _from_row(enabled) if enabled is not None else None
-    _active = ActiveRecommender(RecommenderSource.STORED, stored) if stored is not None else _NONE
+    _active = _from_row(enabled) if enabled is not None else None
 
 
 async def refresh_agent_recommenders(uow: UnitOfWork) -> None:
@@ -119,10 +90,10 @@ async def refresh_agent_recommenders(uow: UnitOfWork) -> None:
 
 
 def reset_agent_recommenders() -> None:
-    """Forget the rows, so the configured model answers until the next load (startup and tests)."""
+    """Forget the rows, so nothing answers until the next load (startup and tests)."""
     global _active  # noqa: PLW0603
 
-    _active = _CONFIGURED
+    _active = None
 
 
 async def _refresh_on_a_session_of_its_own() -> None:
@@ -134,7 +105,7 @@ async def load_agent_recommenders_at_startup() -> None:
     """Read the rows before the first request. Until a read lands, nothing answers."""
     global _active  # noqa: PLW0603
 
-    _active = _NONE
+    _active = None
     try:
         await _refresh_on_a_session_of_its_own()
     except DATABASE_ERRORS as exc:

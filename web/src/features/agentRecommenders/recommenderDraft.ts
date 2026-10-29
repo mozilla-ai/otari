@@ -8,7 +8,6 @@
 
 import type {
   AgentRecommender,
-  ConfiguredRecommender,
   CreateAgentRecommenderRequest,
   UpdateAgentRecommenderRequest,
 } from "@/client"
@@ -107,21 +106,6 @@ export function draftFrom(recommender: AgentRecommender): RecommenderDraft {
   }
 }
 
-/**
- * A draft started from the decision model config.yml names, so adding it here
- * with a price is one step. It carries no key and no price: those are what
- * the row adds.
- */
-export function draftFromConfigured(
-  configured: ConfiguredRecommender,
-): RecommenderDraft {
-  return {
-    ...EMPTY_DRAFT,
-    provider: configured.provider,
-    model: configured.model,
-  }
-}
-
 /** Whether saving without typing a key keeps one already stored: the key goes to the API base. */
 function keepsStoredKey(
   draft: RecommenderDraft,
@@ -155,14 +139,11 @@ export function checkDraft(
     errors.apiBase = "Enter an http or https address."
   else if (hasKey && scheme.startsWith("http://"))
     errors.apiBase = "Use https: the API key is sent to this address."
-  const prices = (["inputPrice", "outputPrice"] as const).map((name) => {
+  // Both rates at zero is a free router, such as a local model.
+  for (const name of ["inputPrice", "outputPrice"] as const) {
     const parsed = parsePrice(draft[name])
     if (!parsed.ok) errors[name] = parsed.message
-    return parsed
-  })
-  // A stored router charges the caller, so it names a rate.
-  if (prices.every((parsed) => parsed.ok && parsed.value === 0))
-    errors.inputPrice = "Set an input or output token price above zero."
+  }
   return errors
 }
 

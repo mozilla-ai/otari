@@ -152,9 +152,9 @@ when its own requests go to Anthropic directly.
 
 `POST /api/v1/routing/recommend` takes the facts a harness holds at spawn
 time and recommends the model to start the subagent on. Otari puts one choice
-question to a decision model, TypeSafe's Jev by default: given the subagent
+question to a decision model, such as TypeSafe's Jev: given the subagent
 type, the task and the parent's model, which is the cheapest candidate that
-would do the task well? The candidate Jev picks is the recommendation. Any
+would do the task well? The candidate it picks is the recommendation. Any
 active API key may ask. The decision call is billed to the caller and recorded
 in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
 the harness acts on the answer with its own provider credentials.
@@ -163,15 +163,12 @@ Who answers is the deployment's choice. An operator stores one or more
 decision models on the **Subagent router** page of the deployment view, each
 with its key and a price per million tokens, and switches one on; a
 recommendation is then charged to the caller at that price (see
-[Subagent routers](routing.md#subagent-routers)). On otari.ai that router is
-managed for you. With no router stored, the deployment asks the decision model
-`agent_recommender_model` names, which may be a local one, and the call costs
-what the deployment's own pricing rows say.
+[Subagent routers](routing.md#subagent-routers)). The router may be a local
+model, and both prices at 0 make it free. On otari.ai that router is managed
+for you.
 
-That fallback needs a [decision provider](configuration.md#decision-providers)
-the `agent_recommender_model` selector resolves to, `typesafe` with an API key
-by default. Without one, or with every stored router switched off, the route
-answers 400 and the plugin falls back to the model the subagent would have had
+With no router stored, or every stored router switched off, the route answers
+400 and the plugin falls back to the model the subagent would have had
 anyway.
 
 ```bash

@@ -265,7 +265,8 @@ nothing else is dispatched. See
 ### Subagent routers
 
 Which decision model answers is set on the **Subagent router** page of the
-deployment view (`/api/v1/routing/recommenders`, operator-only). A router is a
+deployment view (`/api/v1/routing/recommenders`, operator-only), and nowhere
+else: `config.yml` has no setting for it. A router is a
 decision provider (TypeSafe, OpenRouter or a llama.cpp server), a model, an
 optional API base, a key stored encrypted under `OTARI_SECRET_KEY`, and the
 price per million input and output tokens the caller is charged. Several may
@@ -280,11 +281,10 @@ the router's own provider or model, and that label is what an API key's
 allow-list has to admit. A router that does
 not answer within 2.5 seconds fails the call, uncharged, so the otari-router
 plugin can fall back in time. An operator who wants a margin on the decision
-model's own price puts it in the rates.
+model's own price puts it in the rates, and one who wants recommendations
+free, from a local model for example, sets both rates to 0.
 
-With no router stored, the decision model `agent_recommender_model` names in
-`config.yml` answers, priced from the deployment's own `pricing` rows or not at
-all. With routers stored and every one switched off, nothing answers and the
+With no router stored, or every one switched off, nothing answers and the
 route refuses with 400. A write reaches its own gateway worker at once and
 every other worker or replica within 30 seconds.
 

@@ -151,8 +151,8 @@ def test_file_storage_refuses_a_container_built_without_config() -> None:
         container.resolve(FileStoragePort, NO_SESSION)
 
 
-def test_the_recommender_asks_the_configured_decision_model_once_per_resolve() -> None:
-    """The core answers from the deployment's own decision model, with a fresh adapter per request.
+def test_the_recommender_is_a_fresh_adapter_per_resolve() -> None:
+    """The core answers from the deployment's own subagent router, with a fresh adapter per request.
 
     Fresh, because the adapter keeps the router it quoted for the call that
     follows, and one shared instance would let a request reprice another's.
@@ -163,14 +163,6 @@ def test_the_recommender_asks_the_configured_decision_model_once_per_resolve() -
 
     assert isinstance(recommender, DecisionProviderRecommender)
     assert container.resolve(AgentModelRecommenderPort, NO_SESSION) is not recommender
-
-
-def test_the_recommender_refuses_a_container_built_without_config() -> None:
-    """With no config there is no ``agent_recommender_model`` to ask, so resolving says so."""
-    container = build_container()
-
-    with pytest.raises(ContainerError, match="AgentModelRecommenderPort"):
-        container.resolve(AgentModelRecommenderPort, NO_SESSION)
 
 
 def test_the_model_provider_answers_nothing_without_a_unit_of_work() -> None:

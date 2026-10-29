@@ -182,9 +182,10 @@ gateway process rather than to any organization on it:
   encrypted and shown by its last four characters, and the price per million
   input and output tokens the caller is charged. Several may be added and one
   is switched on at a time: the first one added is on, and the Serving switch
-  moves it. With none added, the decision model `agent_recommender_model` names
-  in `config.yml` answers, unpriced; with every router switched off, nothing
-  does. See [Subagent routers](routing.md#subagent-routers).
+  moves it. Both prices at 0 make a free router, such as a local model. With
+  none added, or every router switched off, no model is picked. This page is
+  the only place the router is set. See
+  [Subagent routers](routing.md#subagent-routers).
 - Web search, the search and fetch tools the deployment runs for every
   workspace and what each call costs. Its two tables list the search tools and
   the fetch tools, `builtin_fetch` first, each with its key's last four and its

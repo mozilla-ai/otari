@@ -1,8 +1,8 @@
 """What makes a stored recommender usable.
 
 The rules are the ones ``validate_decision_providers`` holds a
-``decision_providers`` entry to, plus the price: a stored router charges the
-caller, so it names a rate.
+``decision_providers`` entry to, plus a price that is not negative. Both rates
+at zero is a free router, such as a local model.
 """
 
 from urllib.parse import urlsplit
@@ -32,12 +32,6 @@ def check_recommender(*, provider: str, has_api_key: bool, api_base: str | None,
         if has_api_key and scheme != "https":
             msg = "the API base must use https when an API key is set"
             raise ValueError(msg)
-    rates = (price.input_price_per_million, price.output_price_per_million)
-    if any(rate < 0 for rate in rates):
+    if price.input_price_per_million < 0 or price.output_price_per_million < 0:
         msg = "a price cannot be negative"
-        raise ValueError(msg)
-    # A stored router charges the caller, so it names a rate; a free decision
-    # model is configured in config.yml instead.
-    if not any(rate > 0 for rate in rates):
-        msg = "set an input or output token price above zero"
         raise ValueError(msg)

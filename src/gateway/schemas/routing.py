@@ -101,6 +101,12 @@ class AgentModelRecommendation(BaseModel):
     )
 
 
+class RecommendationRefusal(BaseModel):
+    """The body of a recommendation request the gateway refuses."""
+
+    detail: str = Field(description="Why the request was refused.")
+
+
 class FallbackOfferingPublic(BaseModel):
     """One offering a catalog ID tries, and who runs the built-in tools on it."""
 
@@ -211,16 +217,7 @@ class AgentRecommenderPublic(BaseModel):
     updated_at: datetime | None
 
 
-class ConfiguredRecommenderPublic(BaseModel):
-    """The decision model ``agent_recommender_model`` names, which answers unpriced while no router is stored."""
-
-    selector: str
-    provider: str
-    model: str
-
-
 class AgentRecommendersPublic(BaseModel):
-    """Every stored subagent router, oldest first, and the configured decision model, where it resolves."""
+    """Every stored subagent router, oldest first."""
 
     data: list[AgentRecommenderPublic]
-    configured: ConfiguredRecommenderPublic | None
