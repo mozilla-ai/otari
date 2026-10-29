@@ -125,8 +125,8 @@ class SpanPublic(BaseModel):
     content: dict[str, str] = Field(
         description=(
             "What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, "
-            "tool.output), only where the workspace keeps content, the client sent it, and the reader may open it. "
-            "Empty otherwise."
+            "tool.output), only where the workspace keeps content, the client sent it or Otari ran the tool that "
+            "produced it, and the reader may open it. Empty otherwise."
         )
     )
     content_private: bool = Field(

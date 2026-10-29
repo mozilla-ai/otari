@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gateway.api.routes._normalize import normalize_request_messages
 from gateway.core.config import API_ROOT, TRACE_CONTENT_HEADER
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import OrganizationMember, Workspace
@@ -130,6 +131,22 @@ def test_a_request_that_asks_keeps_its_prompt(client: TestClient, routed: Any) -
 
     [write] = writer.writes
     assert write.content_generation is not None
+    assert write.spans[0].content == {"prompt": "fix the flaky test"}
+
+
+def test_the_prompt_is_what_the_client_sent_not_an_attachment_rendered_as_text(client: TestClient, routed: Any) -> None:
+    writer, headers, _, _ = routed
+
+    async def rendering_an_attachment(messages: list[Any], **kwargs: Any) -> Any:
+        normalized, stats = await normalize_request_messages(messages, **kwargs)
+        rendered = [*normalized[:-1], {"role": "user", "content": [{"type": "text", "text": "fix the flaky test"}]}]
+        rendered[-1]["content"].append({"type": "text", "text": "ATTACHMENT TEXT"})
+        return rendered, stats
+
+    with patch("gateway.api.routes.chat.normalize_request_messages", rendering_an_attachment):
+        _chat(client, {**headers, TRACE_CONTENT_HEADER: "keep"}, _PROMPT)
+
+    [write] = writer.writes
     assert write.spans[0].content == {"prompt": "fix the flaky test"}
 
 

@@ -3009,12 +3009,14 @@ async def resolve_request_context(
     budget_exempt = (api_key is not None and api_key.exclude_from_budget) or (
         resolved_provider is not None and resolved_provider.owned_endpoint is not None
     )
-    # Before the rate limit and the reservation, so a read that fails or is cancelled holds nothing to give back.
+    # Before the rate limit and the reservation, so a read that fails or is cancelled holds nothing to give back,
+    # and before normalization, so the content is what the client sent and not an attachment rendered as text.
     content_generation = (
         await routed_trace_content_generation(raw_request, uow, db, config, workspace_id, user_id)
         if config.trace_capture_enabled and turn_content is not None
         else None
     )
+    content = turn_content() if turn_content is not None and content_generation is not None else None
     # Before the reservation, so a request the rules refuse holds no budget to refund.
     rate_limit_grant = await admit_rate_limit_rules(
         raw_request,
@@ -3324,7 +3326,7 @@ async def resolve_request_context(
             harness=harness_of(raw_request.headers),
             turn=turn,
             context=context_of(context),
-            content=turn_content() if turn_content is not None and content_generation is not None else None,
+            content=content,
             content_generation=content_generation,
             keep_tool_output=config.trace_content_tool_output,
             subagent=is_subagent(raw_request.headers),

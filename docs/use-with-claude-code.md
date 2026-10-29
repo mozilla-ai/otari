@@ -332,8 +332,10 @@ To keep them, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
 ```
 
 See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
-Do not both [route](#route-claude-code-through-otari) and export one session,
-or its cost appears twice.
+Do not both [route](#route-claude-code-through-otari) and export one session.
+Both land on the session's one trace, so each turn and its cost appear twice.
+`otari hook` is the exception: its gates open no turn and carry no cost, so a
+routed session can report them.
 
 ## Import Claude Code usage without routing
 
