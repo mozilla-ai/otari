@@ -37,8 +37,12 @@ class ApplicableCeiling:
     scoped_budget_id: str
     scope_type: ScopeType
     provider_key_id: str | None
-    budget_duration_sec: int | None
-    reset_alignment: str | None
+    reset_cycle: str | None
+    reset_every_n: int | None
+    reset_anchor_at: datetime | None
+    reset_weekdays: int | None
+    reset_month_day: int | None
+    reset_month: int | None
     period_end: datetime | None
     token_limit: int | None
     request_limit: int | None
@@ -322,8 +326,12 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 ScopedBudget.id,
                 ScopedBudget.scope_type,
                 ScopedBudget.provider_key_id,
-                Budget.budget_duration_sec,
-                Budget.reset_alignment,
+                Budget.reset_cycle,
+                Budget.reset_every_n,
+                Budget.reset_anchor_at,
+                Budget.reset_weekdays,
+                Budget.reset_month_day,
+                Budget.reset_month,
                 ScopedBudget.period_end,
                 Budget.token_limit,
                 Budget.request_limit,
@@ -337,8 +345,12 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 scoped_budget_id=scoped_budget_id,
                 scope_type=cast(ScopeType, scope_type),
                 provider_key_id=provider_key_id,
-                budget_duration_sec=budget_duration_sec,
-                reset_alignment=reset_alignment,
+                reset_cycle=reset_cycle,
+                reset_every_n=reset_every_n,
+                reset_anchor_at=reset_anchor_at,
+                reset_weekdays=reset_weekdays,
+                reset_month_day=reset_month_day,
+                reset_month=reset_month,
                 period_end=period_end,
                 token_limit=token_limit,
                 request_limit=request_limit,
@@ -347,8 +359,12 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 scoped_budget_id,
                 scope_type,
                 provider_key_id,
-                budget_duration_sec,
-                reset_alignment,
+                reset_cycle,
+                reset_every_n,
+                reset_anchor_at,
+                reset_weekdays,
+                reset_month_day,
+                reset_month,
                 period_end,
                 token_limit,
                 request_limit,

@@ -21,6 +21,7 @@ import re
 import statistics
 import time
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -86,6 +87,11 @@ class Tenant:
     key_id: str
 
 
+def _every(n: int, unit: str) -> dict[str, object]:
+    """An interval reset cycle starting now. A gateway older than reset cycles ignores the fields."""
+    return {"reset_cycle": f"every_n_{unit}", "reset_every_n": n, "reset_anchor_at": datetime.now(UTC).isoformat()}
+
+
 def create_tenant(name: str, pooled: bool) -> Tenant:
     with httpx.Client(
         base_url=f"{GATEWAY}/api/v1", headers={"Authorization": f"Bearer {MASTER_KEY}"}, timeout=30
@@ -98,7 +104,7 @@ def create_tenant(name: str, pooled: bool) -> Tenant:
             return response.json()
 
         service_user = f"loadtest-{name}-{random.getrandbits(32):08x}"
-        end_user_budget = post("/budgets", {"name": f"{name} end user", "max_budget": 100, "budget_duration_sec": 3600})
+        end_user_budget = post("/budgets", {"name": f"{name} end user", "max_budget": 100, **_every(1, "hours")})
         post("/users", {"user_id": service_user})
         key = post(
             "/keys",
@@ -110,7 +116,7 @@ def create_tenant(name: str, pooled: bool) -> Tenant:
             },
         )
         if pooled:
-            pool = post("/budgets", {"name": f"{name} pool", "max_budget": 10_000, "budget_duration_sec": 86_400})
+            pool = post("/budgets", {"name": f"{name} pool", "max_budget": 10_000, **_every(1, "days")})
             post(
                 "/scoped-budgets",
                 {"scope_type": "api_token", "scope_id": key["id"], "budget_id": pool["budget_id"], "name": name},

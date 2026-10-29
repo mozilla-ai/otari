@@ -1,138 +1,14 @@
 /**
  * The vocabulary the organization's Spend page is written in.
  *
- * Pure derivations, in their own module so the two cards and their dialogs share
- * one answer rather than three: what a period is called, what a budget's figure
- * reads as, and how a ceiling's scope is named on screen.
+ * Pure derivations, in their own module so the page and its dialogs share one
+ * answer rather than three: what a budget's figure reads as, and how a ceiling's
+ * scope is named on screen. The reset cycle has its own module, `resetCycle.ts`,
+ * because it is one concept carried by six fields.
  */
 
-import type {
-  CreateOrganizationBudget,
-  OrganizationBudget,
-  OrganizationSpendCeiling,
-  Workspace,
-} from "@/client"
+import type { OrganizationSpendCeiling, Workspace } from "@/client"
 import { formatNumber, formatUsd } from "@/shared/helpers/format"
-
-/**
- * The calendar boundaries the API accepts, derived from the generated client
- * rather than restated here.
- *
- * Restating them as `string` is what broke the build once: the endpoint narrowed
- * `reset_alignment` to a three-value enum and every local `string` stopped
- * assigning to it. Deriving the type means the next change to that enum is a
- * type error at the two places that construct one, not a widening that compiles
- * and sends a value the server refuses.
- */
-export type ResetAlignment = NonNullable<
-  CreateOrganizationBudget["reset_alignment"]
->
-
-/**
- * The periods this page offers, as calendar boundaries rather than seconds.
- *
- * The API accepts either (`reset_alignment` or `budget_duration_sec`, never
- * both), and this surface deliberately only writes the first. A duration is a
- * rolling integer measured from the last reset, so "86400" does not mean "resets
- * at midnight", it means "at least 24 hours, restarted on the next request":
- * on a quiet workspace the reset walks through the morning and stays there. And
- * a month has no duration at all, since 30 days is a 1.5 percent more generous
- * product than a calendar month. An admin picking "Monthly" means the calendar,
- * so that is what is stored.
- *
- * A ceiling created by the deployment surface may still carry a duration, which
- * is why `periodLabel` reads both.
- */
-export const PERIOD_OPTIONS: readonly {
-  value: string
-  label: string
-  alignment: ResetAlignment | undefined
-}[] = [
-  { value: "none", label: "No reset", alignment: undefined },
-  { value: "calendar_day", label: "Daily", alignment: "calendar_day" },
-  { value: "calendar_week", label: "Weekly", alignment: "calendar_week" },
-  { value: "calendar_month", label: "Monthly", alignment: "calendar_month" },
-]
-
-const ALIGNMENT_LABELS: Record<string, string> = {
-  calendar_day: "Daily, at UTC midnight",
-  calendar_week: "Weekly, Monday 00:00 UTC",
-  calendar_month: "Monthly, the 1st at 00:00 UTC",
-}
-
-const SHORT_ALIGNMENTS: Record<string, string> = {
-  calendar_day: "day",
-  calendar_week: "week",
-  calendar_month: "month",
-}
-
-const HOUR = 3_600
-const DAY = 86_400
-
-/** Which `PERIOD_OPTIONS` value a stored budget corresponds to, for the form. */
-export function periodValue(budget: OrganizationBudget | undefined): string {
-  if (!budget) return "calendar_month"
-  if (budget.reset_alignment) return budget.reset_alignment
-  // A duration-based budget has no option of its own here, so the form opens on
-  // "No reset" rather than silently proposing to convert it. Saving would then
-  // clear the duration, which the field description says.
-  return "none"
-}
-
-/** How a period reads in a table cell, for either way a budget can carry one. */
-export function periodLabel(
-  budget: Pick<OrganizationBudget, "reset_alignment" | "budget_duration_sec">,
-): string {
-  if (budget.reset_alignment) {
-    return ALIGNMENT_LABELS[budget.reset_alignment] ?? budget.reset_alignment
-  }
-  const seconds = budget.budget_duration_sec
-  if (seconds === null || seconds === undefined) return "Never"
-  if (seconds % DAY === 0) {
-    const days = seconds / DAY
-    return `Every ${days} ${days === 1 ? "day" : "days"}, from the last reset`
-  }
-  if (seconds % HOUR === 0) {
-    const hours = seconds / HOUR
-    return `Every ${hours} ${hours === 1 ? "hour" : "hours"}, from the last reset`
-  }
-  return `Every ${seconds}s, from the last reset`
-}
-
-/**
- * The same period as a bare unit, for a label that reads as a rate.
- *
- * `periodLabel` spells the boundary out because a table cell is where an
- * operator checks exactly when a budget turns over. A derived name is not: it
- * has to fit beside a figure (`$50.00 / month`), so it takes the unit alone.
- * `undefined` where a budget never resets, which is a label with no rate at all
- * rather than one reading "never".
- *
- * A calendar boundary is a word (`month`) and a rolling duration is a count
- * (`30 days`). They are not the same product: a duration restarts on the first
- * request after the last reset, so it walks, and 30 days is 1.5 percent more
- * generous than the calendar month the deployment form's "Monthly" preset
- * suggests. That form also takes a custom day count, which has no calendar word
- * at all, so a count is the only spelling every period has.
- */
-export function shortPeriodLabel(
-  budget: Pick<OrganizationBudget, "reset_alignment" | "budget_duration_sec">,
-): string | undefined {
-  if (budget.reset_alignment) {
-    return SHORT_ALIGNMENTS[budget.reset_alignment] ?? budget.reset_alignment
-  }
-  const seconds = budget.budget_duration_sec
-  if (seconds === null || seconds === undefined) return undefined
-  if (seconds % DAY === 0) {
-    const days = seconds / DAY
-    return `${days} ${days === 1 ? "day" : "days"}`
-  }
-  if (seconds % HOUR === 0) {
-    const hours = seconds / HOUR
-    return `${hours} ${hours === 1 ? "hour" : "hours"}`
-  }
-  return `${seconds}s`
-}
 
 /** The three caps a budget can hold, as every response shape carries them. */
 type BudgetCaps = {

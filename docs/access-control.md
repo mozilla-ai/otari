@@ -357,9 +357,9 @@ declare them in config.yml instead. The two requests above become:
 
 ```yaml
 budgets:
-  end-user-budget-ai: {max_budget: 0.1, reset_alignment: calendar_day, rpm_limit: 40, tpm_limit: 2000}
-  end-user-budget-memories: {max_budget: 0.05, reset_alignment: calendar_day}
-  mlpa-global: {max_budget: 100, reset_alignment: calendar_day}
+  end-user-budget-ai: {max_budget: 0.1, reset_cycle: daily, rpm_limit: 40, tpm_limit: 2000}
+  end-user-budget-memories: {max_budget: 0.05, reset_cycle: daily}
+  mlpa-global: {max_budget: 100, reset_cycle: daily}
 
 api_keys:
   mlpa:
@@ -504,7 +504,10 @@ limit. They apply to a user's own budget on chat completions, messages,
 responses and search, not to a scoped ceiling, and a refusal is a 429 naming the
 rule `budget`.
 
-Scoped budgets can use a rolling duration or a UTC calendar boundary. A key with
+A budget resets on a cycle: daily, weekly on chosen weekdays, monthly on a day
+from the 1st to the 28th, or yearly, each at 00:00 UTC; or every N hours or days
+counted from a start date, which keeps its phase however quiet the traffic. A
+budget with no cycle never resets. A key with
 `exclude_from_budget`, or a deployment with `budget_strategy: disabled`,
 bypasses enforcement.
 

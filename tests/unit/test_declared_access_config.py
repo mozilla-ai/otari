@@ -19,8 +19,8 @@ OTHER_SECRET = "tk-" + secrets.token_urlsafe(48)
 
 MLPA_CONFIG = """
 budgets:
-  end-user-budget-ai: {max_budget: 0.1, reset_alignment: calendar_day, rpm_limit: 40, tpm_limit: 2000}
-  mlpa-global: {max_budget: 100, reset_alignment: calendar_day}
+  end-user-budget-ai: {max_budget: 0.1, reset_cycle: daily, rpm_limit: 40, tpm_limit: 2000}
+  mlpa-global: {max_budget: 100, reset_cycle: daily}
 api_keys:
   mlpa:
     secret: ${MLPA_SERVICE_KEY}
@@ -67,9 +67,9 @@ def test_the_mlpa_example_loads_with_its_secret_from_the_environment(tmp_path: P
     config = _load(tmp_path, MLPA_CONFIG)
 
     budget = config.budgets["end-user-budget-ai"]
-    assert (budget.max_budget, budget.reset_alignment, budget.rpm_limit, budget.tpm_limit) == (
+    assert (budget.max_budget, budget.reset_cycle, budget.rpm_limit, budget.tpm_limit) == (
         0.1,
-        "calendar_day",
+        "daily",
         40,
         2000,
     )
@@ -168,10 +168,12 @@ def test_a_key_name_must_be_an_identifier() -> None:
 @pytest.mark.parametrize(
     ("budget", "message"),
     [
-        ({"budget_duration_sec": 86400, "reset_alignment": "calendar_day"}, "not both"),
+        ({"reset_alignment": "calendar_day"}, "replaced by reset_cycle"),
+        ({"budget_duration_sec": 86400}, "replaced by reset_cycle"),
         ({"max_budget": -1}, "greater than or equal to 0"),
         ({"rpm_limit": 0}, "greater than or equal to 1"),
-        ({"reset_alignment": "fortnightly"}, "calendar_day"),
+        ({"reset_cycle": "fortnightly"}, "every_n_hours"),
+        ({"reset_month_day": 29}, "less than or equal to 28"),
         ({"max_budgt": 1}, "Extra inputs are not permitted"),
     ],
 )

@@ -2435,17 +2435,6 @@
       "BudgetResponse": {
         "description": "Response model for budget information.\n\n``max_budget``, ``token_limit`` and ``request_limit`` are the per-user\nceilings, each independent and each unlimited when null, and multiple users\ncan share one budget, so the usage rollup is an aggregate over the users\nassigned to this budget: how many there are and their combined ``spend`` /\n``reserved``.\nAssigning users to a budget is done through the users API (dashboard support\nlands with user management), so a fresh gateway reports zeros here.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Duration Sec"
-          },
           "budget_id": {
             "title": "Budget Id",
             "type": "string"
@@ -2511,7 +2500,7 @@
             ],
             "title": "Request Limit"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -2520,7 +2509,62 @@
                 "type": "null"
               }
             ],
-            "title": "Reset Alignment"
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Weekdays"
           },
           "rpm_limit": {
             "anyOf": [
@@ -2582,8 +2626,12 @@
           "max_budget",
           "token_limit",
           "request_limit",
-          "budget_duration_sec",
-          "reset_alignment",
+          "reset_cycle",
+          "reset_every_n",
+          "reset_anchor_at",
+          "reset_weekdays",
+          "reset_month_day",
+          "reset_month",
           "created_at",
           "updated_at"
         ],
@@ -5026,19 +5074,6 @@
       "CreateBudgetRequest": {
         "description": "Request model for creating a new budget.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Budget duration in seconds (e.g., 86400 for daily, 604800 for weekly)",
-            "title": "Budget Duration Sec"
-          },
           "max_budget": {
             "anyOf": [
               {
@@ -5079,13 +5114,29 @@
             "description": "Maximum requests over the period. Independent of max_budget; null is unlimited",
             "title": "Request Limit"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where an interval cycle's first period opened. Later periods are counted from it, so the cadence keeps its phase rather than restarting at the next request",
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
             "anyOf": [
               {
                 "enum": [
-                  "calendar_day",
-                  "calendar_week",
-                  "calendar_month"
+                  "every_n_hours",
+                  "every_n_days",
+                  "daily",
+                  "weekly",
+                  "monthly",
+                  "yearly"
                 ],
                 "type": "string"
               },
@@ -5093,8 +5144,64 @@
                 "type": "null"
               }
             ],
-            "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
-            "title": "Reset Alignment"
+            "description": "How often the budget resets. Null never resets. daily, weekly, monthly and yearly reset at 00:00 UTC; every_n_hours and every_n_days reset every reset_every_n hours or days counted from reset_anchor_at. Each cycle carries its own settings and no others: every_n_hours and every_n_days take reset_every_n and reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly takes reset_month and reset_month_day",
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 87600.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many hours or days between resets, in the unit reset_cycle names: at most 87600 hours or 3650 days",
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The month a yearly cycle resets in, 1 to 12",
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "maximum": 28.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The day of the month a monthly or yearly cycle resets on, 1 to 28. Capped so every month has the day",
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "maximum": 127.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. Several are allowed and the limit applies to each period between them, so Monday and Friday give a four-day period and a three-day one",
+            "title": "Reset Weekdays"
           },
           "rpm_limit": {
             "anyOf": [
@@ -13661,19 +13768,6 @@
       "OrganizationBudgetCreate": {
         "description": "Create one budget owned by the caller's organization.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment",
-            "title": "Budget Duration Sec"
-          },
           "max_budget": {
             "anyOf": [
               {
@@ -13715,13 +13809,29 @@
             "description": "Maximum requests over one period; null caps nothing. Independent of max_budget",
             "title": "Request Limit"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where an interval cycle's first period opened. Later periods are counted from it, so the cadence keeps its phase rather than restarting at the next request",
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
             "anyOf": [
               {
                 "enum": [
-                  "calendar_day",
-                  "calendar_week",
-                  "calendar_month"
+                  "every_n_hours",
+                  "every_n_days",
+                  "daily",
+                  "weekly",
+                  "monthly",
+                  "yearly"
                 ],
                 "type": "string"
               },
@@ -13729,8 +13839,64 @@
                 "type": "null"
               }
             ],
-            "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
-            "title": "Reset Alignment"
+            "description": "How often the budget resets. Null never resets. daily, weekly, monthly and yearly reset at 00:00 UTC; every_n_hours and every_n_days reset every reset_every_n hours or days counted from reset_anchor_at. Each cycle carries its own settings and no others: every_n_hours and every_n_days take reset_every_n and reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly takes reset_month and reset_month_day",
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 87600.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many hours or days between resets, in the unit reset_cycle names: at most 87600 hours or 3650 days",
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The month a yearly cycle resets in, 1 to 12",
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "maximum": 28.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The day of the month a monthly or yearly cycle resets on, 1 to 28. Capped so every month has the day",
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "maximum": 127.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. Several are allowed and the limit applies to each period between them, so Monday and Friday give a four-day period and a three-day one",
+            "title": "Reset Weekdays"
           },
           "token_limit": {
             "anyOf": [
@@ -13760,17 +13926,6 @@
             },
             "title": "Applied To",
             "type": "array"
-          },
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Duration Sec"
           },
           "budget_id": {
             "title": "Budget Id",
@@ -13822,7 +13977,7 @@
             ],
             "title": "Request Limit"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -13831,7 +13986,62 @@
                 "type": "null"
               }
             ],
-            "title": "Reset Alignment"
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Weekdays"
           },
           "token_limit": {
             "anyOf": [
@@ -13856,8 +14066,12 @@
           "max_budget",
           "token_limit",
           "request_limit",
-          "budget_duration_sec",
-          "reset_alignment",
+          "reset_cycle",
+          "reset_every_n",
+          "reset_anchor_at",
+          "reset_weekdays",
+          "reset_month_day",
+          "reset_month",
           "ceiling_count",
           "applied_to",
           "created_at",
@@ -13867,21 +14081,8 @@
         "type": "object"
       },
       "OrganizationBudgetUpdate": {
-        "description": "Replace a budget's label, figure and period.\n\nEvery field is optional and keyed on ``model_fields_set``, matching\nthe deployment-wide budget update's own: an *omitted* field is left alone, and an\nexplicit null clears it, so sending ``max_budget: null`` takes a budget back\nto uncapped, which is what the dashboard's dialog does. The period pair is\nstill mutually exclusive, and setting one does not clear the other, which is\nwhy :func:`_require_single_period_source` re-checks the *resulting* pair\nrather than the submitted one.",
+        "description": "Replace a budget's label, figure and period.\n\nEvery field is optional and keyed on ``model_fields_set``, matching\nthe deployment-wide budget update's own: an *omitted* field is left alone, and an\nexplicit null clears it, so sending ``max_budget: null`` takes a budget back\nto uncapped, which is what the dashboard's dialog does. A cycle's settings\nare checked as the row ends up with them, not as submitted, since an omitted\nsetting keeps its stored value.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment",
-            "title": "Budget Duration Sec"
-          },
           "max_budget": {
             "anyOf": [
               {
@@ -13923,13 +14124,29 @@
             "description": "Maximum requests over one period; null caps nothing. Independent of max_budget",
             "title": "Request Limit"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where an interval cycle's first period opened. Later periods are counted from it, so the cadence keeps its phase rather than restarting at the next request",
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
             "anyOf": [
               {
                 "enum": [
-                  "calendar_day",
-                  "calendar_week",
-                  "calendar_month"
+                  "every_n_hours",
+                  "every_n_days",
+                  "daily",
+                  "weekly",
+                  "monthly",
+                  "yearly"
                 ],
                 "type": "string"
               },
@@ -13937,8 +14154,64 @@
                 "type": "null"
               }
             ],
-            "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
-            "title": "Reset Alignment"
+            "description": "How often the budget resets. Null never resets. daily, weekly, monthly and yearly reset at 00:00 UTC; every_n_hours and every_n_days reset every reset_every_n hours or days counted from reset_anchor_at. Each cycle carries its own settings and no others: every_n_hours and every_n_days take reset_every_n and reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly takes reset_month and reset_month_day",
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 87600.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many hours or days between resets, in the unit reset_cycle names: at most 87600 hours or 3650 days",
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The month a yearly cycle resets in, 1 to 12",
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "maximum": 28.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The day of the month a monthly or yearly cycle resets on, 1 to 28. Capped so every month has the day",
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "maximum": 127.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. Several are allowed and the limit applies to each period between them, so Monday and Friday give a four-day period and a three-day one",
+            "title": "Reset Weekdays"
           },
           "token_limit": {
             "anyOf": [
@@ -15394,17 +15667,6 @@
       "OrganizationScopedBudgetPublic": {
         "description": "One ceiling inside the organization, and the figures it enforces.\n\nThe limit and the period are read through the budget rather than stored here,\nand carried on the wire so a page can render a ceiling without fetching every\nbudget to resolve one id. Same reasoning as ``ScopedBudgetResponse``, whose\nshape this deliberately mirrors.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Duration Sec"
-          },
           "budget_id": {
             "title": "Budget Id",
             "type": "string"
@@ -15511,7 +15773,7 @@
             "title": "Reserved Tokens",
             "type": "integer"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -15520,7 +15782,62 @@
                 "type": "null"
               }
             ],
-            "title": "Reset Alignment"
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Weekdays"
           },
           "scope_id": {
             "title": "Scope Id",
@@ -15562,8 +15879,12 @@
           "request_limit",
           "current_requests",
           "reserved_requests",
-          "budget_duration_sec",
-          "reset_alignment",
+          "reset_cycle",
+          "reset_every_n",
+          "reset_anchor_at",
+          "reset_weekdays",
+          "reset_month_day",
+          "reset_month",
           "period_start",
           "period_end",
           "created_at",
@@ -19373,19 +19694,8 @@
         "type": "string"
       },
       "ScopedBudgetResponse": {
-        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\nEvery limit, along with ``budget_duration_sec`` and ``reset_alignment``, is\nread off the budget rather than stored here, and carried on the wire so a\ncaller can render a ceiling without fetching every budget to resolve one id.",
+        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\nEvery limit, along with the reset cycle and its settings, is\nread off the budget rather than stored here, and carried on the wire so a\ncaller can render a ceiling without fetching every budget to resolve one id.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Duration Sec"
-          },
           "budget_id": {
             "title": "Budget Id",
             "type": "string"
@@ -19488,7 +19798,7 @@
             "title": "Reserved Tokens",
             "type": "integer"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -19497,7 +19807,62 @@
                 "type": "null"
               }
             ],
-            "title": "Reset Alignment"
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Weekdays"
           },
           "scope_id": {
             "title": "Scope Id",
@@ -19539,8 +19904,12 @@
           "request_limit",
           "current_requests",
           "reserved_requests",
-          "budget_duration_sec",
-          "reset_alignment",
+          "reset_cycle",
+          "reset_every_n",
+          "reset_anchor_at",
+          "reset_weekdays",
+          "reset_month_day",
+          "reset_month",
           "period_start",
           "period_end",
           "created_at",
@@ -22142,18 +22511,6 @@
       "UpdateBudgetRequest": {
         "description": "Request model for updating a budget.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Duration Sec"
-          },
           "max_budget": {
             "anyOf": [
               {
@@ -22192,13 +22549,29 @@
             "description": "Maximum requests over the period. Independent of max_budget; null is unlimited",
             "title": "Request Limit"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where an interval cycle's first period opened. Later periods are counted from it, so the cadence keeps its phase rather than restarting at the next request",
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
             "anyOf": [
               {
                 "enum": [
-                  "calendar_day",
-                  "calendar_week",
-                  "calendar_month"
+                  "every_n_hours",
+                  "every_n_days",
+                  "daily",
+                  "weekly",
+                  "monthly",
+                  "yearly"
                 ],
                 "type": "string"
               },
@@ -22206,7 +22579,64 @@
                 "type": "null"
               }
             ],
-            "title": "Reset Alignment"
+            "description": "How often the budget resets. Null never resets. daily, weekly, monthly and yearly reset at 00:00 UTC; every_n_hours and every_n_days reset every reset_every_n hours or days counted from reset_anchor_at. Each cycle carries its own settings and no others: every_n_hours and every_n_days take reset_every_n and reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly takes reset_month and reset_month_day",
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 87600.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many hours or days between resets, in the unit reset_cycle names: at most 87600 hours or 3650 days",
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The month a yearly cycle resets in, 1 to 12",
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "maximum": 28.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The day of the month a monthly or yearly cycle resets on, 1 to 28. Capped so every month has the day",
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "maximum": 127.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. Several are allowed and the limit applies to each period between them, so Monday and Friday give a four-day period and a three-day one",
+            "title": "Reset Weekdays"
           },
           "rpm_limit": {
             "anyOf": [
@@ -25818,17 +26248,6 @@
       "WorkspaceMemberBudgetPolicyPublic": {
         "description": "One default and its template values.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Duration Sec"
-          },
           "budget_id": {
             "title": "Budget Id",
             "type": "string"
@@ -25885,7 +26304,7 @@
             ],
             "title": "Request Limit"
           },
-          "reset_alignment": {
+          "reset_anchor_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -25894,7 +26313,62 @@
                 "type": "null"
               }
             ],
-            "title": "Reset Alignment"
+            "title": "Reset Anchor At"
+          },
+          "reset_cycle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Cycle"
+          },
+          "reset_every_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Every N"
+          },
+          "reset_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month"
+          },
+          "reset_month_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Month Day"
+          },
+          "reset_weekdays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Weekdays"
           },
           "token_limit": {
             "anyOf": [
@@ -25926,8 +26400,12 @@
           "max_budget",
           "token_limit",
           "request_limit",
-          "budget_duration_sec",
-          "reset_alignment",
+          "reset_cycle",
+          "reset_every_n",
+          "reset_anchor_at",
+          "reset_weekdays",
+          "reset_month_day",
+          "reset_month",
           "created_at",
           "updated_at"
         ],
