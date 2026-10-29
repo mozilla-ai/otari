@@ -1389,21 +1389,17 @@ model like any other, as `<provider>:<model>` in `pricing`.
 `POST /api/v1/routing/recommend` asks a decision model which of a few
 candidate models a coding agent's subagent should run on (see
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model)).
-Two settings shape the question:
+The decision model is set only on the
+[Subagent router](routing.md#subagent-routers) page of the dashboard, never in
+`config.yml`. One setting shapes the question:
 
 ```yaml
-agent_recommender_model: typesafe:jev-latest
 agent_recommender_candidates:
   haiku: Simple, well-specified, mechanical work. Little judgment needed.
   sonnet: Moderate reasoning across a few files, contained code changes.
   opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
 ```
 
-`agent_recommender_model` is the fallback: a router stored on the
-[Subagent router](routing.md#subagent-routers) page answers in its place, at
-the price stored with it, and with routers stored and all of them switched off
-nothing answers at all. It is a `decision_providers` selector, resolved per
-request, so a deployment that never asks need not configure the provider.
 `agent_recommender_candidates` maps each model name, as Claude Code spells it,
 to what it is for; `null` is allowed when the name says enough. At least two
 are required, and at most 255, the limit a choice question has. The defaults

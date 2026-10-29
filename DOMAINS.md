@@ -150,9 +150,8 @@ It owns `ports/agent_model_recommender_port.py` and its adapter in
 answers a subagent model recommendation and at what price. The core asks the
 subagent router switched on in the dashboard (the `agent_recommenders` table,
 administered through `/api/v1/routing/recommenders` and held in memory per
-worker for the quote), at the token rates stored with it, or, with none
-stored, the decision model the deployment configured, which may be a local
-one, at no price of its own. An overlay may bind a recommender of its own, or
+worker for the quote), at the token rates stored with it; with none switched
+on, nothing answers. An overlay may bind a recommender of its own, or
 wrap the core one, so the composition root binds the implementation and no
 caller chooses between them. The adapter quotes the price where it owns one;
 the decisions scaffold meters the call.
