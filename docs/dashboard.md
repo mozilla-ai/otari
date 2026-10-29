@@ -107,7 +107,7 @@ The organization view contains tenant-wide administration:
 - Organization-wide usage
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
-- Spend and budgets
+- Budgets
 - General: Providers, followed by Guardrails and Org settings.
   Providers is the organization's own upstream credentials, the models each one
   reaches, and what this organization pays for them: adding a key offers every
@@ -215,9 +215,9 @@ tokens per minute and requests in flight; rules from config.yml are listed there
 read-only.
 
 What a page shows can also depend on who is signed in, not only on the
-deployment. Spend and budgets is the clearest case: an organization owner or
-admin manages their own organization's budgets and the spend ceilings holding
-them, while a deployment operator gets the deployment's own budgets, their
+deployment. Budgets is the clearest case: an organization owner or admin
+manages their own organization's budgets, one table naming what each budget
+applies to, while a deployment operator gets the deployment's own budgets, their
 active organization's, and the gateway users assigned to them. Usage, activity,
 traces, routing and the overview's key count likewise show an operator their
 active organization, not every organization on the deployment.

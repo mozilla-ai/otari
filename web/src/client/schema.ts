@@ -8188,6 +8188,23 @@ export interface components {
             type: "file";
         };
         /**
+         * AppliedEntityPublic
+         * @description One entity a budget applies to: the scope a ceiling caps, and the provider it narrows to.
+         */
+        AppliedEntityPublic: {
+            /**
+             * Name
+             * @description The organization's or the workspace's name; null for a membership or an API key
+             */
+            name: string | null;
+            /** Provider Key Id */
+            provider_key_id: string | null;
+            /** Scope Id */
+            scope_id: string;
+            /** Scope Type */
+            scope_type: string;
+        };
+        /**
          * AudioContent
          * @description Audio provided to or from an LLM.
          */
@@ -13779,6 +13796,11 @@ export interface components {
          *     ceilings this budget currently holds, which is what makes a delete refuse.
          */
         OrganizationBudgetPublic: {
+            /**
+             * Applied To
+             * @description Every entity the budget applies to, oldest first
+             */
+            applied_to: components["schemas"]["AppliedEntityPublic"][];
             /** Budget Duration Sec */
             budget_duration_sec: number | null;
             /** Budget Id */
