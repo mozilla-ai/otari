@@ -494,6 +494,75 @@ describe("KeysPage", () => {
     expect(screen.queryByText("No API keys yet")).not.toBeInTheDocument()
   })
 
+  it("matches a key's owner as the Owner column spells it", async () => {
+    const member = "33333333-3333-3333-3333-333333333333"
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "named", user_id: member }),
+        apiKey({ id: "key-2", key_name: "raw", user_id: "ci-bot" }),
+      ],
+      users: [user({ user_id: member, alias: "alice@example.com" })],
+      members: [
+        organizationMember({
+          attribution_user_id: member,
+          full_name: "Alice Example",
+        }),
+      ],
+    })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+    const search = await screen.findByRole("searchbox", {
+      name: "Search API keys",
+    })
+    await screen.findByText("named")
+
+    await usr.type(search, "alice")
+    await waitFor(() =>
+      expect(screen.queryByText("raw")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("named")).toBeInTheDocument()
+
+    // An owner with no member behind it is shown, and found, by its id.
+    await usr.clear(search)
+    await usr.type(search, "ci-bot")
+    await waitFor(() =>
+      expect(screen.queryByText("named")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("raw")).toBeInTheDocument()
+  })
+
+  it("keeps a bulk action to the keys the search leaves on screen", async () => {
+    stubRegionWidth(390)
+    const fetchMock = mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "prod-ingest", is_active: true }),
+        apiKey({ id: "key-2", key_name: "staging-eval", is_active: true }),
+      ],
+    })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+    await screen.findByRole("button", { name: "Actions for prod-ingest" })
+
+    // Selected while both are listed, then narrowed to one.
+    await usr.click(screen.getByRole("checkbox", { name: "Select all keys" }))
+    await usr.type(
+      screen.getByRole("searchbox", { name: "Search API keys" }),
+      "prod",
+    )
+    await waitFor(() =>
+      expect(screen.queryByText("staging-eval")).not.toBeInTheDocument(),
+    )
+    await usr.click(await screen.findByRole("button", { name: /^Disable/ }))
+
+    await waitFor(() => {
+      const patches = fetchMock.mock.calls.filter(
+        ([, init]) => init?.method === "PATCH",
+      )
+      expect(patches).toHaveLength(1)
+      expect(String(patches[0][0])).toContain("key-1")
+    })
+  })
+
   it("lists key fingerprints and supports keys without stored suffixes", async () => {
     const tooltips = instantTooltips()
     mockApi({
