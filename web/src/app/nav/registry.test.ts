@@ -87,6 +87,7 @@ describe("nav registry", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
+      "Subagent router",
       "Web search",
       "Code execution pricing",
       "Health",
@@ -130,6 +131,7 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/recommender",
       "/admin/web-search",
       "/admin/code-execution",
       "/health-checks",
@@ -152,6 +154,7 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/recommender",
       "/admin/web-search",
       "/admin/code-execution",
       "/health-checks",
@@ -164,6 +167,7 @@ describe("nav registry", () => {
     expect(others).not.toContain("/settings")
     expect(others).not.toContain("/admin/accounts")
     expect(others).not.toContain("/admin/hosted-providers")
+    expect(others).not.toContain("/admin/recommender")
     expect(others).not.toContain("/admin/web-search")
     expect(others).not.toContain("/admin/code-execution")
     expect(others).not.toContain("/health-checks")
@@ -180,6 +184,7 @@ describe("nav registry", () => {
       ["/settings", "settings", "refused"],
       ["/admin/accounts", "admin", "unlisted"],
       ["/admin/hosted-providers", "hosted_providers", "unlisted"],
+      ["/admin/recommender", "agent_recommenders", "unlisted"],
       ["/admin/web-search", "tools", "refused"],
       ["/admin/code-execution", "pricing", "refused"],
       ["/health-checks", "health_checks", "refused"],

@@ -128,6 +128,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     heading: /hosted providers/i,
   },
   {
+    route: "/admin/recommender",
+    name: "admin-subagent-router",
+    heading: /subagent router/i,
+  },
+  {
     route: "/admin/web-search",
     name: "admin-web-search",
     heading: /^web search$/i,
