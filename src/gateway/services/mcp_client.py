@@ -29,6 +29,7 @@ from mcp.client.streamable_http import streamable_http_client
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
 from gateway.services.mcp_stateless import failure_class
+from gateway.services.model_access import is_mcp_tool_allowed
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.traces import RequestTrace
 
@@ -239,6 +240,8 @@ class MCPClientPool:
         for tool in listed.tools:
             if allowed is not None and tool.name not in allowed:
                 continue
+            if cfg.caller_tool_patterns is not None and not is_mcp_tool_allowed(cfg.caller_tool_patterns, tool.name):
+                continue
             if tool.name in self._tool_owner:
                 # Tool-name collision policy: **first server wins**. Subsequent servers'
                 # tools with the same name are dropped entirely — they're not added to
@@ -284,10 +287,14 @@ class MCPClientPool:
             if self._tally is not None:
                 self._tally.record_failure(name)
             if self._trace is not None:
-                self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=False)
+                self._trace.record_tool_call(
+                    tool_name=name, tool_type="mcp", started=started, ok=False, mcp_server=owner
+                )
             raise
         if self._trace is not None:
-            self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=not result.is_error)
+            self._trace.record_tool_call(
+                tool_name=name, tool_type="mcp", started=started, ok=not result.is_error, mcp_server=owner
+            )
         return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:

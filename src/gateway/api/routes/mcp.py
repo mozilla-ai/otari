@@ -93,8 +93,9 @@ from gateway.services.mcp_stateless import (
     discovery_response_exceeds_bound,
     execute_stored_tool,
 )
+from gateway.services.model_access import McpAccess, is_mcp_tool_allowed, resolve_request_mcp_access
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
+from gateway.services.tenancy.workspace_mcp_server_service import McpServerSummary, WorkspaceMcpServers
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.workspace_scope import resolve_workspace_id
 
@@ -315,6 +316,8 @@ class _Principal:
     """Who the request authenticated as."""
 
     workspace_id: uuid.UUID
+    # Which stored servers, and which of their tools, the key may reach.
+    mcp_access: McpAccess = McpAccess()
 
 
 async def _authenticate(
@@ -335,7 +338,8 @@ async def _authenticate(
     # every user-less key does not share one bucket keyed on ``"None"``.
     await check_rate_limit(raw_request, api_key.user_id or api_key.id)
     await _refuse_blocked_user(db, api_key)
-    return _Principal(workspace_id=await resolve_workspace_id(db, api_key))
+    workspace_id = await resolve_workspace_id(db, api_key)
+    return _Principal(workspace_id=workspace_id, mcp_access=await resolve_request_mcp_access(db, api_key, workspace_id))
 
 
 async def _refuse_blocked_user(db: AsyncSession, api_key: APIKey) -> None:
@@ -383,7 +387,21 @@ async def _resolve_server(
         # Indistinguishable from an id naming no server, on purpose: a caller
         # learns that it cannot reach this server, not why.
         raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
+    if not _caller_patterns(principal, server):
+        # The same answer again: a server whose access list grants the key nothing does not exist for it.
+        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
     return server
+
+
+def _caller_patterns(principal: _Principal, server: ResolvedMcpServer) -> list[str]:
+    """The tool patterns the authenticated key holds on a stored server; empty means it cannot reach it."""
+    return principal.mcp_access.patterns_for(server.id, server.everyone_tools)
+
+
+def _require_caller_allowed(patterns: list[str], tool_name: str) -> None:
+    """Apply the caller's own tool patterns to one tool name, beside the server's allowlist."""
+    if not is_mcp_tool_allowed(patterns, tool_name):
+        raise McpExecutionError(CODE_TOOL_NOT_ALLOWED, ExecutionState.NOT_STARTED, 403)
 
 
 def _require_allowed(server: ResolvedMcpServer, tool_name: str) -> None:
@@ -453,6 +471,40 @@ class McpToolsResponse(BaseModel):
     warnings: list[McpToolWarning]
 
 
+class McpServersResponse(BaseModel):
+    """The enabled stored servers the authenticated key can reach."""
+
+    servers: list[McpServerSummary]
+
+
+@router.get(
+    "/servers",
+    response_model=McpServersResponse,
+    responses={
+        401: {"model": McpErrorBody},
+        404: {"model": McpErrorBody},
+        429: {"model": McpErrorBody},
+        500: {"model": McpErrorBody},
+        503: {"model": McpErrorBody},
+    },
+)
+async def list_mcp_servers(
+    raw_request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    servers: WorkspaceMcpServersDep,
+) -> McpServersResponse:
+    """List the enabled stored MCP servers this API key can reach.
+
+    A server appears when its access list grants the key something: the key's own grant, else its
+    owner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`
+    (or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and
+    the token are never returned. A master key has no workspace and is refused with a 404.
+    """
+    principal = await _authenticate(raw_request, db, config)
+    return McpServersResponse(servers=await servers.list_reachable(principal.workspace_id, principal.mcp_access))
+
+
 @router.get(
     "/servers/{mcp_server_id}/tools",
     response_model=McpToolsResponse,
@@ -514,6 +566,9 @@ async def list_mcp_tools(
             await _require_safe_url(server)
             track_request(raw_request, endpoint=TOOLS_ENDPOINT, model=TOOLS_LABEL)
             catalog = await discover_stored_tools(server)
+            patterns = _caller_patterns(principal, server)
+            visible = [tool for tool in catalog.tools if is_mcp_tool_allowed(patterns, tool.name)]
+            warnings = [(name, code) for name, code in catalog.warnings if is_mcp_tool_allowed(patterns, name)]
 
             response = McpToolsResponse(
                 server_id=server.id,
@@ -527,9 +582,9 @@ async def list_mcp_tools(
                         if tool.annotations is not None
                         else None,
                     )
-                    for tool in catalog.tools
+                    for tool in visible
                 ],
-                warnings=[McpToolWarning(tool_name=name, code=code) for name, code in catalog.warnings],
+                warnings=[McpToolWarning(tool_name=name, code=code) for name, code in warnings],
             )
             if discovery_response_exceeds_bound(response):
                 raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
@@ -557,8 +612,8 @@ async def list_mcp_tools(
         "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d duration_ms=%.2f",
         getattr(raw_request.state, "otari_request_id", "-"),
         mcp_server_id,
-        len(catalog.tools),
-        len(catalog.warnings),
+        len(visible),
+        len(warnings),
         (time.monotonic() - started) * 1000,
     )
     return response
@@ -617,6 +672,7 @@ async def execute_mcp_tool(
             principal = await _authenticate(raw_request, db, config)
             server = await _resolve_server(principal, servers, request.mcp_server_id)
             _require_allowed(server, request.tool_name)
+            _require_caller_allowed(_caller_patterns(principal, server), request.tool_name)
             if request.server_revision != server.revision:
                 # In memory, over the resolution already made, so this costs no database or MCP round trip.
                 raise McpExecutionError(CODE_SERVER_CHANGED, ExecutionState.NOT_STARTED, 409)

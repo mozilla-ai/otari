@@ -16,12 +16,16 @@ the inference gates and the catalog filter feed it the *same* canonical
 
 A search tool has a list of its own, ``allowed_tools``, of tool names
 (:func:`effective_tool_allowlist`), so no model wildcard can grant one.
+
+A workspace's stored MCP servers carry access rules of their own (:class:`McpAccess`):
+what everyone may call, and grants for single keys and users.
 """
 
 import uuid
-from collections.abc import Container, Sequence
-from dataclasses import dataclass
+from collections.abc import Container, Mapping, Sequence
+from dataclasses import dataclass, field
 from http import HTTPStatus
+from typing import Literal
 
 from any_llm import LLMProvider
 from sqlalchemy import select
@@ -32,6 +36,8 @@ from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT
 from gateway.core.settings.tools import ALL_SEARCH_TOOLS
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
+from gateway.repositories.tenancy import WorkspaceRepository
+from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
 from gateway.services.alias_service import all_alias_names
 from gateway.services.catalog import dated_builds
 from gateway.services.provider_kwargs import reaches_organization_key, split_selector
@@ -234,6 +240,90 @@ def validate_allowed_tools(config: GatewayConfig, entries: list[str] | None) -> 
         if name not in names:
             names.append(name)
     return names
+
+
+MAX_MCP_TOOL_PATTERNS = 256
+"""Most tool patterns one access rule (a server's ``everyone_tools`` or one grant) may hold."""
+
+McpAccessSource = Literal["key", "user", "everyone"]
+
+
+def is_mcp_tool_allowed(patterns: Sequence[str], tool: str) -> bool:
+    """Whether a tool name matches one of a rule's tool patterns: ``*``, ``prefix*`` or an exact name."""
+    return any(pattern == tool or (pattern.endswith("*") and tool.startswith(pattern[:-1])) for pattern in patterns)
+
+
+def validate_mcp_tool_patterns(patterns: object) -> list[str]:
+    """Validate an MCP access rule's tool patterns; ``[]`` denies. Raises ``ValueError`` (a 400 or 422 at the caller).
+
+    A pattern is a tool name, ``*`` for every tool, or a name prefix ending in ``*``. Duplicates collapse.
+    """
+    if not isinstance(patterns, list):
+        raise ValueError("tools must be a list of tool names or patterns, [] to deny")
+    if len(patterns) > MAX_MCP_TOOL_PATTERNS:
+        raise ValueError(f"tools holds at most {MAX_MCP_TOOL_PATTERNS} entries")
+    checked: list[str] = []
+    for pattern in patterns:
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError("tools entries must be non-empty strings")
+        name = pattern.strip()
+        if "*" in name[:-1]:
+            raise ValueError(f"'{name}' is not a tool pattern; '*' may only end one, as in 'get_*'")
+        if name not in checked:
+            checked.append(name)
+    return ["*"] if "*" in checked else checked
+
+
+@dataclass(frozen=True, slots=True)
+class McpAccess:
+    """What one caller may reach among its workspace's stored MCP servers.
+
+    ``key_grants`` and ``user_grants`` are the tool patterns the caller's key and its owner hold on
+    each server, by server id. A key's grant decides over its owner's, and either over the server's
+    ``everyone_tools``. ``unrestricted`` is the master key and a dashboard session, which no rule binds.
+    """
+
+    unrestricted: bool = False
+    key_grants: Mapping[uuid.UUID, tuple[str, ...]] = field(default_factory=dict)
+    user_grants: Mapping[uuid.UUID, tuple[str, ...]] = field(default_factory=dict)
+    request_servers_allowed: bool = True
+
+    def decide(self, server_id: uuid.UUID, everyone_tools: Sequence[str]) -> tuple[McpAccessSource, list[str]]:
+        """Which rule decides this caller's access to a stored server, and the tool patterns it grants."""
+        if self.unrestricted:
+            return "everyone", ["*"]
+        if server_id in self.key_grants:
+            return "key", list(self.key_grants[server_id])
+        if server_id in self.user_grants:
+            return "user", list(self.user_grants[server_id])
+        return "everyone", list(everyone_tools)
+
+    def patterns_for(self, server_id: uuid.UUID, everyone_tools: Sequence[str]) -> list[str]:
+        """The tool patterns this caller holds on a stored server; empty means it cannot reach it."""
+        return self.decide(server_id, everyone_tools)[1]
+
+    @property
+    def may_declare_servers(self) -> bool:
+        """Whether the caller may name MCP servers by URL in the request itself."""
+        return self.unrestricted or self.request_servers_allowed
+
+
+async def resolve_request_mcp_access(
+    db: AsyncSession, api_key: APIKey | None, workspace_id: uuid.UUID | None
+) -> McpAccess:
+    """The MCP access of a request's key: its grants and its owner's, and its workspace's request-server switch."""
+    if api_key is None:
+        return McpAccess(unrestricted=True)
+    key_grants: dict[uuid.UUID, tuple[str, ...]] = {}
+    user_grants: dict[uuid.UUID, tuple[str, ...]] = {}
+    for grant in await WorkspaceMcpServerGrantRepository(db).for_caller(api_key.id, api_key.user_id):
+        (key_grants if grant.api_key_id is not None else user_grants)[grant.server_id] = tuple(grant.tools)
+    workspace = await WorkspaceRepository(db).get(workspace_id) if workspace_id is not None else None
+    return McpAccess(
+        key_grants=key_grants,
+        user_grants=user_grants,
+        request_servers_allowed=workspace is None or workspace.request_mcp_servers_allowed,
+    )
 
 
 def tool_not_allowed_detail(tool: str, legacy_key: str, legacy_models: Sequence[list[str]] = ()) -> str:

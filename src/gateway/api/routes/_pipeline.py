@@ -251,10 +251,12 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import (
+    McpAccess,
     key_model_refusal,
     model_not_allowed_detail,
     organization_key_refusal,
     resolve_request_allowlist,
+    resolve_request_mcp_access,
     unresolvable_model_detail,
     unresolved_model_refusal,
 )
@@ -1225,8 +1227,12 @@ class RequestContext:
         trace: RequestTrace | None = None,
         source_label: str | None = None,
         country_gate: CountryGate | None = None,
+        api_key: APIKey | None = None,
     ) -> None:
         self.config = config
+        # The key that authenticated the request; ``None`` for the master key and a session principal,
+        # which no MCP access list binds.
+        self.api_key = api_key
         # The request's trace while it is served; None where nothing records one.
         self.trace = trace
         # Sent to the client as ``Otari-Request-ID``.
@@ -3345,6 +3351,7 @@ async def resolve_request_context(
         country_gate=country_gate,
         trace=trace,
         source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
+        api_key=api_key,
     )
 
 
@@ -4256,8 +4263,17 @@ async def _admit_mcp_servers(
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
     try:
+        access = (
+            await resolve_request_mcp_access(ctx.db, ctx.api_key, ctx.workspace_id)
+            if declared.mcp_servers or declared.mcp_server_ids
+            else McpAccess()
+        )
         return await admit_mcp_servers(
-            declared.mcp_servers, declared.mcp_server_ids, servers=servers, workspace_id=ctx.workspace_id
+            declared.mcp_servers,
+            declared.mcp_server_ids,
+            servers=servers,
+            workspace_id=ctx.workspace_id,
+            access=access,
         )
     except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
         raise domain_error(adapter, exc) from exc

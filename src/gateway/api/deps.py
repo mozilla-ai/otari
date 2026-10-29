@@ -1536,8 +1536,11 @@ def get_workspace_activation_service(
 WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(get_workspace_activation_service)]
 
 
-def get_workspace_mcp_server_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServerService:
-    return WorkspaceMcpServerService(db)
+def get_workspace_mcp_server_service(
+    db: Annotated[AsyncSession, Depends(get_db)], api_keys: ApiKeyServiceDep
+) -> WorkspaceMcpServerService:
+    """Build the service on the request's session, with the keys its access lists name."""
+    return WorkspaceMcpServerService(db, api_keys)
 
 
 WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]

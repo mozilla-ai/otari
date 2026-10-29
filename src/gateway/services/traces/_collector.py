@@ -198,10 +198,18 @@ class RequestTrace:
         )
 
     @_never_raises
-    def record_tool_call(self, *, tool_name: str, tool_type: str, started: datetime, ok: bool) -> None:
-        """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool)."""
+    def record_tool_call(
+        self, *, tool_name: str, tool_type: str, started: datetime, ok: bool, mcp_server: str | None = None
+    ) -> None:
+        """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool).
+
+        ``mcp_server`` names the MCP server that owns the tool, since a tool's name alone does not.
+        """
         ended = datetime.now(UTC)
         name = identifier_or_none(tool_name)
+        attributes: dict[str, str | int | float | bool] = {}
+        if mcp_server is not None and (safe_server := identifier_or_none(mcp_server)) is not None:
+            attributes["otari.mcp.server"] = safe_server
         self._add(
             SpanRecord(
                 span_id=_span_id(),
@@ -218,6 +226,7 @@ class RequestTrace:
                 tool_name=name,
                 tool_type=identifier_or_none(tool_type),
                 request_id=self.request_id,
+                attributes=attributes,
             )
         )
 

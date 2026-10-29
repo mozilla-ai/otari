@@ -23,7 +23,7 @@ from gateway.services.api_keys._federation import (
 )
 from gateway.services.api_keys._membership import ApiKeyMembershipListener
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
-from gateway.services.api_keys._service import ApiKeyService
+from gateway.services.api_keys._service import ApiKeyService, KeySummary
 from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace
 
 __all__ = [
@@ -38,6 +38,7 @@ __all__ = [
     "FederationRefusedError",
     "FederationTokenExchange",
     "FederationUnavailableError",
+    "KeySummary",
     "OrganizationOfWorkspace",
     "access_token_expiry",
     "declared_secret_problem",

@@ -68,6 +68,7 @@ from sqlalchemy import (
     false,
     func,
     text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlmodel import Field, SQLModel
@@ -939,6 +940,13 @@ class WorkspaceUpdate(SQLModel):
             "report. Only where the deployment keeps content at all."
         ),
     )
+    request_mcp_servers_allowed: bool | None = Field(
+        default=None,
+        description=(
+            "Let this workspace's keys name MCP servers by URL in a request (mcp_servers), beside the stored servers "
+            "whose access lists the workspace controls."
+        ),
+    )
 
 
 class WorkspacePublic(WorkspaceBase):
@@ -947,6 +955,9 @@ class WorkspacePublic(WorkspaceBase):
     created_by_user_id: uuid.UUID | None = None
     trace_content_enabled: bool = Field(
         default=False, description="Whether this workspace keeps what its agent sessions were about."
+    )
+    request_mcp_servers_allowed: bool = Field(
+        default=True, description="Whether this workspace's keys may name MCP servers by URL in a request."
     )
     created_at: datetime
     updated_at: datetime | None = None
@@ -983,6 +994,9 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     # Off until a workspace's managers turn it on. Read by the OTLP receiver,
     # under the deployment's own ``trace_content_enabled``.
     trace_content_enabled: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+    # On as before stored-server access lists existed: a workspace that locks its
+    # stored servers down turns it off, or a key could name any server by URL.
+    request_mcp_servers_allowed: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
 
 
 class WorkspaceMemberBase(SQLModel):

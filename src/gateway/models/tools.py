@@ -131,12 +131,50 @@ class WorkspaceMcpServer(Base):
     purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # What every key of the workspace may call, as tool patterns ('*', a name, or
+    # 'prefix*'); [] denies everyone. A grant for a key or its owner overrides it.
+    everyone_tools: Mapped[list[str]] = mapped_column(
+        JSON, default=lambda: ["*"], server_default='["*"]', nullable=False
+    )
     # The last connection check, in the shape ``WorkspaceMcpServerHealth``
     # publishes; null until one has run, and cleared when the URL, the token or
     # the allow-list changes, since it described the old ones.
     health: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault``'s are: these
     # go over the wire and a naive SQLite round-trip would drop the offset.
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class WorkspaceMcpServerGrant(Base):
+    """An exception to a stored MCP server's ``everyone_tools``, for one key or one user.
+
+    Exactly one of ``api_key_id`` and ``user_id`` is set. A key's own grant decides
+    over its owner's, and either decides over the server's ``everyone_tools``;
+    ``tools`` holds patterns in the same grammar, and ``[]`` denies. The server's
+    ``allowed_tools`` stays a ceiling over all of them.
+
+    CASCADE on all three: a grant means nothing without its server, its key or its user.
+    """
+
+    __tablename__ = "workspace_mcp_server_grants"
+    __table_args__ = (
+        CheckConstraint("(api_key_id IS NULL) <> (user_id IS NULL)", name="ck_workspace_mcp_server_grants_one_subject"),
+        UniqueConstraint("server_id", "api_key_id", name="uq_workspace_mcp_server_grants_server_key"),
+        UniqueConstraint("server_id", "user_id", name="uq_workspace_mcp_server_grants_server_user"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace_mcp_servers.id", ondelete="CASCADE"), nullable=False
+    )
+    api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    tools: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(),

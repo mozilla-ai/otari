@@ -251,13 +251,14 @@ class WorkspaceService:
         workspace_id: uuid.UUID,
         workspace_update: WorkspaceUpdate,
     ) -> WorkspacePublic:
-        """Rename a workspace, change its description, or turn keeping its trace content on or off."""
+        """Rename a workspace, change its description, or turn trace content or request MCP servers on or off."""
         workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
-        if update_data.get("trace_content_enabled", False) is None:
-            del update_data["trace_content_enabled"]
+        for switch in ("trace_content_enabled", "request_mcp_servers_allowed"):
+            if update_data.get(switch, False) is None:
+                del update_data[switch]
         if "name" in update_data:
             new_name = self._validated_name(update_data["name"])
             update_data["name"] = new_name
