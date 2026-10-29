@@ -174,7 +174,7 @@ export function WorkspaceMembersPanel({
     [orgMembers],
   )
   const rows = allRows.filter((member) =>
-    matchesSearch(searchTerm, nameByUserId.get(member.user_id)),
+    matchesSearch(searchTerm, nameByUserId.get(member.user_id) ?? ""),
   )
   return (
     <div className="flex flex-col gap-4 p-4">

@@ -777,7 +777,7 @@ export function WorkspacesPage() {
   const showOnboarding = !workspaces.isLoading && rows.length === 0
   const search = useListSearch()
   const shown = rows.filter((row) =>
-    matchesSearch(search.term, row.name, row.description),
+    matchesSearch(search.term, row.name, row.description ?? ""),
   )
 
   // The default-budget column is dropped, not emptied, for a caller who cannot

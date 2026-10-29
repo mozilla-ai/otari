@@ -124,7 +124,7 @@ export function WorkspaceMembersPage() {
       <Toolbar>
         <SearchField
           label="Search members"
-          placeholder="Search by name or email"
+          placeholder="Search by name"
           value={search.value}
           onChange={search.onChange}
           className="w-full md:w-96"
