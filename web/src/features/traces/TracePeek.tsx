@@ -195,11 +195,8 @@ function PreviewBody({
   level: Observation["level"]
   format: Format
 }) {
-  if (input == null && output == null && !statusMessage) {
-    return noInput ? (
-      <NoInputNote noInput={noInput} className="text-subtle" />
-    ) : null
-  }
+  const empty = input == null && output == null
+  if (empty && !statusMessage && !noInput) return null
   return (
     <>
       {statusMessage ? (
@@ -211,6 +208,9 @@ function PreviewBody({
             {statusMessage}
           </p>
         </section>
+      ) : null}
+      {empty && noInput ? (
+        <NoInputNote noInput={noInput} className="text-subtle" />
       ) : null}
       <IOBlock label="Input" value={input} format={format} />
       <IOBlock label="Output" value={output} format={format} />
@@ -914,21 +914,14 @@ export function TracePeek({
                   {observation.estimate ? (
                     <CostCard cost={observation.estimate} />
                   ) : null}
-                  {/* An explained span says nothing more about a missing input, unless it could be kept. */}
-                  {observation.explain &&
-                  observation.input == null &&
-                  observation.output == null &&
-                  !observation.statusMessage &&
-                  !observation.noInput?.docsHref ? null : (
-                    <PreviewBody
-                      input={observation.input}
-                      output={observation.output}
-                      noInput={observation.noInput}
-                      statusMessage={observation.statusMessage}
-                      level={observation.level}
-                      format={format}
-                    />
-                  )}
+                  <PreviewBody
+                    input={observation.input}
+                    output={observation.output}
+                    noInput={observation.noInput}
+                    statusMessage={observation.statusMessage}
+                    level={observation.level}
+                    format={format}
+                  />
                 </>
               ) : null}
             </div>

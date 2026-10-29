@@ -553,6 +553,10 @@ describe("toTrace", () => {
     expect(byId.get("gate-1")?.gate?.evidence).toBe("CHANGELOG.md")
     expect(byId.get("gate-2")?.gate?.evidence).toBe("CHANGELOG.md")
     expect(byId.get("gate-3")?.gate?.evidence).toBeNull()
+    expect(byId.get("gate-2")?.noInput).toBeUndefined()
+    expect(byId.get("gate-3")?.noInput?.sentence).toBe(
+      "What the gate checked is not shown.",
+    )
   })
 
   it("says what a permission decision, a run and a model call were", () => {

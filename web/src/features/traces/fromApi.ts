@@ -347,6 +347,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
       const startMs = offset(span.start_time ?? span.end_time) ?? 0
       const endMs = offset(span.end_time) ?? startMs + (span.duration_ms ?? 0)
       const input = spanInput(span)
+      const gate = gateCheck(span, gateSummaries, checkEvidence)
       observations.push({
         id: span.span_id,
         parentObservationId:
@@ -363,8 +364,10 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),
         input,
-        noInput: input === undefined ? noInput(span) : undefined,
-        gate: gateCheck(span, gateSummaries, checkEvidence),
+        // A gate can read its evidence off a sibling gate of the same check.
+        noInput:
+          input === undefined && !gate?.evidence ? noInput(span) : undefined,
+        gate,
         detail:
           span.operation === "tool.blocked_on_user" ||
           span.operation === "tool.execution" ||

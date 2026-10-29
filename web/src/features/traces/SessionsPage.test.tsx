@@ -206,6 +206,49 @@ describe("SessionsPage", () => {
     expect(within(peek).queryByText("No input or output")).toBeNull()
   })
 
+  it("says why an explained span has no input, beside why it was blocked", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, origin: "otlp" as const, outcome: "blocked" as const }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    expect(
+      await within(peek).findByText(
+        "Otari never keeps what a request sent or got back.",
+      ),
+    ).toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: /^Tool, Bash/ }))
+
+    expect(
+      await within(peek).findByText("Blocked before it ran."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("Its command is not shown."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("link", { name: /How to keep it/ }),
+    ).toBeInTheDocument()
+  })
+
   it("reads an opened session in the workspace its list entry names", async () => {
     const { calls } = mockApi({
       traces: [traceSummary()],
