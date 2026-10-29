@@ -104,6 +104,60 @@ async def test_empty_allowed_tools_exposes_no_discovered_tools(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("allowed_tools", "caller_patterns", "exposed"),
+    [
+        (None, None, ["list_issues", "delete_issue", "get_repo"]),
+        (None, ["list_*", "get_repo"], ["list_issues", "get_repo"]),
+        # The server's own list is a ceiling the caller's patterns cannot raise.
+        (["list_issues", "delete_issue"], ["list_*", "get_repo"], ["list_issues"]),
+        (None, [], []),
+    ],
+)
+async def test_a_callers_patterns_narrow_the_discovered_tools_within_the_servers_own_list(
+    monkeypatch: pytest.MonkeyPatch,
+    allowed_tools: list[str] | None,
+    caller_patterns: list[str] | None,
+    exposed: list[str],
+) -> None:
+    @asynccontextmanager
+    async def fake_transport(*args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object]]:
+        yield object(), object()
+
+    class FakeSession:
+        async def __aenter__(self) -> FakeSession:
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> SimpleNamespace:
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(name=name, description=name, input_schema={"type": "object"})
+                    for name in ("list_issues", "delete_issue", "get_repo")
+                ]
+            )
+
+    monkeypatch.setattr("gateway.services.mcp_client.streamable_http_client", fake_transport)
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", lambda *args: FakeSession())
+
+    config = McpServerConfig(
+        name="tools",
+        url="https://93.184.216.34/mcp",
+        allowed_tools=allowed_tools,
+        caller_tool_patterns=caller_patterns,
+    )
+    async with MCPClientPool([config]) as pool:
+        assert [tool["function"]["name"] for tool in pool.openai_tools] == exposed
+        for name in ("list_issues", "delete_issue", "get_repo"):
+            assert pool.owns_tool(name) is (name in exposed)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("is_error", [False, True])
 async def test_call_tool_outcome_preserves_server_error_status(is_error: bool) -> None:
     session = SimpleNamespace(
