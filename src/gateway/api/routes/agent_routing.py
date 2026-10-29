@@ -63,7 +63,7 @@ class _RecommenderCall:
             quote = self._recommender.quote()
         except RecommenderNotConfiguredError as exc:
             raise DecisionUnavailableError(str(exc)) from exc
-        return DecisionQuote(provider=quote.provider, model=quote.model, charge=quote.charge)
+        return DecisionQuote(provider=quote.provider, model=quote.model, charge=quote.charge, served_by=quote.served_by)
 
     async def dispatch(self) -> DecisionOutcome[ModelRecommendation]:
         try:

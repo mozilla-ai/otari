@@ -927,12 +927,15 @@ class DecisionQuote:
     owns the price: the scaffold holds and charges it, through the budgets and
     the billing port, and looks up no rate. ``None`` leaves the estimate to the
     deployment's pricing row, which is the open-source case, where the caller
-    pays whatever the upstream charged.
+    pays whatever the upstream charged. ``served_by`` is the provider the
+    country gate checks where the label names none; ``None`` checks
+    ``provider``.
     """
 
     provider: str
     model: str
     charge: Decimal | None = None
+    served_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1150,16 +1153,20 @@ async def run_decision(
         await log_rejection(str(exc), row_model=selector, row_provider=None, status_code=400)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     provider_name, model = quote.provider, quote.model
+    # A refusal after the quote names what was quoted: the allow-list and the
+    # pricing rows are checked against that label, which a bound recommender
+    # may answer with in place of the selector.
+    quoted = f"{provider_name}:{model}"
 
     key_allowlist = await resolve_request_allowlist(db, api_key)
-    if key_allowlist is not None and not is_model_allowed(key_allowlist, f"{provider_name}:{model}"):
-        not_allowed_detail = model_not_allowed_detail(selector)
+    if key_allowlist is not None and not is_model_allowed(key_allowlist, quoted):
+        not_allowed_detail = model_not_allowed_detail(quoted)
         await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
     try:
-        ensure_provider_country(config, country_gate_for(config, raw_request), provider_name)
+        ensure_provider_country(config, country_gate_for(config, raw_request), quote.served_by or provider_name)
     except CountryNotServedError as exc:
-        refused = country_not_supported(exc.gate, selector)
+        refused = country_not_supported(exc.gate, quoted)
         await log_rejection(str(refused.detail), row_model=model, row_provider=provider_name, status_code=403)
         raise refused from exc
 
@@ -1213,9 +1220,9 @@ async def run_decision(
         and pricing_required_but_missing(pricing, require_pricing=config.require_pricing)
     ):
         await refund_reservation(db, reservation)
-        no_pricing_detail = no_pricing_error_detail(selector)
+        no_pricing_detail = no_pricing_error_detail(quoted)
         logger.warning(
-            "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", selector
+            "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", quoted
         )
         await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
         raise HTTPException(

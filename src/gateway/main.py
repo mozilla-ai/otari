@@ -133,6 +133,11 @@ from gateway.services.providers import (
     run_provider_endpoint_refresher,
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
+from gateway.services.routing import (
+    load_agent_recommenders_at_startup,
+    reset_agent_recommenders,
+    run_agent_recommender_refresher,
+)
 from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.services.secret_box import secret_box_configured, shares_secret_key, validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
@@ -510,6 +515,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     ),
     _LifespanWorker(
         "hosted provider name", lambda config, _container: run_hosted_name_refresher(config), reset_hosted_name_index
+    ),
+    _LifespanWorker(
+        "subagent router",
+        lambda _config, _container: run_agent_recommender_refresher(),
+        reset_agent_recommenders,
     ),
     # Not a cache of rows like its neighbours: this holds constructed vendor
     # clients, so its tick rebuilds only what a write moved and its reset gives
@@ -1000,6 +1010,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         await _move_deployment_providers(config)
         await _import_configured_providers(config)
         await load_hosted_names_at_startup(config)
+        await load_agent_recommenders_at_startup()
         # On a Unit of Work of its own, after the session above has closed.
         await _report_hosted_providers_config(config)
         await _warn_about_legacy_tool_grants(config)

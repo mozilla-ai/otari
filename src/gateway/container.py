@@ -458,14 +458,21 @@ def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[
 def _agent_model_recommender_factory(config: GatewayConfig | None) -> PortFactory[AgentModelRecommenderPort]:
     """The core ``AgentModelRecommenderPort`` factory, closed over this app's config.
 
-    Config rather than a session, because which decision model answers is a
-    deployment setting (``agent_recommender_model``) and not a per-request fact,
-    and the adapter holds nothing per request, so one serves every request.
+    Config rather than a session: which decision model answers is read from
+    the stored routers held in memory, or from ``agent_recommender_model``,
+    never from this request's database. One adapter per resolve, because the
+    adapter keeps the router it quoted for the call that follows, and a
+    switch the operator makes in between must not reprice that call.
     A container built without config resolves this port only to raise.
     """
     if config is None:
         return _requires_config(AgentModelRecommenderPort)
-    return _shared(DecisionProviderRecommender(config))
+
+    def factory(session: AsyncSession | None) -> AgentModelRecommenderPort:
+        del session
+        return DecisionProviderRecommender(config)
+
+    return factory
 
 
 def _requires_config(port: PortKey[T]) -> PortFactory[T]:
