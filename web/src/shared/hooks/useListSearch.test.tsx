@@ -107,10 +107,9 @@ describe("matchesSearch", () => {
     expect(matchesSearch("", "anything")).toBe(true)
   })
 
-  it("skips a field that is absent", () => {
-    expect(matchesSearch("ada", undefined, "Ada Lovelace")).toBe(true)
-    expect(matchesSearch("ada", undefined)).toBe(false)
-    expect(matchesSearch("ada", null, "Ada Lovelace")).toBe(true)
+  it("finds nothing in a field passed empty", () => {
+    expect(matchesSearch("ada", "", "Ada Lovelace")).toBe(true)
+    expect(matchesSearch("ada", "")).toBe(false)
   })
 
   it("takes the LIKE wildcards literally, as the gateway does", () => {
