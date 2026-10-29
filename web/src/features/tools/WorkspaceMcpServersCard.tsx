@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { FiEdit2, FiRefreshCw, FiTrash2 } from "react-icons/fi"
+
 import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
