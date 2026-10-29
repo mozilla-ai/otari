@@ -8795,7 +8795,7 @@
               },
               "raw": "{\n  \"api_key\": \"<your Exa API key>\",\n  \"kind\": \"search\",\n  \"name\": \"production\",\n  \"provider\": \"exa\"\n}"
             },
-            "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.",
+            "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA new key serves no workspace until the organization makes it its default for the key's kind, or a\nworkspace pins it. Until then each workspace keeps using the deployment's instance.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8926,6 +8926,36 @@
             "description": "Make a key the organization's default of its kind, in place of the previous one.\n\nOrganization owners and admins only.",
             "header": [],
             "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys",
+                ":key_id",
+                "default"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys/:key_id/default",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unset Org Default Web Search Key",
+          "request": {
+            "description": "Stop a key being the organization's default of its kind. Organization owners and admins only.\n\nIdempotent: a key that is not the default is returned unchanged. With no default, a workspace that\npinned no key uses the deployment's instance for that kind.",
+            "header": [],
+            "method": "DELETE",
             "url": {
               "host": [
                 "{{baseUrl}}"

@@ -522,6 +522,7 @@ DELETE /api/v1/organizations/me/web-search-keys/{key_id}                      # 
 POST /api/v1/organizations/me/web-search-keys/{key_id}/archive                # dashboard-only
 POST /api/v1/organizations/me/web-search-keys/{key_id}/restore                # dashboard-only
 POST /api/v1/organizations/me/web-search-keys/{key_id}/default                # dashboard-only
+DELETE /api/v1/organizations/me/web-search-keys/{key_id}/default              # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/web-search-keys                         # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}              # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}             # dashboard-only

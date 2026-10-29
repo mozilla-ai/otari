@@ -4347,7 +4347,8 @@ export interface paths {
          * Create Org Web Search Key
          * @description Add a search or fetch key to the caller's organization. Organization owners and admins only.
          *
-         *     A workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.
+         *     A new key serves no workspace until the organization makes it its default for the key's kind, or a
+         *     workspace pins it. Until then each workspace keeps using the deployment's instance.
          */
         post: operations["web-search-keys-create_org_web_search_key"];
         delete?: never;
@@ -4421,7 +4422,14 @@ export interface paths {
          *     Organization owners and admins only.
          */
         post: operations["web-search-keys-set_org_default_web_search_key"];
-        delete?: never;
+        /**
+         * Unset Org Default Web Search Key
+         * @description Stop a key being the organization's default of its kind. Organization owners and admins only.
+         *
+         *     Idempotent: a key that is not the default is returned unchanged. With no default, a workspace that
+         *     pinned no key uses the deployment's instance for that kind.
+         */
+        delete: operations["web-search-keys-unset_org_default_web_search_key"];
         options?: never;
         head?: never;
         patch?: never;
@@ -19792,6 +19800,12 @@ export interface components {
              */
             is_effective: boolean;
             /**
+             * Is Org Default
+             * @description The organization's default of its kind, which a workspace that pinned no key uses.
+             * @default false
+             */
+            is_org_default: boolean;
+            /**
              * Kind
              * @enum {string}
              */
@@ -27444,6 +27458,37 @@ export interface operations {
         };
     };
     "web-search-keys-set_org_default_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-unset_org_default_web_search_key": {
         parameters: {
             query?: never;
             header?: never;

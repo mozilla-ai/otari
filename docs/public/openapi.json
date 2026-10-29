@@ -27040,6 +27040,12 @@
             "title": "Is Effective",
             "type": "boolean"
           },
+          "is_org_default": {
+            "default": false,
+            "description": "The organization's default of its kind, which a workspace that pinned no key uses.",
+            "title": "Is Org Default",
+            "type": "boolean"
+          },
           "kind": {
             "enum": [
               "search",
@@ -42215,7 +42221,7 @@
         ]
       },
       "post": {
-        "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.",
+        "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA new key serves no workspace until the organization makes it its default for the key's kind, or a\nworkspace pins it. Until then each workspace keeps using the deployment's instance.",
         "operationId": "web-search-keys-create_org_web_search_key",
         "requestBody": {
           "content": {
@@ -42421,6 +42427,56 @@
       }
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}/default": {
+      "delete": {
+        "description": "Stop a key being the organization's default of its kind. Organization owners and admins only.\n\nIdempotent: a key that is not the default is returned unchanged. With no default, a workspace that\npinned no key uses the deployment's instance for that kind.",
+        "operationId": "web-search-keys-unset_org_default_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Unset Org Default Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      },
       "post": {
         "description": "Make a key the organization's default of its kind, in place of the previous one.\n\nOrganization owners and admins only.",
         "operationId": "web-search-keys-set_org_default_web_search_key",

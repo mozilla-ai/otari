@@ -94,22 +94,24 @@ def test_without_a_pin_the_default_wins_over_an_older_key() -> None:
     assert _chosen((oldest, None), (default, None)) == "default"
 
 
-def test_without_a_pin_or_default_the_oldest_key() -> None:
-    assert _chosen((_key("oldest"), None), (_key("newer", age=1), None)) == "oldest"
+def test_without_a_pin_or_default_the_deployments_search() -> None:
+    assert _chosen((_key("oldest"), None), (_key("newer", age=1), None)) is None
 
 
-def test_a_key_the_workspace_turned_off_is_passed_over() -> None:
+def test_a_default_the_workspace_turned_off_is_passed_over() -> None:
     default = _key("default", default=True)
     other = _key("other", age=1)
 
-    assert _chosen((default, _override(default, disabled=True)), (other, None)) == "other"
+    assert _chosen((default, _override(default, disabled=True)), (other, None)) is None
+    assert _chosen((default, _override(default, disabled=True)), (other, _override(other, pinned=True))) == "other"
 
 
 def test_a_key_this_deployment_cannot_decrypt_is_passed_over() -> None:
     pinned = _key("pinned")
-    other = _key("other", age=1)
+    default = _key("default", default=True, age=1)
 
-    assert _chosen((pinned, _override(pinned, pinned=True)), (other, None), unusable="pinned") == "other"
+    assert _chosen((pinned, _override(pinned, pinned=True)), (default, None), unusable="pinned") == "default"
+    assert _chosen((pinned, _override(pinned, pinned=True)), (default, None), unusable="default") == "pinned"
 
 
 def test_no_usable_key_means_the_deployments_search() -> None:
@@ -330,24 +332,11 @@ class _Overrides:
         self.reads.append(f"preferred {kind or 'every kind'}")
         return [(key, None) for key in self._of(kind) if key.is_org_default]
 
-    async def candidate_page(
-        self, *, skip: int, limit: int, kind: str | None, **_kwargs: Any
-    ) -> list[tuple[OrgWebSearchKey, None]]:
-        self.reads.append(f"page {skip} {kind or 'every kind'}")
-        return [(key, None) for key in self._of(kind)[skip : skip + limit]]
-
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("usable_name", "reads"),
-    [
-        ("default", ["preferred search"]),
-        ("k3", ["preferred search", "page 0 search"]),
-        ("k45", ["preferred search", "page 0 search", "page 20 search", "page 40 search"]),
-    ],
-)
-async def test_the_choice_reads_only_the_keys_it_reaches(
-    monkeypatch: pytest.MonkeyPatch, usable_name: str, reads: list[str]
+@pytest.mark.parametrize(("usable_name", "chosen_name"), [("default", "default"), ("k3", None)])
+async def test_the_choice_reads_only_the_pins_and_defaults(
+    monkeypatch: pytest.MonkeyPatch, usable_name: str, chosen_name: str | None
 ) -> None:
     keys = [_key(f"k{index}", age=index) for index in range(50)]
     keys.append(_key("default", default=True, age=60))
@@ -364,9 +353,8 @@ async def test_the_choice_reads_only_the_keys_it_reaches(
         )
     )["search"]
 
-    assert chosen is not None
-    assert chosen.name == usable_name
-    assert overrides.reads == reads
+    assert (chosen.name if chosen is not None else None) == chosen_name
+    assert overrides.reads == ["preferred search"]
 
 
 @pytest.mark.parametrize(
@@ -462,17 +450,9 @@ async def test_a_keys_options_are_checked_against_its_provider() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("defaults", "reads"),
-    [
-        ({"search", "fetch"}, ["preferred every kind"]),
-        ({"search"}, ["preferred every kind", "page 0 fetch"]),
-        (set(), ["preferred every kind", "page 0 every kind"]),
-    ],
-    ids=["both-defaults", "search-default", "no-default"],
-)
+@pytest.mark.parametrize("defaults", [{"search", "fetch"}, {"search"}, set()], ids=["both", "search", "none"])
 async def test_both_kinds_are_chosen_from_one_read_of_the_pins_and_defaults(
-    monkeypatch: pytest.MonkeyPatch, defaults: set[str], reads: list[str]
+    monkeypatch: pytest.MonkeyPatch, defaults: set[str]
 ) -> None:
     keys = [
         _key(f"{kind}-key", provider=provider, kind=kind, default=kind in defaults)
@@ -488,7 +468,7 @@ async def test_both_kinds_are_chosen_from_one_read_of_the_pins_and_defaults(
     )
 
     assert {kind: key.name if key else None for kind, key in chosen.items()} == {
-        "search": "search-key",
-        "fetch": "fetch-key",
+        "search": "search-key" if "search" in defaults else None,
+        "fetch": "fetch-key" if "fetch" in defaults else None,
     }
-    assert overrides.reads == reads
+    assert overrides.reads == ["preferred every kind"]

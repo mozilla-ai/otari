@@ -40,16 +40,16 @@ def resolve_web_search_key(
 
     1. The key the workspace pinned.
     2. Otherwise the organization's default.
-    3. Otherwise the organization's oldest key.
+    3. Otherwise none, and the workspace uses the deployment's instance: a key serves
+       a workspace only once the organization makes it the default or the workspace pins it.
 
     A key the workspace turned off, or one this deployment cannot decrypt, is passed over.
     ``usable`` is asked of keys in that order and only until one passes.
-    ``candidates`` must be oldest-first, which is the order the repository returns.
     """
     live = [(key, override) for key, override in candidates if override is None or not override.disabled]
     pinned = [key for key, override in live if override is not None and override.is_default]
     defaults = [key for key, _ in live if key.is_org_default]
-    return next((key for key in (*pinned, *defaults, *(key for key, _ in live)) if usable(key)), None)
+    return next((key for key in (*pinned, *defaults) if usable(key)), None)
 
 
 class OrgWebSearchKeyRepository(
@@ -180,6 +180,14 @@ class OrgWebSearchKeyRepository(
         await self.db.refresh(key)
         return key
 
+    async def unset_org_default(self, key: OrgWebSearchKey) -> OrgWebSearchKey:
+        """Stop ``key`` being its kind's default. A key that is not the default is returned unchanged."""
+        if key.is_org_default:
+            key.is_org_default = False
+            await self.db.flush()
+            await self.db.refresh(key)
+        return key
+
 
 class WorkspaceWebSearchKeyOverrideRepository:
     """``workspace_web_search_key_overrides`` rows, always addressed by (workspace, key)."""
@@ -280,17 +288,9 @@ class WorkspaceWebSearchKeyOverrideRepository:
         skip: int,
         limit: int,
         kind: str | None = None,
-        enabled_only: bool = False,
     ) -> list[SearchKeyCandidate]:
-        """A page of the live keys of ``kind`` or every kind, oldest-first.
-
-        ``enabled_only`` leaves out those the workspace turned off.
-        """
+        """A page of the live keys of ``kind`` or every kind, oldest-first."""
         query = self._candidates(organization_id, workspace_id, kind)
-        if enabled_only:
-            query = query.where(
-                WorkspaceWebSearchKeyOverride.disabled.is_(None) | WorkspaceWebSearchKeyOverride.disabled.is_(False)
-            )
         result = await self.db.execute(
             query.order_by(OrgWebSearchKey.created_at, OrgWebSearchKey.id).offset(skip).limit(limit)
         )
