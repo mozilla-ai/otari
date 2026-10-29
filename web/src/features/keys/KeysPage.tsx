@@ -1237,18 +1237,25 @@ export function KeysPage() {
   // action is the stable landing spot nearest to where the operator was.
   const createButtonRef = useRef<HTMLButtonElement>(null)
 
+  const ownerLabel = useCallback(
+    (apiKey: ApiKey) =>
+      isVirtualUser(apiKey.user_id)
+        ? "virtual"
+        : apiKey.user_id
+          ? (memberLabels.get(apiKey.user_id) ?? apiKey.user_id)
+          : "—",
+    [memberLabels],
+  )
   const allKeys = keys.data ?? []
   const search = useListSearch()
-  // The owner only where the page shows one, so a key never matches on text
-  // its row does not carry.
+  // The owner as its cell spells it, and only where the page shows one, so a
+  // key never matches on text its row does not carry.
   const rows = allKeys.filter((apiKey) =>
     matchesSearch(
       search.term,
-      apiKey.key_name,
-      apiKey.key_prefix,
-      isDeploymentWide && apiKey.user_id
-        ? memberLabels.get(apiKey.user_id)
-        : undefined,
+      apiKey.key_name ?? "",
+      apiKey.key_prefix ?? "",
+      isDeploymentWide ? ownerLabel(apiKey) : "",
     ),
   )
   // An unresolved scope is a loading state: which surface the page reads, and
@@ -1367,15 +1374,6 @@ export function KeysPage() {
     }
   }, [])
 
-  const ownerLabel = useCallback(
-    (apiKey: ApiKey) =>
-      isVirtualUser(apiKey.user_id)
-        ? "virtual"
-        : apiKey.user_id
-          ? (memberLabels.get(apiKey.user_id) ?? apiKey.user_id)
-          : "—",
-    [memberLabels],
-  )
   const renderActions = useCallback(
     (apiKey: ApiKey) => (
       <KeyActionsMenu

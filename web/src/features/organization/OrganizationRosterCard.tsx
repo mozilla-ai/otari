@@ -73,7 +73,11 @@ export function OrganizationRosterCard({
             ariaLabel="Organization members"
             columns={columns}
             rows={members.filter((member) =>
-              matchesSearch(searchTerm, memberLabel(member), member.email),
+              matchesSearch(
+                searchTerm,
+                memberLabel(member),
+                member.email ?? "",
+              ),
             )}
             getRowKey={memberRowKey}
             isLoading={isLoading}
