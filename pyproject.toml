@@ -28,7 +28,7 @@ dependencies = [
     # local-model guardrails, which run in the sidecar and never here. Bounded
     # below 0.8 rather than trusting a 0.x minor to keep the registry's shape.
     "any-guardrail[azure-content-safety,bedrock,openai,watsonx]>=0.7.7,<0.8.0",
-    "alembic>=1.13.0",
+    "alembic>=1.20.1",
     "aiosqlite>=0.19.0",
     # OAuth protocol mechanics for dashboard sign-in: provider endpoints, the
     # code exchange, and the userinfo fetch that normalizes a provider response
@@ -36,7 +36,7 @@ dependencies = [
     # this edition follows, so the two do not keep separate copies of a protocol
     # neither of us owns. What stays ours is which providers are configured,
     # which scopes are asked for, and how a fetched identity maps onto a user.
-    "apron-auth>=0.18.0,<0.19.0",
+    "apron-auth>=0.19.0,<0.20.0",
     "asyncpg>=0.32.0",
     # Password hashing for the dashboard sign-in (docs/access-control.md).
     # The library directly rather than passlib, which the platform wraps it in:
@@ -54,13 +54,13 @@ dependencies = [
     # a claimed domain whose nameservers are gone takes the full timeout, and the
     # blocking resolver would hold the event loop for it.
     "dnspython>=2.9.0",
-    "fastapi>=0.153.0",
+    "fastapi>=0.162.0",
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
     "httpx>=0.28.1",
     # The client the mcp SDK's transport takes (`http_client=`), which Otari
     # builds itself to keep MCP redirects and response sizes bounded.
-    "httpx2>=2.13.1",
+    "httpx2>=2.16.0",
     # IDNA2008 for email-domain ownership and one UTS #46/STD3 identity for
     # URL policy and pinned retrieval. Declared rather than leaned on as a
     # transitive dependency, because the standard library's own "idna" codec
@@ -139,8 +139,8 @@ fsspec = [
 # is the line it was written against rather than the first release to carry the
 # names.
 e2b = [
-    "e2b>=2.57.0",
-    "e2b-code-interpreter>=2.11.1",
+    "e2b>=2.61.0",
+    "e2b-code-interpreter>=2.11.5",
 ]
 # A rate-limit store every gateway process shares (`rate_limit_store: redis`),
 # so a limit holds across replicas rather than per process. The adapter imports
@@ -188,12 +188,12 @@ dev = [
     "packaging>=24.0",
     "pre-commit>=4.7.0",
     "pytest>=9.0.3,<10",
-    "pytest-asyncio>=0.26.0",
+    "pytest-asyncio>=1.4.1",
     "pytest-cov>=6.2.1,<8",
     "pytest-rerunfailures>=16.0",
     "pytest-timeout",
     "pytest-xdist>=3.6.1",
-    "ruff>=0.17.1",
+    "ruff>=0.17.2",
     # The fsspec file store test reaches a real S3-compatible store through s3fs.
     # Its aiobotocore dependency pins botocore, so it also bounds the boto3 this lock can take.
     "s3fs>=2026.3.0",
