@@ -72,6 +72,11 @@ header. An id that names no server in that workspace returns `404`, and a
 server that is configured but disabled is skipped rather than refusing the
 request.
 
+Which stored servers a key reaches, and which of their tools, is each server's
+[access list](#server-access). A server that denies the key answers `404` exactly
+as an unknown id does, and the tools it may not run are never offered to the
+model.
+
 The same stored servers are what
 [caller-orchestrated MCP](#caller-orchestrated-mcp) refers to by id, so a server
 registered once serves both integration modes. The two read a disabled server
@@ -121,6 +126,9 @@ an owner/admin of that workspace.
   the response. A URL sent in the request body is yours to fix and still fails
   with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
+- `everyone_tools` (default `["*"]`) is the server's default policy; see
+  [Server access](#server-access).
+- `GET /{server_id}` reads one server, for any member who can see the workspace.
 
 #### Connection checks
 
@@ -154,6 +162,63 @@ change when every check slot on the gateway was busy; `POST /{server_id}/check`
 answers `429` in that case and records nothing. The value describes the server
 as of `health.checked_at`; a request still checks the URL again, and nothing is
 skipped because a check once passed.
+
+### Server access
+
+Each stored server has an access list (ACL), which decides which keys reach it
+and which of its tools they may run. It works like a firewall, with keys as the
+source:
+
+- **Rules** each match one source, a single key or a user (which covers every key
+  that user owns, including keys they create later), and either allow tools or
+  deny. On the API a rule is a grant, and its `tools` are the tool patterns it
+  allows; `[]` denies.
+- **The default policy** (`everyone_tools` on the server) applies to every key no
+  rule matches. `["*"]`, the default, allows every tool; `[]` denies.
+- **Match order:** the rule for the key, else the rule for the user who owns it,
+  else the default policy. There is no ordering to manage, so "deny by default, then
+  allow these keys" and "allow by default, except this key" are both a policy and a
+  rule.
+
+A tool pattern is a tool name, `*` for every tool, or a name prefix ending in `*`
+(`get_*`); a pattern with `*` anywhere else is refused. The master key and a
+dashboard session, which the Playground runs as, are not bound by any ACL.
+
+- **A server's own `allowed_tools` is a ceiling.** It decides which of the server's
+  tools Otari exposes at all, beneath every rule and the default policy. A disabled
+  server stays unreachable.
+- **A server that denies a key does not exist for it.** The completion
+  endpoints answer a `mcp_server_ids` entry naming one as they answer an unknown id
+  (`404`), `GET /api/v1/mcp/servers` leaves it out, and the caller-orchestrated
+  discovery and execution routes answer `404 mcp_server_not_found`. A tool outside
+  the matching rule is not offered to the model and, on `POST /api/v1/mcp/execute`,
+  is refused with `403 mcp_tool_not_allowed`, the code the server's own list uses.
+- **Rules follow the server, the key and the user.** They name the server by id,
+  so renaming a server keeps them, and deleting the server, the key or the user
+  deletes them.
+- **Servers named in a request.** `mcp_servers` in a completion request names a server
+  by URL, which no ACL covers. A workspace allows it by default; turning off
+  `request_mcp_servers_allowed` with `PATCH /api/v1/workspaces/{workspace_id}` refuses
+  such a request with a `400`, so that a workspace's ACLs cannot be stepped around.
+  The master key and a dashboard session may still name servers.
+
+The ACL is managed under
+`/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}`, by organization
+owners/admins or the workspace's owners/admins:
+
+| Route | Does |
+|---|---|
+| `PATCH /` with `everyone_tools` | change the default policy |
+| `GET /access` | the default policy and every rule, each naming its key (with its name, owner and whether it is active) or its user |
+| `POST /access/grants` | add the same rule for several `api_key_ids` and `user_ids`; a key or user that already has a rule gets this one instead. A key must belong to the workspace and a user must own a key in it |
+| `PATCH /access/grants/{grant_id}` | change one rule's `tools` |
+| `DELETE /access/grants/{grant_id}` | delete one rule, so its key or user matches the next rule down |
+| `GET /access/check?api_key_id=&tool=` | trace one call: whether a key may call a tool, and what matched (`key`, `user`, `everyone` for the default policy, or `server` when the server is disabled or does not expose the tool) |
+
+`GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access` answers
+the other way round: what one key reaches on each of the workspace's servers, and which
+rule matched. A server holds at most 1000 rules; write a rule for a user rather than
+one for each of their keys.
 
 ## Limits and safety
 
@@ -222,6 +287,31 @@ once, rather than transmitting a URL and a credential per request, is what keeps
 authorization, credential storage, revocation, and allowlist policy on Otari's
 side of the boundary. Local `stdio` servers stay outside this: a remote Otari
 deployment cannot reach a machine-local process.
+
+### Listing the servers a key can reach
+
+```http
+GET /api/v1/mcp/servers
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "servers": [
+    {
+      "id": "2c948a61-dc96-4cd8-96bb-8e1434bf424e",
+      "name": "github",
+      "purpose_hint": "Use for repository and issue lookups"
+    }
+  ]
+}
+```
+
+The enabled stored servers of the key's workspace whose
+[access list](#server-access) grants it something, which is what to send in
+`mcp_server_ids`. The URL and the token are never returned. A master key has no
+workspace and is refused with `404`, as on the other routes of this section; the
+route is rate limited and refuses a blocked user as they are.
 
 ### Discovery
 
@@ -399,9 +489,9 @@ exception text.
 | Payment required or insufficient funds | 402 | `payment_required` | `not_started` |
 | Authorization refused | 403 | `forbidden` | `not_started` |
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |
-| Server inaccessible to caller, or disabled | 404 | `mcp_server_not_found` | `not_started` |
+| Server inaccessible to caller (including one whose ACL denies the key), or disabled | 404 | `mcp_server_not_found` | `not_started` |
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
-| Tool absent from stored allowlist | 403 | `mcp_tool_not_allowed` | `not_started` |
+| Tool absent from stored allowlist, or outside the server's ACL for the key | 403 | `mcp_tool_not_allowed` | `not_started` |
 | Unsafe resolved URL | 400 | `unsafe_mcp_url` | `not_started` |
 | Authentication refused for any other reason | 502 | `mcp_resolution_failed` | `not_started` |
 | Stored credential unavailable | 500 | `mcp_credentials_unavailable` | `not_started` |

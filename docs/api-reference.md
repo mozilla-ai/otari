@@ -1183,6 +1183,7 @@ Bedrock's, or an upstream `504`), and `api_error` otherwise.
 
 ## Caller-orchestrated MCP
 
+`GET /api/v1/mcp/servers` lists the enabled stored servers the key can reach,
 `GET /api/v1/mcp/servers/{mcp_server_id}/tools` lists the tools a stored MCP
 server exposes to the authenticated workspace, and `POST /api/v1/mcp/execute`
 runs one exact caller-authorized call and returns the server's native MCP
