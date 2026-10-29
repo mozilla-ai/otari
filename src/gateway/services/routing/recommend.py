@@ -21,6 +21,15 @@ from gateway.schemas.inference import ChoiceQuestion, DecisionRequest, DecisionR
 from gateway.schemas.routing import Harness
 from gateway.services.inference import reported_charge
 
+ROUTER_LABEL_PROVIDER = "otari"
+ROUTER_LABEL_MODEL = "subagent-router"
+ROUTER_LABEL = f"{ROUTER_LABEL_PROVIDER}:{ROUTER_LABEL_MODEL}"
+"""What a stored router's call is recorded as.
+
+The usage row, and the label an API key's allow-list admits, never name the
+decision model behind it.
+"""
+
 RECOMMENDATION_QUESTION = "model"
 """The one question's key, in the decision request and in its answer."""
 

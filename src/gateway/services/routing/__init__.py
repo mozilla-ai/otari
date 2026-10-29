@@ -71,7 +71,14 @@ from gateway.services.routing.compiler import (
 )
 from gateway.services.routing.decide import RoutingSignal, decide_ordering, explain_router_ordering
 from gateway.services.routing.knn import KnnRoutingMemory, unpriced_router_candidates
-from gateway.services.routing.recommend import build_decision_request, candidates_for, recommendation_from_decision
+from gateway.services.routing.recommend import (
+    ROUTER_LABEL,
+    ROUTER_LABEL_MODEL,
+    ROUTER_LABEL_PROVIDER,
+    build_decision_request,
+    candidates_for,
+    recommendation_from_decision,
+)
 from gateway.types.budget_state import BudgetState
 
 __all__ = [
@@ -82,6 +89,9 @@ __all__ = [
     "NOOP_BACKEND",
     "PRIORITY_BACKEND",
     "REFRESH_SECONDS",
+    "ROUTER_LABEL",
+    "ROUTER_LABEL_MODEL",
+    "ROUTER_LABEL_PROVIDER",
     "WEIGHTED_BACKEND",
     "ActiveRecommender",
     "AgentRecommenderService",

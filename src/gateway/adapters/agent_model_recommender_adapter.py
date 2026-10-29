@@ -44,6 +44,8 @@ from gateway.services.inference import (
     resolve_decision_provider,
 )
 from gateway.services.routing import (
+    ROUTER_LABEL_MODEL,
+    ROUTER_LABEL_PROVIDER,
     RecommenderSource,
     StoredRecommender,
     active_agent_recommender,
@@ -52,11 +54,6 @@ from gateway.services.routing import (
 )
 
 NOT_CONFIGURED = "No subagent recommender is configured on this deployment."
-
-# What a stored router's call is recorded as: the usage row, and the label an
-# API key's allow-list admits, never name the decision model behind it.
-ROUTER_LABEL_PROVIDER = "otari"
-ROUTER_LABEL_MODEL = "subagent-router"
 
 # The otari-router plugin stops waiting after three seconds and starts the
 # subagent on its usual model. The gateway's own work before and after the
