@@ -464,7 +464,8 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
           <InfoBanner>
             {workspace ? "This workspace keeps" : "Your workspaces keep"} what
             your sessions were about: the prompts and tool calls your agents
-            send. Otari shows yours only to you, unless you share a session.{" "}
+            send{policy.tool_output ? ", and what each tool returned" : ""}.
+            Otari shows yours only to you, unless you share a session.{" "}
             {exceptionalAccess(platformBreakGlass)}
           </InfoBanner>
         ) : null}

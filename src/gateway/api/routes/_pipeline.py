@@ -3012,7 +3012,7 @@ async def resolve_request_context(
     # Before the rate limit and the reservation, so a read that fails or never finishes holds nothing to give back,
     # and before normalization, so the content is what the client sent and not an attachment rendered as text.
     content_generation = (
-        await routed_trace_content_generation(raw_request, uow, db, config, workspace_id, user_id)
+        await routed_trace_content_generation(raw_request, config, workspace_id, user_id)
         if config.trace_capture_enabled and turn_content is not None
         else None
     )

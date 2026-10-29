@@ -124,7 +124,7 @@ describe("WorkspaceTraceContent", () => {
       <WorkspaceTraceContent workspace={workspace()} />,
     )
     expect(
-      screen.getByText(/Never tool output or model responses/),
+      screen.getByText(/It does not keep what tools return/),
     ).toBeInTheDocument()
     unmount()
 

@@ -39,7 +39,7 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
   const exceptions = exceptionalAccess(policy.platform_break_glass)
   const toolOutput = policy.tool_output
     ? "On requests routed through Otari it also keeps what each tool returned. Never model responses."
-    : "Never tool output or model responses."
+    : "It does not keep what tools return, though any it kept before stays until it is deleted, and never model responses."
   const retention = `A session is deleted, with what it was about, ${policy.retention_days} days after its last activity, and ${policy.session_max_age_days} days after it started at the latest.`
 
   const close = () => {

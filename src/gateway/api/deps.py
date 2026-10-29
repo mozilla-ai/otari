@@ -1994,20 +1994,15 @@ async def workspace_keeps_trace_content(
 
 
 async def routed_trace_content_generation(
-    request: Request,
-    uow: UnitOfWork,
-    db: AsyncSession,
-    config: GatewayConfig,
-    workspace_id: uuid.UUID,
-    user_id: str | None,
+    request: Request, config: GatewayConfig, workspace_id: uuid.UUID, user_id: str | None
 ) -> int | None:
     """The content generation a routed request's content is captured on, or None when it keeps none.
 
     The request asks for it with ``Otari-Trace-Content: keep``, and then the rule an
     OTLP export is held to applies: the deployment can seal content, and the
     workspace keeps it for this member, read after the generation so a workspace
-    that turns content off meanwhile keeps nothing. Ends the session's transaction,
-    as the dispatch that follows would.
+    that turns content off meanwhile keeps nothing. Read on a session of its own,
+    so a failed read keeps no content and leaves the request's session untouched.
     """
     if not config.trace_content_enabled:
         return None
@@ -2017,11 +2012,12 @@ async def routed_trace_content_generation(
     if content is None or not content.sealing:
         return None
     try:
-        generation = await build_trace_service(uow, content, NoSessionOwners()).content_generation(workspace_id)
+        async with create_unit_of_work_with_session() as (db, uow):
+            generation = await build_trace_service(uow, content, NoSessionOwners()).content_generation(workspace_id)
+            if not await workspace_keeps_trace_content(db, config, workspace_id, user_id):
+                return None
     except DATABASE_ERRORS as exc:
         logger.warning("Could not read a workspace's trace content generation (%s)", describe_database_error(exc))
-        return None
-    if not await workspace_keeps_trace_content(db, config, workspace_id, user_id):
         return None
     return generation
 

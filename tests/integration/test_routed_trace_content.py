@@ -14,6 +14,7 @@ from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choi
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from gateway.api.routes._normalize import normalize_request_messages
@@ -148,6 +149,20 @@ def test_the_prompt_is_what_the_client_sent_not_an_attachment_rendered_as_text(c
 
     [write] = writer.writes
     assert write.spans[0].content == {"prompt": "fix the flaky test"}
+
+
+def test_a_failed_content_read_keeps_nothing_and_still_serves_the_request(client: TestClient, routed: Any) -> None:
+    writer, headers, _, _ = routed
+
+    async def unreadable(*_: Any) -> int:
+        raise OperationalError("SELECT generation", None, Exception("connection lost"))
+
+    with patch("gateway.repositories.traces.barrier_repository.ContentBarrierRepository.generation", unreadable):
+        _chat(client, {**headers, TRACE_CONTENT_HEADER: "keep"}, _PROMPT)
+
+    [write] = writer.writes
+    assert write.content_generation is None
+    assert all(not span.content for span in write.spans)
 
 
 def test_a_request_that_does_not_ask_keeps_nothing(client: TestClient, routed: Any) -> None:
