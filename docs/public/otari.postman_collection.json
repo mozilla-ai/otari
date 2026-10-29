@@ -10406,6 +10406,135 @@
     {
       "item": [
         {
+          "name": "List Agent Recommenders",
+          "request": {
+            "description": "List the subagent routers, and the configured decision model that answers while none is stored.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "recommenders"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/recommenders"
+            }
+          }
+        },
+        {
+          "name": "Create Agent Recommender",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"provider\": \"string\",\n  \"model\": \"string\"\n}"
+            },
+            "description": "Add a subagent router: a decision model, its key, and the prices a recommendation is charged at.\n\nThe first router added is switched on; a later one waits to be switched\non in place of the one that is.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "recommenders"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/recommenders"
+            }
+          }
+        },
+        {
+          "name": "Update Agent Recommender",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"enabled\": false,\n  \"input_price_per_million\": 0,\n  \"model\": \"string\",\n  \"output_price_per_million\": 0,\n  \"provider\": \"string\"\n}"
+            },
+            "description": "Change a subagent router, or switch it on in place of the one that is.\n\nAn omitted field keeps its stored value, the key included while the\nprovider and the API base stay the same.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "recommenders",
+                ":recommender_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/recommenders/:recommender_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "recommender_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Agent Recommender",
+          "request": {
+            "description": "Remove a subagent router and its key. With none left, the configured decision model answers again.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "recommenders",
+                ":recommender_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/recommenders/:recommender_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "recommender_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "agent-recommenders"
+    },
+    {
+      "item": [
+        {
           "name": "List Scoped Budgets",
           "request": {
             "description": "List the scoped budgets in the caller's organization, optionally filtered to one scope.",

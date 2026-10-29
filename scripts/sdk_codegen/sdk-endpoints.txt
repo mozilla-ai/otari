@@ -146,6 +146,11 @@ POST /api/v1/hosted-providers/{provider}/models/refresh                  # dashb
 GET /api/v1/hosted-providers/{provider}/available-models                 # dashboard-only
 PATCH /api/v1/hosted-providers/{provider}/models/{model_id}              # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}/models/{model_id}             # dashboard-only
+# Subagent routers (the decision models that pick a subagent's model, operator-only)
+GET /api/v1/routing/recommenders                    # dashboard-only
+POST /api/v1/routing/recommenders                   # dashboard-only
+PATCH /api/v1/routing/recommenders/{recommender_id}  # dashboard-only
+DELETE /api/v1/routing/recommenders/{recommender_id} # dashboard-only
 # Provider credentials (runtime provider management)
 # Providers catalog
 GET /api/v1/providers                               # not yet wrapped

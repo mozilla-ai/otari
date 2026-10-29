@@ -833,6 +833,285 @@
         "title": "AgentModelRecommendationRequest",
         "type": "object"
       },
+      "AgentRecommenderCreate": {
+        "additionalProperties": false,
+        "description": "Add a subagent router. The first one added is switched on; a later one waits to be.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Root URL of the provider; blank for its own.",
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stored encrypted, never returned.",
+            "title": "Api Key"
+          },
+          "input_price_per_million": {
+            "default": 0.0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model": {
+            "description": "The decision model, as the provider names it.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "default": 0.0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "provider": {
+            "description": "The decision provider: typesafe, openrouter or llamacpp.",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "AgentRecommenderCreate",
+        "type": "object"
+      },
+      "AgentRecommenderPublic": {
+        "description": "One stored subagent router, known by its provider, model and the tail of its key.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key_last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Last4"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_api_key": {
+            "title": "Has Api Key",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_price_per_million": {
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "model",
+          "api_base",
+          "api_key_last4",
+          "has_api_key",
+          "input_price_per_million",
+          "output_price_per_million",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentRecommenderPublic",
+        "type": "object"
+      },
+      "AgentRecommenderUpdate": {
+        "additionalProperties": false,
+        "description": "Change a subagent router. An omitted field keeps its stored value.\n\nOmitting ``api_key`` keeps the stored key while the provider and the API\nbase stay the same, so a price change never has to re-send a secret. A new\nprovider or address needs its own key, unless it is a self-hosted server\nthat takes none. A blank ``api_base`` goes back to the provider's own\naddress. Switching one on switches every other one off.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "title": "AgentRecommenderUpdate",
+        "type": "object"
+      },
+      "AgentRecommendersPublic": {
+        "description": "Every stored subagent router, oldest first, and the configured decision model, where it resolves.",
+        "properties": {
+          "configured": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfiguredRecommenderPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRecommenderPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "configured"
+        ],
+        "title": "AgentRecommendersPublic",
+        "type": "object"
+      },
       "AgentTelemetryBehavior": {
         "description": "Counts from the behavioral events already captured on the logs signal.",
         "properties": {
@@ -4565,6 +4844,30 @@
           "has_api_key"
         ],
         "title": "ConfigSearchToolSchema",
+        "type": "object"
+      },
+      "ConfiguredRecommenderPublic": {
+        "description": "The decision model ``agent_recommender_model`` names, which answers unpriced while no router is stored.",
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "provider",
+          "model"
+        ],
+        "title": "ConfiguredRecommenderPublic",
         "type": "object"
       },
       "ContentReadListPublic": {
@@ -44696,6 +44999,189 @@
         "summary": "Recommend Model For Agent",
         "tags": [
           "routing"
+        ]
+      }
+    },
+    "/api/v1/routing/recommenders": {
+      "get": {
+        "description": "List the subagent routers, and the configured decision model that answers while none is stored.",
+        "operationId": "agent-recommenders-list_agent_recommenders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRecommendersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Agent Recommenders",
+        "tags": [
+          "agent-recommenders"
+        ]
+      },
+      "post": {
+        "description": "Add a subagent router: a decision model, its key, and the prices a recommendation is charged at.\n\nThe first router added is switched on; a later one waits to be switched\non in place of the one that is.",
+        "operationId": "agent-recommenders-create_agent_recommender",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRecommenderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRecommenderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Agent Recommender",
+        "tags": [
+          "agent-recommenders"
+        ]
+      }
+    },
+    "/api/v1/routing/recommenders/{recommender_id}": {
+      "delete": {
+        "description": "Remove a subagent router and its key. With none left, the configured decision model answers again.",
+        "operationId": "agent-recommenders-delete_agent_recommender",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recommender_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recommender Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Agent Recommender",
+        "tags": [
+          "agent-recommenders"
+        ]
+      },
+      "patch": {
+        "description": "Change a subagent router, or switch it on in place of the one that is.\n\nAn omitted field keeps its stored value, the key included while the\nprovider and the API base stay the same.",
+        "operationId": "agent-recommenders-update_agent_recommender",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recommender_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recommender Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRecommenderUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRecommenderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Agent Recommender",
+        "tags": [
+          "agent-recommenders"
         ]
       }
     },

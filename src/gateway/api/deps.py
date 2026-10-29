@@ -57,6 +57,7 @@ from gateway.repositories.providers import (
     ProviderEndpointRepository,
 )
 from gateway.repositories.rate_limits import RateLimitRuleRepository
+from gateway.repositories.routing import AgentRecommenderRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationGuardrailDefinitionRepository,
@@ -120,7 +121,7 @@ from gateway.services.providers import (
     refresh_provider_endpoint_cache,
 )
 from gateway.services.rate_limits import RateLimitService
-from gateway.services.routing import RoutingService, clear_router_backend_cache
+from gateway.services.routing import AgentRecommenderService, RoutingService, clear_router_backend_cache
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
@@ -1717,6 +1718,17 @@ def get_hosted_provider_service(
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
 
 
+def get_agent_recommender_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> AgentRecommenderService:
+    """Build the subagent router service on the request's unit of work."""
+    return AgentRecommenderService(uow, AgentRecommenderRepository(uow), config)
+
+
+AgentRecommenderServiceDep = Annotated[AgentRecommenderService, Depends(get_agent_recommender_service)]
+
+
 def build_hosted_catalog_update(uow: UnitOfWork, *, config: GatewayConfig) -> HostedCatalogUpdate:
     """Build the catalog update on ``uow``; its price steps open sessions of their own."""
     return HostedCatalogUpdate(build_hosted_provider_service(uow, config=config), ModelsDevPriceUpdates(config))
@@ -2346,6 +2358,7 @@ __all__ = [
     "IdentityServiceDep",
     "InferenceServiceDep",
     "ModelProviderPortDep",
+    "AgentRecommenderServiceDep",
     "HostedProviderServiceDep",
     "SearchToolServiceDep",
     "SearchToolTesterDep",

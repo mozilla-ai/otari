@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
     admin,
+    agent_recommenders,
     agent_routing,
     agent_telemetry,
     aliases,
@@ -167,6 +168,9 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # The deployment's own upstream credentials and the models it offers on
     # them. Operator-only, and answered 404 to anyone else like /admin.
     hosted_providers.router,
+    # The decision models that pick a subagent's model, and their prices.
+    # Operator-only, and answered 404 to anyone else like /admin.
+    agent_recommenders.router,
     keys.router,
     # A service key managing its own end users, rather than the operator gate
     # ``keys.router`` holds over every key's.

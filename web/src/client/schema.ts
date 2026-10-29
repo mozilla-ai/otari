@@ -5405,6 +5405,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing/recommenders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Recommenders
+         * @description List the subagent routers, and the configured decision model that answers while none is stored.
+         */
+        get: operations["agent-recommenders-list_agent_recommenders"];
+        put?: never;
+        /**
+         * Create Agent Recommender
+         * @description Add a subagent router: a decision model, its key, and the prices a recommendation is charged at.
+         *
+         *     The first router added is switched on; a later one waits to be switched
+         *     on in place of the one that is.
+         */
+        post: operations["agent-recommenders-create_agent_recommender"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/routing/recommenders/{recommender_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Agent Recommender
+         * @description Remove a subagent router and its key. With none left, the configured decision model answers again.
+         */
+        delete: operations["agent-recommenders-delete_agent_recommender"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Agent Recommender
+         * @description Change a subagent router, or switch it on in place of the one that is.
+         *
+         *     An omitted field keeps its stored value, the key included while the
+         *     provider and the API base stay the same.
+         */
+        patch: operations["agent-recommenders-update_agent_recommender"];
+        trace?: never;
+    };
     "/api/v1/routing/status": {
         parameters: {
             query?: never;
@@ -7719,6 +7773,111 @@ export interface components {
             user?: string | null;
         };
         /**
+         * AgentRecommenderCreate
+         * @description Add a subagent router. The first one added is switched on; a later one waits to be.
+         */
+        AgentRecommenderCreate: {
+            /**
+             * Api Base
+             * @description Root URL of the provider; blank for its own.
+             */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description Stored encrypted, never returned.
+             */
+            api_key?: string | null;
+            /**
+             * Input Price Per Million
+             * @default 0
+             */
+            input_price_per_million: number;
+            /**
+             * Model
+             * @description The decision model, as the provider names it.
+             */
+            model: string;
+            /**
+             * Output Price Per Million
+             * @default 0
+             */
+            output_price_per_million: number;
+            /**
+             * Provider
+             * @description The decision provider: typesafe, openrouter or llamacpp.
+             */
+            provider: string;
+        };
+        /**
+         * AgentRecommenderPublic
+         * @description One stored subagent router, known by its provider, model and the tail of its key.
+         */
+        AgentRecommenderPublic: {
+            /** Api Base */
+            api_base: string | null;
+            /** Api Key Last4 */
+            api_key_last4: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Has Api Key */
+            has_api_key: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Price Per Million */
+            input_price_per_million: number;
+            /** Model */
+            model: string;
+            /** Output Price Per Million */
+            output_price_per_million: number;
+            /** Provider */
+            provider: string;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /**
+         * AgentRecommenderUpdate
+         * @description Change a subagent router. An omitted field keeps its stored value.
+         *
+         *     Omitting ``api_key`` keeps the stored key while the provider and the API
+         *     base stay the same, so a price change never has to re-send a secret. A new
+         *     provider or address needs its own key, unless it is a self-hosted server
+         *     that takes none. A blank ``api_base`` goes back to the provider's own
+         *     address. Switching one on switches every other one off.
+         */
+        AgentRecommenderUpdate: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Model */
+            model?: string | null;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+            /** Provider */
+            provider?: string | null;
+        };
+        /**
+         * AgentRecommendersPublic
+         * @description Every stored subagent router, oldest first, and the configured decision model, where it resolves.
+         */
+        AgentRecommendersPublic: {
+            configured: components["schemas"]["ConfiguredRecommenderPublic"] | null;
+            /** Data */
+            data: components["schemas"]["AgentRecommenderPublic"][];
+        };
+        /**
          * AgentTelemetryBehavior
          * @description Counts from the behavioral events already captured on the logs signal.
          */
@@ -9461,6 +9620,18 @@ export interface components {
              * @default false
              */
             shadowed: boolean;
+        };
+        /**
+         * ConfiguredRecommenderPublic
+         * @description The decision model ``agent_recommender_model`` names, which answers unpriced while no router is stored.
+         */
+        ConfiguredRecommenderPublic: {
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            /** Selector */
+            selector: string;
         };
         /** ContentReadListPublic */
         ContentReadListPublic: {
@@ -28699,6 +28870,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentModelRecommendation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "agent-recommenders-list_agent_recommenders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRecommendersPublic"];
+                };
+            };
+        };
+    };
+    "agent-recommenders-create_agent_recommender": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRecommenderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRecommenderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "agent-recommenders-delete_agent_recommender": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recommender_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "agent-recommenders-update_agent_recommender": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recommender_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRecommenderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRecommenderPublic"];
                 };
             };
             /** @description Validation Error */
