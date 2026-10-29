@@ -1,5 +1,6 @@
+import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { FiEdit2, FiRefreshCw, FiTrash2 } from "react-icons/fi"
+import { FiChevronRight, FiRefreshCw, FiTrash2 } from "react-icons/fi"
 
 import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -18,20 +19,22 @@ import {
   McpServerDialog,
   type McpServerDraft,
 } from "@/features/tools/McpServerDialog"
+import { accessMode, defaultPolicySummary } from "@/features/tools/mcpAccess"
 import {
   healthDetail,
   healthLabel,
   healthNeedsAttention,
   toolCountLabel,
 } from "@/features/tools/mcpServerHealth"
+import { WorkspaceRequestMcpServers } from "@/features/tools/WorkspaceRequestMcpServers"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCheckWorkspaceMcpServer,
   useCreateWorkspaceMcpServer,
   useDeleteWorkspaceMcpServer,
-  useUpdateWorkspaceMcpServer,
   useWorkspaceMcpServers,
 } from "@/shared/api/tools"
+import { useWorkspaces } from "@/shared/api/workspaces"
 import { formatDateTime } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
@@ -140,17 +143,19 @@ export function WorkspaceMcpServersCard({
   const workspaceId = selected ? selected.workspace_id : null
   const query = useWorkspaceMcpServers(workspaceId)
   const create = useCreateWorkspaceMcpServer()
-  const update = useUpdateWorkspaceMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
   const check = useCheckWorkspaceMcpServer()
+  const navigate = useNavigate()
+  // The workspace row carries the request-named servers switch; only a manager
+  // is offered it, so only a manager pays for the read.
+  const workspaces = useWorkspaces(manages)
+  const workspace = workspaces.data?.find((entry) => entry.id === workspaceId)
 
   const [isDialogOpen, setDialogOpen] = useState(false)
   // Bumped on every open and used as the dialog's key, so the draft is cleared
   // on the way in. Clearing it on close would blank the fields while the dialog
   // is still animating away.
   const [openCount, setOpenCount] = useState(0)
-  const [editing, setEditing] = useState<WorkspaceMcpServer>()
-  const [saved, setSaved] = useState<WorkspaceMcpServer>()
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
 
   const isPage = variant === "page"
@@ -178,17 +183,7 @@ export function WorkspaceMcpServersCard({
   // refused write leaves its banner up, so reopening the form shows the last
   // 409 over a blank one. Same reset `PasskeysCard` does for the same reason.
   const openAdd = () => {
-    setEditing(undefined)
-    setSaved(undefined)
     create.reset()
-    setOpenCount((count) => count + 1)
-    setDialogOpen(true)
-  }
-
-  const openEdit = (server: WorkspaceMcpServer) => {
-    setEditing(server)
-    setSaved(undefined)
-    update.reset()
     setOpenCount((count) => count + 1)
     setDialogOpen(true)
   }
@@ -198,45 +193,19 @@ export function WorkspaceMcpServersCard({
     setPendingDelete(server)
   }
 
-  const submit = (draft: McpServerDraft) => {
-    // A save checks the connection when it adds a server or changes its URL,
-    // token or allow-list, the same rule the service applies. When that check
-    // found a problem, or could not run, the dialog stays open on the stored
-    // row and says so, so the fix is an edit rather than a second add.
-    const checked =
-      editing === undefined ||
-      draft.url !== editing.url ||
-      draft.authorization_token !== undefined ||
-      JSON.stringify(draft.allowed_tools) !==
-        JSON.stringify(editing.allowed_tools)
-    const settle = (server: WorkspaceMcpServer) => {
-      if (
-        checked &&
-        (server.health === null || healthNeedsAttention(server.health))
-      ) {
-        setEditing(server)
-        setSaved(server)
-        return
-      }
-      setDialogOpen(false)
-    }
-    const onDone = { onSuccess: settle }
-    if (editing) {
-      update.mutate(
-        {
-          workspaceId: selected.workspace_id,
-          serverId: editing.id,
-          // The token's states ride on `authorization_token` being absent,
-          // which `JSON.stringify` does for `undefined`. That is what lets an
-          // edit restate every other field safely; see `McpServerDialog`.
-          body: draft,
-        },
-        onDone,
-      )
-      return
-    }
-    create.mutate({ workspaceId: selected.workspace_id, body: draft }, onDone)
-  }
+  const openServer = (serverId: string) =>
+    void navigate({
+      to: "/tools/mcp-servers/$serverId",
+      params: { serverId },
+    })
+
+  // A new server opens on its own page, where its connection check, its
+  // access list and every later change live.
+  const submit = (draft: McpServerDraft) =>
+    create.mutate(
+      { workspaceId: selected.workspace_id, body: draft },
+      { onSuccess: (server) => openServer(server.id) },
+    )
 
   const columns: DataTableColumn<WorkspaceMcpServer>[] = [
     {
@@ -289,12 +258,32 @@ export function WorkspaceMcpServersCard({
       // the component's own prop, it carries the right foreground for its fill
       // (`--chip-fg` per `.chip--success`), and it is what the two cards next
       // door already use.
-      cell: (row) => (
-        <span className="flex items-center gap-2 text-mono-caption text-muted">
-          <Dot className={row.enabled ? "bg-success" : "bg-text-subtle"} />
-          {row.enabled ? "ENABLED" : "DISABLED"}
-        </span>
-      ),
+      // The server's default policy shares the cell, as a second line, so the
+      // table gains no column the URL would have to give its width to. The
+      // rules for keys and users are on the server's own page.
+      cell: (row) => {
+        const everyone = accessMode(row.everyone_tools)
+        return (
+          <span className="flex flex-col gap-1 text-mono-caption whitespace-nowrap text-muted">
+            <span className="flex items-center gap-2">
+              <Dot className={row.enabled ? "bg-success" : "bg-text-subtle"} />
+              {row.enabled ? "ENABLED" : "DISABLED"}
+            </span>
+            <span className="flex items-center gap-2">
+              <Dot
+                className={
+                  everyone === "all"
+                    ? "bg-success"
+                    : everyone === "none"
+                      ? "bg-text-subtle"
+                      : "bg-warning"
+                }
+              />
+              {defaultPolicySummary(row.everyone_tools)}
+            </span>
+          </span>
+        )
+      },
     },
     { id: "health", header: "Health", cell: healthCell },
   ]
@@ -316,9 +305,10 @@ export function WorkspaceMcpServersCard({
             }
           />
           <RowAction
-            icon={FiEdit2}
-            label="Edit"
-            onPress={() => openEdit(row)}
+            icon={FiChevronRight}
+            label="Manage"
+            ariaLabel={`Manage ${row.name}`}
+            onPress={() => openServer(row.id)}
           />
           <RowAction
             icon={FiTrash2}
@@ -367,6 +357,7 @@ export function WorkspaceMcpServersCard({
           columns={columns}
           rows={rows}
           getRowKey={(row) => row.id}
+          onRowAction={openServer}
           isLoading={query.isPending && !query.data}
           // Deliberately asserts nothing about the workspace: an empty table
           // is also what a failed request leaves behind, and the banner above
@@ -378,15 +369,18 @@ export function WorkspaceMcpServersCard({
       {/* Keyed on the open count, so each open remounts the form: it seeds its
           fields on mount, and one row's draft must not survive into the next
           row's dialog. */}
+      {manages && workspace ? (
+        <WorkspaceRequestMcpServers workspace={workspace} />
+      ) : null}
+
+      {/* Keyed on the open count, so each open starts from a blank form. */}
       <McpServerDialog
         key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
-        editing={editing}
-        saved={saved}
         workspaceId={selected.workspace_id}
-        isPending={create.isPending || update.isPending}
-        error={editing ? update.error : create.error}
+        isPending={create.isPending}
+        error={create.error}
         onSubmit={submit}
       />
 
@@ -398,7 +392,7 @@ export function WorkspaceMcpServersCard({
         heading="Delete MCP server"
         body={
           pendingDelete
-            ? `${pendingDelete.name} and the token stored with it are removed. A request that still names its id is refused, so update the callers that use it.`
+            ? `${pendingDelete.name}, the token stored with it and its access list are removed. A request that still names its id is refused, so update the callers that use it.`
             : null
         }
         confirmLabel="Delete server"

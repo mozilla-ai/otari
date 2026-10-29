@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useParams } from "@tanstack/react-router"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -13,8 +14,10 @@ import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import {
   workspaceMcpServerHealth as health,
   organizationContext,
+  workspace,
   workspaceMcpServer,
 } from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -71,11 +74,30 @@ function mockApi({
       }
       return Response.json(written ?? servers[0] ?? workspaceMcpServer())
     }
+    if (url.includes(`/workspaces/${ALPHA}`) || url.includes("/workspaces?")) {
+      calls.push({
+        url,
+        method,
+        body:
+          typeof init?.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : undefined,
+      })
+      const row = workspace({ id: ALPHA, name: "Alpha" })
+      return method === "GET"
+        ? Response.json({ data: [row], count: 1 })
+        : Response.json({ ...row, request_mcp_servers_allowed: false })
+    }
     return Response.json(
       organizationContext({ role, workspace_memberships: memberships }),
     )
   })
   return calls
+}
+
+function ServerPageProbe() {
+  const { serverId } = useParams({ strict: false })
+  return <p>Server page {serverId}</p>
 }
 
 function renderCard(variant?: "card" | "page") {
@@ -88,6 +110,19 @@ function renderCard(variant?: "card" | "page") {
         <WorkspaceMcpServersCard variant={variant} />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
+    {
+      // A real router, because a row and a new server open the server's own
+      // page; the probe stands in for that page.
+      wrapper: withRouter({
+        url: "/tools/mcp-servers",
+        routes: [
+          {
+            path: "/tools/mcp-servers/$serverId",
+            element: <ServerPageProbe />,
+          },
+        ],
+      }),
+    },
   )
 }
 
@@ -232,6 +267,7 @@ describe("WorkspaceMcpServersCard", () => {
       purpose_hint: null,
       allowed_tools: ["list_issues", "get_issue"],
       enabled: true,
+      everyone_tools: ["*"],
     })
     // No `authorization_token` key at all rather than an explicit null: the
     // operator typed no token, so the request says nothing about one.
@@ -261,78 +297,6 @@ describe("WorkspaceMcpServersCard", () => {
     expect(
       await screen.findByText(/already has an MCP server named 'github'/),
     ).toBeVisible()
-  })
-
-  it("leaves a stored token alone when the edit form never touches it", async () => {
-    const servers = [workspaceMcpServer({ has_token: true })]
-    const calls = mockApi({ servers })
-    const user = userEvent.setup()
-    await renderLoaded(servers)
-
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    await user.clear(screen.getByLabelText("Name"))
-    await user.type(screen.getByLabelText("Name"), "github-prod")
-    await user.click(screen.getByRole("button", { name: "Save server" }))
-
-    const patch = writes(calls).find((call) => call.method === "PATCH")
-    expect(patch?.body).toMatchObject({ name: "github-prod" })
-    // The whole point of the three-state token: a form that serialized an empty
-    // box back as null or "" would destroy a credential it was never shown.
-    expect(patch?.body).not.toHaveProperty("authorization_token")
-  })
-
-  it("clears a stored token only when the operator asks for it", async () => {
-    const servers = [workspaceMcpServer({ has_token: true })]
-    const calls = mockApi({ servers })
-    const user = userEvent.setup()
-    await renderLoaded(servers)
-
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    await user.click(
-      screen.getByRole("checkbox", { name: "Remove the stored token" }),
-    )
-    await user.click(screen.getByRole("button", { name: "Save server" }))
-
-    const patch = writes(calls).find((call) => call.method === "PATCH")
-    expect(patch?.body).toMatchObject({ authorization_token: "" })
-  })
-
-  it("rotates the token when the operator types a replacement", async () => {
-    const servers = [workspaceMcpServer({ has_token: true })]
-    const calls = mockApi({ servers })
-    const user = userEvent.setup()
-    await renderLoaded(servers)
-
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    await user.type(screen.getByLabelText("Authorization token"), "ghp_rotated")
-    await user.click(screen.getByRole("button", { name: "Save server" }))
-
-    // The third of the three states, and the only one that writes a credential.
-    const patch = writes(calls).find((call) => call.method === "PATCH")
-    expect(patch?.body).toMatchObject({ authorization_token: "ghp_rotated" })
-  })
-
-  it("takes the tick off Remove when a replacement token is typed", async () => {
-    const servers = [workspaceMcpServer({ has_token: true })]
-    const calls = mockApi({ servers })
-    const user = userEvent.setup()
-    await renderLoaded(servers)
-
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    const remove = screen.getByRole("checkbox", {
-      name: "Remove the stored token",
-    })
-    await user.click(remove)
-    expect(remove).toBeChecked()
-
-    // Clearing and rotating say opposite things, so the later instruction wins
-    // rather than both being held and one silently losing at submit.
-    await user.type(screen.getByLabelText("Authorization token"), "ghp_new")
-    expect(remove).not.toBeChecked()
-
-    await user.click(screen.getByRole("button", { name: "Save server" }))
-    const patch = writes(calls).find((call) => call.method === "PATCH")
-    expect(patch?.body).toMatchObject({ authorization_token: "ghp_new" })
   })
 
   it("does not show a refused write's banner over the next blank form", async () => {
@@ -394,7 +358,9 @@ describe("WorkspaceMcpServersCard", () => {
     await user.click(screen.getByRole("button", { name: "Delete" }))
     const dialog = await screen.findByRole("alertdialog")
     expect(
-      within(dialog).getByText(/the token stored with it are removed/),
+      within(dialog).getByText(
+        /the token stored with it and its access list are removed/,
+      ),
     ).toBeVisible()
     await user.click(
       within(dialog).getByRole("button", { name: "Delete server" }),
@@ -583,52 +549,11 @@ describe("WorkspaceMcpServersCard", () => {
     expect(screen.getByText(/HTTP 404/)).toBeVisible()
   })
 
-  it("hides the stored catalog once a test of the same connection fails", async () => {
-    const servers = [workspaceMcpServer({ health: health() })]
-    mockApi({
-      servers,
-      tested: health({
-        status: "failing",
-        error: "timeout",
-        tool_count: null,
-        tools: [],
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded(servers)
-
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    expect(screen.getByText(/2 tools available/)).toBeVisible()
-    await user.click(screen.getByRole("button", { name: "Test connection" }))
-
-    expect(await screen.findByText(/The test failed\./)).toBeVisible()
-    expect(screen.queryByText(/tools available/)).not.toBeInTheDocument()
-  })
-
-  it("tests an edit with the stored token unless a new one is typed", async () => {
-    const servers = [workspaceMcpServer({ has_token: true })]
-    const calls = mockApi({ servers })
-    const user = userEvent.setup()
-    await renderLoaded(servers)
-
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    await user.click(screen.getByRole("button", { name: "Test connection" }))
-
-    await waitFor(() =>
-      expect(
-        writes(calls).find((call) => call.url.endsWith("/check"))?.body,
-      ).toEqual({
-        url: servers[0].url,
-        allowed_tools: null,
-        server_id: servers[0].id,
-      }),
-    )
-  })
-
-  it("keeps the add form open on the stored server when its check fails", async () => {
-    // Save and warn: the server is stored either way, so the form turns into
-    // an edit of it rather than inviting a second add of the same name.
+  it("opens the new server's page once it is added, whatever its check found", async () => {
+    // The page is where the check's result, the access list and every later
+    // change live, so a failing check no longer holds the form open.
     const failing = workspaceMcpServer({
+      id: "99999999-9999-9999-9999-999999999999",
       health: health({
         status: "failing",
         error: "not_found",
@@ -652,68 +577,9 @@ describe("WorkspaceMcpServersCard", () => {
       }),
     )
 
-    const dialog = await screen.findByRole("dialog", {
-      name: "Edit MCP server",
-    })
     expect(
-      within(dialog).getByText(/Saved, but the connection failed/),
-    ).toBeVisible()
-    expect(within(dialog).getByText(/HTTP 404/)).toBeVisible()
-    expect(
-      within(dialog).getByRole("button", { name: "Save server" }),
-    ).toBeVisible()
-  })
-
-  it("closes the add form when the check finds nothing to fix", async () => {
-    mockApi({ written: workspaceMcpServer({ health: health() }) })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
-    await user.type(screen.getByLabelText("Name"), "github")
-    await user.type(
-      screen.getByLabelText("URL"),
-      "https://mcp.example.com/github",
-    )
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Add MCP server",
-      }),
-    )
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-  })
-
-  it("says so when an edit's check could not run, even on a server never checked", async () => {
-    // The gateway had no free check slot, so the row comes back with no health
-    // at all: the same as before the edit, which is why "did a check run" is
-    // read off what the edit changed rather than off the health it returned.
-    const servers = [workspaceMcpServer()]
-    mockApi({ servers })
-    const user = userEvent.setup()
-    await renderLoaded(servers)
-
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    await user.clear(screen.getByLabelText("URL"))
-    await user.type(screen.getByLabelText("URL"), "https://mcp.example.com/v2")
-    await user.click(screen.getByRole("button", { name: "Save server" }))
-
-    expect(await screen.findByText(/the gateway was busy/)).toBeVisible()
-    expect(screen.getByRole("dialog")).toBeVisible()
-  })
-
-  it("closes on an edit that leaves the connection alone", async () => {
-    const servers = [workspaceMcpServer()]
-    mockApi({ servers })
-    const user = userEvent.setup()
-    await renderLoaded(servers)
-
-    await user.click(screen.getByRole("button", { name: "Edit" }))
-    await user.clear(screen.getByLabelText("Name"))
-    await user.type(screen.getByLabelText("Name"), "github-prod")
-    await user.click(screen.getByRole("button", { name: "Save server" }))
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+      await screen.findByText(`Server page ${failing.id}`),
+    ).toBeInTheDocument()
   })
 
   it("rechecks a server from its row", async () => {
@@ -733,5 +599,105 @@ describe("WorkspaceMcpServersCard", () => {
         ),
       ).toBe(true),
     )
+  })
+
+  it("sums up on each row the server's default policy", async () => {
+    const servers = [
+      workspaceMcpServer({ name: "github" }),
+      workspaceMcpServer({
+        id: "66666666-6666-6666-6666-666666666666",
+        name: "payroll",
+        everyone_tools: [],
+      }),
+      workspaceMcpServer({
+        id: "77777777-7777-7777-7777-777777777777",
+        name: "jira",
+        everyone_tools: ["get_issue", "list_*"],
+      }),
+    ]
+    mockApi({ servers })
+    await renderLoaded(servers)
+
+    const rowOf = (name: string) =>
+      screen.getByText(name).closest("tr") as HTMLElement
+    expect(within(rowOf("github")).getByText("DEFAULT: ALLOW")).toBeVisible()
+    expect(within(rowOf("payroll")).getByText("DEFAULT: DENY")).toBeVisible()
+    expect(
+      within(rowOf("jira")).getByText("DEFAULT: ALLOW 2 TOOLS"),
+    ).toBeVisible()
+  })
+
+  it("registers a server nobody can use yet when asked to", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    expect(screen.getByRole("radio", { name: "Allow" })).toBeChecked()
+    await user.type(screen.getByLabelText("Name"), "payroll")
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/payroll",
+    )
+    await user.click(screen.getByRole("radio", { name: "Deny" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
+
+    const post = writes(calls).find((call) => call.method === "POST")
+    expect(post?.body).toMatchObject({ everyone_tools: [] })
+  })
+
+  it("opens a server's own page from its row", async () => {
+    const servers = [workspaceMcpServer()]
+    mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Manage github" }))
+
+    expect(
+      await screen.findByText(`Server page ${servers[0].id}`),
+    ).toBeInTheDocument()
+  })
+
+  it("switches whether requests may name their own servers", async () => {
+    const calls = mockApi({ servers: [workspaceMcpServer()] })
+    const user = userEvent.setup()
+    await renderLoaded([workspaceMcpServer()])
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Let requests name their own MCP servers",
+    })
+    expect(toggle).toBeChecked()
+    expect(screen.getByText(/make the access lists airtight/)).toBeVisible()
+    await user.click(toggle)
+
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (call) =>
+            call.method === "PATCH" &&
+            call.url.endsWith(`/workspaces/${ALPHA}`),
+        )?.body,
+      ).toEqual({ request_mcp_servers_allowed: false }),
+    )
+  })
+
+  it("offers the request switch only to those who manage the workspace", async () => {
+    mockApi({
+      servers: [workspaceMcpServer()],
+      role: "member",
+      memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "member" }],
+    })
+    await renderLoaded([workspaceMcpServer()])
+
+    expect(
+      screen.queryByRole("switch", {
+        name: "Let requests name their own MCP servers",
+      }),
+    ).not.toBeInTheDocument()
   })
 })

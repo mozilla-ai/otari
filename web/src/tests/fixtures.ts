@@ -37,6 +37,7 @@ import type {
   WorkspaceCodeExecutionPolicy,
   WorkspaceHostedProvider,
   WorkspaceMcpServer,
+  WorkspaceMcpServerGrant,
   WorkspaceMcpServerHealth,
   WorkspaceMember,
   WorkspaceProviderKeyOverride,
@@ -380,6 +381,7 @@ export function workspace(overrides: Partial<Workspace> = {}): Workspace {
     created_by_user_id: null,
     trace_content_enabled: false,
     trace_content_tool_output: true,
+    request_mcp_servers_allowed: true,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: null,
     ...overrides,
@@ -880,6 +882,9 @@ export function workspaceMcpServer(
     // builder wants. Not interchangeable with `[]`, which admits no tool.
     allowed_tools: null,
     enabled: true,
+    // What every key of the workspace may call: everything, as a create
+    // defaults to.
+    everyone_tools: ["*"],
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
     // Never checked, which is how a row stored before checks existed reads.
@@ -901,6 +906,27 @@ export function workspaceMcpServerHealth(
     tool_count: 2,
     missing_allowed_tools: [],
     tools: ["list_issues", "get_issue"],
+    ...overrides,
+  }
+}
+
+/**
+ * One exception on a server's access list: a key's, allowing every tool, by
+ * default. A user's grant names no key, and a test about one says so.
+ */
+export function workspaceMcpServerGrant(
+  overrides: Partial<WorkspaceMcpServerGrant> = {},
+): WorkspaceMcpServerGrant {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    subject: "key",
+    api_key_id: "key-1",
+    key_name: "ci-bot",
+    key_active: true,
+    user_id: "33333333-3333-3333-3333-333333333333",
+    tools: ["*"],
+    created_at: "2026-08-01T00:00:00+00:00",
+    updated_at: "2026-08-01T00:00:00+00:00",
     ...overrides,
   }
 }
