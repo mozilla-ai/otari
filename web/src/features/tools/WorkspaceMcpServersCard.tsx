@@ -369,7 +369,7 @@ export function WorkspaceMcpServersCard({
       <ErrorBanner error={query.error} />
       <ErrorBanner error={check.error} />
 
-      {isPage && allRows.length > 0 ? (
+      {isPage && (allRows.length > 0 || search.value) ? (
         <Toolbar>
           <SearchField
             label="Search MCP servers"
