@@ -193,8 +193,12 @@ describe("FeedbackDialog", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
   })
 
-  it("offers no email the gateway would refuse to attach", () => {
-    setup({ email: "ops@intranet" })
+  it.each([
+    ["no dot in the domain", "ops@intranet"],
+    ["past the receiver's 254", `${"a".repeat(243)}@example.com`],
+    ["a bidirectional override", "ada@example.com‮moc"],
+  ])("offers no email the gateway would refuse to attach: %s", (_, email) => {
+    setup({ email })
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
   })
 

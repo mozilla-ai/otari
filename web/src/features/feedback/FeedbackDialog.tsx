@@ -20,6 +20,18 @@ const MAX_MESSAGE_LENGTH = 4000
 
 const IS_APPLE = /Mac|iPhone|iPad/.test(navigator.platform)
 
+/** The receiver's cap on the address to reply to, which the gateway applies too. */
+const MAX_REPLY_TO_LENGTH = 254
+
+/** Whether the gateway would attach this address: its shape, length and printable-only rules. */
+function canShare(email: string): boolean {
+  return (
+    email.length <= MAX_REPLY_TO_LENGTH &&
+    !/[\s\p{C}]/u.test(email) &&
+    looksLikeAddress(email)
+  )
+}
+
 /**
  * A message to the Otari team, opened from Feedback beside Documentation: in the
  * top bar from `md` up, and in the account menu below it.
@@ -49,7 +61,7 @@ export function FeedbackDialog({
 }) {
   // Only an address the gateway will attach: offering one it refuses would be a
   // box that fails every send.
-  const shareable = email && looksLikeAddress(email) ? email : null
+  const shareable = email && canShare(email) ? email : null
   const headingId = useId()
   const thanksId = useId()
   const thanksRef = useRef<HTMLDivElement>(null)

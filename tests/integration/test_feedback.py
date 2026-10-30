@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.api import deps
-from gateway.api.routes.feedback import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.exceptions.feedback_exceptions import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL
 from gateway.models.tenancy import DashboardSession, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.feedback import FeedbackService
@@ -130,6 +130,7 @@ def test_an_address_the_page_showed_for_another_account_is_refused(
     # The page was loaded as one account, and another tab has since signed in as
     # this one: what the person agreed to share is not the session's address.
     user = _sign_in_member(client, db_session, master_key_header)
+    assert user.email is not None
     stale = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": "earlier@example.com"})
     assert stale.status_code == 422
     assert stale.json()["detail"] == ANOTHER_ACCOUNT

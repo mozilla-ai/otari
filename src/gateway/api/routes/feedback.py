@@ -7,9 +7,8 @@ from pydantic import ValidationError
 from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import get_feedback_service, get_session_identity, verify_master_key
-from gateway.core.addresses import normalized_address
 from gateway.core.feature import CoreFeature
-from gateway.exceptions.feedback_exceptions import FeedbackDeliveryError
+from gateway.exceptions.feedback_exceptions import UNSHAREABLE_EMAIL, FeedbackDeliveryError
 from gateway.models.tenancy import User
 from gateway.rate_limit import RateLimiter
 from gateway.schemas.feedback import FeedbackSubmission
@@ -17,18 +16,6 @@ from gateway.services.feedback import FeedbackService
 
 router = APIRouter(prefix="/feedback", tags=["feedback"], dependencies=[Depends(verify_master_key)])
 MAX_BODY_BYTES = 32 * 1024
-# The receiver's own cap on `reply_to`; keep the two together.
-MAX_REPLY_TO_LENGTH = 254
-UNSHAREABLE_EMAIL = "Your email could not be attached. Untick it to send without it."
-ANOTHER_ACCOUNT = "You are now signed in as another account. Reload the page to share that email."
-
-
-def _reply_to(identity: User | None) -> str | None:
-    """The caller's email as the receiver will accept it, or None if it would refuse it."""
-    email = identity.email.strip() if identity and identity.email else ""
-    if len(email) > MAX_REPLY_TO_LENGTH or not email.isprintable() or normalized_address(email) is None:
-        return None
-    return email
 
 
 async def _read_submission(request: Request) -> FeedbackSubmission:
@@ -72,13 +59,7 @@ async def submit_feedback(
 ) -> Response:
     """Send feedback privately to the Otari team."""
     body = await _read_submission(request)
-    reply_to = None
-    if body.share_email is not None:
-        reply_to = _reply_to(session_identity)
-        if reply_to is None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, UNSHAREABLE_EMAIL)
-        if normalized_address(body.share_email) != normalized_address(reply_to):
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ANOTHER_ACCOUNT)
+    reply_to = service.reply_to(body.share_email, session_identity.email if session_identity else None)
     # After validation, so a body that never leaves the gateway costs no send.
     limiter: RateLimiter | None = getattr(request.app.state, "feedback_rate_limiter", None)
     if limiter is not None:
