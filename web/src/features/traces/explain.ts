@@ -1,7 +1,8 @@
 import type { TraceSpan } from "@/client"
+import { docsSourceHref } from "@/shared/helpers/docs"
 
 import { formatDuration } from "./format"
-import type { GuardrailVerdict } from "./gateway"
+import { type GuardrailVerdict, gateVerdict } from "./gateway"
 import { clip, clipPath } from "./traceModel"
 
 // What a span means, in a sentence and a few facts, for the panel a picked span
@@ -9,6 +10,49 @@ import { clip, clipPath } from "./traceModel"
 export interface Explanation {
   sentence: string
   facts: [term: string, value: string][]
+}
+
+// Why a span shows no input. The dashboard cannot tell a deployment that keeps
+// no content from an agent that sent none or a reader not allowed to see it, so
+// a span that can hold content says it is not shown, and links the docs on all three.
+export interface NoInput {
+  sentence: string
+  docsHref?: string
+}
+
+const KEEPING_CONTENT = docsSourceHref(
+  "traces.md",
+  "keeping-what-a-span-was-about",
+)
+
+// The tools Claude Code reports a command or a file path for.
+const TOOL_KEEPS: Record<string, string> = {
+  Bash: "command",
+  Read: "file path",
+  Edit: "file path",
+  Write: "file path",
+}
+
+// Only what an instrumented agent exports can be kept, never what the gateway
+// reads off a request it routed.
+function notShown(span: TraceSpan): string | undefined {
+  if (span.origin !== "otlp") return undefined
+  if (span.kind === "step" && span.operation === "interaction")
+    return "Its prompt is not shown."
+  const kept = span.kind === "tool" ? TOOL_KEEPS[span.tool_name ?? ""] : null
+  if (kept) return `Its ${kept} is not shown.`
+  if (gateVerdict(span)) return "What the gate checked is not shown."
+  return undefined
+}
+
+export function noInput(span: TraceSpan): NoInput {
+  const sentence = notShown(span)
+  if (sentence) return { sentence, docsHref: KEEPING_CONTENT }
+  if (span.kind === "llm" || span.kind === "step")
+    return { sentence: "Otari never keeps what a request sent or got back." }
+  if (span.kind === "tool")
+    return { sentence: "Otari keeps no content for this tool." }
+  return { sentence: "Otari keeps no content for this kind of span." }
 }
 
 const DECIDED_BY: Record<string, string> = {
@@ -166,7 +210,7 @@ function prompt(span: TraceSpan): Explanation {
   return {
     sentence: span.content.prompt
       ? "The prompt that started this turn."
-      : "A turn the agent took. Its prompt is not kept here.",
+      : "A turn the agent took.",
     facts: facts(["Took", took(span)]),
   }
 }

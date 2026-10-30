@@ -11,6 +11,7 @@ import {
   type GateTally,
   gateGroupExplanation,
   groupWords,
+  noInput,
 } from "./explain"
 import {
   failureLabel,
@@ -274,6 +275,10 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           completionTokens: turn.output_tokens,
           cachedTokens: turn.cache_read_tokens,
           cost: turn.cost > 0 ? turn.cost : undefined,
+          noInput: {
+            sentence:
+              "A turn keeps nothing of its own. Its steps are under it.",
+          },
           isRollup: true,
           metadata: {
             State: turn.state,
@@ -376,6 +381,8 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           : null
       const startMs = offset(span.start_time ?? span.end_time) ?? 0
       const endMs = offset(span.end_time) ?? startMs + (span.duration_ms ?? 0)
+      const input = spanInput(span)
+      const gate = gateCheck(span, gateSummaries, checkEvidence)
       observations.push({
         id: span.span_id,
         parentObservationId:
@@ -388,8 +395,11 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
         ),
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),
-        input: spanInput(span),
-        gate: gateCheck(span, gateSummaries, checkEvidence),
+        input,
+        // A gate can read its evidence off a sibling gate of the same check.
+        noInput:
+          input === undefined && !gate?.evidence ? noInput(span) : undefined,
+        gate,
         detail:
           span.operation === "tool.blocked_on_user" ||
           span.operation === "tool.execution" ||
@@ -449,6 +459,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
             span.kind === "step",
             gateNodes.length,
           ),
+          noInput: { sentence: "Its gates are under it." },
         })
         for (const gate of gateNodes) visit(gate, groupId)
       }
