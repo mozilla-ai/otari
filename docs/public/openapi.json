@@ -30881,10 +30881,17 @@
                     "type": "string"
                   },
                   "share_email": {
-                    "default": false,
-                    "description": "Send the signed-in account's email with the message so the Otari team can reply. Refused when the caller has no email the team can reply to.",
-                    "title": "Share Email",
-                    "type": "boolean"
+                    "anyOf": [
+                      {
+                        "maxLength": 255,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The signed-in account's email as the form showed it, to send with the message so the Otari team can reply. Refused when the caller has no email the team can reply to, or when it is not this one.",
+                    "title": "Share Email"
                   }
                 },
                 "required": [

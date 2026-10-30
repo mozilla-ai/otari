@@ -57,8 +57,11 @@ export function FeedbackDialog({
   const [message, setMessage] = useState("")
   const [isEmptySend, setIsEmptySend] = useState(false)
   const [isSent, setIsSent] = useState(false)
-  const [shareEmail, setShareEmail] = useState(false)
-  const repliesTo = shareEmail ? shareable : null
+  // The address the tick agreed to, so the box reads unticked once another
+  // shows (a session changed in another tab), and that one is what is sent.
+  const [agreedTo, setAgreedTo] = useState<string | null>(null)
+  const repliesTo =
+    agreedTo !== null && agreedTo === shareable ? agreedTo : null
   const { mutate, reset, isPending, error } = useSendFeedback()
   // A 422 is a refusal the person can act on (untick the email), so it keeps
   // the gateway's reason; anything else is a delivery a retry may get through.
@@ -81,7 +84,7 @@ export function FeedbackDialog({
     setIsEmptySend(false)
     setIsSent(false)
     // Opt-in each time: a tick from an earlier message is not consent to this one.
-    setShareEmail(false)
+    setAgreedTo(null)
     reset()
   }, [isOpen, reset])
 
@@ -102,7 +105,7 @@ export function FeedbackDialog({
     }
     mutate(
       repliesTo
-        ? { message: trimmed, share_email: true }
+        ? { message: trimmed, share_email: repliesTo }
         : { message: trimmed },
       { onSuccess: () => setIsSent(true) },
     )
@@ -237,8 +240,10 @@ export function FeedbackDialog({
                 {shareable ? (
                   <div className="shrink-0 px-6 pb-5 max-sm:px-4 max-sm:pb-3">
                     <Checkbox
-                      isSelected={shareEmail}
-                      onChange={setShareEmail}
+                      isSelected={repliesTo !== null}
+                      onChange={(selected) =>
+                        setAgreedTo(selected ? shareable : null)
+                      }
                       isDisabled={isPending}
                     >
                       <span className="min-w-0 break-words">

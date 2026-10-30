@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.api import deps
-from gateway.api.routes.feedback import UNSHAREABLE_EMAIL
+from gateway.api.routes.feedback import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import DashboardSession, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -112,19 +112,37 @@ def test_a_member_who_shares_their_email_sends_the_session_address(
     user.email = "Member@Example.com"
     db_session.commit()
     assert (
-        client.post(f"{API_ROOT}/feedback", json={"message": "Reply, please", "share_email": True}).status_code == 204
+        client.post(
+            f"{API_ROOT}/feedback", json={"message": "Reply, please", "share_email": "Member@Example.com"}
+        ).status_code
+        == 204
     )
-    assert client.post(f"{API_ROOT}/feedback", json={"message": "Anonymous", "share_email": False}).status_code == 204
+    assert client.post(f"{API_ROOT}/feedback", json={"message": "Anonymous"}).status_code == 204
     assert [json.loads(request.content) for request in deliveries] == [
         {"message": "Reply, please", "reply_to": "Member@Example.com"},
         {"message": "Anonymous"},
     ]
 
 
+def test_an_address_the_page_showed_for_another_account_is_refused(
+    client: TestClient, db_session: Session, deliveries: list[httpx.Request], master_key_header: dict[str, str]
+) -> None:
+    # The page was loaded as one account, and another tab has since signed in as
+    # this one: what the person agreed to share is not the session's address.
+    user = _sign_in_member(client, db_session, master_key_header)
+    stale = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": "earlier@example.com"})
+    assert stale.status_code == 422
+    assert stale.json()["detail"] == ANOTHER_ACCOUNT
+    assert user.email not in stale.text
+    shown = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": user.email.upper()})
+    assert shown.status_code == 204
+    assert [json.loads(request.content) for request in deliveries] == [{"message": "Idea", "reply_to": user.email}]
+
+
 def test_sharing_an_email_the_caller_does_not_have_is_refused(
     client: TestClient, test_config: GatewayConfig, master_key_header: dict[str, str], deliveries: list[httpx.Request]
 ) -> None:
-    body = {"message": "Idea", "share_email": True}
+    body = {"message": "Idea", "share_email": "operator@example.com"}
     by_key = client.post(f"{API_ROOT}/feedback", json=body, headers=master_key_header)
     assert by_key.status_code == 422
     assert by_key.json()["detail"] == UNSHAREABLE_EMAIL
@@ -141,7 +159,7 @@ def test_an_email_the_receiver_would_refuse_is_never_sent(
     # Within this gateway's 255, one past the receiver's 254.
     user.email = "a" * 243 + "@example.com"
     db_session.commit()
-    refused = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": True})
+    refused = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": user.email})
     assert refused.status_code == 422
     assert refused.json()["detail"] == UNSHAREABLE_EMAIL
     assert not deliveries
@@ -155,8 +173,8 @@ def test_a_receiver_that_refuses_the_address_is_explained(
         return httpx.Response(422 if "reply_to" in json.loads(request.content) else 204)
 
     monkeypatch.setattr(deps, "FeedbackService", partial(FeedbackService, transport=httpx.MockTransport(receive)))
-    _sign_in_member(client, db_session, master_key_header)
-    ticked = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": True})
+    user = _sign_in_member(client, db_session, master_key_header)
+    ticked = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": user.email})
     assert ticked.status_code == 422
     assert ticked.json()["detail"] == UNSHAREABLE_EMAIL
     assert client.post(f"{API_ROOT}/feedback", json={"message": "Idea"}).status_code == 204
@@ -178,7 +196,7 @@ def test_unauthenticated_and_api_key_callers_are_refused(
         {"message": "ok", "url": "private"},
         {"message": "ok", "email": "private@example.com"},
         {"message": "ok", "reply_to": "private@example.com"},
-        {"message": "ok", "share_email": "true"},
+        {"message": "ok", "share_email": True},
         {"message": "\ud800"},
     ],
 )

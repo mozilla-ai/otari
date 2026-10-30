@@ -87,8 +87,8 @@ async def test_only_the_named_fields_are_forwarded(gateway_logs: pytest.LogCaptu
         return httpx.Response(204)
 
     service = FeedbackService(transport=httpx.MockTransport(receive))
-    await service.submit(FeedbackSubmission(message="Idea", share_email=True), "private@example.com")
-    await service.submit(FeedbackSubmission(message="Idea", share_email=True))
+    await service.submit(FeedbackSubmission(message="Idea", share_email="private@example.com"), "private@example.com")
+    await service.submit(FeedbackSubmission(message="Idea", share_email="private@example.com"))
     assert [json.loads(request.content) for request in calls] == [
         {"message": "Idea", "reply_to": "private@example.com"},
         {"message": "Idea"},

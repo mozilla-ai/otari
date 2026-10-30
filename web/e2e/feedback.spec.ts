@@ -107,7 +107,9 @@ test("an account with an email is offered it, off, and the shortcut sends from t
   await expect(page.getByRole("dialog", { name: "Thank you!" })).toContainText(
     "If we have a question, we’ll write to ada.lovelace@example.com.",
   )
-  expect(payloads).toEqual([{ message: MESSAGE, share_email: true }])
+  expect(payloads).toEqual([
+    { message: MESSAGE, share_email: "ada.lovelace@example.com" },
+  ])
 })
 
 test.describe("phone", () => {

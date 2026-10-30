@@ -3,7 +3,7 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -19,14 +19,17 @@ function setup({ email }: { email?: string } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  let showEmail: (next: string) => void = () => {}
   function Harness() {
     const [open, setOpen] = useState(true)
+    const [shown, setShown] = useState(email)
+    showEmail = setShown
     return (
       <>
         <button type="button" onClick={() => setOpen(true)}>
           Open feedback
         </button>
-        <FeedbackDialog isOpen={open} onOpenChange={setOpen} email={email} />
+        <FeedbackDialog isOpen={open} onOpenChange={setOpen} email={shown} />
       </>
     )
   }
@@ -35,7 +38,11 @@ function setup({ email }: { email?: string } = {}) {
       <Harness />
     </QueryClientProvider>,
   )
-  return { fetch, user: userEvent.setup() }
+  return {
+    fetch,
+    user: userEvent.setup(),
+    showEmail: (next: string) => act(() => showEmail(next)),
+  }
 }
 
 const field = () => screen.getByRole("textbox", { name: "Feedback" })
@@ -204,13 +211,28 @@ describe("FeedbackDialog", () => {
     // A flag, never the address: the gateway reads it from the session.
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
       message: "Idea",
-      share_email: true,
+      share_email: "ada@example.com",
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
     ).toHaveAccessibleDescription(
       "Every message reaches the people building Otari. If we have a question, we’ll write to ada@example.com.",
     )
+  })
+
+  it("drops the tick when the address shown changes, sending only what was agreed", async () => {
+    const { fetch, user, showEmail } = setup({ email: "ada@example.com" })
+    await user.type(field(), "Idea")
+    await user.click(screen.getByRole("checkbox"))
+    // Another tab signed in as someone else, and the caller query caught up.
+    showEmail("grace@example.com")
+    const share = screen.getByRole("checkbox", {
+      name: "Share grace@example.com so the team can reply",
+    })
+    expect(share).not.toBeChecked()
+    await user.click(screen.getByRole("button", { name: SEND }))
+    await screen.findByRole("heading", { name: "Thank you!" })
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ message: "Idea" })
   })
 
   it("asks again every time it opens, and an unticked send stays anonymous", async () => {
@@ -243,7 +265,7 @@ describe("FeedbackDialog", () => {
     await screen.findByRole("heading", { name: "Thank you!" })
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
       message: "Idea",
-      share_email: true,
+      share_email: "ada@example.com",
     })
   })
 

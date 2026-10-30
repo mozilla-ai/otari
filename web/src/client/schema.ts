@@ -21799,10 +21799,9 @@ export interface operations {
                     message: string;
                     /**
                      * Share Email
-                     * @description Send the signed-in account's email with the message so the Otari team can reply. Refused when the caller has no email the team can reply to.
-                     * @default false
+                     * @description The signed-in account's email as the form showed it, to send with the message so the Otari team can reply. Refused when the caller has no email the team can reply to, or when it is not this one.
                      */
-                    share_email?: boolean;
+                    share_email?: string | null;
                 };
             };
         };

@@ -20,6 +20,7 @@ MAX_BODY_BYTES = 32 * 1024
 # The receiver's own cap on `reply_to`; keep the two together.
 MAX_REPLY_TO_LENGTH = 254
 UNSHAREABLE_EMAIL = "Your email could not be attached. Untick it to send without it."
+ANOTHER_ACCOUNT = "You are now signed in as another account. Reload the page to share that email."
 
 
 def _reply_to(identity: User | None) -> str | None:
@@ -71,9 +72,13 @@ async def submit_feedback(
 ) -> Response:
     """Send feedback privately to the Otari team."""
     body = await _read_submission(request)
-    reply_to = _reply_to(session_identity) if body.share_email else None
-    if body.share_email and reply_to is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, UNSHAREABLE_EMAIL)
+    reply_to = None
+    if body.share_email is not None:
+        reply_to = _reply_to(session_identity)
+        if reply_to is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, UNSHAREABLE_EMAIL)
+        if normalized_address(body.share_email) != normalized_address(reply_to):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ANOTHER_ACCOUNT)
     # After validation, so a body that never leaves the gateway costs no send.
     limiter: RateLimiter | None = getattr(request.app.state, "feedback_rate_limiter", None)
     if limiter is not None:

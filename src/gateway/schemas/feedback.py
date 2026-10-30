@@ -7,13 +7,14 @@ class FeedbackSubmission(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, hide_input_in_errors=True)
 
     message: str = Field(min_length=1, max_length=4000)
-    # A yes or no rather than an address, so nobody can put someone else's
-    # email on a message: the gateway reads the address from the session.
-    share_email: bool = Field(
-        default=False,
-        strict=True,
+    # The address the person saw when they agreed, never the one sent: the
+    # gateway sends the session's own, and only when it is this one, so a page
+    # still showing an earlier account cannot share the next one's.
+    share_email: str | None = Field(
+        default=None,
+        max_length=255,
         description=(
-            "Send the signed-in account's email with the message so the Otari team can reply. "
-            "Refused when the caller has no email the team can reply to."
+            "The signed-in account's email as the form showed it, to send with the message so the Otari team can "
+            "reply. Refused when the caller has no email the team can reply to, or when it is not this one."
         ),
     )

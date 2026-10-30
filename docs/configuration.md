@@ -1587,9 +1587,11 @@ no email, screenshot, page URL, account identifier, deployment identifier, or
 usage history is attached. Someone whose account has an email also sees a box
 under the message, **Share _their address_ so the team can reply**. Ticked, the
 gateway adds the signed-in account's email, never an address from the request,
-and the Slack post shows it as the address to reply to. The box starts unticked every time the
-form opens, and an account without an email is not offered it. Opening the
-form, typing, and canceling make no outbound request.
+and only when it is the address the form showed: a page left open while another
+tab signed in as someone else shares nothing. The Slack post shows it as the
+address to reply to. The box starts unticked every time the form opens, and an
+account without an email is not offered it. Opening the form, typing, and
+canceling make no outbound request.
 
 The gateway forwards the message to
 `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
