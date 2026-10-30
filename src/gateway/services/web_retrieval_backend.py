@@ -22,7 +22,7 @@ from opentelemetry import trace
 
 from gateway.core.settings.tools import DEFAULT_SEARXNG_ENGINES
 from gateway.services._tool_loop import MaxToolIterationsExceeded
-from gateway.services.tool_usage import ToolUsageTally, is_tool_error
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally, is_tool_error
 from gateway.services.tools import DEFAULT_MAX_RESULTS as DEFAULT_MAX_RESULTS
 from gateway.services.tools import WEB_FETCH_TOOL_NAME as WEB_FETCH_TOOL_NAME
 from gateway.services.tools import WEB_RETRIEVAL_RESULT_MAX_BYTES as WEB_RETRIEVAL_RESULT_MAX_BYTES
@@ -319,6 +319,12 @@ class WebRetrievalBackend:
             self._last_failure = self._fetch.take_last_failure()
             return fetched
         started = datetime.now(UTC)
+        if self._tally is not None and not await self._tally.admit(
+            WEB_SEARCH_TOOL_NAME, deployment_paid=not self._on_credential
+        ):
+            self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
+            self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=False)
+            return TOOL_BUDGET_EXCEEDED_TEXT
         try:
             result = await self._search_tool(arguments)
         except Exception:

@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from any_fetch import FetchedPage
 from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
-from gateway.services.tool_usage import is_tool_error
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, is_tool_error
 from gateway.services.tools._web_call_cap import FETCH_CALL_LIMIT_TEXT
 from gateway.services.tools._web_display import fetched_url
 from gateway.services.tools._web_fetch._builtin import (
@@ -51,7 +51,7 @@ from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     web_fetch_tool_definition,
 )
-from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure, failed_text
+from gateway.services.tools._web_tool_failure import BUDGET_EXCEEDED_TAG, CALL_LIMIT_TAG, WebToolFailure, failed_text
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy
 
@@ -174,6 +174,13 @@ class WebFetchBackend:
         started = datetime.now(UTC)
         if self._cap is not None and not self._cap.claim():
             text = self._refused(CALL_LIMIT_TAG, FETCH_CALL_LIMIT_TEXT)
+        elif self._tally is not None and not await self._tally.admit(
+            WEB_FETCH_TOOL_NAME,
+            label=self._resolved.label,
+            rate_keys=self._resolved.rate_keys,
+            deployment_paid=not self._resolved.on_credential,
+        ):
+            text = self._refused(BUDGET_EXCEEDED_TAG, TOOL_BUDGET_EXCEEDED_TEXT)
         else:
             text = await self._fetch(arguments)
         if self._tally is not None:

@@ -29,7 +29,7 @@ from mcp.client.streamable_http import streamable_http_client
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
 from gateway.services.mcp_stateless import failure_class
-from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally
 from gateway.services.traces import RequestTrace
 
 if TYPE_CHECKING:
@@ -301,6 +301,13 @@ class MCPClientPool:
         """
         if name not in self._tool_owner:
             raise KeyError(f"No MCP server owns tool {name!r}")
+        if self._tally is not None and not await self._tally.admit(name):
+            self._tally.record_failure(name)
+            return MCPToolCallOutcome(
+                content=TOOL_BUDGET_EXCEEDED_TEXT,
+                activity_content=TOOL_BUDGET_EXCEEDED_TEXT.removeprefix("[tool error] "),
+                is_error=True,
+            )
         try:
             result = await self._call_tool_result(name, arguments)
         except Exception as exc:

@@ -28,6 +28,7 @@ from gateway.services.sandbox_backend import (
     SandboxSessionGoneError,
     SandboxUnavailableError,
 )
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally
 
 
 class _MockTransport(httpx.AsyncBaseTransport):
@@ -1730,3 +1731,25 @@ async def test_without_a_registry_nothing_is_held_or_reported() -> None:
     async with SandboxBackend(port=port) as backend:
         assert port.keep_alive_s is None
         assert backend.lease is None
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_budget_cannot_hold_never_reaches_the_sandbox() -> None:
+    """Refused before it runs, and counted as a failure, so it is never billed."""
+
+    class _Refuse:
+        async def admit(self, _call: Any) -> bool:
+            return False
+
+    tally = ToolUsageTally()
+    tally.spend_gate = _Refuse()
+    backend = _sandbox(tally=tally)
+    backend.owns_tool = lambda name: name == CODE_EXECUTION_TOOL_NAME  # type: ignore[method-assign]
+
+    async def never(_code: str) -> Any:
+        raise AssertionError("the sandbox ran a call the budget refused")
+
+    backend._exec_tool = never  # type: ignore[method-assign,assignment]
+
+    assert await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"}) == TOOL_BUDGET_EXCEEDED_TEXT
+    assert tally.meters() == {CODE_EXECUTION_TOOL_NAME: {"billed": 0, "errors": 1}}

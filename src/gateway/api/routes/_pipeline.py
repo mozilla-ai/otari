@@ -399,7 +399,7 @@ from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.session_principal import SessionPrincipal
-from gateway.types.tool_charges import describe_rate_key
+from gateway.types.tool_charges import LabelCalls, RateKey, describe_rate_key
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
@@ -1272,6 +1272,10 @@ class RequestContext:
         # which is what keeps ``users.spend`` matching the row: ``refund_reservation``
         # releases the hold *without* writing spend.
         self.tool_charge: Decimal = Decimal(0)
+        # USD the reservation grew by to hold gateway-run tool calls before they ran.
+        # A fallover's top-up holds it on top of the next candidate's estimate, since
+        # those calls are billed whichever attempt wins.
+        self.tool_hold: Decimal = Decimal(0)
         # Set once a deployment-paid request passes its funding gate, and ``None``
         # on every other request: settlement charges the organization through it.
         self.deployment_charge: DeploymentCharge | None = None
@@ -2363,7 +2367,7 @@ async def _grow_reservation(
         await increase_reservation(
             ctx.db,
             ctx.reservation,
-            estimate=repriced,
+            estimate=repriced + ctx.tool_hold,
             model=f"{instance}:{model}",
             model_is_free=is_free_pricing(pricing),
             strategy=ctx.config.budget_strategy,
@@ -2373,6 +2377,60 @@ async def _grow_reservation(
         if refused_detail is None:
             raise
         raise HTTPException(status_code=exc.status_code, detail=refused_detail, headers=exc.headers) from exc
+
+
+class ReservationToolGate:
+    """Grows the request's reservation by each gateway-run tool call's price before the call runs.
+
+    Settlement prices tool calls only after they ran, so the hold taken at admission
+    covers the model alone and one request could otherwise search its way past a
+    spend ceiling. A call that does not fit is refused to the model, which carries on.
+    A call whose provider reports its own cost and has no rate holds nothing, since
+    its price is not known until it returns.
+    """
+
+    def __init__(self, ctx: RequestContext) -> None:
+        self._ctx = ctx
+        self._unit_costs: dict[tuple[str, str | None, tuple[RateKey, ...] | None, bool | None], Decimal] = {}
+
+    async def admit(self, call: LabelCalls) -> bool:
+        ctx, handle = self._ctx, self._ctx.reservation
+        if handle is None or not handle.counts_toward_budget or not (handle.reserved or handle.scoped_budgets):
+            return True
+        try:
+            unit = await self._unit_cost(call)
+            if unit <= ZERO:
+                return True
+            await increase_reservation(
+                ctx.db,
+                handle,
+                estimate=max(handle.estimate, handle.scoped_estimate) + unit,
+                model_is_free=False,
+                strategy=ctx.config.budget_strategy,
+            )
+        except HTTPException:
+            logger.info("Gateway tool call %s refused: its price does not fit the request's budget", call.tool)
+            await release_session(ctx.db)
+            return False
+        except DATABASE_ERRORS as exc:
+            logger.error(
+                "Could not hold gateway tool call %s on the budget; not running it: %s",
+                call.tool,
+                describe_database_error(exc),
+            )
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await ctx.db.rollback()
+            return False
+        ctx.tool_hold += unit
+        # The grown hold locks budget rows; the connection must not be held across the next provider call.
+        return await release_session(ctx.db)
+
+    async def _unit_cost(self, call: LabelCalls) -> Decimal:
+        key = (call.tool, call.label, call.rate_keys, call.deployment_paid)
+        if key not in self._unit_costs:
+            charges = await price_tool_calls(self._ctx.db, [call], organization_id=self._ctx.organization_id)
+            self._unit_costs[key] = charges.total
+        return self._unit_costs[key]
 
 
 BUDGETS_UNAVAILABLE_DETAIL = "Budgets could not be checked for a fallback, so it was not sent."
@@ -3929,6 +3987,7 @@ async def prepare_gateway_tools(
         use_budget=ToolUseBudget(caps) if caps else None,
         web_call_cap=WebToolCallCap(effective_web_search_max_calls(ctx.config)),
     )
+    shared.tally.spend_gate = ReservationToolGate(ctx)
 
     def _tool_context(answer: _AdmittedTools) -> ToolContext:
         code, web, web_access = answer.code, answer.web, answer.web_access
