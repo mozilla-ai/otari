@@ -677,7 +677,11 @@ export function HostedProvidersPage() {
               placeholder="Search by name or provider"
               value={search.value}
               onChange={search.onChange}
-              resultCount={shownRows.length}
+              resultCount={
+                providers.isPending || configured.isPending
+                  ? undefined
+                  : shownRows.length
+              }
               className="w-full md:w-96"
             />
           </Toolbar>

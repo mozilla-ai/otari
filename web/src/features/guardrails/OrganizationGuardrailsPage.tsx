@@ -354,7 +354,7 @@ export function OrganizationGuardrailsPage() {
                   placeholder="Search by name or guardrail"
                   value={search.value}
                   onChange={search.onChange}
-                  resultCount={shownDefined.length}
+                  resultCount={isLoading ? undefined : shownDefined.length}
                   className="w-full md:w-96"
                 />
               </Toolbar>
