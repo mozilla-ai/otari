@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { HealthCheckSettings, HealthCheckStatus } from "@/client"
@@ -137,7 +139,17 @@ function mockApi(
   return requests
 }
 
-function renderPage({ mailReady = true } = {}) {
+/** Moves `q` the way Back or Forward does: through the router, not the field. */
+function NavigateTo({ q }: { q: string }) {
+  const navigate = useNavigate()
+  return (
+    <button type="button" onClick={() => navigate({ to: ".", search: { q } })}>
+      Go to {q}
+    </button>
+  )
+}
+
+function renderPage({ mailReady = true, extra = null as ReactNode } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -145,6 +157,7 @@ function renderPage({ mailReady = true } = {}) {
     <DeploymentProvider value={bootstrap({ mail_ready: mailReady })}>
       <QueryClientProvider client={client}>
         <HealthChecksPage />
+        {extra}
       </QueryClientProvider>
     </DeploymentProvider>,
     { url: "/health-checks" },
@@ -209,6 +222,8 @@ describe("HealthChecksPage", () => {
     const models = screen.getByRole("grid", { name: "Models" })
     expect(within(models).getByText("deepinfra:llama")).toBeInTheDocument()
     expect(within(models).queryByText("bedrock:claude")).toBeNull()
+    // One provider and one model.
+    expect(screen.getByText("2 matches")).toBeInTheDocument()
   })
 
   it("pages the failing models", async () => {
@@ -262,6 +277,27 @@ describe("HealthChecksPage", () => {
       screen.getByRole("searchbox", { name: "Search providers and models" }),
       "bedrock",
     )
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("grid", { name: "Models" })).getByText(
+          "bedrock:model-00",
+        ),
+      ).toBeInTheDocument(),
+    )
+  })
+
+  it("starts the models over when the term changes without the field", async () => {
+    const failing = Array.from({ length: 30 }, (_, i) => ({
+      ...status().results[0],
+      selector: `bedrock:model-${String(i).padStart(2, "0")}`,
+    }))
+    mockApi(status({ results: failing }))
+    const user = userEvent.setup()
+    await renderPage({ extra: <NavigateTo q="bedrock" /> })
+    await screen.findByRole("grid", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    await user.click(screen.getByRole("button", { name: "Go to bedrock" }))
     await waitFor(() =>
       expect(
         within(screen.getByRole("grid", { name: "Models" })).getByText(
