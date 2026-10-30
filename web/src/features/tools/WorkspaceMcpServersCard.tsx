@@ -376,7 +376,7 @@ export function WorkspaceMcpServersCard({
             placeholder="Search by name or URL"
             value={search.value}
             onChange={search.onChange}
-            resultCount={rows.length}
+            resultCount={query.isPending ? undefined : rows.length}
             className="w-full md:w-96"
           />
         </Toolbar>

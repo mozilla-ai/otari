@@ -62,7 +62,7 @@ function mockApi({
 
 // In a router, because the page links to Organization > Members & roles for a
 // caller who manages the organization.
-function renderPage() {
+function renderPage(url = "/members") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -72,7 +72,7 @@ function renderPage() {
         <WorkspaceMembersPage />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
-    { url: "/members" },
+    { url },
   )
 }
 
@@ -165,6 +165,32 @@ describe("WorkspaceMembersPage", () => {
         "No organization members match this search.",
       ),
     ).toBeInTheDocument()
+  })
+
+  it("states no count until the rosters it counts have answered", async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockApi({
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+      ],
+    })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes("/organizations/me/members")) await held
+      return answer(input, init)
+    })
+    await renderPage("/members?q=alex")
+
+    expect(
+      await screen.findByRole("searchbox", { name: "Search members" }),
+    ).toHaveValue("alex")
+    expect(screen.queryByText(/\bmatch(es)?\b/)).toBeNull()
+
+    release()
+    expect(await screen.findByText("1 match")).toBeInTheDocument()
   })
 
   it("counts a person once though both lists show them", async () => {

@@ -1817,7 +1817,7 @@ export function KeysPage() {
             }
             value={search.value}
             onChange={search.onChange}
-            resultCount={rows.length}
+            resultCount={loading ? undefined : rows.length}
             className="w-full md:w-96"
           />
         </Toolbar>
