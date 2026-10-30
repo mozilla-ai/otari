@@ -153,6 +153,28 @@ export function AddWorkspaceMemberDialog({
   )
 }
 
+/** Each organization member's label, by user id. */
+export function memberNames(
+  orgMembers: readonly OrganizationMember[],
+): Map<string, string> {
+  return new Map(
+    orgMembers
+      .filter((member) => member.user_id)
+      .map((member) => [member.user_id as string, memberLabel(member)]),
+  )
+}
+
+/**
+ * How a workspace row names its member: the organization's label, or a short
+ * identity when the organization roster failed and there is none.
+ */
+export function workspaceMemberLabel(
+  member: WorkspaceMember,
+  names: ReadonlyMap<string, string>,
+): string {
+  return names.get(member.user_id) ?? `Identity ${member.user_id.slice(0, 8)}`
+}
+
 export function WorkspaceMembersPanel({
   workspaceId,
   workspaceName,
@@ -175,18 +197,9 @@ export function WorkspaceMembersPanel({
   const [removing, setRemoving] = useState<WorkspaceMember>()
 
   const allRows = members.data ?? []
-  const nameByUserId = useMemo(
-    () =>
-      new Map(
-        orgMembers
-          .filter((member) => member.user_id)
-          .map((member) => [member.user_id as string, memberLabel(member)]),
-      ),
-    [orgMembers],
-  )
-  // The fallback is what a row shows when the organization roster failed.
+  const nameByUserId = useMemo(() => memberNames(orgMembers), [orgMembers])
   const labelOf = (member: WorkspaceMember) =>
-    nameByUserId.get(member.user_id) ?? `Identity ${member.user_id.slice(0, 8)}`
+    workspaceMemberLabel(member, nameByUserId)
   const rows = allRows.filter((member) =>
     matchesSearch(searchTerm, labelOf(member)),
   )

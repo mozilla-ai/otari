@@ -7,10 +7,16 @@ import { SearchField } from "@/design-system/forms/SearchField"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Toolbar } from "@/design-system/layout/Toolbar"
 import { OrganizationRosterCard } from "@/features/organization/OrganizationRosterCard"
-import { canManage, canManageWorkspace } from "@/features/organization/roles"
+import {
+  canManage,
+  canManageWorkspace,
+  memberLabel,
+} from "@/features/organization/roles"
 import {
   AddWorkspaceMemberDialog,
+  memberNames,
   WorkspaceMembersPanel,
+  workspaceMemberLabel,
 } from "@/features/workspaces/WorkspaceMembersPanel"
 import {
   useOrganizationContext,
@@ -18,7 +24,7 @@ import {
 } from "@/shared/api/organizations"
 import { useWorkspaceMembers } from "@/shared/api/workspaces"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useListSearch } from "@/shared/hooks/useListSearch"
+import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 
 // The roster of the workspace the switcher has selected, which is the one page
 // in the workspace context that is genuinely scoped to it today: the workspace
@@ -78,6 +84,24 @@ export function WorkspaceMembersPage() {
       )
     : []
 
+  // People, not rows: someone in the workspace is also on the organization
+  // roster below it, and is one match however many lists show them.
+  const names = memberNames(orgMembers.data ?? [])
+  const showsRoster = hasOrganizationAnswered && !canManageOrganization
+  const matched = new Set([
+    ...(selected ? (members.data ?? []) : [])
+      .filter((member) =>
+        matchesSearch(search.term, workspaceMemberLabel(member, names)),
+      )
+      .map((member) => member.user_id),
+    ...(showsRoster ? (orgMembers.data ?? []) : [])
+      .filter((member) =>
+        matchesSearch(search.term, memberLabel(member), member.email ?? ""),
+      )
+      .map((member) => member.user_id ?? member.email ?? ""),
+  ])
+  const matchedPeople = matched.size
+
   return (
     <div className="flex flex-col gap-6">
       <PageIntro
@@ -130,6 +154,7 @@ export function WorkspaceMembersPage() {
           placeholder="Search by name"
           value={search.value}
           onChange={search.onChange}
+          resultCount={matchedPeople}
           className="w-full md:w-96"
         />
       </Toolbar>
