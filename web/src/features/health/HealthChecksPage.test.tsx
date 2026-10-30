@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { HealthCheckSettings, HealthCheckStatus } from "@/client"
@@ -137,7 +139,17 @@ function mockApi(
   return requests
 }
 
-function renderPage({ mailReady = true } = {}) {
+/** Moves `q` the way Back or Forward does: through the router, not the field. */
+function NavigateTo({ q }: { q: string }) {
+  const navigate = useNavigate()
+  return (
+    <button type="button" onClick={() => navigate({ to: ".", search: { q } })}>
+      Go to {q}
+    </button>
+  )
+}
+
+function renderPage({ mailReady = true, extra = null as ReactNode } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -145,6 +157,7 @@ function renderPage({ mailReady = true } = {}) {
     <DeploymentProvider value={bootstrap({ mail_ready: mailReady })}>
       <QueryClientProvider client={client}>
         <HealthChecksPage />
+        {extra}
       </QueryClientProvider>
     </DeploymentProvider>,
     { url: "/health-checks" },
@@ -188,6 +201,31 @@ describe("HealthChecksPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("narrows both tables with one search", async () => {
+    mockApi(status())
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("grid", { name: "Providers" })
+    await user.click(screen.getByRole("button", { name: "Show all" }))
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers and models" }),
+      "deepinfra",
+    )
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("grid", { name: "Providers" })).queryByText(
+          "bedrock",
+        ),
+      ).toBeNull(),
+    )
+    const models = screen.getByRole("grid", { name: "Models" })
+    expect(within(models).getByText("deepinfra:llama")).toBeInTheDocument()
+    expect(within(models).queryByText("bedrock:claude")).toBeNull()
+    // One provider and one model.
+    expect(screen.getByText("2 matches")).toBeInTheDocument()
+  })
+
   it("pages the failing models", async () => {
     const failing = Array.from({ length: 30 }, (_, i) => ({
       ...status().results[0],
@@ -205,6 +243,92 @@ describe("HealthChecksPage", () => {
     const second = screen.getByRole("grid", { name: "Models" })
     expect(within(second).getAllByRole("row").slice(1)).toHaveLength(5)
     expect(within(second).getByText("bedrock:model-29")).toBeInTheDocument()
+  })
+
+  it("offers the search when there are model results but no provider summary", async () => {
+    // Every result skipped, as for offerings that are not chat models: the
+    // provider summary counts none of them, but the models are still listed.
+    mockApi(
+      status({
+        providers: [],
+        results: [
+          {
+            ...status().results[1],
+            selector: "openai:embed-3",
+            status: "skip",
+          },
+        ],
+      }),
+    )
+    await renderPage()
+
+    expect(
+      await screen.findByRole("searchbox", {
+        name: "Search providers and models",
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("says the failing-only view is why a search finds no model", async () => {
+    mockApi(status())
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("grid", { name: "Models" })
+
+    // deepinfra:llama passes, so the failing-only view hides it.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers and models" }),
+      "llama",
+    )
+    expect(
+      await screen.findByText("No failing models match this search."),
+    ).toBeInTheDocument()
+  })
+
+  it("goes back to the first page of models when the search changes", async () => {
+    const failing = Array.from({ length: 30 }, (_, i) => ({
+      ...status().results[0],
+      selector: `bedrock:model-${String(i).padStart(2, "0")}`,
+    }))
+    mockApi(status({ results: failing }))
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("grid", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    // Still all thirty, so only a reset puts the first page back on screen.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search providers and models" }),
+      "bedrock",
+    )
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("grid", { name: "Models" })).getByText(
+          "bedrock:model-00",
+        ),
+      ).toBeInTheDocument(),
+    )
+  })
+
+  it("starts the models over when the term changes without the field", async () => {
+    const failing = Array.from({ length: 30 }, (_, i) => ({
+      ...status().results[0],
+      selector: `bedrock:model-${String(i).padStart(2, "0")}`,
+    }))
+    mockApi(status({ results: failing }))
+    const user = userEvent.setup()
+    await renderPage({ extra: <NavigateTo q="bedrock" /> })
+    await screen.findByRole("grid", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Next page" }))
+
+    await user.click(screen.getByRole("button", { name: "Go to bedrock" }))
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("grid", { name: "Models" })).getByText(
+          "bedrock:model-00",
+        ),
+      ).toBeInTheDocument(),
+    )
   })
 
   it("keeps the pager away while every failing model fits one page", async () => {

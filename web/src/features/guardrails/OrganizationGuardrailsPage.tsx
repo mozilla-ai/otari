@@ -11,8 +11,10 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import {
   countServedUnchecked,
   mandateConsequence,
@@ -49,6 +51,7 @@ import {
   useUpdateOrganizationGuardrail,
 } from "@/shared/api/tools"
 import { useWorkspaces } from "@/shared/api/workspaces"
+import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 
 // The organization's guardrails: what each check is, and where each one runs.
 //
@@ -94,6 +97,14 @@ export function OrganizationGuardrailsPage() {
   const close = () => setOpen({ kind: "" })
 
   const defined = definitions.data ?? []
+  const search = useListSearch()
+  const shownDefined = defined.filter((row) =>
+    matchesSearch(
+      search.term,
+      row.name,
+      guardrailLabel(row, builtInCatalog.data),
+    ),
+  )
   const entries = mandates.data ?? []
   const known = workspaces.data ?? []
   const editingDefinition =
@@ -336,14 +347,30 @@ export function OrganizationGuardrailsPage() {
         <div className="flex flex-col gap-8">
           <section className="flex flex-col gap-3">
             <h2 className="text-title">Guardrails you have configured</h2>
+            {defined.length > 0 || search.value ? (
+              <Toolbar>
+                <SearchField
+                  label="Search guardrails"
+                  placeholder="Search by name or guardrail"
+                  value={search.value}
+                  onChange={search.onChange}
+                  resultCount={isLoading ? undefined : shownDefined.length}
+                  className="w-full md:w-96"
+                />
+              </Toolbar>
+            ) : null}
             <TableScrollFrame className="otari-guardrail-definitions-table">
               <DataTable
                 ariaLabel="Guardrails you have configured"
                 columns={definitionColumns}
-                rows={defined}
+                rows={shownDefined}
                 getRowKey={(row) => row.id}
                 isLoading={isLoading}
-                emptyContent="None yet. Configure a guardrail to have Otari run a vendor's check itself."
+                emptyContent={
+                  search.term && defined.length > 0
+                    ? "No guardrails match this search."
+                    : "None yet. Configure a guardrail to have Otari run a vendor's check itself."
+                }
               />
             </TableScrollFrame>
           </section>

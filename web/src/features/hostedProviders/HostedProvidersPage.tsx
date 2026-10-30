@@ -23,10 +23,12 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Checkbox } from "@/design-system/forms/Checkbox"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { ConnectionTestRowResult } from "@/features/providers/ConnectionTest"
 import { HealthPill } from "@/features/providers/HealthPill"
 import { HealthSummary } from "@/features/providers/HealthSummary"
@@ -45,6 +47,7 @@ import {
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
@@ -302,6 +305,7 @@ function HostedProviderRowActions({
 }
 
 export function HostedProvidersPage() {
+  const search = useListSearch()
   const access = useDeploymentAdminAccess()
   // Withheld until the gate answers, so a non-operator load does not put a 404
   // in the console to learn what the gate is about to say.
@@ -410,6 +414,13 @@ export function HostedProvidersPage() {
   // would tell an operator their live providers are gone.
   const isEmpty =
     !providers.error && !providers.isPending && tableRows.length === 0
+  const shownRows = tableRows.filter((row) =>
+    matchesSearch(
+      search.term,
+      row.name,
+      row.kind === "hosted" ? row.hosted.provider : row.instance.provider_type,
+    ),
+  )
 
   const hostedColumns: DataTableColumn<HostedProvider>[] = [
     {
@@ -660,11 +671,28 @@ export function HostedProvidersPage() {
               checkedAt={health.data.checked_at ?? ""}
             />
           ) : null}
+          <Toolbar className="pb-3">
+            <SearchField
+              label="Search providers"
+              placeholder="Search by name or provider"
+              value={search.value}
+              onChange={search.onChange}
+              resultCount={
+                providers.isPending || configured.isPending
+                  ? undefined
+                  : shownRows.length
+              }
+              className="w-full md:w-96"
+            />
+          </Toolbar>
           <TableScrollFrame className="otari-hosted-providers-table">
             <DataTable
               ariaLabel="Hosted providers"
               columns={columns}
-              rows={tableRows}
+              rows={shownRows}
+              emptyContent={
+                search.term ? "No providers match this search." : undefined
+              }
               // The kind and the name, not the id: a configured provider has no
               // row id, and a hosted provider may share a configured instance's name.
               getRowKey={(row) => `${row.kind}:${row.name}`}
