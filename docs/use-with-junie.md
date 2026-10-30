@@ -26,7 +26,7 @@ Junie CLI reaches an OpenAI-compatible backend through a custom model profile. W
 
 Two details differ from most clients:
 
-- `baseUrl` is the full chat completions URL, not the API root. Most clients take `/api/v1` and append the path themselves. Junie does not, so give it your Otari base URL plus `/api/v1/chat/completions`: `http://localhost:8000/api/v1/chat/completions` for local development, or your own deployment's URL.
+- `baseUrl` is the full chat completions URL, not the API root. Most clients take `/api/v1` and append the path themselves. Junie does not, so give it your Otari base URL plus `/api/v1/chat/completions`: `http://localhost:8000/api/v1/chat/completions` for local development, or your own deployment's URL. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1/chat/completions`.
 - `apiKey` accepts a `${VAR}` reference, so the key stays out of the file.
 
 Export the key, then select the profile by its **file name** without the extension, which is why `otari.json` is reached as `custom:otari`. The `providerName` inside the file is a label and is not the selector:

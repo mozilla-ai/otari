@@ -40,6 +40,8 @@ wire_api = "responses"
 env_key = "OTARI_API_KEY"
 ```
 
+Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use.
+
 ```bash
 export OTARI_API_KEY="<your-otari-key>"
 codex
