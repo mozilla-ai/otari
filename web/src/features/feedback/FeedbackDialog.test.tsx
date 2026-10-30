@@ -186,6 +186,11 @@ describe("FeedbackDialog", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
   })
 
+  it("offers no email the gateway would refuse to attach", () => {
+    setup({ email: "ops@intranet" })
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+  })
+
   it("sends the email only when ticked, and the thanks name it", async () => {
     const { fetch, user } = setup({ email: "ada@example.com" })
     const share = screen.getByRole("checkbox", {

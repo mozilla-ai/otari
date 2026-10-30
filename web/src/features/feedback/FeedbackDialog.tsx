@@ -9,6 +9,7 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { ProductMark } from "@/design-system/ProductMark"
 import { ApiError } from "@/shared/api/client"
 import { useSendFeedback } from "@/shared/api/feedback"
+import { looksLikeAddress } from "@/shared/helpers/addresses"
 
 const NOT_SENT = new Error(
   "That didn’t reach us. Your message is still here; send it again.",
@@ -46,6 +47,9 @@ export function FeedbackDialog({
    */
   email?: string | null
 }) {
+  // Only an address the gateway will attach: offering one it refuses would be a
+  // box that fails every send.
+  const shareable = email && looksLikeAddress(email) ? email : null
   const headingId = useId()
   const thanksId = useId()
   const thanksRef = useRef<HTMLDivElement>(null)
@@ -54,7 +58,7 @@ export function FeedbackDialog({
   const [isEmptySend, setIsEmptySend] = useState(false)
   const [isSent, setIsSent] = useState(false)
   const [shareEmail, setShareEmail] = useState(false)
-  const repliesTo = shareEmail && email ? email : null
+  const repliesTo = shareEmail ? shareable : null
   const { mutate, reset, isPending, error } = useSendFeedback()
   // A 422 is a refusal the person can act on (untick the email), so it keeps
   // the gateway's reason; anything else is a delivery a retry may get through.
@@ -148,7 +152,7 @@ export function FeedbackDialog({
                 data-feedback-view="sent"
                 // The compose's height, which the email line adds 40px to.
                 className={`flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 ${
-                  email ? "min-h-[18.75rem]" : "min-h-[16.25rem]"
+                  shareable ? "min-h-[18.75rem]" : "min-h-[16.25rem]"
                 }`}
               >
                 {/* The hook is on a wrapper because `ProductMark` passes no
@@ -230,7 +234,7 @@ export function FeedbackDialog({
                     is the point of the label, there is no room for it beside
                     Send, and that lane is the empty-send reason's and the
                     guard's. */}
-                {email ? (
+                {shareable ? (
                   <div className="shrink-0 px-6 pb-5 max-sm:px-4 max-sm:pb-3">
                     <Checkbox
                       isSelected={shareEmail}
@@ -238,7 +242,7 @@ export function FeedbackDialog({
                       isDisabled={isPending}
                     >
                       <span className="min-w-0 break-words">
-                        Share {email} so the team can reply
+                        Share {shareable} so the team can reply
                       </span>
                     </Checkbox>
                   </div>
