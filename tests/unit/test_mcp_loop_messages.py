@@ -426,6 +426,10 @@ def _offers_gateway_tool(kwargs: dict[str, Any]) -> bool:
     return any(tool.get("name") == "fetch_url" for tool in kwargs.get("tools") or [])
 
 
+def _may_call_gateway_tool(kwargs: dict[str, Any]) -> bool:
+    return _offers_gateway_tool(kwargs) and kwargs.get("tool_choice") != {"type": "none"}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("caller_tools", [[], [_CALLER_TOOL]])
 async def test_the_last_round_withholds_the_gateways_tools_so_the_model_answers(
@@ -436,7 +440,7 @@ async def test_the_last_round_withholds_the_gateways_tools_so_the_model_answers(
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
         rounds.append(kwargs)
-        if _offers_gateway_tool(kwargs):
+        if _may_call_gateway_tool(kwargs):
             return _message_response(stop_reason="tool_use", content=[_tool_use(f"tu_{len(rounds)}", "fetch_url", {})])
         return _message_response(stop_reason="end_turn", content=[_text_block("answer")])
 
@@ -459,8 +463,13 @@ async def test_the_last_round_withholds_the_gateways_tools_so_the_model_answers(
     assert pool.calls == [("fetch_url", {})]
     first, last = rounds
     assert _offers_gateway_tool(first)
-    assert last.get("tools") == (caller_tools or None)
-    assert "tool_choice" not in last
+    if caller_tools:
+        assert last["tools"] == caller_tools
+        assert "tool_choice" not in last
+    else:
+        # Bedrock refuses a transcript of tool calls from a request that declares no tools.
+        assert _offers_gateway_tool(last)
+        assert last["tool_choice"] == {"type": "none"}
     assert last["messages"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
     # The note is the provider's alone; the next round never inherits it.
     assert FINAL_ROUND_NOTE not in str(first["messages"])
@@ -474,7 +483,7 @@ async def test_the_last_streamed_round_withholds_the_gateways_tools_so_the_model
 
     async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
         rounds.append(kwargs)
-        if _offers_gateway_tool(kwargs):
+        if _may_call_gateway_tool(kwargs):
             return _async_iter(
                 _msg_start_event(),
                 _tool_use_block_start(0, f"tu_{len(rounds)}", "fetch_url"),
@@ -506,7 +515,7 @@ async def test_the_last_streamed_round_withholds_the_gateways_tools_so_the_model
 
     assert [e.type for e in events][-2:] == ["message_delta", "message_stop"]
     assert pool.calls == [("fetch_url", {})]
-    assert "tools" not in rounds[-1]
+    assert rounds[-1]["tool_choice"] == {"type": "none"}
     assert rounds[-1]["messages"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
 
 

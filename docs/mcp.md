@@ -21,11 +21,13 @@ When the model emits an MCP tool call, Otari:
 - calls the model again
 
 The loop stops when the model returns a normal assistant response. Its last
-allowed round, the one `max_tool_iterations` names, offers the model none of
+allowed round, the one `max_tool_iterations` names, lets the model call none of
 Otari's tools and tells it to answer from the results it already has, so a model
 that would keep calling tools still ends with an answer. Your own tools stay on
-offer in that round. The request fails only if the model calls one of Otari's
-tools anyway.
+offer in that round. When you sent none, Otari's tools stay declared with
+`tool_choice` set to `none`, since some providers, such as Bedrock, refuse earlier
+tool calls in a request that declares no tools. The request fails only if the
+model calls one of Otari's tools anyway.
 
 ## Caller-orchestrated MCP
 

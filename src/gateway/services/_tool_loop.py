@@ -98,9 +98,13 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
     finish_reason before splitting (``exit_before_split``), while messages
     checks the stop_reason only after the foreign-tool branch
     (``exit_after_split``); see :func:`run_tool_loop` for the consequences.
+    ``no_tool_choice`` is the format's ``tool_choice`` that forbids every call.
     """
 
     transcript_key: str
+
+    @property
+    def no_tool_choice(self) -> Any: ...
 
     def coerce_transcript(self, value: Any) -> list[Any]: ...
 
@@ -147,6 +151,9 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
     """
 
     transcript_key: str
+
+    @property
+    def no_tool_choice(self) -> Any: ...
 
     def coerce_transcript(self, value: Any) -> list[Any]: ...
 
@@ -218,22 +225,30 @@ def _round_kwargs(
     pool: ToolBackend,
     *,
     final: bool,
+    no_tool_choice: Any,
 ) -> dict[str, Any]:
     """The tool arguments for one round.
 
     The last round the loop allows withholds the gateway's own tools, so the model
     answers from what its earlier rounds gathered rather than calling a tool whose
     result could never reach it. The caller's tools stay, since a call of one ends
-    the loop anyway. Every provider the loop serves accepts a transcript holding
-    calls of a tool the round no longer declares.
+    the loop anyway. A round that would then declare no tools keeps the gateway's
+    and forbids every call with ``no_tool_choice`` instead: Bedrock refuses a
+    transcript holding tool calls from a request that declares no tools (otari#2717).
     """
-    tools = user_tools if final else merged_tools
+    tools = user_tools if final and user_tools else merged_tools
     kwargs = dict(base)
     if tools:
         kwargs["tools"] = tools
-    if final:
+    if not final:
+        return kwargs
+    if not tools:
+        kwargs.pop("tool_choice", None)
+    elif not user_tools:
+        kwargs["tool_choice"] = no_tool_choice
+    else:
         choice_name = _tool_name(kwargs.get("tool_choice"))
-        if not tools or (choice_name is not None and pool.owns_tool(choice_name)):
+        if choice_name is not None and pool.owns_tool(choice_name):
             kwargs.pop("tool_choice", None)
     return kwargs
 
@@ -312,7 +327,14 @@ async def run_tool_loop(
     first_response_signaled = False
 
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
+        kwargs = _round_kwargs(
+            base,
+            merged_tools,
+            user_tools,
+            pool,
+            final=iteration == max_iterations,
+            no_tool_choice=strategy.no_tool_choice,
+        )
         kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
         kwargs["stream"] = False
 
@@ -393,7 +415,14 @@ async def run_tool_loop_stream(
     acc = strategy.new_stream_accumulator()
 
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
+        kwargs = _round_kwargs(
+            base,
+            merged_tools,
+            user_tools,
+            pool,
+            final=iteration == max_iterations,
+            no_tool_choice=strategy.no_tool_choice,
+        )
         kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
 
         stream = await strategy.open_stream(kwargs)

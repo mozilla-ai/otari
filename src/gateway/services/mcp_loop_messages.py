@@ -522,6 +522,10 @@ class _MessagesToolLoopStrategy:
         """A sink over ``blocks`` when native emission is on, else ``None`` (collect nothing)."""
         return _NativeSink(self._native_tools, blocks) if self._native_tools else None
 
+    @property
+    def no_tool_choice(self) -> dict[str, Any]:
+        return {"type": "none"}
+
     def coerce_transcript(self, value: Any) -> list[Any]:
         return list(value or [])
 

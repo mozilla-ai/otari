@@ -451,6 +451,7 @@ class _ChatToolLoopStrategy:
     """
 
     transcript_key = "messages"
+    no_tool_choice = "none"
 
     def __init__(
         self,

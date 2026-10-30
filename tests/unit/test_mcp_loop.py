@@ -366,6 +366,55 @@ async def test_max_uses_stops_further_searches_and_reports_a_tool_error(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_the_last_round_keeps_the_searches_declared_but_forbids_calling_them(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    """otari#2717: Bedrock refuses a transcript of tool calls from a request that declares no tools.
+
+    A model that keeps searching past ``max_uses`` reaches the last round with only
+    the gateway's search on offer, so that round declares it with ``tool_choice``
+    ``none`` rather than declaring nothing.
+    """
+    rounds: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        rounds.append(kwargs)
+        searching = kwargs.get("tool_choice") != "none"
+        if not stream:
+            if searching:
+                return _completion(finish="tool_calls", tool_calls=[_search_call(f"c{len(rounds)}", "again")])
+            return _completion(finish="stop", content="answer")
+        if searching:
+            return _async_iter(
+                _chunk(tool_calls=[(0, f"c{len(rounds)}", "web_search", '{"query": "again"}')]),
+                _chunk(finish="tool_calls"),
+            )
+        return _async_iter(_chunk(content="answer"), _chunk(finish="stop"))
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakeSearchPool()
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "hi"}]}
+
+    if stream:
+        async for _ in mcp_tool_loop_stream(
+            completion_kwargs=completion_kwargs, pool=cast(Any, pool), max_iterations=3, use_budget=_use_budget(1)
+        ):
+            pass
+    else:
+        out = await mcp_tool_loop(
+            completion_kwargs=completion_kwargs, pool=cast(Any, pool), max_iterations=3, use_budget=_use_budget(1)
+        )
+        assert out.choices[0].message.content == "answer"
+
+    assert pool.calls == [("web_search", {"query": "again"})]
+    *earlier, last = rounds
+    assert all("tool_choice" not in kwargs for kwargs in earlier)
+    assert [tool["function"]["name"] for tool in last["tools"]] == ["web_search"]
+    assert last["tool_choice"] == "none"
+
+
+@pytest.mark.asyncio
 async def test_stream_max_uses_stops_further_searches(monkeypatch: pytest.MonkeyPatch) -> None:
     streams = iter(
         [

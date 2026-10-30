@@ -367,6 +367,7 @@ class _ResponsesToolLoopStrategy:
     """
 
     transcript_key = "input_data"
+    no_tool_choice = "none"
 
     def __init__(self, *, budget: ToolUseBudget | None = None, native_tools: frozenset[str] = frozenset()) -> None:
         # Absent unless the caller capped the searches, which keeps the shared
