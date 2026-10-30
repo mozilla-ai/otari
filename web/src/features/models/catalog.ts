@@ -9,6 +9,7 @@ import { PAGE_SIZE_OPTIONS } from "@/design-system/data/TablePagination"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import type { DashboardSearch } from "@/shared/helpers/search"
 import type { UrlState } from "@/shared/helpers/urlState"
+import { SEARCH_MAX_LENGTH } from "@/shared/hooks/useListSearch"
 
 // What the list can be narrowed by, and how a row is sorted. Pure, so the page
 // stays a composition and these can be pinned on their own.
@@ -215,9 +216,6 @@ export const SORT_OPTIONS: {
     direction: "desc",
   },
 ]
-
-/** The API's limit on the search term, which a hand-edited URL can exceed. */
-export const SEARCH_MAX_LENGTH = 200
 
 const SORT_COLUMNS: readonly CatalogSortColumn[] = [
   "name",

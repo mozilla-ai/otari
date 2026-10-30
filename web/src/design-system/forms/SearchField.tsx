@@ -1,6 +1,8 @@
 import { SearchField as HeroSearchField } from "@heroui/react"
 import { useEffect, useState } from "react"
 
+import { formatNumber } from "@/design-system/helpers/format"
+
 /**
  * How long after the last keystroke the field waits for the caller to hand
  * back what it reported before showing `value` instead.
@@ -32,6 +34,7 @@ export function SearchField({
   placeholder = "Search",
   isDisabled,
   maxLength,
+  resultCount,
   className = "",
 }: {
   value: string
@@ -44,6 +47,12 @@ export function SearchField({
   placeholder?: string
   isDisabled?: boolean
   maxLength?: number
+  /**
+   * How many rows the caller's search found, shown beside the field while there
+   * is a term and announced politely once it changes. The caller counts; the
+   * field only reports it.
+   */
+  resultCount?: number
   className?: string
 }) {
   // Bound to `value` straight, the field would revert for the render between a
@@ -74,7 +83,7 @@ export function SearchField({
     }, SEARCH_SETTLE_MS)
     return () => clearTimeout(timer)
   }, [reported, value])
-  return (
+  const field = (
     <HeroSearchField.Root
       aria-label={label}
       value={draft}
@@ -85,7 +94,7 @@ export function SearchField({
       }}
       isDisabled={isDisabled}
       maxLength={maxLength}
-      className={className}
+      className="min-w-0 flex-1"
     >
       <HeroSearchField.Group>
         <HeroSearchField.SearchIcon />
@@ -93,5 +102,19 @@ export function SearchField({
         <HeroSearchField.ClearButton aria-label="Clear search" />
       </HeroSearchField.Group>
     </HeroSearchField.Root>
+  )
+  // One shape with or without a count, so a count that arrives with the first
+  // response does not move the field and remount the input being typed in.
+  return (
+    <div className={`flex items-center gap-3 ${className}`}>
+      {field}
+      {/* Mounted before it speaks, even with no count yet: a live region added
+          with its text already in it is not reliably announced. */}
+      <span role="status" className="shrink-0 text-caption">
+        {resultCount === undefined || value.trim() === ""
+          ? ""
+          : `${formatNumber(resultCount)} ${resultCount === 1 ? "match" : "matches"}`}
+      </span>
+    </div>
   )
 }

@@ -179,3 +179,63 @@ It carries the count, a Clear, the actions, and, once the visible page is fully
 selected and more rows match the filter, a "select all N matching" affordance. The
 destructive action names its count (`Revoke 3`), because a bulk action's blast
 radius is the thing worth reading twice.
+
+## Searching a list
+
+Every list that can grow past a screen is searched the same way, whether it is a
+`DataTable` or a list of rows.
+
+```text
+Toolbar            the SearchField first; filters after it, through FilterChips
+DataTable / list   the rows the search kept
+TablePagination    the narrowed total, when the list pages
+```
+
+- **The term lives in the URL** as `?q=`, through `useListSearch`
+  (`shared/hooks/useListSearch.ts`). It survives a reload, Back and a shared link,
+  a create or a delete does not clear it, and a change returns to the first page.
+- **Search the whole collection, never the page on screen.** The endpoint does
+  the searching (`performance.md`, "The server does the shaping"): a list paged
+  by its endpoint passes `term` to the endpoint's `search` param, in the query
+  key with `placeholderData`. `matchesSearch` filters in memory instead, and
+  only a list that is small by construction earns it: one the server caps
+  (guardrail definitions, MCP servers) or one read whole by design (routing
+  policies, hosted providers, health status). It matches the way the endpoints
+  do: case-insensitive, anywhere in the text, nothing a wildcard.
+- **A list read by a whole-collection walk is debt, not a license.** API keys,
+  workspaces, members and provider keys are searched with `matchesSearch` today
+  only because their pages still walk the collection (`shared/api/paging.ts`,
+  otari#1376). The search moves to the endpoint's `search` param with the walk,
+  and `/keys` is the next one due.
+- **Match what a person can see** that names the row: a name, an email, a prefix.
+  Never a secret, never a field the row does not show.
+- **Say how many matched.** Pass `resultCount` to `SearchField`; it shows the count
+  beside the field while there is a term and announces it to a screen reader.
+  Pass `undefined` until the rows it counts have loaded, so a shared link does
+  not announce "0 matches" while its results are still arriving.
+- **An empty search is not an empty list.** A term that finds nothing gets an
+  `EmptyMessage` naming the search ("No API keys match this search."); the list's
+  own `EmptyState` stays for the case where nothing exists yet.
+- No keyboard shortcut to focus it, and no highlighting of the match.
+
+```tsx
+// Correct: the term is the URL's, and the rows are narrowed before paging
+const search = useListSearch()
+const rows = keys.filter((key) => matchesSearch(search.term, key.name, key.key_prefix))
+
+<Toolbar>
+  <SearchField
+    label="Search API keys"
+    placeholder="Search by name or prefix"
+    value={search.value}
+    onChange={search.onChange}
+    resultCount={keys.isPending ? undefined : rows.length}
+    className="w-full md:w-80"
+  />
+</Toolbar>
+
+// Incorrect: a term in component state is lost on reload, and filtering the
+// fetched page of a paged list hides every match on the other pages
+const [query, setQuery] = useState("")
+const shown = page.data.filter((row) => row.name.includes(query))
+```

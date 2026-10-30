@@ -52,7 +52,8 @@ TextArea: { label, value, onChange, placeholder?, rows = 4, description?, isRequ
   isDisabled?, isInvalid?, errorMessage?, reserveMessage?, className? }
 SecretField: { label, value, onChange, placeholder?, description?, reserveMessage?,
   isDisabled?, isRequired?, isInvalid?, errorMessage? }
-SearchField: { label, value, onChange, placeholder = "Search", isDisabled?, className? }
+SearchField: { label, value, onChange, placeholder = "Search", isDisabled?, maxLength?,
+  resultCount?, className? }
 Toggle: { label, isSelected, onChange: (next: boolean) => void, isDisabled? }
 Checkbox: { isSelected, onChange: (next: boolean) => void, isDisabled?, ariaLabel?,
   children }

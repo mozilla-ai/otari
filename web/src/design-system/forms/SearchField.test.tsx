@@ -183,3 +183,74 @@ describe("SearchField", () => {
     })
   })
 })
+
+describe("SearchField resultCount", () => {
+  it("says nothing while there is no term", () => {
+    render(
+      <SearchField
+        label="Search"
+        value=""
+        onChange={() => {}}
+        resultCount={4}
+      />,
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("")
+  })
+
+  it("states the count in a live region once there is a term", () => {
+    const { rerender } = render(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={1200}
+      />,
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("1,200 matches")
+    rerender(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={1}
+      />,
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("1 match")
+  })
+
+  it("keeps the input, and its focus, when a count first arrives", async () => {
+    const { rerender } = render(
+      <SearchField label="Search" value="gpt" onChange={() => {}} />,
+    )
+    const input = screen.getByRole("searchbox", { name: "Search" })
+    input.focus()
+    rerender(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={3}
+      />,
+    )
+    expect(screen.getByRole("searchbox", { name: "Search" })).toBe(input)
+    expect(input).toHaveFocus()
+  })
+
+  it("keeps an empty region mounted before a count arrives", () => {
+    const { rerender } = render(
+      <SearchField label="Search" value="gpt" onChange={() => {}} />,
+    )
+    const region = screen.getByRole("status")
+    expect(region).toHaveTextContent("")
+    rerender(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={2}
+      />,
+    )
+    expect(screen.getByRole("status")).toBe(region)
+    expect(region).toHaveTextContent("2 matches")
+  })
+})
