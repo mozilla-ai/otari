@@ -150,7 +150,9 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
     return user
 
 
-async def get_budget_state(db: AsyncSession, user_id: str, scope: BudgetScopeRequest | None = None) -> BudgetState:
+async def get_budget_state(
+    db: AsyncSession, user_id: str, scope: BudgetScopeRequest | None = None, *, strategy: str = "for_update"
+) -> BudgetState:
     """Read what a routing policy's budget conditions need.
 
     The numbers are those of the tightest budget gating the request: the user's
@@ -163,12 +165,16 @@ async def get_budget_state(db: AsyncSession, user_id: str, scope: BudgetScopeReq
     the total the budget gate enforces (:func:`reserve_budget`). Bare spend would
     let a tier-down rule read a smaller number than the gate does and fire late.
 
+    A $0 cap is exhausted, as the gate treats it, so it reads as fully used.
+
     Both fields are ``None`` when no finite budget applies, which includes a key
-    flagged ``exclude_from_budget``: no budget gates it, so none may tier it
-    down. An undefined value never matches a condition, so the policy falls
-    through to its default.
+    flagged ``exclude_from_budget`` and a ``disabled`` strategy: no budget gates
+    the request, so none may tier it down. An undefined value never matches a
+    condition, so the policy falls through to its default.
     """
-    if scope is not None and scope.api_key is not None and scope.api_key.exclude_from_budget:
+    if _normalize_strategy(strategy) == "disabled" or (
+        scope is not None and scope.api_key is not None and scope.api_key.exclude_from_budget
+    ):
         return BudgetState()
     caps: list[tuple[float, float]] = []
     row = (
@@ -180,13 +186,13 @@ async def get_budget_state(db: AsyncSession, user_id: str, scope: BudgetScopeReq
     ).one_or_none()
     if row is not None:
         spend, reserved, max_budget = row
-        if max_budget is not None and max_budget > 0:
+        if max_budget is not None:
             caps.append((float(spend or 0) + float(reserved or 0), float(max_budget)))
 
     if scope is not None:
         now = datetime.now(UTC)
         for ceiling in await get_scope_ceilings(db, user_id=user_id, scope=scope):
-            if ceiling.provider_key_id is not None or ceiling.max_budget is None or ceiling.max_budget <= 0:
+            if ceiling.provider_key_id is not None or ceiling.max_budget is None:
                 continue
             # An ended window is rolled before the request reserves against it,
             # which zeroes recorded spend and keeps the holds.
@@ -200,7 +206,7 @@ async def get_budget_state(db: AsyncSession, user_id: str, scope: BudgetScopeReq
     # and headroom conditions, which are thresholds rather than accounting, and
     # the compiler that reads them is float throughout.
     return BudgetState(
-        used_pct=max(committed / cap * 100.0 for committed, cap in caps),
+        used_pct=max(committed / cap * 100.0 if cap > 0 else 100.0 for committed, cap in caps),
         remaining_usd=min(max(0.0, cap - committed) for committed, cap in caps),
     )
 

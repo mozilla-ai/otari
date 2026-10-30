@@ -2427,7 +2427,12 @@ async def _compile_request_plan(
 
     budget = BudgetState()
     if needs_budget_state(spec) and user_id is not None:
-        budget = await get_budget_state(db, user_id, BudgetScopeRequest(api_key=api_key, workspace_id=workspace_id))
+        budget = await get_budget_state(
+            db,
+            user_id,
+            BudgetScopeRequest(api_key=api_key, workspace_id=workspace_id),
+            strategy=config.budget_strategy,
+        )
 
     # The signal is built here rather than by the endpoint because flattening the
     # prompt is not free on a long conversation, and only a policy with a router

@@ -78,8 +78,9 @@ one of `gt`, `gte`, `lt`, or `lte`. A budget condition reads the tightest
 budget gating the request: the user's own budget, or a spend ceiling on the
 calling API key, its workspace, its member or its organization that caps every
 provider. A ceiling narrowed to one provider is not read, because which provider
-serves the request is what the policy decides. A budget condition does not match
-a caller with no finite budget, or a key excluded from budget enforcement.
+serves the request is what the policy decides. A $0 budget reads as fully used.
+A budget condition does not match a caller with no finite budget, a key excluded
+from budget enforcement, or any request while `budget_strategy` is `disabled`.
 
 In a policy that can fall over, each candidate gets one upstream call unless a
 retry count is configured, so a throttled provider hands over to the next

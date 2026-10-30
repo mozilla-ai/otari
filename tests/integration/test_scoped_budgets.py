@@ -35,6 +35,7 @@ from gateway.services.budgets import (
     BudgetScopeRequest,
     EstimateInputs,
     ReservationHandle,
+    get_budget_state,
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
@@ -1931,3 +1932,41 @@ async def test_a_move_after_the_sweep_reclaimed_the_reservation_takes_no_hold(
 
     assert anthropic.id in handle.scoped_budget_ids
     assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_budget", [None, 10.0])
+async def test_a_zero_ceiling_reads_as_exhausted_to_routing(
+    async_db: AsyncSession, tenancy: Fixture, user_budget: float | None
+) -> None:
+    """The gate refuses every priced request under a $0 cap, so routing reads it as fully used, alone or beside room."""
+    if user_budget is not None:
+        budget = Budget(max_budget=user_budget)
+        async_db.add(budget)
+        await async_db.flush()
+        user = await async_db.get(User, tenancy.user_id)
+        assert user is not None
+        user.budget_id = budget.budget_id
+    async_db.add(await _scoped(async_db, scope_type="api_token", scope_id=tenancy.api_key.id, max_budget=0))
+    await async_db.commit()
+
+    state = await get_budget_state(async_db, tenancy.user_id, tenancy.scope(None))
+
+    assert state.used_pct == 100.0
+    assert state.remaining_usd == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_zero_user_budget_reads_as_exhausted_to_routing(async_db: AsyncSession, tenancy: Fixture) -> None:
+    budget = Budget(max_budget=0)
+    async_db.add(budget)
+    await async_db.flush()
+    user = await async_db.get(User, tenancy.user_id)
+    assert user is not None
+    user.budget_id = budget.budget_id
+    await async_db.commit()
+
+    state = await get_budget_state(async_db, tenancy.user_id)
+
+    assert state.used_pct == 100.0
+    assert state.remaining_usd == 0.0

@@ -803,6 +803,15 @@ def test_a_budget_exempt_key_is_not_tiered_down_by_its_ceiling(
     assert _awaited_model(mock) == "openai:gpt-5-mini"
 
 
+def test_a_disabled_budget_strategy_is_not_tiered_down(routing_config: GatewayConfig) -> None:
+    """With enforcement off no budget gates a request, so none of them moves it off the default either."""
+    for client in build_test_client(routing_config.model_copy(update={"budget_strategy": "disabled"})):
+        ceiling_id, headers = _key_with_ceiling(client)
+        _set_ceiling_spend(routing_config, ceiling_id, 0.9)
+
+        assert _served_model(client, headers, "thrifty") == "openai:gpt-5-mini"
+
+
 @pytest.mark.parametrize("scope_type", ["workspace", "organization"])
 def test_tier_down_reads_a_ceiling_on_the_key_s_workspace_and_organization(
     client: TestClient, routing_config: GatewayConfig, scope_type: str
