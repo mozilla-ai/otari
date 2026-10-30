@@ -1895,7 +1895,13 @@ export function KeysPage() {
             emptyContent={noMatch}
             selectionMode={isReadOnly ? "none" : "multiple"}
             selectedKeys={selection.selectedKeys}
-            onSelectionChange={selection.onSelectionChange}
+            // "Select all" is taken as the keys on screen now, not the value
+            // `all`, which would also take in any key that appears later.
+            onSelectionChange={(keys) =>
+              selection.onSelectionChange(
+                keys === "all" ? new Set(selectableKeys) : keys,
+              )
+            }
           />
         </TableScrollFrame>
       )}
