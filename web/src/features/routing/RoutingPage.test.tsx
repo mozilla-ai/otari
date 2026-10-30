@@ -115,6 +115,24 @@ describe("RoutingPage", () => {
     expect(screen.getByText("u-bob")).toBeInTheDocument()
   })
 
+  it("finds a policy by the provider name its cells print", async () => {
+    mockApi([
+      policy("fast", CHAIN),
+      policy("hosted", { select: [{ default: "bedrock:claude-sonnet" }] }),
+    ])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("hosted")
+
+    // The cell says "Amazon Bedrock"; the selector only says "bedrock".
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search routing policies" }),
+      "amazon",
+    )
+    await waitFor(() => expect(screen.queryByText("fast")).toBeNull())
+    expect(screen.getByText("hosted")).toBeInTheDocument()
+  })
+
   it("finds a policy by the model a budget switches it to", async () => {
     mockApi()
     const user = userEvent.setup()
