@@ -555,6 +555,45 @@ def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
     assert len(seen.loop_calls) == 2, "the walk must have tried both candidates' tool loops"
 
 
+class _McpPool:
+    """An MCP pool whose one server exposes a tool no built-in is named."""
+
+    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None) -> None:
+        return None
+
+    async def __aenter__(self) -> _McpPool:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "lookup", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "lookup"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+
+def test_a_streamed_mcp_only_loop_candidates_failure_falls_over_to_the_next_candidate(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A stream whose only gateway tools are MCP servers is held for its first chunk like any other."""
+    body = _messages_body(
+        "claude-then-vertex", mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}], stream=True
+    )
+
+    with patch("gateway.api.routes._pipeline.MCPClientPool", new=_McpPool):
+        response, seen = _post_messages(client, api_key_header, body, loop_stream_fails=True)
+
+    assert response.status_code == 200, response.text
+    assert "via-otari" in response.text
+    assert len(seen.loop_calls) == 2, "the walk must have tried both candidates' tool loops"
+
+
 def test_a_streamed_loop_that_ran_a_round_does_not_fall_over(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:

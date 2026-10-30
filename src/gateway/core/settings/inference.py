@@ -108,8 +108,8 @@ class InferenceSettings(BaseModel):
             "after a 200. A tool loop's hold ends with its first round instead, which can run the "
             "gateway's tools before anything is sent, so a failure past that point cannot fall over "
             "either, even though nothing has reached the client yet. A provider slower than this still "
-            "streams: the response is committed and keeps waiting. Streams whose only gateway tools are "
-            "MCP servers are not held. 0 commits the response as soon as the stream opens."
+            "streams: the response is committed and keeps waiting. 0 commits the response as soon as the "
+            "stream opens."
         ),
     )
 

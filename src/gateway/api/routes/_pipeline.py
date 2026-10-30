@@ -39,7 +39,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Coroutine, Iterable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, AsyncExitStack
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -404,7 +404,6 @@ from gateway.types.tool_charges import LabelCalls, RateKey, describe_rate_key
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
-BackendT = TypeVar("BackendT")
 _P = ParamSpec("_P")
 
 TOKENS = PrometheusCounter(
@@ -5508,37 +5507,6 @@ async def _close_tool_backend(closing: Awaitable[object], kind: _ToolBackendKind
         logger.warning("The %s tool backend failed to close: %s", kind, failure_class(exc))
 
 
-@contextlib.asynccontextmanager
-async def _held_tool_backend(
-    backend: AbstractAsyncContextManager[BackendT], kind: _ToolBackendKind
-) -> AsyncIterator[BackendT]:
-    """Enter ``backend`` for the block, and close it through :func:`_close_tool_backend`."""
-    entered = await backend.__aenter__()
-    try:
-        yield entered
-    except BaseException as exc:
-        await _close_tool_backend(backend.__aexit__(type(exc), exc, exc.__traceback__), kind)
-        raise
-    await _close_tool_backend(backend.__aexit__(None, None, None), kind)
-
-
-async def _lazy_mcp_stream(
-    adapter: FormatAdapter[Any, ChunkT],
-    kwargs: dict[str, Any],
-    configs: list[McpServerConfig],
-    tool_ctx: ToolContext,
-) -> AsyncIterator[ChunkT]:
-    # The MCP pool is entered lazily inside the generator: a dial failure
-    # surfaces once the client starts pulling events. Sandbox / web_search use
-    # the eager-open path below for a pre-200 HTTP error instead.
-    async with _held_tool_backend(
-        MCPClientPool(configs, tally=tool_ctx.tally, trace=tool_ctx.trace), _ToolBackendKind.MCP
-    ) as pool:
-        hinted = adapter.inject_hints(kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
-        async for event in adapter.open_tool_loop_stream(hinted, pool, tool_ctx.max_tool_iterations):
-            yield event
-
-
 async def _eager_backend_stream(
     adapter: FormatAdapter[Any, ChunkT],
     kwargs: dict[str, Any],
@@ -5579,26 +5547,21 @@ async def open_stream(
 ) -> AsyncIterator[ChunkT]:
     """Open the upstream stream for a single-attempt streaming request.
 
-    A provider stream, and a tool loop with eagerly opened backends, is held for
-    its first chunk (:func:`hold_for_first_chunk`), so a provider failure before
-    any output raises here, where a routing walk can still fall over. A tool loop
-    calls ``on_first_response`` once its first provider round has ended, since the
+    A provider stream, and a tool loop, is held for its first chunk
+    (:func:`hold_for_first_chunk`), so a provider failure before any output raises
+    here, where a routing walk can still fall over. A tool loop calls
+    ``on_first_response`` once its first provider round has ended, since the
     gateway's tools may run before anything reaches the hold.
 
-    The sandbox and web_search backends are opened eagerly (their
-    ``__aenter__`` runs before this function returns) so a backend-unreachable
-    error surfaces as an HTTP 502 rather than landing in the SSE channel after
-    the response has already committed to 200 OK. An MCP pool declared alone is
-    entered lazily inside the returned iterator; one declared beside the others
-    opens with them, so a refusal of its tool names is an HTTP error too.
+    The tool backends are opened eagerly (their ``__aenter__`` runs before this
+    function returns) so a backend-unreachable error or a refused MCP tool name
+    surfaces as an HTTP error rather than landing in the SSE channel after the
+    response has already committed to 200 OK.
     """
     kwargs = adapter.prepare_stream_kwargs(call_kwargs)
 
     if not tool_ctx.use_tool_loop:
         return await hold_for_first_chunk(await adapter.open_provider_stream(kwargs), tool_ctx.config)
-
-    if tool_ctx.mcp_server_configs and not tool_ctx.reserved_tool_names:
-        return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)
 
     stack = AsyncExitStack()
     try:
