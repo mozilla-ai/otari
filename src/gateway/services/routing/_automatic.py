@@ -234,9 +234,15 @@ class AutomaticRouter:
         anchor: str,
         region: Region | None,
         mode: str,
+        own: frozenset[str] = frozenset(),
         limit: int = 5,
     ) -> CompiledPlan:
-        """Order by price availability, health, region and cost/load/latency, preserving eligible affinity."""
+        """Order by price availability, health, own key, region and cost/load/latency, preserving eligible affinity.
+
+        ``own`` holds the selectors the caller's organization serves on its own provider keys. A priced,
+        healthy own key leads every other offering, so the organization's key is used before one the
+        deployment pays for; the other signals order the offerings within each tier.
+        """
         from gateway.services.routing.compiler import DroppedCandidate
 
         now = self.clock()
@@ -252,22 +258,22 @@ class AutomaticRouter:
                 latencies[selector] = value[0]
         neutral = median(latencies.values()) if latencies else 1.0
 
-        def group(attempt: Attempt) -> tuple[bool, bool, int]:
-            """Partition candidates by missing price, cooldown and region mismatch."""
+        def group(attempt: Attempt) -> tuple[bool, bool, bool, int]:
+            """Partition candidates by missing price, cooldown, ownership and region mismatch."""
             selector = f"{attempt.instance}:{attempt.model}"
             hint = settings.offerings.get(selector, settings.offerings.get(attempt.instance, AutomaticOffering()))
             health = self.health.get(keys[selector])
             locality = 0 if region is None or hint.region == region else 1
-            return costs.get(selector) is None, bool(health and health.cooldown > now), locality
+            return costs.get(selector) is None, bool(health and health.cooldown > now), selector not in own, locality
 
-        floors: dict[tuple[bool, bool, int], Decimal] = {}
+        floors: dict[tuple[bool, bool, bool, int], Decimal] = {}
         for attempt in plan.attempts:
             cost = costs.get(f"{attempt.instance}:{attempt.model}")
             if cost is not None:
                 bucket = group(attempt)
                 floors[bucket] = min(floors.get(bucket, cost), cost)
 
-        def score(attempt: Attempt) -> tuple[bool, bool, int, float, int]:
+        def score(attempt: Attempt) -> tuple[bool, bool, bool, int, float, int]:
             """Score cost and load within a health/region group, breaking ties by catalog order."""
             selector = f"{attempt.instance}:{attempt.model}"
             hint = settings.offerings.get(selector, settings.offerings.get(attempt.instance, AutomaticOffering()))
@@ -287,8 +293,13 @@ class AutomaticRouter:
         ranked = sorted(plan.attempts, key=score)
         bound = next((a for a in ranked if keys[f"{a.instance}:{a.model}"] == sticky), None)
         if bound is not None:
-            unpriced, unhealthy, locality = group(bound)
-            if not unhealthy and locality == 0 and (not unpriced or all(group(a)[0] for a in ranked)):
+            unpriced, unhealthy, foreign, locality = group(bound)
+            if (
+                not unhealthy
+                and locality == 0
+                and (not unpriced or all(group(a)[0] for a in ranked))
+                and (not foreign or group(ranked[0])[2])
+            ):
                 ranked.remove(bound)
                 ranked.insert(0, bound)
             else:

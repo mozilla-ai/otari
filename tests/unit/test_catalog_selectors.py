@@ -199,6 +199,26 @@ def test_a_legacy_spelling_of_an_organizations_own_offering_lists_it_first() -> 
         selectors.reset_selector_index()
 
 
+def test_organization_offerings_name_only_that_organizations_own_keys() -> None:
+    deployment = [selectors.OfferingRow("azure:gpt-4o", "azure", "azureopenai", 2.5)]
+    own = [selectors.OfferingRow("openai:gpt-4o", "openai", "openai", 2.5)]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o", "openai:gpt-4o"))
+    }
+    view = selectors.build_organization_selectors(deployment, own, identities)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment, {"openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o",))}, organizations={_ORG_A: view}
+        )
+    )
+    try:
+        assert selectors.organization_offerings(organization_id=_ORG_A) == frozenset({"openai:gpt-4o"})
+        assert selectors.organization_offerings(organization_id=_ORG_B) == frozenset()
+        assert selectors.organization_offerings() == frozenset()
+    finally:
+        selectors.reset_selector_index()
+
+
 def test_a_vendor_is_matched_to_its_own_provider_by_the_identity_table() -> None:
     """``moonshotai`` is the vendor's id segment; ``moonshot`` is the provider it publishes on."""
     rows = [

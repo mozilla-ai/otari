@@ -396,3 +396,40 @@ def test_unknown_credential_objects_cannot_inherit_affinity(router: AutomaticRou
     """Unsupported credential objects receive non-reusable identities rather than unsafe shared affinity."""
     candidate = replace(_plan().head, kwargs={"client_args": {"credentials": object()}})
     assert router.candidate_key(candidate) != router.candidate_key(candidate)
+
+
+def test_own_key_leads_a_cheaper_closer_offering(router: AutomaticRouter) -> None:
+    """An organization's priced, healthy own key outranks cost and region; the rest stay ranked after it."""
+    costs = {"us:model": Decimal("0.01"), "eu:model": Decimal("0.50")}
+    plan = _rank(router, costs=costs, region="us", own=frozenset({"eu:model"}))
+    assert [attempt.instance for attempt in plan.attempts] == ["eu", "us"]
+    assert _rank(router, costs=costs, region="us").head.instance == "us"
+
+
+def test_own_key_yields_when_cooling_down_or_unpriced(router: AutomaticRouter) -> None:
+    """The deployment's offering serves while the own key is in cooldown or has no known price."""
+    first = _rank(router, own=frozenset({"us:model"}))
+    assert first.automatic is not None
+    assert first.head.instance == "us"
+    first.automatic.start(first.head).finish(unhealthy=True)
+    assert _rank(router, own=frozenset({"us:model"})).head.instance == "eu"
+    unpriced = {"us:model": None, "eu:model": Decimal("0.01")}
+    assert _rank(AutomaticRouter(), costs=unpriced, own=frozenset({"us:model"})).head.instance == "eu"
+
+
+def test_session_on_a_deployment_offering_yields_to_a_healthy_own_key(router: AutomaticRouter) -> None:
+    """A binding to an offering the deployment pays for does not hold the conversation off the own key."""
+    first = _rank(router)
+    assert first.automatic is not None
+    first.automatic.start(first.attempts[1]).finish(success=True)
+    assert _rank(router).head.instance == "eu"
+    assert _rank(router, own=frozenset({"us:model"})).head.instance == "us"
+
+
+def test_session_on_one_own_key_holds_over_another(router: AutomaticRouter) -> None:
+    """Between two own keys, the binding keeps the conversation where its prompt cache is."""
+    own = frozenset({"us:model", "eu:model"})
+    first = _rank(router, own=own)
+    assert first.automatic is not None
+    first.automatic.start(first.attempts[1]).finish(success=True)
+    assert _rank(router, own=own, costs={"us:model": Decimal(1), "eu:model": Decimal(2)}).head.instance == "eu"

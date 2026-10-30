@@ -372,7 +372,7 @@ A provider's own id can be long, so the gateway also accepts the two spellings
 the catalog shows. Each is relabeled like an alias, so a response's `model` is
 what was sent, and pricing, budgets and usage key on the offering reached.
 
-- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) uses this baseline order for discovery and as a tie-breaker for automatic routing. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
+- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) uses this baseline order for discovery and as a tie-breaker for automatic routing, which keeps the own key first as described below. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
 - `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
 - On an organization's own provider key, a provider's undated name (`anthropic:claude-haiku-4-5`) resolves to the dated build the key serves under it (`claude-haiku-4-5-20251001`), where exactly one serving model is that name plus a release date (`-YYYYMMDD` or `-YYYY-MM-DD`). The dated build's serving switch, price and allow-lists apply as if it had been sent. A name with two dated builds, at least one of them serving, is refused as not found (404 `model_not_found`), and the detail names both; a name whose dated builds are all switched off is refused as not serving (403 `model_not_serving`). Neither detail names the dated builds to a caller who reached the model through an alias. A selector whose prefix names a `providers:` instance is never rewritten this way, even for a caller whose organization also holds a key for that provider: the instance sends any id to the provider as written.
 
@@ -428,6 +428,11 @@ Selection uses these signals:
   deployment list, then enabled defaults. Missing prices are never treated as free.
   Token counts are estimates; output uses the request's limit or the configured
   default. Tool calls and other work whose quantity is not yet known are not predicted.
+- **Own provider key:** among healthy, priced offerings, the organization's own
+  provider keys come before offerings the deployment pays for, even where those
+  are cheaper, faster or closer. The other signals order the offerings within each
+  group. An own key that is cooling down after an outage, or has no known price,
+  yields to the deployment's offerings until it recovers.
 - **Region:** among healthy, priced offerings, prefer the caller's region when
   the operator has declared the endpoint's location. A caller can send
   `Otari-Region: us` or `Otari-Region: eu`. Otherwise, an explicitly trusted edge
@@ -454,12 +459,13 @@ Selection uses these signals:
   never discounts the budget reservation.
 
 For a new session or an unusable binding, known prices precede unknown ones,
-including during an outage. Within each pricing-availability, health and region
-group, the score is estimated cost divided by the cheapest known cost in that
+including during an outage. Within each pricing-availability, health, own-key and
+region group, the score is estimated cost divided by the cheapest known cost in that
 group (with a $0.000001 floor), plus 0.5 times active calls divided by capacity,
 plus 0.25 times relative latency (capped at 3). Lower wins; ties keep the baseline
 order. A binding to an unpriced offering is discarded when a priced alternative
-is available. Prices are batch-read and reused for admission and settlement.
+is available, and a binding to an offering the deployment pays for is discarded
+when a healthy, priced own key is available. Prices are batch-read and reused for admission and settlement.
 An offering whose initial budget reservation is refused is skipped, and the next
 is checked at its full price. Every budget still has to admit the serving provider;
 if none fits, the request is refused without an upstream call.

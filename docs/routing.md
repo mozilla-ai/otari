@@ -7,9 +7,10 @@ remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
 For provider selection within one model, an unpinned catalog ID already uses
-[automatic routing](models.md#automatic-provider-selection), considering estimated
-cost, load, region and latency, with sticky sessions for conversation continuity,
-without scored examples.
+[automatic routing](models.md#automatic-provider-selection), which keeps an
+organization's own provider key first and otherwise considers estimated cost, load,
+region and latency, with sticky sessions for conversation continuity, without
+scored examples.
 
 ## Failover
 
