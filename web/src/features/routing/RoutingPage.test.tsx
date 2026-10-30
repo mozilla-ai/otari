@@ -98,6 +98,23 @@ describe("RoutingPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("finds a scoped policy by the user its Applies to column shows", async () => {
+    mockApi([
+      policy("cheap", CHAIN, { user_id: "u-bob" }),
+      policy("cheap", CHAIN, { user_id: "u-carol" }),
+    ])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("u-carol")
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search routing policies" }),
+      "u-bob",
+    )
+    await waitFor(() => expect(screen.queryByText("u-carol")).toBeNull())
+    expect(screen.getByText("u-bob")).toBeInTheDocument()
+  })
+
   it("finds a policy by the model a budget switches it to", async () => {
     mockApi()
     const user = userEvent.setup()
