@@ -211,6 +211,8 @@ TablePagination    the narrowed total, when the list pages
   Never a secret, never a field the row does not show.
 - **Say how many matched.** Pass `resultCount` to `SearchField`; it shows the count
   beside the field while there is a term and announces it to a screen reader.
+  Pass `undefined` until the rows it counts have loaded, so a shared link does
+  not announce "0 matches" while its results are still arriving.
 - **An empty search is not an empty list.** A term that finds nothing gets an
   `EmptyMessage` naming the search ("No API keys match this search."); the list's
   own `EmptyState` stays for the case where nothing exists yet.
@@ -227,7 +229,7 @@ const rows = keys.filter((key) => matchesSearch(search.term, key.name, key.key_p
     placeholder="Search by name or prefix"
     value={search.value}
     onChange={search.onChange}
-    resultCount={rows.length}
+    resultCount={keys.isPending ? undefined : rows.length}
     className="w-full md:w-80"
   />
 </Toolbar>
