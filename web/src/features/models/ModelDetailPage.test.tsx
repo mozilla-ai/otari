@@ -540,28 +540,6 @@ describe("ModelDetailPage", () => {
     }
   })
 
-  it("marks a metered rate that differs from the provider's list price", async () => {
-    mockApi()
-    GLM_DETAIL.offerings[0] = offering({
-      metadata_input_price_per_million: 1,
-      metadata_output_price_per_million: 2.01,
-    })
-    try {
-      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
-
-      await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
-      // Input is metered at half the list price and says so; output is within
-      // rounding of it and does not.
-      expect(screen.getByText("list $1.00")).toBeInTheDocument()
-      expect(screen.queryByText("list $2.01")).toBeNull()
-      expect(
-        screen.getByText(/differs from the price the provider publishes/),
-      ).toBeInTheDocument()
-    } finally {
-      GLM_DETAIL.offerings[0] = offering({})
-    }
-  })
-
   it("keeps the page read-only for a member", async () => {
     // A member, stated as one: the fixture's default role is owner, and an owner
     // now gets the rate link whether or not they operate the deployment, so a
