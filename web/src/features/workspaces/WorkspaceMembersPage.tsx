@@ -100,7 +100,10 @@ export function WorkspaceMembersPage() {
       )
       .map((member) => member.user_id ?? member.email ?? ""),
   ])
-  const matchedPeople = matched.size
+  // Withheld until every roster it counts has answered, and when one failed:
+  // a roster still loading, or lost, would count as nobody.
+  const rostersAnswered =
+    orgMembers.isSuccess && (!selected || members.isSuccess)
 
   return (
     <div className="flex flex-col gap-6">
@@ -154,7 +157,7 @@ export function WorkspaceMembersPage() {
           placeholder="Search by name"
           value={search.value}
           onChange={search.onChange}
-          resultCount={matchedPeople}
+          resultCount={rostersAnswered ? matched.size : undefined}
           className="w-full md:w-96"
         />
       </Toolbar>

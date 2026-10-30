@@ -679,7 +679,7 @@ export function OrganizationProvidersPage() {
             placeholder="Search by name or provider"
             value={search.value}
             onChange={search.onChange}
-            resultCount={shown.length}
+            resultCount={keys.isPending ? undefined : shown.length}
             className="w-full md:w-96"
           />
           {archivedCount > 0 ? (

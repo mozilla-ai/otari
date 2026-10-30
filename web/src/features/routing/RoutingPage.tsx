@@ -337,7 +337,7 @@ export function RoutingPage() {
               placeholder="Search by name or model"
               value={search.value}
               onChange={search.onChange}
-              resultCount={shown.length}
+              resultCount={isListLoading ? undefined : shown.length}
               className="w-full md:w-96"
             />
           </Toolbar>

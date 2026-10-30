@@ -971,7 +971,7 @@ export function WorkspacesPage() {
               placeholder="Search by name or description"
               value={search.value}
               onChange={search.onChange}
-              resultCount={shown.length}
+              resultCount={workspaces.isPending ? undefined : shown.length}
               className="w-full md:w-96"
             />
           </Toolbar>
