@@ -89,6 +89,7 @@ const URL_DEFAULTS = {
   override: "",
   models_page: "0",
   models_size: String(PAGE_SIZE_OPTIONS[0]),
+  models_q: "",
 }
 
 // The organization's own upstream credentials: one BYO key per provider that
@@ -528,8 +529,10 @@ export function OrganizationProvidersPage() {
                 onPress={() =>
                   url.patch({
                     provider: expandedKeyId === row.id ? "" : row.id,
-                    // A different provider's panel starts at its own first page.
+                    // A different provider's panel starts at its own first
+                    // page, unsearched.
                     models_page: "0",
+                    models_q: "",
                   })
                 }
               />

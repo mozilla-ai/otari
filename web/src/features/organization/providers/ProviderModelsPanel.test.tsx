@@ -45,9 +45,16 @@ function mockApi(opts: MockOpts = {}) {
       return jsonResponse({ provider: "openai", models: ["gpt-4o-mini"] })
     }
     if (url.includes("/models") && method === "GET") {
+      // Narrowed the way the route narrows a search: by name, ignoring case.
+      const term = (
+        new URL(url, "http://localhost").searchParams.get("search") ?? ""
+      ).toLowerCase()
+      const matched = models.filter((model) =>
+        model.model.toLowerCase().includes(term),
+      )
       return opts.listFails
         ? jsonResponse({ detail: "Tenancy is unavailable" }, 500)
-        : jsonResponse({ count: models.length, data: models })
+        : jsonResponse({ count: matched.length, data: matched })
     }
     // Every write answers with a row the panel re-reads through the invalidated
     // list, so one is enough for all of them.
@@ -67,6 +74,7 @@ function renderPanel(
     onPageChange?: (page: number) => void
     onPageSizeChange?: (size: number) => void
   } = {},
+  url = "/",
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -83,6 +91,7 @@ function renderPanel(
         onPageSizeChange={pager.onPageSizeChange ?? vi.fn()}
       />
     </QueryClientProvider>,
+    { url },
   )
 }
 
@@ -91,6 +100,75 @@ afterEach(() => {
 })
 
 describe("ProviderModelsPanel", () => {
+  it("keeps the field, and its focus, when a search that matched nothing is cleared", async () => {
+    // Held, so the unsearched list is still in flight while the rows are the
+    // empty search's, kept as placeholder data.
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const models = [orgProviderModel({ id: "m-1", model: "gpt-4o" })]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes("search=")) {
+        return jsonResponse({ count: 0, data: [] })
+      }
+      await held
+      return jsonResponse({ count: models.length, data: models })
+    })
+    const user = userEvent.setup()
+    await renderPanel(true, vi.fn(), {}, "/?models_q=zzz")
+    expect(
+      await screen.findByText("No models match this search."),
+    ).toBeInTheDocument()
+    const search = screen.getByRole("searchbox", {
+      name: "Search models on Production",
+    })
+
+    await user.clear(search)
+    // The unsearched read has not landed: still the field, never the
+    // empty-catalog panel.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(screen.queryByText("No models offered yet")).toBeNull()
+    expect(search).toHaveFocus()
+
+    release()
+    expect(await screen.findByText("gpt-4o")).toBeInTheDocument()
+  })
+
+  it("asks the endpoint to search, and keeps the field when nothing matches", async () => {
+    const requests = mockApi({
+      models: [
+        orgProviderModel({ id: "m-1", model: "gpt-4o" }),
+        orgProviderModel({ id: "m-2", model: "o3-mini" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPanel()
+    await screen.findByText("gpt-4o")
+    const search = screen.getByRole("searchbox", {
+      name: "Search models on Production",
+    })
+
+    await user.type(search, "O3")
+    await waitFor(() =>
+      expect(screen.queryByText("gpt-4o")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("o3-mini")).toBeInTheDocument()
+    expect(requests.some((request) => request.url.includes("search=O3"))).toBe(
+      true,
+    )
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No models match this search."),
+    ).toBeInTheDocument()
+    // A search that found nothing is not a provider offering nothing.
+    expect(screen.queryByText("No models offered yet")).not.toBeInTheDocument()
+    expect(search).toBeInTheDocument()
+  })
+
   it("lists a model with its rate and where the rate came from", async () => {
     mockApi()
     await renderPanel()

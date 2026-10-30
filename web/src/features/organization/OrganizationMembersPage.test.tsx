@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -27,6 +27,7 @@ import {
   workspace,
   workspaceMember,
 } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
 
 interface Request {
@@ -225,9 +226,19 @@ function mockApi(opts: {
         const params = new URL(url, "http://localhost").searchParams
         const skip = Number(params.get("skip") ?? 0)
         const limit = Number(params.get("limit") ?? 100)
+        // And the search, the way the route matches it: name or email,
+        // case-insensitively, with the count narrowed alongside.
+        const term = (params.get("search") ?? "").toLowerCase()
+        const matched = members.filter(
+          (member) =>
+            !term ||
+            [member.full_name, member.email].some((field) =>
+              field?.toLowerCase().includes(term),
+            ),
+        )
         return jsonResponse({
-          data: members.slice(skip, skip + limit).map(joined),
-          count: members.length,
+          data: matched.slice(skip, skip + limit).map(joined),
+          count: matched.length,
         })
       }
       if (method === "POST") {
@@ -251,7 +262,8 @@ function renderPage(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  // In a router, because the page keeps its search in the URL.
+  return renderWithRouter(
     <DeploymentProvider value={bootstrap(bootstrapOverrides)}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
     </DeploymentProvider>,
@@ -291,7 +303,7 @@ afterEach(() => {
 describe("OrganizationMembersPage", () => {
   it("lists the roster with each member's role and status", async () => {
     mockApi({ members: [OWNER, ANALYST] })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     expect(await screen.findByText("Analyst")).toBeInTheDocument()
     expect(screen.getByText("analyst@example.com")).toBeInTheDocument()
@@ -301,7 +313,7 @@ describe("OrganizationMembersPage", () => {
   it("changes a member's role through the membership endpoint", async () => {
     const requests = mockApi({ members: [OWNER, ANALYST] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await pickOption(user, "Role for Analyst", "Admin")
@@ -315,7 +327,7 @@ describe("OrganizationMembersPage", () => {
 
   it("locks the last active owner's membership rather than letting it be cleared", async () => {
     mockApi({ members: [OWNER, ANALYST] })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Operator")
     const owner = rowFor("Operator")
@@ -337,10 +349,35 @@ describe("OrganizationMembersPage", () => {
     expect(within(owner).getByText("ACTIVE")).toBeInTheDocument()
   })
 
+  it("does not lock an owner as the last one when a search hides the others", async () => {
+    const second = organizationMember({
+      organization_member_id: "second-owner",
+      user_id: "second-owner-user",
+      full_name: "Second Owner",
+      role: "owner",
+    })
+    mockApi({ members: [OWNER, second, ANALYST] })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationMembersPage />)
+    await screen.findByText("Second Owner")
+
+    // Only Operator matches, but Second Owner still exists.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "operator",
+    )
+    await waitFor(() => expect(screen.queryByText("Second Owner")).toBeNull())
+    const owner = rowFor("Operator")
+    expect(within(owner).getByLabelText(/^Role for Operator/)).toBeEnabled()
+    expect(
+      within(owner).queryByLabelText(/This is the last active owner/),
+    ).toBeNull()
+  })
+
   it("suspends a member rather than deleting them, and says so", async () => {
     const requests = mockApi({ members: [OWNER, ANALYST] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await user.click(
@@ -359,7 +396,7 @@ describe("OrganizationMembersPage", () => {
 
   it("shows a status rather than offering one to set", async () => {
     mockApi({ members: [OWNER, ANALYST] })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     // The gateway takes two settable statuses, and suspending is what Remove
@@ -376,7 +413,7 @@ describe("OrganizationMembersPage", () => {
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -408,7 +445,7 @@ describe("OrganizationMembersPage", () => {
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -436,7 +473,7 @@ describe("OrganizationMembersPage", () => {
       // Adding someone straight to `active` left an identity nobody could claim
       // where mail cannot be sent; an invitation always hands back a link.
       mockApi({ members: [OWNER] })
-      renderPage(<OrganizationMembersPage />, { mail_ready: mailReady })
+      await renderPage(<OrganizationMembersPage />, { mail_ready: mailReady })
 
       await screen.findByRole("button", { name: "Invite member" })
       expect(screen.queryByRole("button", { name: "Add member" })).toBeNull()
@@ -448,7 +485,7 @@ describe("OrganizationMembersPage", () => {
     // control does not vanish from under the pointer while it is open.
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     const add = await screen.findByRole("button", { name: "Invite member" })
     await user.click(add)
@@ -462,7 +499,7 @@ describe("OrganizationMembersPage", () => {
     // while the dialog is still animating away.
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -485,7 +522,7 @@ describe("OrganizationMembersPage", () => {
       members: [OWNER],
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByRole("button", { name: "Invite member" })
     await waitFor(() =>
@@ -503,7 +540,7 @@ describe("OrganizationMembersPage", () => {
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -523,7 +560,7 @@ describe("OrganizationMembersPage", () => {
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -553,7 +590,7 @@ describe("OrganizationMembersPage", () => {
       context: organizationContext({ role: "viewer" }),
       members: [OWNER, ANALYST],
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     const analyst = rowFor("Analyst")
@@ -587,7 +624,7 @@ describe("OrganizationMembersPage", () => {
       workspacesGate: gate,
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -614,7 +651,7 @@ describe("OrganizationMembersPage", () => {
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -636,7 +673,7 @@ describe("OrganizationMembersPage", () => {
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    await renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -661,7 +698,7 @@ describe("OrganizationMembersPage", () => {
   it("invites a member by email and shows the accept link when the send did not go out", async () => {
     const requests = mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    await renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -717,7 +754,7 @@ describe("OrganizationMembersPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    await renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -773,7 +810,7 @@ describe("OrganizationMembersPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    await renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -816,7 +853,7 @@ describe("OrganizationMembersPage", () => {
   it("says a link comes back to share when mail cannot be sent", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: false })
+    await renderPage(<OrganizationMembersPage />, { mail_ready: false })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -829,7 +866,7 @@ describe("OrganizationMembersPage", () => {
   it("says the email will be sent when mail is configured", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    await renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -851,7 +888,7 @@ describe("OrganizationMembersPage", () => {
     })
     const requests = mockApi({ members: [OWNER, invited] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("pending@example.com")
     const row = rowFor("pending@example.com")
@@ -877,7 +914,7 @@ describe("OrganizationMembersPage", () => {
     })
     const requests = mockApi({ members: [OWNER, invited] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("pending@example.com")
     const row = rowFor("pending@example.com")
@@ -915,7 +952,7 @@ describe("OrganizationMembersPage", () => {
       invitation_expires_at: "2020-01-01T00:00:00+00:00",
     })
     mockApi({ members: [OWNER, expired] })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("late@example.com")
     const row = rowFor("late@example.com")
@@ -945,7 +982,7 @@ describe("OrganizationMembersPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -980,7 +1017,7 @@ describe("OrganizationMembersPage", () => {
         }),
       ),
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Member 00")
     // The window's worth, not the roster: 24 is the last of a page of 25.
@@ -995,6 +1032,42 @@ describe("OrganizationMembersPage", () => {
     })
   })
 
+  it("searches the whole roster through the endpoint, not the page on screen", async () => {
+    const requests = mockApi({
+      members: Array.from({ length: 30 }, (_, index) =>
+        organizationMember({
+          organization_member_id: `member-${index}`,
+          user_id: `user-${index}`,
+          full_name: `Member ${String(index).padStart(2, "0")}`,
+        }),
+      ),
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationMembersPage />)
+    await screen.findByText("Member 00")
+
+    // Member 27 is on the second page, so only the endpoint can find it.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "member 27",
+    )
+    expect(await screen.findByText("Member 27")).toBeInTheDocument()
+    expect(screen.queryByText("Member 00")).toBeNull()
+    expect(screen.getByText("1 match")).toBeInTheDocument()
+    expect(
+      requests.some((request) => request.url.includes("search=member%2027")),
+    ).toBe(true)
+
+    await user.clear(screen.getByRole("searchbox", { name: "Search members" }))
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "nobody-here",
+    )
+    expect(
+      await screen.findByText("No members match this search."),
+    ).toBeInTheDocument()
+  })
+
   it("pages the roster without reading the rest", async () => {
     const user = userEvent.setup()
     const requests = mockApi({
@@ -1006,7 +1079,7 @@ describe("OrganizationMembersPage", () => {
         }),
       ),
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Member 00")
     await user.click(screen.getByRole("button", { name: "Next page, members" }))
@@ -1031,7 +1104,7 @@ describe("OrganizationMembersPage", () => {
       members: [ANALYST],
       workspaces: [workspace()],
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
     await screen.findByText("Analyst")
 
     const read = (path: string) =>
@@ -1062,7 +1135,7 @@ describe("OrganizationMembersPage", () => {
         }),
       ],
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     // Awaited rather than read synchronously: these two columns are the
@@ -1093,7 +1166,7 @@ describe("OrganizationMembersPage", () => {
       ],
       users: [],
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Pending")
     const row = rowFor("Pending")
@@ -1116,7 +1189,7 @@ describe("OrganizationMembersPage", () => {
       ],
     })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     // Block lives in the Actions column but reads the spend row, so like the
@@ -1135,7 +1208,7 @@ describe("OrganizationMembersPage", () => {
   it("opens the member editor in a dialog, naming the member", async () => {
     mockApi({ members: [OWNER, ANALYST], workspaces: [workspace()] })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await actor.click(
@@ -1186,7 +1259,7 @@ describe("OrganizationMembersPage", () => {
       ],
     })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     const row = rowFor("Analyst")
@@ -1267,7 +1340,7 @@ describe("OrganizationMembersPage", () => {
       ],
     })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await actor.click(
@@ -1305,7 +1378,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
         members: [OWNER],
         context: organizationContext({ deployment_operator: operator }),
       })
-      renderPage(<OrganizationMembersPage />)
+      await renderPage(<OrganizationMembersPage />)
 
       expect(
         await screen.findByText(
@@ -1324,7 +1397,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       members: [OWNER, ANALYST],
       context: organizationContext({ deployment_operator: false }),
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     // The roster having painted is what proves the page got as far as fetching,
     // so an empty list below is a decision not to ask rather than a page that
@@ -1353,7 +1426,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       members: [OWNER, ANALYST],
       context: organizationContext({ deployment_operator: false }),
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     // "Spend" is still a column and is withheld by id. Model access is not a
@@ -1371,7 +1444,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       members: [OWNER, ANALYST],
       context: organizationContext({ deployment_operator: false }),
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     expect(
@@ -1412,7 +1485,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       context: organizationContext({ deployment_operator: false }),
     })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await actor.click(
@@ -1467,7 +1540,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       context: organizationContext({ deployment_operator: false }),
     })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await actor.click(
@@ -1490,7 +1563,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       context: organizationContext({ deployment_operator: false }),
     })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await actor.click(
@@ -1510,7 +1583,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       context: organizationContext({ deployment_operator: true }),
     })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await actor.click(
@@ -1532,7 +1605,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       context: organizationContext({ deployment_operator: true }),
     })
     const actor = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     await actor.click(
@@ -1552,7 +1625,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
       users: [user({ user_id: ANALYST.attribution_user_id as string })],
       context: organizationContext({ deployment_operator: true }),
     })
-    renderPage(<OrganizationMembersPage />)
+    await renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
     expect((await screen.findAllByText("All models")).length).toBeGreaterThan(0)
@@ -1561,7 +1634,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
 
   it("keeps the intro to the essentials and puts the rest behind How roles work", async () => {
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    await renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     expect(
       await screen.findByText(/Owners and admins manage it/),

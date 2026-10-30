@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { useMemo, useState } from "react"
+
 import {
   FiCheckCircle,
   FiEdit2,
@@ -32,28 +33,34 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Select } from "@/design-system/forms/Select"
 import { TextArea } from "@/design-system/forms/TextArea"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { Disclosure } from "@/design-system/navigation/Disclosure"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+
 import {
   budgetLabeler,
   type LabelableBudget,
 } from "@/features/budgets/budgetLabel"
+
 import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
+
 import {
   useBudgets,
   useMemberCeilingWriter,
   useOrganizationBudgets,
 } from "@/shared/api/budgets"
+
 import {
   useBulkInviteOrganizationMembers,
   useDeploymentOperator,
@@ -66,6 +73,7 @@ import {
   useUpdateOrganizationMember,
 } from "@/shared/api/organizations"
 import { useUpdateUser } from "@/shared/api/users"
+
 import {
   useAddWorkspaceMember,
   useAllWorkspaceBudgetDefaults,
@@ -78,6 +86,7 @@ import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useListSearch } from "@/shared/hooks/useListSearch"
 
 import {
   asMembershipRole,
@@ -850,7 +859,10 @@ export function OrganizationMembersPage() {
   const context = useOrganizationContext()
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const members = useOrganizationMembersPage(page, pageSize)
+  const search = useListSearch()
+  // Searched by the endpoint, so a match on a later page is found and the
+  // pager's total is the number that matched.
+  const members = useOrganizationMembersPage(page, pageSize, search.term)
   const update = useUpdateOrganizationMember()
   const remove = useRemoveOrganizationMember()
   const revoke = useRevokeOrganizationMemberInvitation()
@@ -894,6 +906,9 @@ export function OrganizationMembersPage() {
   const budgets = isOperator ? deploymentBudgets : organizationBudgets
 
   const rows = useMemo(() => members.data?.data ?? [], [members.data])
+  // A searched page holds only the owners who matched, so it cannot say who
+  // the last one is; that is left to the server while a term is applied.
+  const ownersInView = search.term ? undefined : rows
 
   // Removing the last member on a page leaves it empty while earlier pages
   // still hold rows. Adjusted during render, the way `TablePagination` adjusts
@@ -1012,7 +1027,7 @@ export function OrganizationMembersPage() {
           const blocked = membershipChangeBlockedReason({
             member,
             context: activeContext,
-            members: rows,
+            members: ownersInView,
           })
           return (
             // `title` reaches a mouse; the reason is folded into the control's
@@ -1142,7 +1157,7 @@ export function OrganizationMembersPage() {
           const blocked = membershipChangeBlockedReason({
             member,
             context: activeContext,
-            members: rows,
+            members: ownersInView,
           })
           // An invited row's actions are about its link, expired or not: Reissue
           // sends a new one (the way back for a lost link), Revoke withdraws
@@ -1223,7 +1238,7 @@ export function OrganizationMembersPage() {
     )
   }, [
     activeContext,
-    rows,
+    ownersInView,
     update.isPending,
     update.mutate,
     manages,
@@ -1354,6 +1369,24 @@ export function OrganizationMembersPage() {
         />
       ) : null}
 
+      <Toolbar className="pb-3">
+        <SearchField
+          label="Search members"
+          placeholder="Search by name or email"
+          value={search.value}
+          onChange={(next) => {
+            search.onChange(next)
+            setPage(0)
+          }}
+          // Not a previous term's total, held as placeholder data while the
+          // new one is asked for.
+          resultCount={
+            members.isPlaceholderData ? undefined : members.data?.count
+          }
+          className="w-full md:w-96"
+        />
+      </Toolbar>
+
       <TableScrollFrame className="otari-members-table">
         <DataTable
           mobileLayout="cards"
@@ -1362,7 +1395,9 @@ export function OrganizationMembersPage() {
           rows={rows}
           getRowKey={memberRowKey}
           isLoading={members.isLoading}
-          emptyContent="No members yet."
+          emptyContent={
+            search.term ? "No members match this search." : "No members yet."
+          }
         />
       </TableScrollFrame>
       <TablePagination

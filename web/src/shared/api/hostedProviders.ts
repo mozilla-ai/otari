@@ -133,12 +133,13 @@ export function useHostedModels(
   provider: string,
   page: number,
   pageSize: number,
+  search = "",
 ) {
   return useQuery({
-    queryKey: [HOSTED_PROVIDERS, "models", provider, page, pageSize],
+    queryKey: [HOSTED_PROVIDERS, "models", provider, page, pageSize, search],
     queryFn: () =>
       apiFetch<HostedModels>(
-        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}`,
+        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
       ),
     staleTime: 30_000,
     placeholderData: (previous, previousQuery) =>
