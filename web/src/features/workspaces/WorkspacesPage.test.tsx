@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -26,6 +26,7 @@ import {
   workspaceMember,
   workspaceProviderKeyOverride,
 } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 
 interface Request {
   url: string
@@ -121,7 +122,8 @@ function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  // In a router, because the page keeps its search in the URL.
+  return renderWithRouter(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
     </QueryClientProvider>,
@@ -157,10 +159,39 @@ describe("WorkspacesPage", () => {
         workspace({ name: "Production", description: "Live traffic" }),
       ],
     })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     expect(await screen.findByText("Production")).toBeInTheDocument()
     expect(screen.getByText("Live traffic")).toBeInTheDocument()
+  })
+
+  it("narrows the workspaces by name or description", async () => {
+    mockApi({
+      workspaces: [
+        workspace({
+          id: "ws-1",
+          name: "Production",
+          description: "Live traffic",
+        }),
+        workspace({ id: "ws-2", name: "Research", description: "Experiments" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<WorkspacesPage />)
+    await screen.findByText("Production")
+    const search = screen.getByRole("searchbox", { name: "Search workspaces" })
+
+    await user.type(search, "experi")
+    await waitFor(() =>
+      expect(screen.queryByText("Production")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("Research")).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No workspaces match this search."),
+    ).toBeInTheDocument()
   })
 
   it("keeps Edit and Delete reachable on a phone", async () => {
@@ -171,7 +202,7 @@ describe("WorkspacesPage", () => {
         workspace({ id: SECOND, name: "Staging" }),
       ],
     })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     expect(await screen.findByText("Production")).toBeInTheDocument()
     expect(screen.queryByRole("grid")).not.toBeInTheDocument()
@@ -186,7 +217,7 @@ describe("WorkspacesPage", () => {
   it("creates a workspace with a name and a description", async () => {
     const requests = mockApi({})
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
@@ -208,6 +239,23 @@ describe("WorkspacesPage", () => {
     })
   })
 
+  it("ends a search when a workspace is made, so the new one is on screen", async () => {
+    mockApi({ workspaces: [workspace({ id: "ws-1", name: "Research" })] })
+    const user = userEvent.setup()
+    await renderPage(<WorkspacesPage />)
+    await screen.findByText("Research")
+    const search = screen.getByRole("searchbox", { name: "Search workspaces" })
+    await user.type(search, "research")
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.type(screen.getByLabelText("Name"), "Billing")
+    await user.click(screen.getByRole("button", { name: "Create workspace" }))
+
+    await waitFor(() => expect(search).toHaveValue(""))
+  })
+
   // The form itself carries no band, so that the scope switcher can put it in a
   // modal (otari-ai#2107). The band belongs to this page, and it is pinned here
   // because losing it is invisible in jsdom: the fields render either way.
@@ -218,7 +266,7 @@ describe("WorkspacesPage", () => {
     // is over the page rather than in it.
     mockApi({})
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
@@ -237,7 +285,7 @@ describe("WorkspacesPage", () => {
     // the operator. The page keys the form on an open counter instead.
     mockApi({})
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
@@ -261,7 +309,7 @@ describe("WorkspacesPage", () => {
     // next Tab starts at the top of the document.
     mockApi({ workspaces: [] })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     const trigger = await screen.findByRole("button", {
       name: "Create a workspace",
@@ -283,7 +331,7 @@ describe("WorkspacesPage", () => {
       budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
@@ -339,7 +387,7 @@ describe("WorkspacesPage", () => {
       ],
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
@@ -371,7 +419,7 @@ describe("WorkspacesPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
@@ -401,7 +449,7 @@ describe("WorkspacesPage", () => {
       createRefusal: { status: 500, detail: "Internal server error" },
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
@@ -424,7 +472,7 @@ describe("WorkspacesPage", () => {
       workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     const deletes = await screen.findAllByRole("button", { name: "Delete" })
     await user.click(deletes[0])
@@ -440,7 +488,7 @@ describe("WorkspacesPage", () => {
     // The server keeps every organization on at least one workspace, and first
     // boot is that state, so an enabled button here is one that always 400s.
     mockApi({})
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     const remove = await screen.findByRole("button", {
       name: /^Delete Default Workspace \(/,
@@ -457,7 +505,7 @@ describe("WorkspacesPage", () => {
       context: organizationContext({ role: "viewer" }),
       workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
     })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await screen.findByText("Default Workspace")
     expect(
@@ -470,7 +518,7 @@ describe("WorkspacesPage", () => {
   it("opens the edit form in a dialog, naming the workspace", async () => {
     mockApi({})
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
 
@@ -483,7 +531,7 @@ describe("WorkspacesPage", () => {
   it("renames a workspace through the update endpoint", async () => {
     const requests = mockApi({})
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
     const name = screen.getByLabelText("Name")
@@ -511,7 +559,7 @@ describe("WorkspacesPage", () => {
         ],
       },
     })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     // Awaited, not read synchronously: the defaults are a fan-out over the
     // workspaces, so they land after the list the row itself comes from.
@@ -539,7 +587,7 @@ describe("WorkspacesPage", () => {
         ],
       },
     })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await screen.findByText("Bravo")
     expect(screen.queryByText("Default member budget")).toBeNull()
@@ -558,7 +606,7 @@ describe("WorkspacesPage", () => {
       context: organizationContext({ deployment_operator: false }),
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
@@ -594,7 +642,7 @@ describe("WorkspacesPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
     await screen.findByText("Per-provider defaults")
@@ -629,7 +677,7 @@ describe("WorkspacesPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
     await screen.findByText("Per-provider defaults")
@@ -650,7 +698,7 @@ describe("WorkspacesPage", () => {
       context: organizationContext({ deployment_operator: false }),
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
     const name = await screen.findByLabelText("Name")
@@ -688,7 +736,7 @@ describe("WorkspacesPage", () => {
       context: organizationContext({ deployment_operator: false }),
     })
     const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
 
@@ -726,7 +774,7 @@ describe("WorkspacesPage", () => {
         ],
       },
     })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     const row = (await screen.findByText("Bravo")).closest("tr")
     expect(row).not.toBeNull()
@@ -739,7 +787,7 @@ describe("WorkspacesPage", () => {
     // The usual state when the organization holds no provider keys of its own,
     // so the column would be a header over blank cells.
     mockApi()
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await screen.findByText("Default Workspace")
     expect(
@@ -758,7 +806,7 @@ describe("WorkspacesPage", () => {
       }),
     )
     const requests = mockApi({ workspaces: many })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await screen.findByText("Workspace 25")
     expect(
@@ -779,7 +827,7 @@ describe("WorkspacesPage", () => {
         ],
       },
     })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     expect(await screen.findByText("Inherits all")).toBeInTheDocument()
   })
@@ -793,7 +841,7 @@ describe("WorkspacesPage", () => {
       context: organizationContext({ role: "member" }),
       workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
     })
-    renderPage(<WorkspacesPage />)
+    await renderPage(<WorkspacesPage />)
 
     await screen.findByText("Bravo")
     expect(screen.getAllByRole("button", { name: "Edit" })[0]).toBeDisabled()

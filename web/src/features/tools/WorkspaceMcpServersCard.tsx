@@ -9,9 +9,11 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { Popover } from "@/design-system/overlays/Popover"
 import { canManageWorkspace } from "@/features/organization/roles"
 import {
@@ -34,6 +36,7 @@ import {
 } from "@/shared/api/tools"
 import { formatDateTime } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 
 // The MCP servers this workspace has registered, which a request reaches by
 // naming their ids in `mcp_server_ids` (see docs/mcp.md).
@@ -154,6 +157,7 @@ export function WorkspaceMcpServersCard({
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
 
   const isPage = variant === "page"
+  const search = useListSearch()
 
   if (!selected) {
     return (
@@ -172,7 +176,11 @@ export function WorkspaceMcpServersCard({
     )
   }
 
-  const rows = query.data?.data ?? []
+  const allRows = query.data?.data ?? []
+  // Searched only as its own page: as a section of Tools the card shares the
+  // page with others, and one `?q=` cannot belong to two lists.
+  const term = isPage ? search.term : ""
+  const rows = allRows.filter((row) => matchesSearch(term, row.name, row.url))
 
   // Each opener clears the mutation it will render the error of. Without this a
   // refused write leaves its banner up, so reopening the form shows the last
@@ -361,6 +369,19 @@ export function WorkspaceMcpServersCard({
       <ErrorBanner error={query.error} />
       <ErrorBanner error={check.error} />
 
+      {isPage && (allRows.length > 0 || search.value) ? (
+        <Toolbar>
+          <SearchField
+            label="Search MCP servers"
+            placeholder="Search by name or URL"
+            value={search.value}
+            onChange={search.onChange}
+            resultCount={query.isPending ? undefined : rows.length}
+            className="w-full md:w-96"
+          />
+        </Toolbar>
+      ) : null}
+
       <TableScrollFrame className="otari-mcp-table">
         <DataTable
           ariaLabel={`MCP servers for ${selected.name}`}
@@ -371,7 +392,11 @@ export function WorkspaceMcpServersCard({
           // Deliberately asserts nothing about the workspace: an empty table
           // is also what a failed request leaves behind, and the banner above
           // is the only thing that knows which of the two happened.
-          emptyContent="No MCP server registered. Add one to let this workspace's requests name it by id."
+          emptyContent={
+            term
+              ? "No MCP servers match this search."
+              : "No MCP server registered. Add one to let this workspace's requests name it by id."
+          }
         />
       </TableScrollFrame>
 

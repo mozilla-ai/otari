@@ -32,11 +32,13 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 import {
@@ -75,6 +77,7 @@ import {
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 import { ExpiryFields } from "./ExpiryFields"
 import { FederationRulesDialog } from "./FederationRulesDialog"
 import { KeyActionsMenu } from "./KeyActionsMenu"
@@ -1234,14 +1237,42 @@ export function KeysPage() {
   // action is the stable landing spot nearest to where the operator was.
   const createButtonRef = useRef<HTMLButtonElement>(null)
 
-  const rows = keys.data ?? []
+  const ownerLabel = useCallback(
+    (apiKey: ApiKey) =>
+      isVirtualUser(apiKey.user_id)
+        ? "virtual"
+        : apiKey.user_id
+          ? (memberLabels.get(apiKey.user_id) ?? apiKey.user_id)
+          : "—",
+    [memberLabels],
+  )
+  const allKeys = keys.data ?? []
+  const search = useListSearch()
+  // The owner as its cell spells it, and only where the page shows one, so a
+  // key never matches on text its row does not carry.
+  const rows = allKeys.filter((apiKey) =>
+    matchesSearch(
+      search.term,
+      apiKey.key_name ?? "",
+      apiKey.key_prefix ?? "",
+      isDeploymentWide ? ownerLabel(apiKey) : "",
+    ),
+  )
   // An unresolved scope is a loading state: which surface the page reads, and
   // which affordances it draws, are both undecided until the organization
   // context answers, and a disabled query reports `isLoading` false.
   const loading = !scope.isReady || keys.isLoading
-  const editingKey = rows.find((apiKey) => apiKey.id === editing)
-  const showOnboarding = !loading && rows.length === 0
+  const editingKey = allKeys.find((apiKey) => apiKey.id === editing)
+  const showOnboarding = !loading && allKeys.length === 0
   const selection = useTableSelection()
+  // A new term starts the selection over. The table can hold "select all" as
+  // the value `all` rather than a list of keys, and that would otherwise
+  // expand onto whatever the next search shows, keys nobody selected.
+  const [selectedUnder, setSelectedUnder] = useState(search.term)
+  if (selectedUnder !== search.term) {
+    setSelectedUnder(search.term)
+    selection.clear()
+  }
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkError, setBulkError] = useState<unknown>(undefined)
   const [bulkPending, setBulkPending] = useState(false)
@@ -1298,6 +1329,11 @@ export function KeysPage() {
   const isReadOnly =
     !isDeploymentWide &&
     !canContributeToWorkspace(organizationContext, workspace?.role)
+  const noMatch = search.term
+    ? "No API keys match this search."
+    : isReadOnly
+      ? "No API keys yet. Ask your deployment operator to issue you one."
+      : "No API keys yet. Create one to authenticate a caller."
   // Organization owners and admins on their own keys, which are all this
   // surface lists to them, and the operator on any key in the organization.
   // The server enforces the same; this only keeps a member from being offered
@@ -1346,15 +1382,6 @@ export function KeysPage() {
     }
   }, [])
 
-  const ownerLabel = useCallback(
-    (apiKey: ApiKey) =>
-      isVirtualUser(apiKey.user_id)
-        ? "virtual"
-        : apiKey.user_id
-          ? (memberLabels.get(apiKey.user_id) ?? apiKey.user_id)
-          : "—",
-    [memberLabels],
-  )
   const renderActions = useCallback(
     (apiKey: ApiKey) => (
       <KeyActionsMenu
@@ -1748,6 +1775,23 @@ export function KeysPage() {
       {/* Suppress the table (and its own empty message) while the onboarding
           panel owns the empty state, so a fresh gateway shows one call to action,
           not a panel stacked over a redundant "no rows" table. */}
+      {showOnboarding ? null : (
+        <Toolbar className="pb-3">
+          <SearchField
+            label="Search API keys"
+            placeholder={
+              isDeploymentWide
+                ? "Search by name, prefix or owner"
+                : "Search by name or prefix"
+            }
+            value={search.value}
+            onChange={search.onChange}
+            resultCount={loading ? undefined : rows.length}
+            className="w-full md:w-96"
+          />
+        </Toolbar>
+      )}
+
       {showOnboarding ? null : layout === "mobile" ? (
         <section
           aria-label="API keys"
@@ -1783,6 +1827,9 @@ export function KeysPage() {
                 <Spinner size="sm" aria-hidden="true" /> Loading…
               </span>
             </EmptyMessage>
+          ) : null}
+          {!loading && rows.length === 0 ? (
+            <EmptyMessage>{noMatch}</EmptyMessage>
           ) : null}
           <ul className="flex flex-col">
             {rows.map((apiKey) => (
@@ -1845,14 +1892,16 @@ export function KeysPage() {
             rows={rows}
             getRowKey={getKeyRowKey}
             isLoading={loading}
-            emptyContent={
-              isReadOnly
-                ? "No API keys yet. Ask your deployment operator to issue you one."
-                : "No API keys yet. Create one to authenticate a caller."
-            }
+            emptyContent={noMatch}
             selectionMode={isReadOnly ? "none" : "multiple"}
             selectedKeys={selection.selectedKeys}
-            onSelectionChange={selection.onSelectionChange}
+            // "Select all" is taken as the keys on screen now, not the value
+            // `all`, which would also take in any key that appears later.
+            onSelectionChange={(keys) =>
+              selection.onSelectionChange(
+                keys === "all" ? new Set(selectableKeys) : keys,
+              )
+            }
           />
         </TableScrollFrame>
       )}

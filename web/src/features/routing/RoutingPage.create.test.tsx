@@ -209,6 +209,22 @@ describe("Creating a routing policy", () => {
     })
   })
 
+  it("ends a search once the policy is written, so the new one is on screen", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    const search = await screen.findByRole("searchbox", {
+      name: "Search routing policies",
+    })
+    await user.type(search, "auto")
+
+    await startCreate(user)
+    await fillFallback(user, "cheap")
+    await submitDialog(user)
+
+    await waitFor(() => expect(search).toHaveValue(""))
+  })
+
   it("writes exactly one unscoped policy for every caller", async () => {
     const { calls } = mockApi([], null, [], { members: MEMBERS })
     const user = userEvent.setup()

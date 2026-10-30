@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useParams, useSearch } from "@tanstack/react-router"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -71,6 +71,81 @@ describe("RoutingPage", () => {
     expect(within(backups).getAllByRole("listitem")).toHaveLength(1)
     expect(backups).toHaveTextContent("claude-haiku-4-5 · Anthropic")
     expect(within(fastRow).getByText("Every caller")).toBeInTheDocument()
+  })
+
+  it("narrows the policies by name or by a model they route to", async () => {
+    mockApi([
+      policy("fast", CHAIN),
+      policy("solo", { select: [{ default: "openai:gpt-5" }] }),
+    ])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("solo")
+    const search = screen.getByRole("searchbox", {
+      name: "Search routing policies",
+    })
+
+    // A backup is a model the policy routes to, so it finds the row too.
+    await user.type(search, "claude-haiku")
+    expect(await screen.findByText("1 match")).toBeInTheDocument()
+    expect(screen.getByText("fast")).toBeInTheDocument()
+    expect(screen.queryByText("solo")).not.toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No routing policies match this search."),
+    ).toBeInTheDocument()
+  })
+
+  it("finds a scoped policy by the user its Applies to column shows", async () => {
+    mockApi([
+      policy("cheap", CHAIN, { user_id: "u-bob" }),
+      policy("cheap", CHAIN, { user_id: "u-carol" }),
+    ])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("u-carol")
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search routing policies" }),
+      "u-bob",
+    )
+    await waitFor(() => expect(screen.queryByText("u-carol")).toBeNull())
+    expect(screen.getByText("u-bob")).toBeInTheDocument()
+  })
+
+  it("finds a policy by the provider name its cells print", async () => {
+    mockApi([
+      policy("fast", CHAIN),
+      policy("hosted", { select: [{ default: "bedrock:claude-sonnet" }] }),
+    ])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("hosted")
+
+    // The cell says "Amazon Bedrock"; the selector only says "bedrock".
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search routing policies" }),
+      "amazon",
+    )
+    await waitFor(() => expect(screen.queryByText("fast")).toBeNull())
+    expect(screen.getByText("hosted")).toBeInTheDocument()
+  })
+
+  it("finds a policy by the model a budget switches it to", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("auto")
+
+    // gpt-5-nano is only the target past 80% of the budget, not the default.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search routing policies" }),
+      "gpt-5-nano",
+    )
+    await waitFor(() => expect(screen.queryByText("fast")).toBeNull())
+    expect(screen.getByText("auto")).toBeInTheDocument()
   })
 
   it("says a policy has no backups rather than leaving the cell empty", async () => {

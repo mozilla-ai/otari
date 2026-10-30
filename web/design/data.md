@@ -194,6 +194,9 @@ TablePagination    the narrowed total, when the list pages
 - **The term lives in the URL** as `?q=`, through `useListSearch`
   (`shared/hooks/useListSearch.ts`). It survives a reload, Back and a shared link,
   a create or a delete does not clear it, and a change returns to the first page.
+  The exception is a page with no other sign that a create worked, where a new
+  row the search does not match would look like nothing happened: there,
+  making one ends the search (Workspaces, Routing, a workspace's Members).
 - **Search the whole collection, never the page on screen.** The endpoint does
   the searching (`performance.md`, "The server does the shaping"): a list paged
   by its endpoint passes `term` to the endpoint's `search` param, in the query

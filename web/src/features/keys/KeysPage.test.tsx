@@ -457,6 +457,164 @@ describe("KeysPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("narrows the keys by name or prefix, and says so when nothing matches", async () => {
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "prod-ingest", key_prefix: "gw-AbC" }),
+        apiKey({ id: "key-2", key_name: "staging-eval", key_prefix: "gw-Zz9" }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+    const search = await screen.findByRole("searchbox", {
+      name: "Search API keys",
+    })
+    await screen.findByText("prod-ingest")
+
+    await user.type(search, "PROD")
+    await waitFor(() =>
+      expect(screen.queryByText("staging-eval")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("prod-ingest")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("1 match")
+
+    await user.clear(search)
+    await user.type(search, "gw-zz")
+    expect(await screen.findByText("staging-eval")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByText("prod-ingest")).not.toBeInTheDocument(),
+    )
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No API keys match this search."),
+    ).toBeInTheDocument()
+    // An empty search is not an empty list: the onboarding panel stays away.
+    expect(screen.queryByText("No API keys yet")).not.toBeInTheDocument()
+  })
+
+  it("matches a key's owner as the Owner column spells it", async () => {
+    const member = "33333333-3333-3333-3333-333333333333"
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "named", user_id: member }),
+        apiKey({ id: "key-2", key_name: "raw", user_id: "ci-bot" }),
+      ],
+      users: [user({ user_id: member, alias: "alice@example.com" })],
+      members: [
+        organizationMember({
+          attribution_user_id: member,
+          full_name: "Alice Example",
+        }),
+      ],
+    })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+    const search = await screen.findByRole("searchbox", {
+      name: "Search API keys",
+    })
+    await screen.findByText("named")
+
+    await usr.type(search, "alice")
+    await waitFor(() =>
+      expect(screen.queryByText("raw")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("named")).toBeInTheDocument()
+
+    // An owner with no member behind it is shown, and found, by its id.
+    await usr.clear(search)
+    await usr.type(search, "ci-bot")
+    await waitFor(() =>
+      expect(screen.queryByText("named")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("raw")).toBeInTheDocument()
+  })
+
+  it("keeps a select-all to the keys on screen when it was made", async () => {
+    stubRegionWidth(1440)
+    const member = "33333333-3333-3333-3333-333333333333"
+    // The roster lands after the keys, so an owner match appears only then.
+    let release: () => void = () => {}
+    const roster = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "alice-prod", is_active: true }),
+        apiKey({
+          id: "key-2",
+          key_name: "ci",
+          user_id: member,
+          is_active: true,
+        }),
+      ],
+      members: [
+        organizationMember({
+          attribution_user_id: member,
+          full_name: "Alice Example",
+        }),
+      ],
+    })
+    const answer = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/organizations/me/members")) await roster
+      return answer(input, init)
+    })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+    await screen.findByText("alice-prod")
+    await usr.type(
+      screen.getByRole("searchbox", { name: "Search API keys" }),
+      "alice",
+    )
+    await waitFor(() => expect(screen.queryByText("ci")).toBeNull())
+    await usr.click(screen.getByRole("checkbox", { name: "Select all rows" }))
+
+    release()
+    // Alice's other key joins the list, but not the selection.
+    expect(await screen.findByText("ci")).toBeInTheDocument()
+    await usr.click(await screen.findByRole("button", { name: /^Disable/ }))
+    await waitFor(() => {
+      const patches = fetchMock.mock.calls.filter(
+        ([, init]) => init?.method === "PATCH",
+      )
+      expect(patches).toHaveLength(1)
+      expect(String(patches[0][0])).toContain("key-1")
+    })
+  })
+
+  it("starts the selection over when the search changes", async () => {
+    stubRegionWidth(1440)
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "prod-ingest", is_active: true }),
+        apiKey({ id: "key-2", key_name: "staging-eval", is_active: true }),
+      ],
+    })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+    await screen.findByText("prod-ingest")
+    const search = screen.getByRole("searchbox", { name: "Search API keys" })
+
+    // "Select all" under one search is not a selection of the next one's keys.
+    await usr.type(search, "prod")
+    await waitFor(() =>
+      expect(screen.queryByText("staging-eval")).not.toBeInTheDocument(),
+    )
+    await usr.click(screen.getByRole("checkbox", { name: "Select all rows" }))
+    expect(
+      await screen.findByRole("button", { name: /^Disable/ }),
+    ).toBeInTheDocument()
+
+    await usr.clear(search)
+    await usr.type(search, "staging")
+    expect(await screen.findByText("staging-eval")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Disable/ })).toBeNull(),
+    )
+  })
+
   it("lists key fingerprints and supports keys without stored suffixes", async () => {
     const tooltips = instantTooltips()
     mockApi({

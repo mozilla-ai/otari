@@ -62,7 +62,7 @@ function mockApi({
 
 // In a router, because the page links to Organization > Members & roles for a
 // caller who manages the organization.
-function renderPage() {
+function renderPage(url = "/members") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -72,7 +72,7 @@ function renderPage() {
         <WorkspaceMembersPage />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
-    { url: "/members" },
+    { url },
   )
 }
 
@@ -88,6 +88,133 @@ describe("WorkspaceMembersPage", () => {
 
     // The page is about the selected workspace, and says which one.
     expect(await screen.findByText("Members of Alpha")).toBeInTheDocument()
+  })
+
+  it("narrows the workspace roster by name, and says so when nobody matches", async () => {
+    mockApi({
+      members: [
+        workspaceMember({ user_id: USER }),
+        workspaceMember({ user_id: SECOND_USER }),
+      ],
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+        organizationMember({ user_id: SECOND_USER, full_name: "Blair Bell" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByText("Alex Avery")
+    const search = screen.getByRole("searchbox", { name: "Search members" })
+
+    await user.type(search, "BLAIR")
+    await waitFor(() =>
+      expect(screen.queryByText("Alex Avery")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("Blair Bell")).toBeInTheDocument()
+    expect(screen.getByText("1 match")).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, "nobody-here")
+    expect(
+      await screen.findByText("No members of Alpha match this search."),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText("This workspace has no members yet."),
+    ).not.toBeInTheDocument()
+  })
+
+  it("narrows the organization roster a member reads, by name or email", async () => {
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      orgMembers: [
+        organizationMember({
+          user_id: USER,
+          full_name: "Alex Avery",
+          email: "alex@example.com",
+        }),
+        organizationMember({
+          user_id: SECOND_USER,
+          full_name: "Blair Bell",
+          email: "blair@example.com",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    const roster = await screen.findByRole("grid", {
+      name: "Organization members",
+    })
+    await within(roster).findByText("Blair Bell")
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "blair@",
+    )
+    await waitFor(() =>
+      expect(within(roster).queryByText("Alex Avery")).toBeNull(),
+    )
+    expect(within(roster).getByText("Blair Bell")).toBeInTheDocument()
+
+    await user.clear(screen.getByRole("searchbox", { name: "Search members" }))
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "nobody-here",
+    )
+    expect(
+      await within(roster).findByText(
+        "No organization members match this search.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("states no count until the rosters it counts have answered", async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockApi({
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+      ],
+    })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes("/organizations/me/members")) await held
+      return answer(input, init)
+    })
+    await renderPage("/members?q=alex")
+
+    expect(
+      await screen.findByRole("searchbox", { name: "Search members" }),
+    ).toHaveValue("alex")
+    expect(screen.queryByText(/\bmatch(es)?\b/)).toBeNull()
+
+    release()
+    expect(await screen.findByText("1 match")).toBeInTheDocument()
+  })
+
+  it("counts a person once though both lists show them", async () => {
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      orgMembers: [
+        organizationMember({
+          user_id: USER,
+          full_name: "Alex Avery",
+          email: "alex@example.com",
+        }),
+        organizationMember({ user_id: SECOND_USER, full_name: "Blair Bell" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("grid", { name: "Organization members" })
+
+    // Alex is in the workspace and on the organization roster.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "alex",
+    )
+    expect(await screen.findByText("1 match")).toBeInTheDocument()
   })
 
   it("says so rather than showing an empty roster when there is no workspace", async () => {
@@ -348,6 +475,32 @@ describe("WorkspaceMembersPage", () => {
     expect(post?.url).toContain(
       `${API_ROOT}/workspaces/${ALPHA}/members/77777777-7777-7777-7777-777777777777?role=admin`,
     )
+  })
+
+  it("ends a search once a member is added, so they are on screen", async () => {
+    mockApi({
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+        organizationMember({
+          organization_member_id: "analyst-membership",
+          user_id: "77777777-7777-7777-7777-777777777777",
+          full_name: "Analyst",
+          role: "member",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByText("Alex Avery")
+    const search = screen.getByRole("searchbox", { name: "Search members" })
+    await user.type(search, "alex")
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    const dialog = await screen.findByRole("dialog")
+    await pickOption(user, "Organization member", "Analyst")
+    await user.click(within(dialog).getByRole("button", { name: "Add member" }))
+
+    await waitFor(() => expect(search).toHaveValue(""))
   })
 
   it("offers a non-manager the roster but none of its write controls", async () => {
