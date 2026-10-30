@@ -111,6 +111,7 @@ describe("WorkspaceMembersPage", () => {
       expect(screen.queryByText("Alex Avery")).not.toBeInTheDocument(),
     )
     expect(screen.getByText("Blair Bell")).toBeInTheDocument()
+    expect(screen.getByText("1 match")).toBeInTheDocument()
 
     await user.clear(search)
     await user.type(search, "nobody-here")
@@ -164,6 +165,30 @@ describe("WorkspaceMembersPage", () => {
         "No organization members match this search.",
       ),
     ).toBeInTheDocument()
+  })
+
+  it("counts a person once though both lists show them", async () => {
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      orgMembers: [
+        organizationMember({
+          user_id: USER,
+          full_name: "Alex Avery",
+          email: "alex@example.com",
+        }),
+        organizationMember({ user_id: SECOND_USER, full_name: "Blair Bell" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByRole("grid", { name: "Organization members" })
+
+    // Alex is in the workspace and on the organization roster.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "alex",
+    )
+    expect(await screen.findByText("1 match")).toBeInTheDocument()
   })
 
   it("says so rather than showing an empty roster when there is no workspace", async () => {
