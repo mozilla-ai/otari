@@ -418,8 +418,7 @@ the request to copy, sent to the gateway's pick or to a provider pinned by
 its selector. It is read-only; an organization's own rate is set on Providers,
 which an offering on one of that organization's keys links to. An offering the
 deployment supplies the credential for says so instead, because its rate is the
-deployment price list's rather than a tenant's. A metered rate that differs from the provider's
-list price is marked with the list price.
+deployment price list's rather than a tenant's.
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the
