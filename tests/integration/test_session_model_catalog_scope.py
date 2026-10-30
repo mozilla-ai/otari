@@ -880,7 +880,7 @@ def test_a_hosted_model_switched_on_unpriced_is_listed_for_every_caller_it_serve
     for who in ("alpha_member", "beta_member", "alpha_owner", "superuser", "beta_root"):
         listed = _listing_as(client, world, who)
         assert _LISTED_AS[unpriced] in listed, who
-        assert listed[_LISTED_AS[unpriced]]["pricing"] is None, who
+        assert "pricing" not in listed[_LISTED_AS[unpriced]], who
         # The roster is the deployment's whole say on the provider: the priced
         # model it switched off stays withheld.
         assert _LISTED_AS[_MISTRAL_MODEL] not in listed, who

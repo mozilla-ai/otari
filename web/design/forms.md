@@ -280,6 +280,9 @@ Pass `ariaLabel` when the visible label repeats across the page (one workspace l
 per guardrail, say). Keep the visible text inside it so speech input still reaches
 the control.
 
+A label that wraps keeps the box beside its first line: the box sits in a slot one
+body line tall. Do not re-align it from the call site.
+
 ## Buttons in a form
 
 One `primary` at the foot of the group it saves. See [actions.md](actions.md).

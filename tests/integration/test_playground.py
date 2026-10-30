@@ -42,6 +42,7 @@ from sqlalchemy.orm import Session
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.budgets import SCOPE_WORKSPACE, Budget, ScopedBudget
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
@@ -857,6 +858,30 @@ def test_a_completion_cannot_be_billed_to_a_workspace_that_is_not_the_caller_s(
     assert code == status.HTTP_404_NOT_FOUND
 
     assert db_session.query(UsageLog).count() == 0
+
+
+def test_a_completion_is_held_to_the_ceilings_of_the_caller_s_workspace(
+    client: TestClient,
+    world: _World,
+    db_session: Session,
+    _priced: None,
+) -> None:
+    """With no key to name a workspace, the session's own is what the ceilings resolve from, not the default."""
+    budget = Budget(max_budget=1.0)
+    db_session.add(budget)
+    db_session.flush()
+    db_session.add(
+        ScopedBudget(
+            scope_type=SCOPE_WORKSPACE,
+            scope_id=str(world.workspaces["alpha_one"]),
+            budget_id=budget.budget_id,
+            current_spend=1.0,
+        )
+    )
+    db_session.commit()
+
+    code, body = _chat(client, world, "member")
+    assert code == status.HTTP_403_FORBIDDEN, body
 
 
 @pytest.mark.parametrize("field", ["user", "safety_identifier"])

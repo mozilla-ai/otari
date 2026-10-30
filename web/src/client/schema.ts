@@ -2427,7 +2427,7 @@ export interface paths {
          *     request sends as `model` to let the gateway choose the provider: it tries the
          *     model's offerings best first and falls back down the list. An entry's price,
          *     token limits and capabilities are those of the offering tried first, at the
-         *     caller's own rate. A limit nobody knows is null.
+         *     caller's own rate. A value nobody knows is omitted rather than sent as null.
          *
          *     Aliases and routing policies are listed beside the models. An
          *     `instance:model` selector still pins a request to one provider, and
@@ -2516,6 +2516,8 @@ export interface paths {
         /**
          * Get Model
          * @description Get details for a specific model, by catalog id, alias or `instance:model` selector.
+         *
+         *     A value the gateway does not know is omitted rather than sent as null.
          */
         get: operations["models-get_model"];
         put?: never;
@@ -5388,8 +5390,8 @@ export interface paths {
          *     session and the spawning tool call, the subagent type, the task, the
          *     parent's model and the model the caller asked for, if any. The recommender
          *     this build binds picks one of the candidate models and the answer names it.
-         *     By default the deployment asks the decision model `agent_recommender_model`
-         *     names to choose among `agent_recommender_candidates` for Claude Code and
+         *     By default the deployment asks the subagent router an operator switched on
+         *     in the dashboard to choose among `agent_recommender_candidates` for Claude Code and
          *     among the request's own `candidates` for pi; a bootstrap may bind a
          *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
@@ -5415,7 +5417,7 @@ export interface paths {
         };
         /**
          * List Agent Recommenders
-         * @description List the subagent routers, and the configured decision model that answers while none is stored.
+         * @description List the subagent routers.
          */
         get: operations["agent-recommenders-list_agent_recommenders"];
         put?: never;
@@ -5445,7 +5447,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Agent Recommender
-         * @description Remove a subagent router and its key. With none left, the configured decision model answers again.
+         * @description Remove a subagent router and its key. With none left, no recommendation is served.
          */
         delete: operations["agent-recommenders-delete_agent_recommender"];
         options?: never;
@@ -7871,10 +7873,9 @@ export interface components {
         };
         /**
          * AgentRecommendersPublic
-         * @description Every stored subagent router, oldest first, and the configured decision model, where it resolves.
+         * @description Every stored subagent router, oldest first.
          */
         AgentRecommendersPublic: {
-            configured: components["schemas"]["ConfiguredRecommenderPublic"] | null;
             /** Data */
             data: components["schemas"]["AgentRecommenderPublic"][];
         };
@@ -9621,18 +9622,6 @@ export interface components {
              * @default false
              */
             shadowed: boolean;
-        };
-        /**
-         * ConfiguredRecommenderPublic
-         * @description The decision model ``agent_recommender_model`` names, which answers unpriced while no router is stored.
-         */
-        ConfiguredRecommenderPublic: {
-            /** Model */
-            model: string;
-            /** Provider */
-            provider: string;
-            /** Selector */
-            selector: string;
         };
         /** ContentReadListPublic */
         ContentReadListPublic: {
@@ -16201,6 +16190,17 @@ export interface components {
             rules: components["schemas"]["RateLimitRulePublic"][];
         };
         /**
+         * RecommendationRefusal
+         * @description The body of a recommendation request the gateway refuses.
+         */
+        RecommendationRefusal: {
+            /**
+             * Detail
+             * @description Why the request was refused.
+             */
+            detail: string;
+        };
+        /**
          * RecordedPool
          * @description How warm one pool is after the write.
          */
@@ -21798,6 +21798,11 @@ export interface operations {
                 "application/json": {
                     /** Message */
                     message: string;
+                    /**
+                     * Share Email
+                     * @description The signed-in account's email as the form showed it, to send with the message so the Otari team can reply. Refused when the caller has no email the team can reply to, or when it is not this one.
+                     */
+                    share_email?: string | null;
                 };
             };
         };
@@ -28871,6 +28876,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentModelRecommendation"];
+                };
+            };
+            /** @description No subagent router is switched on, or a master-key call names no `user`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecommendationRefusal"];
                 };
             };
             /** @description Validation Error */

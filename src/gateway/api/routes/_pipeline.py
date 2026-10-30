@@ -1136,6 +1136,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
     def inject_hints(
@@ -2395,7 +2396,7 @@ async def _compile_request_plan(
     config: GatewayConfig,
     model: str,
     user_id: str | None,
-    api_key_id: str | None,
+    api_key: APIKey | None,
     allowlist: list[str] | None,
     endpoint: str,
     started_at: float,
@@ -2418,6 +2419,7 @@ async def _compile_request_plan(
     else (a policy exists partly to keep its targets off the wire); the enumerated
     per-candidate reasons go to the activity log, which is a master-key surface.
     """
+    api_key_id = api_key.id if api_key is not None else None
     spec = resolve_effective_policy(config, model, user_id, workspace_id=workspace_id)
     if spec is None:
         return compile_catalog_plan(
@@ -2432,7 +2434,12 @@ async def _compile_request_plan(
 
     budget = BudgetState()
     if needs_budget_state(spec) and user_id is not None:
-        budget = await get_budget_state(db, user_id)
+        budget = await get_budget_state(
+            db,
+            user_id,
+            BudgetScopeRequest(api_key=api_key, workspace_id=workspace_id),
+            strategy=config.budget_strategy,
+        )
 
     # The signal is built here rather than by the endpoint because flattening the
     # prompt is not free on a long conversation, and only a policy with a router
@@ -2817,7 +2824,7 @@ async def resolve_request_context(
         config=config,
         model=model,
         user_id=user_id,
-        api_key_id=api_key_id,
+        api_key=api_key,
         allowlist=key_allowlist,
         endpoint=adapter.endpoint,
         started_at=started_at,
@@ -3047,7 +3054,9 @@ async def resolve_request_context(
                     estimated_tokens=estimated_tokens,
                     strategy=config.budget_strategy,
                     counts_toward_budget=not budget_exempt,
-                    scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance),
+                    scope=BudgetScopeRequest(
+                        api_key=api_key, provider_instance=gate_instance, workspace_id=workspace_id
+                    ),
                     organization_id=organization_id,
                     model_is_free=is_free_pricing(gate_pricing),
                     reservation_ttl_sec=config.budget_reservation_ttl_sec,
@@ -5534,11 +5543,13 @@ async def _eager_backend_stream(
     opened: _OpenedTools,
     stack: AsyncExitStack,
     tool_ctx: ToolContext,
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncIterator[ChunkT]:
     # The backends on ``stack`` were entered in ``open_stream``; this generator
     # closes them once the stream finishes or errors, and hands them the error
     # so a backend can abandon work nobody will read.
     kind = _ToolBackendKind.of(tool_ctx)
+    lock_in: dict[str, Any] = {"on_first_response": on_first_response} if on_first_response is not None else {}
     try:
         hinted = adapter.inject_hints(kwargs, opened.pool.purpose_hints(), header=tool_ctx.tools_header)
         async for event in adapter.open_tool_loop_stream(
@@ -5548,6 +5559,7 @@ async def _eager_backend_stream(
             **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
             **_container_loop_option(adapter, opened.sandbox),
+            **lock_in,
         ):
             yield event
     except BaseException as exc:
@@ -5561,11 +5573,15 @@ async def open_stream(
     adapter: FormatAdapter[Any, ChunkT],
     tool_ctx: ToolContext,
     call_kwargs: dict[str, Any],
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncIterator[ChunkT]:
     """Open the upstream stream for a single-attempt streaming request.
 
-    A provider stream is held for its first chunk (:func:`hold_for_first_chunk`),
-    so a provider failure before any output raises here.
+    A provider stream, and a tool loop with eagerly opened backends, is held for
+    its first chunk (:func:`hold_for_first_chunk`), so a provider failure before
+    any output raises here, where a routing walk can still fall over. A tool loop
+    calls ``on_first_response`` once its first provider round has ended, since the
+    gateway's tools may run before anything reaches the hold.
 
     The sandbox and web_search backends are opened eagerly (their
     ``__aenter__`` runs before this function returns) so a backend-unreachable
@@ -5589,7 +5605,9 @@ async def open_stream(
     except BaseException as exc:
         await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(tool_ctx))
         raise
-    return _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx)
+    return await hold_for_first_chunk(
+        _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx, on_first_response), tool_ctx.config
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -6195,7 +6213,12 @@ async def run_single_attempt_stream(
                 observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
                 try:
                     _mark_dispatched(ctx)
-                    return await open_stream(adapter=adapter, tool_ctx=served_tools, call_kwargs=attempt_kwargs)
+                    return await open_stream(
+                        adapter=adapter,
+                        tool_ctx=served_tools,
+                        call_kwargs=attempt_kwargs,
+                        on_first_response=mark_locked_in,
+                    )
                 except BaseException as exc:
                     if observation is not None:
                         observation.finish(unhealthy=_automatic_unhealthy(exc))
@@ -6277,6 +6300,7 @@ async def run_single_attempt_stream(
             failure_error_message(exc),
             failure_status_code(exc),
             attribution=_failure_attribution(ctx),
+            tool_tally=tool_ctx.tally,
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)

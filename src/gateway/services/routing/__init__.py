@@ -22,8 +22,7 @@ automatic fallbacks a catalog ID gets with no policy, and the traffic that used 
 subagent should start on. That is put to a decision model, not compiled from
 a policy, and the harness acts on the answer itself. The decision model it is
 put to is the stored subagent router switched on (``_agent_recommenders.py``
-holds the rows in memory, ``_agent_recommender_service.py`` administers them)
-or, with none stored, the one ``agent_recommender_model`` names.
+holds the rows in memory, ``_agent_recommender_service.py`` administers them).
 """
 
 from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
@@ -32,8 +31,6 @@ from gateway.services.routing._agent_recommender_rules import check_recommender
 from gateway.services.routing._agent_recommender_service import AgentRecommenderService
 from gateway.services.routing._agent_recommenders import (
     REFRESH_SECONDS,
-    ActiveRecommender,
-    RecommenderSource,
     StoredRecommender,
     active_agent_recommender,
     apply_agent_recommenders,
@@ -72,7 +69,14 @@ from gateway.services.routing.compiler import (
 )
 from gateway.services.routing.decide import RoutingSignal, decide_ordering, explain_router_ordering
 from gateway.services.routing.knn import KnnRoutingMemory, unpriced_router_candidates
-from gateway.services.routing.recommend import build_decision_request, candidates_for, recommendation_from_decision
+from gateway.services.routing.recommend import (
+    ROUTER_LABEL,
+    ROUTER_LABEL_MODEL,
+    ROUTER_LABEL_PROVIDER,
+    build_decision_request,
+    candidates_for,
+    recommendation_from_decision,
+)
 from gateway.types.budget_state import BudgetState
 
 __all__ = [
@@ -86,8 +90,10 @@ __all__ = [
     "NOOP_BACKEND",
     "PRIORITY_BACKEND",
     "REFRESH_SECONDS",
+    "ROUTER_LABEL",
+    "ROUTER_LABEL_MODEL",
+    "ROUTER_LABEL_PROVIDER",
     "WEIGHTED_BACKEND",
-    "ActiveRecommender",
     "AgentRecommenderService",
     "BudgetState",
     "AutomaticFallback",
@@ -97,7 +103,6 @@ __all__ = [
     "KnnRoutingMemory",
     "NoEligibleCandidatesError",
     "RecommenderPrice",
-    "RecommenderSource",
     "RouterBackend",
     "RouterOrdering",
     "RoutingContext",

@@ -1,22 +1,25 @@
 """Integration tests for POST /api/v1/routing/recommend.
 
-The upstream decision call is stubbed at ``request_decision`` where the core
-recommender adapter calls it, as the decisions tests do, so these cover the
-route's own job: who may ask, the question the core puts to the decision model,
+A free subagent router is stored before each test, and the upstream decision
+call is stubbed at ``request_decision`` where the core recommender adapter
+calls it, as the decisions tests do, so these cover the route's own job: who
+may ask, the question the core puts to the decision model,
 how the answer comes back, the request's strictness, and that the decision is
 billed to the caller like any other decision. A recommender an overlay binds in
 its place is covered by ``test_agent_model_recommender_rebound.py``.
 """
 
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, DEFAULT_AGENT_MODEL_CANDIDATES, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, DEFAULT_AGENT_MODEL_CANDIDATES
 from gateway.services.inference import DecisionProviderError
 from gateway.services.routing.recommend import RECOMMENDATION_QUESTION
+from gateway.services.secret_box import generate_secret_key
 
 PATH = f"{API_ROOT}/routing/recommend"
 
@@ -34,18 +37,18 @@ ANSWER: dict[str, Any] = {
 }
 
 
-@pytest.fixture
-def test_config(postgres_url: str) -> GatewayConfig:
-    """Override the shared config with a TypeSafe decisions provider for the recommender to ask."""
-    return GatewayConfig(
-        database_url=postgres_url,
-        master_key="test-master-key",
-        host="127.0.0.1",
-        port=8000,
-        auto_migrate=False,
-        require_pricing=False,
-        decision_providers={"typesafe": {"api_key": "ts-secret"}},
-    )
+@pytest.fixture(autouse=True)
+def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _router(_secret_key: None, client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A free TypeSafe router for the recommender to ask."""
+    body = {"provider": "typesafe", "model": "jev-latest", "api_key": "ts-secret"}
+    response = client.post(f"{API_ROOT}/routing/recommenders", json=body, headers=master_key_header)
+    assert response.status_code == 201, response.text
 
 
 def _spawn(**overrides: Any) -> dict[str, Any]:
@@ -231,7 +234,7 @@ def test_the_decision_is_recorded_as_the_callers_usage(
     )
     assert rows.status_code == 200, rows.text
     models = {row["model"] for row in rows.json()}
-    assert "jev-latest" in models
+    assert "subagent-router" in models
 
 
 def test_the_hold_is_sized_from_the_whole_question(client: TestClient, master_key_header: dict[str, str]) -> None:

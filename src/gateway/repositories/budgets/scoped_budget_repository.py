@@ -32,7 +32,11 @@ _ZERO = Decimal(0)
 
 @dataclass(frozen=True)
 class ApplicableCeiling:
-    """A ceiling on one of a request's scopes, with its provider, its budget's caps and when its window ends."""
+    """A ceiling on one of a request's scopes, with its provider, its budget's caps and when its window ends.
+
+    ``current_spend`` and ``reserved_spend`` are as read, for a routing policy's
+    budget conditions; enforcement re-reads them inside its conditional UPDATE.
+    """
 
     scoped_budget_id: str
     scope_type: ScopeType
@@ -42,6 +46,9 @@ class ApplicableCeiling:
     period_end: datetime | None
     token_limit: int | None
     request_limit: int | None
+    max_budget: Decimal | None
+    current_spend: Decimal
+    reserved_spend: Decimal
 
 
 @dataclass(frozen=True)
@@ -327,6 +334,9 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 ScopedBudget.period_end,
                 Budget.token_limit,
                 Budget.request_limit,
+                Budget.max_budget,
+                ScopedBudget.current_spend,
+                ScopedBudget.reserved_spend,
             )
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
             .where(_in_scopes(scopes))
@@ -342,6 +352,9 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 period_end=period_end,
                 token_limit=token_limit,
                 request_limit=request_limit,
+                max_budget=max_budget,
+                current_spend=current_spend,
+                reserved_spend=reserved_spend,
             )
             for (
                 scoped_budget_id,
@@ -352,6 +365,9 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 period_end,
                 token_limit,
                 request_limit,
+                max_budget,
+                current_spend,
+                reserved_spend,
             ) in result.all()
         ]
 

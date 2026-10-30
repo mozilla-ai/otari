@@ -1,5 +1,6 @@
 """Bounded, private forwarding and safe receiver failures."""
 
+import json
 import logging
 from collections.abc import Iterator
 
@@ -75,3 +76,21 @@ async def test_timeout_has_no_automatic_retry() -> None:
         await FeedbackService(transport=httpx.MockTransport(receive)).submit(FeedbackSubmission(message="Idea"))
     assert error.value.status_code == 503
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_only_the_named_fields_are_forwarded(gateway_logs: pytest.LogCaptureFixture) -> None:
+    calls: list[httpx.Request] = []
+
+    def receive(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(204)
+
+    service = FeedbackService(transport=httpx.MockTransport(receive))
+    await service.submit(FeedbackSubmission(message="Idea", share_email="private@example.com"), "private@example.com")
+    await service.submit(FeedbackSubmission(message="Idea", share_email="private@example.com"))
+    assert [json.loads(request.content) for request in calls] == [
+        {"message": "Idea", "reply_to": "private@example.com"},
+        {"message": "Idea"},
+    ]
+    assert "private@example.com" not in gateway_logs.text

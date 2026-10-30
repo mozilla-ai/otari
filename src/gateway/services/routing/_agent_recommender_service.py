@@ -8,7 +8,6 @@ them. Other workers pick them up on their next refresh.
 import uuid
 from decimal import Decimal
 
-from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.routing_exceptions import (
     AgentRecommenderNotFoundError,
@@ -24,9 +23,7 @@ from gateway.schemas.routing import (
     AgentRecommenderPublic,
     AgentRecommendersPublic,
     AgentRecommenderUpdate,
-    ConfiguredRecommenderPublic,
 )
-from gateway.services.inference import UnknownDecisionProviderError, resolve_decision_provider
 from gateway.services.providers import last4, normalize_api_base, public_api_base
 from gateway.services.routing._agent_recommender_price import RecommenderPrice
 from gateway.services.routing._agent_recommender_rules import check_recommender
@@ -56,24 +53,15 @@ def _public(row: AgentRecommender) -> AgentRecommenderPublic:
 class AgentRecommenderService:
     """Configure the deployment's subagent routers."""
 
-    def __init__(self, uow: UnitOfWork, recommenders: AgentRecommenderRepository, config: GatewayConfig) -> None:
+    def __init__(self, uow: UnitOfWork, recommenders: AgentRecommenderRepository) -> None:
         self._uow = uow
         self._rows = recommenders
-        self._config = config
 
     async def list(self) -> AgentRecommendersPublic:
-        """Every stored recommender, oldest first, and the configured decision model that answers with none stored."""
+        """Every stored recommender, oldest first."""
         async with self._uow:
             rows = await self._rows.list_all()
-        return AgentRecommendersPublic(data=[_public(row) for row in rows], configured=self._configured())
-
-    def _configured(self) -> ConfiguredRecommenderPublic | None:
-        selector = self._config.agent_recommender_model
-        try:
-            provider, model = resolve_decision_provider(self._config, selector)
-        except UnknownDecisionProviderError:
-            return None
-        return ConfiguredRecommenderPublic(selector=selector, provider=provider.provider, model=model)
+        return AgentRecommendersPublic(data=[_public(row) for row in rows])
 
     async def create(self, body: AgentRecommenderCreate) -> AgentRecommenderPublic:
         """Add a recommender, switched on when it is the first stored.
@@ -151,7 +139,7 @@ class AgentRecommenderService:
         return _public(row)
 
     async def delete(self, recommender_id: uuid.UUID) -> None:
-        """Remove a recommender and its key. With none left, the configured decision model answers again.
+        """Remove a recommender and its key. With none left, nothing answers.
 
         Raises:
             AgentRecommenderNotFoundError: no recommender has this id.

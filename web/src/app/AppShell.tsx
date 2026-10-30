@@ -58,6 +58,7 @@ import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
+import { useSessionCaller } from "@/shared/api/auth"
 import {
   isNoOrganizationError,
   useOrganizationContext,
@@ -547,6 +548,9 @@ function AppShellChrome() {
   const inOrganization = navContext === "organization"
   const inDeployment = navContext === "deployment"
   const organization = useOrganizationContext()
+  // The identity the gateway reads the shared email from, so the address the
+  // dialog offers is the one that is sent.
+  const caller = useSessionCaller()
   const { selected: selectedWorkspace } = useSelectedWorkspace()
   // True for the local operator, who owns the organization the gateway
   // provisioned for itself, and load-bearing for every account that signs in
@@ -1247,6 +1251,7 @@ function AppShellChrome() {
           // Below `md` the drawer has closed by then, and the menu row inside it
           // with it, so the control that reopens the drawer takes focus.
           returnFocusRef={isMobile ? toggleRef : feedbackTriggerRef}
+          email={caller?.email?.trim() || null}
         />
       ) : null}
     </div>

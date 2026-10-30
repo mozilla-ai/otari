@@ -69,6 +69,49 @@ test("desktop: the top bar opens it beside Documentation, a failure keeps the dr
   expect(payloads).toEqual([{ message: MESSAGE }, { message: MESSAGE }])
 })
 
+test("an account with an email is offered it, off, and the shortcut sends from the tick", async ({
+  page,
+}) => {
+  // The e2e operator has no email, so the context names one.
+  await page.route("**/api/v1/organizations/me", async (route) => {
+    const response = await route.fetch()
+    const context = await response.json()
+    await route.fulfill({
+      response,
+      json: {
+        ...context,
+        caller: { ...context.caller, email: "ada.lovelace@example.com" },
+      },
+    })
+  })
+  const payloads: unknown[] = []
+  await page.route("**/api/v1/feedback", async (route) => {
+    payloads.push(route.request().postDataJSON())
+    await route.fulfill({ status: 204 })
+  })
+  await login(page)
+  await page
+    .locator("header")
+    .getByRole("button", { name: "Feedback", exact: true })
+    .click()
+  const dialog = page.getByRole("dialog", { name: "Feedback", exact: true })
+  const share = dialog.getByRole("checkbox", {
+    name: "Share ada.lovelace@example.com so the team can reply",
+  })
+  await expect(share).not.toBeChecked()
+  await dialog.getByRole("textbox", { name: "Feedback" }).fill(MESSAGE)
+  // `force`: the input sits behind the box that paints it.
+  await share.check({ force: true })
+  await expect(share).toBeFocused()
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await expect(page.getByRole("dialog", { name: "Thank you!" })).toContainText(
+    "If we have a question, we’ll write to ada.lovelace@example.com.",
+  )
+  expect(payloads).toEqual([
+    { message: MESSAGE, share_email: "ada.lovelace@example.com" },
+  ])
+})
+
 test.describe("phone", () => {
   test.use({
     viewport: { width: 390, height: 844 },

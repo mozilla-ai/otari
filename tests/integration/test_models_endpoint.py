@@ -122,7 +122,7 @@ def test_list_models_exposes_cache_pricing(
     assert model["pricing"]["cache_read_price_per_million"] == 0.3
     assert model["pricing"]["cache_write_price_per_million"] == 3.75
 
-    # A model priced without cache rates reports them as null, not absent.
+    # An unset cache rate is absent, like every other value the response does not know.
     client.post(
         f"{API_ROOT}/pricing",
         json={"model_key": "openai:gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10.0},
@@ -130,8 +130,8 @@ def test_list_models_exposes_cache_pricing(
     )
     resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     gpt4 = next(m for m in resp.json()["data"] if m["id"] == "openai/gpt-4o")
-    assert gpt4["pricing"]["cache_read_price_per_million"] is None
-    assert gpt4["pricing"]["cache_write_price_per_million"] is None
+    assert "cache_read_price_per_million" not in gpt4["pricing"]
+    assert "cache_write_price_per_million" not in gpt4["pricing"]
 
 
 def test_get_model_found(
@@ -329,7 +329,13 @@ def _read(client: TestClient, path: str) -> Any:
 
 
 def _limits(model: dict[str, Any]) -> tuple[int | None, int | None]:
-    return model["context_window"], model["max_output_tokens"]
+    # The two model routes omit a limit they do not know.
+    return model.get("context_window"), model.get("max_output_tokens")
+
+
+def _offered_limits(offering: dict[str, Any]) -> tuple[int | None, int | None]:
+    # The grouped catalog sends null instead, so indexing holds it to that.
+    return offering["context_window"], offering["max_output_tokens"]
 
 
 def test_the_listing_carries_each_models_token_limits(limits_client: TestClient) -> None:
@@ -356,7 +362,7 @@ def test_the_listing_and_the_catalog_report_the_same_limits(limits_client: TestC
     offered: dict[str, set[tuple[int | None, int | None]]] = {}
     for summary in _read(limits_client, f"{API_ROOT}/catalog/models")["models"]:
         detail = _read(limits_client, f"{API_ROOT}/catalog/models/{summary['id']}")
-        offered[summary["id"]] = {_limits(offering) for offering in detail["offerings"]}
+        offered[summary["id"]] = {_offered_limits(offering) for offering in detail["offerings"]}
 
     shared = listed.keys() & offered.keys()
     assert {_QWEN_ID, _UNKNOWN_ID, "openai/gpt-4o"} <= shared
@@ -364,7 +370,8 @@ def test_the_listing_and_the_catalog_report_the_same_limits(limits_client: TestC
 
 
 def _capabilities(model: dict[str, Any]) -> tuple[Any, Any, Any]:
-    return model["name"], model["supported_parameters"], model["architecture"]
+    # The listing omits a capability it does not know, where the catalog sends null.
+    return model.get("name"), model.get("supported_parameters"), model.get("architecture")
 
 
 def test_the_listing_carries_each_models_capabilities(limits_client: TestClient) -> None:

@@ -18,6 +18,17 @@ def _make_openai_model(model_id: str, owned_by: str = "openai", created: int = 1
     return {"id": model_id, "object": "model", "created": created, "owned_by": owned_by}
 
 
+def _null_paths(value: Any, trail: str = "") -> list[str]:
+    """Every path inside ``value`` whose leaf is null, for a response that should carry none."""
+    if value is None:
+        return [trail or "."]
+    if isinstance(value, dict):
+        return [path for key, item in value.items() for path in _null_paths(item, f"{trail}.{key}")]
+    if isinstance(value, list):
+        return [path for index, item in enumerate(value) for path in _null_paths(item, f"{trail}[{index}]")]
+    return []
+
+
 @pytest.fixture
 def discovery_config(postgres_url: str) -> GatewayConfig:
     """Config with a fake openai provider and discovery enabled."""
@@ -259,11 +270,11 @@ def test_list_models_pricing_enrichment(
     assert gpt4["pricing"]["output_price_per_million"] == 10.0
 
 
-def test_list_models_no_pricing_returns_null(
+def test_list_models_omits_pricing_when_unpriced(
     discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """Discovered models without pricing have pricing=None."""
+    """A discovered model nothing prices has no ``pricing`` key."""
     from any_llm.types.model import Model
 
     fake_models = [Model(**_make_openai_model("gpt-4o-mini"))]
@@ -284,7 +295,65 @@ def test_list_models_no_pricing_returns_null(
     assert resp.status_code == 200
     models = resp.json()["data"]
     gpt4_mini = next(m for m in models if m["id"] == "openai/gpt-4o-mini")
-    assert gpt4_mini["pricing"] is None
+    assert "pricing" not in gpt4_mini
+
+
+def test_model_responses_omit_unknown_fields_rather_than_nulling_them(
+    discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """Neither model response carries a null, at any depth.
+
+    ``pricing_source`` is the one "we do not know" signal that stays, because
+    "none" is a known answer and is what says why ``pricing`` is absent.
+    """
+    from any_llm.types.model import Model
+
+    fake_models = [Model(**_make_openai_model("gpt-4o")), Model(**_make_openai_model("gpt-4o-mini"))]
+
+    priced = discovery_client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o",
+            "input_price_per_million": 2.5,
+            "output_price_per_million": 10.0,
+            # A tier overriding one rate alone, so the other three are unset and
+            # would reach the wire as nulls inside a list of objects.
+            "pricing_tiers": [{"min_input_tokens": 200000, "input_price_per_million": 5.0}],
+        },
+        headers=discovery_master_header,
+    )
+    assert priced.status_code == 200, priced.text
+
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            return_value=fake_models,
+        ),
+    ):
+        listing = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
+        detail = discovery_client.get(f"{API_ROOT}/models/openai:gpt-4o-mini", headers=discovery_master_header)
+
+    assert listing.status_code == 200, listing.text
+    assert _null_paths(listing.json()) == []
+
+    models = {model["id"]: model for model in listing.json()["data"]}
+    assert "pricing" not in models["openai/gpt-4o-mini"]
+    assert models["openai/gpt-4o-mini"]["pricing_source"] == "none"
+    # Omission reaches a nested model, so an unset cache rate is absent too.
+    assert "cache_read_price_per_million" not in models["openai/gpt-4o"]["pricing"]
+    # And a tier, which rides in a list, carries only the rate it overrides.
+    tier = models["openai/gpt-4o"]["pricing"]["pricing_tiers"][0]
+    assert set(tier) == {"min_input_tokens", "input_price_per_million"}
+
+    assert detail.status_code == 200, detail.text
+    assert _null_paths(detail.json()) == []
+    assert "pricing" not in detail.json()
 
 
 def test_list_models_pricing_only_still_appears(

@@ -771,6 +771,7 @@ async def mcp_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
     emit_activity: bool = False,
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
@@ -803,6 +804,7 @@ async def mcp_tool_loop_stream(
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            on_first_response=on_first_response,
         )
     ) as inner:
         async for chunk in inner:

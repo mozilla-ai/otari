@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, ERROR_CODE_HEADER
 from gateway.models.routing import RoutingConfig
-from gateway.services.routing import ActiveRecommender, RecommenderPrice, RecommenderSource, StoredRecommender
+from gateway.services.routing import RecommenderPrice, StoredRecommender
 
 from .conftest import build_test_client
 from .test_routing_policies import _awaited_model, _completion
@@ -225,7 +225,7 @@ def test_a_stored_subagent_router_is_refused_for_another_country(decisions_clien
     with (
         patch(
             "gateway.adapters.agent_model_recommender_adapter.active_agent_recommender",
-            return_value=ActiveRecommender(RecommenderSource.STORED, stored),
+            return_value=stored,
         ),
         patch("gateway.adapters.agent_model_recommender_adapter.request_decision", new=AsyncMock()) as mock,
     ):

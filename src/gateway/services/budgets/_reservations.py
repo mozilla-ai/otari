@@ -150,18 +150,33 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
     return user
 
 
-async def get_budget_state(db: AsyncSession, user_id: str) -> BudgetState:
-    """Read what a routing policy's budget conditions need, in one round trip.
+async def get_budget_state(
+    db: AsyncSession, user_id: str, scope: BudgetScopeRequest | None = None, *, strategy: str = "for_update"
+) -> BudgetState:
+    """Read what a routing policy's budget conditions need.
 
-    ``used_pct`` and ``remaining_usd`` are computed from ``spend + reserved``
-    against ``max_budget``, which is the same committed total the budget gate
-    enforces (:func:`reserve_budget`). Using bare ``spend`` instead would let a
-    tier-down rule read a smaller number than the gate does and fire late.
+    The numbers are those of the tightest budget gating the request: the user's
+    own and, given ``scope``, every spend ceiling on the scopes it bills to that
+    caps all providers. A provider-narrowed ceiling is left out, since which
+    provider the request reaches is what the policy is deciding. ``used_pct`` is
+    the highest of their percentages and ``remaining_usd`` the least headroom.
 
-    Both fields are ``None`` when the percentage is undefined: no user row, no
-    budget attached, or an unlimited budget (``max_budget is None``). An undefined
-    value never matches a condition, so the policy falls through to its default.
+    Each is computed from what is committed, recorded spend plus holds, which is
+    the total the budget gate enforces (:func:`reserve_budget`). Bare spend would
+    let a tier-down rule read a smaller number than the gate does and fire late.
+
+    A $0 cap is exhausted, as the gate treats it, so it reads as fully used.
+
+    Both fields are ``None`` when no finite budget applies, which includes a key
+    flagged ``exclude_from_budget`` and a ``disabled`` strategy: no budget gates
+    the request, so none may tier it down. An undefined value never matches a
+    condition, so the policy falls through to its default.
     """
+    if _normalize_strategy(strategy) == "disabled" or (
+        scope is not None and scope.api_key is not None and scope.api_key.exclude_from_budget
+    ):
+        return BudgetState()
+    caps: list[tuple[float, float]] = []
     row = (
         await db.execute(
             select(User.spend, User.reserved, Budget.max_budget)
@@ -169,18 +184,30 @@ async def get_budget_state(db: AsyncSession, user_id: str) -> BudgetState:
             .where(User.user_id == user_id, User.deleted_at.is_(None))
         )
     ).one_or_none()
-    if row is None:
-        return BudgetState()
-    spend, reserved, max_budget = row
-    if max_budget is None or max_budget <= 0:
+    if row is not None:
+        spend, reserved, max_budget = row
+        if max_budget is not None:
+            caps.append((float(spend or 0) + float(reserved or 0), float(max_budget)))
+
+    if scope is not None:
+        now = datetime.now(UTC)
+        for ceiling in await get_scope_ceilings(db, user_id=user_id, scope=scope):
+            if ceiling.provider_key_id is not None or ceiling.max_budget is None:
+                continue
+            # An ended window is rolled before the request reserves against it,
+            # which zeroes recorded spend and keeps the holds.
+            ended = ceiling.period_end is not None and now >= ceiling.period_end
+            recorded = ZERO if ended else ceiling.current_spend
+            caps.append((float(recorded + ceiling.reserved_spend), float(ceiling.max_budget)))
+
+    if not caps:
         return BudgetState()
     # Narrowed deliberately: ``BudgetState`` feeds a routing policy's percentage
     # and headroom conditions, which are thresholds rather than accounting, and
     # the compiler that reads them is float throughout.
-    committed = float(spend or 0) + float(reserved or 0)
     return BudgetState(
-        used_pct=committed / float(max_budget) * 100.0,
-        remaining_usd=max(0.0, float(max_budget) - committed),
+        used_pct=max(committed / cap * 100.0 if cap > 0 else 100.0 for committed, cap in caps),
+        remaining_usd=min(max(0.0, cap - committed) for committed, cap in caps),
     )
 
 

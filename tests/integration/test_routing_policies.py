@@ -18,6 +18,7 @@ The invariants worth defending, and why:
 import asyncio
 import json
 from collections.abc import Generator, Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -146,6 +147,13 @@ def routing_config(postgres_url: str) -> GatewayConfig:
                     "thrifty": {
                         "select": [
                             {"when": {"budget_used_pct": {"gte": 80}}, "target": "openai:gpt-5-nano"},
+                            {"default": "openai:gpt-5-mini"},
+                        ],
+                    },
+                    # Budget tier-down on dollars left rather than percentage used.
+                    "headroom": {
+                        "select": [
+                            {"when": {"budget_remaining_usd": {"lt": 1.0}}, "target": "openai:gpt-5-nano"},
                             {"default": "openai:gpt-5-mini"},
                         ],
                     },
@@ -674,6 +682,192 @@ def test_a_user_without_a_budget_uses_the_default_candidate(client: TestClient) 
 
     assert resp.status_code == 200
     assert _awaited_model(mock) == "openai:gpt-5-mini"
+
+
+def _key(
+    client: TestClient, *, exclude_from_budget: bool = False, **user: Any
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Create test-user and a key for it, returning the key's body and the headers that authenticate with it."""
+    _create_user(client, **user)
+    key = client.post(
+        f"{API_ROOT}/keys", json={"user_id": "test-user", "exclude_from_budget": exclude_from_budget}, headers=HEADERS
+    )
+    assert key.status_code == 200, key.text
+    return key.json(), {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+
+
+def _ceiling(
+    client: TestClient, scope_type: str, scope_id: str, *, max_budget: float = 1.0, provider_key_id: str | None = None
+) -> str:
+    ceiling = client.post(
+        f"{API_ROOT}/scoped-budgets",
+        json={
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "budget_id": _a_budget_id(client, HEADERS, max_budget=max_budget),
+            "provider_key_id": provider_key_id,
+        },
+        headers=HEADERS,
+    )
+    assert ceiling.status_code == 200, ceiling.text
+    return str(ceiling.json()["id"])
+
+
+def _key_with_ceiling(
+    client: TestClient, *, provider_key_id: str | None = None, exclude_from_budget: bool = False
+) -> tuple[str, dict[str, str]]:
+    """A key with a $1 ceiling of its own and no per-user budget, the shape a hosted organization gets."""
+    key, headers = _key(client, exclude_from_budget=exclude_from_budget)
+    return _ceiling(client, "api_token", key["id"], provider_key_id=provider_key_id), headers
+
+
+def _chat_with_key(client: TestClient, headers: dict[str, str], model: str) -> Any:
+    return client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": model, "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers,
+    )
+
+
+def _execute(config: GatewayConfig, sql: str, **params: Any) -> Any:
+    engine = create_engine(config.database_url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        result = conn.execute(text(sql), params)
+        value = result.scalar() if result.returns_rows else None
+        conn.commit()
+    engine.dispose()
+    return value
+
+
+def _set_ceiling_spend(
+    config: GatewayConfig, ceiling_id: str, spend: float, *, reserved: float = 0.0, period_end: datetime | None = None
+) -> None:
+    _execute(
+        config,
+        "UPDATE scoped_budgets SET current_spend = :spend, reserved_spend = :reserved, period_end = :period_end "
+        "WHERE id = :id",
+        spend=spend,
+        reserved=reserved,
+        period_end=period_end,
+        id=ceiling_id,
+    )
+
+
+def _set_user_spend(config: GatewayConfig, spend: float) -> None:
+    _execute(config, "UPDATE users SET spend = :spend WHERE user_id = 'test-user'", spend=spend)
+
+
+def _served_model(client: TestClient, headers: dict[str, str], policy: str) -> str:
+    """Send one completion at a policy and return the candidate it was served by."""
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("any"))) as mock:
+        resp = _chat_with_key(client, headers, policy)
+    assert resp.status_code == 200, resp.text
+    return _awaited_model(mock)
+
+
+def test_tier_down_reads_the_spend_ceiling_on_the_calling_key(
+    client: TestClient, routing_config: GatewayConfig
+) -> None:
+    ceiling_id, headers = _key_with_ceiling(client)
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat_with_key(client, headers, "thrifty").status_code == 200
+    assert _awaited_model(mock) == "openai:gpt-5-mini"
+
+    _set_ceiling_spend(routing_config, ceiling_id, 0.9)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-nano"))) as mock:
+        assert _chat_with_key(client, headers, "thrifty").status_code == 200
+    assert _awaited_model(mock) == "openai:gpt-5-nano"
+
+
+def test_a_provider_narrowed_ceiling_does_not_drive_tier_down(
+    client: TestClient, routing_config: GatewayConfig
+) -> None:
+    """Which provider the request reaches is what the policy decides, so a ceiling on one provider is not read."""
+    ceiling_id, headers = _key_with_ceiling(client, provider_key_id="openai")
+    _set_ceiling_spend(routing_config, ceiling_id, 0.9)
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat_with_key(client, headers, "thrifty").status_code == 200
+    assert _awaited_model(mock) == "openai:gpt-5-mini"
+
+
+def test_a_budget_exempt_key_is_not_tiered_down_by_its_ceiling(
+    client: TestClient, routing_config: GatewayConfig
+) -> None:
+    """No budget gates an exempt key, so none of them moves it off the default either."""
+    ceiling_id, headers = _key_with_ceiling(client, exclude_from_budget=True)
+    _set_ceiling_spend(routing_config, ceiling_id, 0.9)
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat_with_key(client, headers, "thrifty").status_code == 200
+    assert _awaited_model(mock) == "openai:gpt-5-mini"
+
+
+def test_a_disabled_budget_strategy_is_not_tiered_down(routing_config: GatewayConfig) -> None:
+    """With enforcement off no budget gates a request, so none of them moves it off the default either."""
+    for client in build_test_client(routing_config.model_copy(update={"budget_strategy": "disabled"})):
+        ceiling_id, headers = _key_with_ceiling(client)
+        _set_ceiling_spend(routing_config, ceiling_id, 0.9)
+
+        assert _served_model(client, headers, "thrifty") == "openai:gpt-5-mini"
+
+
+@pytest.mark.parametrize("scope_type", ["workspace", "organization"])
+def test_tier_down_reads_a_ceiling_on_the_key_s_workspace_and_organization(
+    client: TestClient, routing_config: GatewayConfig, scope_type: str
+) -> None:
+    _, headers = _key(client)
+    # The key was made without naming a workspace, so it bills to the default one.
+    scope_id = _a_workspace_id(client, HEADERS)
+    if scope_type == "organization":
+        scope_id = str(_execute(routing_config, "SELECT organization_id FROM workspace WHERE id = :id", id=scope_id))
+    ceiling_id = _ceiling(client, scope_type, scope_id)
+    assert _served_model(client, headers, "thrifty") == "openai:gpt-5-mini"
+
+    _set_ceiling_spend(routing_config, ceiling_id, 0.9)
+    assert _served_model(client, headers, "thrifty") == "openai:gpt-5-nano"
+
+
+@pytest.mark.parametrize(("spend", "reserved", "served"), [(0.9, 0.0, "gpt-5-mini"), (0.0, 0.9, "gpt-5-nano")])
+def test_a_ceiling_whose_window_ended_is_read_as_rolled(
+    client: TestClient, routing_config: GatewayConfig, spend: float, reserved: float, served: str
+) -> None:
+    """The reservation rolls an ended window before it holds, zeroing recorded spend and keeping the holds."""
+    ceiling_id, headers = _key_with_ceiling(client)
+    _set_ceiling_spend(
+        routing_config, ceiling_id, spend, reserved=reserved, period_end=datetime.now(UTC) - timedelta(hours=1)
+    )
+
+    assert _served_model(client, headers, "thrifty") == f"openai:{served}"
+
+
+@pytest.mark.parametrize(("user_spend", "ceiling_spend"), [(8.5, 0.5), (5.0, 0.85)])
+def test_the_highest_percentage_of_the_budgets_gating_a_request_is_read(
+    client: TestClient, routing_config: GatewayConfig, user_spend: float, ceiling_spend: float
+) -> None:
+    """A $10 user budget beside a $1 key ceiling: whichever is past 80% tiers the request down."""
+    key, headers = _key(client, budget_id=_a_budget_id(client, HEADERS, max_budget=10.0))
+    ceiling_id = _ceiling(client, "api_token", key["id"])
+    _set_user_spend(routing_config, user_spend)
+    _set_ceiling_spend(routing_config, ceiling_id, ceiling_spend)
+
+    assert _served_model(client, headers, "thrifty") == "openai:gpt-5-nano"
+
+
+@pytest.mark.parametrize(("user_spend", "ceiling_spend"), [(9.5, 50.0), (5.0, 99.5)])
+def test_the_least_headroom_of_the_budgets_gating_a_request_is_read(
+    client: TestClient, routing_config: GatewayConfig, user_spend: float, ceiling_spend: float
+) -> None:
+    """A $10 user budget beside a $100 key ceiling: whichever has under $1 left tiers the request down."""
+    key, headers = _key(client, budget_id=_a_budget_id(client, HEADERS, max_budget=10.0))
+    ceiling_id = _ceiling(client, "api_token", key["id"], max_budget=100.0)
+    assert _served_model(client, headers, "headroom") == "openai:gpt-5-mini"
+
+    _set_user_spend(routing_config, user_spend)
+    _set_ceiling_spend(routing_config, ceiling_id, ceiling_spend)
+
+    assert _served_model(client, headers, "headroom") == "openai:gpt-5-nano"
 
 
 # ---------------------------------------------------------------------------
@@ -1443,7 +1637,7 @@ def test_a_dynamic_stored_policy_reports_no_single_price(client: TestClient) -> 
 
     resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     entries = {model["id"]: model for model in resp.json()["data"]}
-    assert entries["listed-dynamic"]["pricing"] is None
+    assert "pricing" not in entries["listed-dynamic"]
     # Reuses the existing field rather than inventing a second way to say it.
     assert entries["listed-dynamic"]["pricing_source"] == "dynamic"
 

@@ -862,9 +862,12 @@ class _MessagesAdapter:
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, emit_native_mcp = _split_client_betas(_with_upstream_user(kwargs))
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
         if use_budget is not None:

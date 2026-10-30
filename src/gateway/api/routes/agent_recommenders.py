@@ -40,7 +40,7 @@ SURFACE = Surface("agent_recommenders")
 
 @router.get("")
 async def list_agent_recommenders(service: AgentRecommenderServiceDep) -> AgentRecommendersPublic:
-    """List the subagent routers, and the configured decision model that answers while none is stored."""
+    """List the subagent routers."""
     return await service.list()
 
 
@@ -70,5 +70,5 @@ async def update_agent_recommender(
 
 @router.delete("/{recommender_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent_recommender(service: AgentRecommenderServiceDep, recommender_id: uuid.UUID) -> None:
-    """Remove a subagent router and its key. With none left, the configured decision model answers again."""
+    """Remove a subagent router and its key. With none left, no recommendation is served."""
     await service.delete(recommender_id)

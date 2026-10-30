@@ -79,8 +79,13 @@ conditions are:
 - `key_id`
 
 All conditions in one `when` block must match. Numeric comparisons use exactly
-one of `gt`, `gte`, `lt`, or `lte`. A budget condition does not match a
-caller with no finite budget.
+one of `gt`, `gte`, `lt`, or `lte`. A budget condition reads the tightest
+budget gating the request: the user's own budget, or a spend ceiling on the
+calling API key, its workspace, its member or its organization that caps every
+provider. A ceiling narrowed to one provider is not read, because which provider
+serves the request is what the policy decides. A $0 budget reads as fully used.
+A budget condition does not match a caller with no finite budget, a key excluded
+from budget enforcement, or any request while `budget_strategy` is `disabled`.
 
 In a policy that can fall over, each candidate gets one upstream call unless a
 retry count is configured, so a throttled provider hands over to the next
@@ -276,7 +281,8 @@ nothing else is dispatched. See
 ### Subagent routers
 
 Which decision model answers is set on the **Subagent router** page of the
-deployment view (`/api/v1/routing/recommenders`, operator-only). A router is a
+deployment view (`/api/v1/routing/recommenders`, operator-only), and nowhere
+else: `config.yml` has no setting for it. A router is a
 decision provider (TypeSafe, OpenRouter or a llama.cpp server), a model, an
 optional API base, a key stored encrypted under `OTARI_SECRET_KEY`, and the
 price per million input and output tokens the caller is charged. Several may
@@ -291,11 +297,10 @@ the router's own provider or model, and that label is what an API key's
 allow-list has to admit. A router that does
 not answer within 2.5 seconds fails the call, uncharged, so the otari-router
 plugin can fall back in time. An operator who wants a margin on the decision
-model's own price puts it in the rates.
+model's own price puts it in the rates, and one who wants recommendations
+free, from a local model for example, sets both rates to 0.
 
-With no router stored, the decision model `agent_recommender_model` names in
-`config.yml` answers, priced from the deployment's own `pricing` rows or not at
-all. With routers stored and every one switched off, nothing answers and the
+With no router stored, or every one switched off, nothing answers and the
 route refuses with 400. A write reaches its own gateway worker at once and
 every other worker or replica within 30 seconds.
 
@@ -368,7 +373,7 @@ without reading the usage log:
 | `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
 | `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
 | `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening or its first chunk, since the headers go out then. |
-| `Server-Timing` | The same duration split into Otari's time and the provider's, in [W3C Server Timing](https://www.w3.org/TR/server-timing/) form: `otari;dur=4.2;desc="Otari before the provider", upstream;dur=812.5;desc="Provider until its answer or first chunk", total;dur=816.7;desc="Otari and the provider"`. `otari` runs until the first candidate is sent: the budget hold, routing, rate limits and preparing the call. `upstream` runs from there to the answer, failed candidates included, or for a stream to its first chunk, or to the end of the first-chunk hold when the provider is slower. Gateway tools that run between provider calls, such as web search or code execution, count toward `upstream`. A stream that uses gateway tools opens before its first provider call answers, so for one of those `upstream` and `total` end when the stream opens, as `Otari-Response-Duration-Ms` does. Durations are milliseconds to a tenth. |
+| `Server-Timing` | The same duration split into Otari's time and the provider's, in [W3C Server Timing](https://www.w3.org/TR/server-timing/) form: `otari;dur=4.2;desc="Otari before the provider", upstream;dur=812.5;desc="Provider until its answer or first chunk", total;dur=816.7;desc="Otari and the provider"`. `otari` runs until the first candidate is sent: the budget hold, routing, rate limits and preparing the call. `upstream` runs from there to the answer, failed candidates included, or for a stream to its first chunk, or to the end of the first-chunk hold when the provider is slower. Gateway tools that run between provider calls, such as web search or code execution, count toward `upstream`. A stream whose only gateway tools are MCP servers opens before its first provider call answers, so for one of those `upstream` and `total` end when the stream opens, as `Otari-Response-Duration-Ms` does. Durations are milliseconds to a tenth. |
 
 A request naming a model or an alias reports `1` and `false`. Streaming responses
 carry the same values: failover happens before the stream opens, so the serving

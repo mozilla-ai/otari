@@ -9,7 +9,7 @@ request. The pure decision is in ``tests/unit/test_candidate_tools.py``.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -117,6 +117,19 @@ def _web_tools(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig) -> N
 def _unavailable() -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     return httpx.HTTPStatusError("503", request=request, response=httpx.Response(503, request=request))
+
+
+def _billing_exhausted() -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return httpx.HTTPStatusError("402", request=request, response=httpx.Response(402, request=request))
+
+
+async def _failing_events(after_round: Callable[[], None] | None = None) -> AsyncIterator[MessageStreamEvent]:
+    """A tool-loop stream whose provider answers 402 before any event, after a hidden tool round if ``after_round``."""
+    if after_round is not None:
+        after_round()
+    raise _billing_exhausted()
+    yield  # pragma: no cover  (makes this an async generator)
 
 
 def _reply(text: str, content: list[Any] | None = None, stop_reason: str = "end_turn") -> MessageResponse:
@@ -253,6 +266,8 @@ def _post_messages(
     *,
     provider_fails: bool = False,
     loop_fails: bool = False,
+    loop_stream_fails: bool = False,
+    loop_stream_fails_after_round: bool = False,
     run_loop_for: str | None = None,
 ) -> tuple[Any, _Seen]:
     """POST ``body`` to Messages with the providers, loops and backends faked.
@@ -280,6 +295,10 @@ def _post_messages(
         *, completion_kwargs: Any, pool: Any, max_iterations: int, **extra: Any
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.loop_calls.append((completion_kwargs, extra))
+        if loop_stream_fails and len(seen.loop_calls) == 1:
+            return _failing_events()
+        if loop_stream_fails_after_round and len(seen.loop_calls) == 1:
+            return _failing_events(extra["on_first_response"])
         return _events("via-otari")
 
     rounds: list[dict[str, Any]] = []
@@ -518,6 +537,37 @@ def test_otari_runs_otaris_tool_on_every_candidate(
     loop_kwargs, loop_extra = seen.loop_calls[0]
     assert seen.tool_types(loop_kwargs) == set()
     assert loop_extra.get("native_tools") == frozenset({_NAMES[tool]})
+
+
+def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A streamed tool loop whose provider fails before any output falls over, as a plain stream does."""
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, WEB_SEARCH_HEADER: "otari"},
+        _messages_body("claude-then-vertex", _SEARCH, stream=True),
+        loop_stream_fails=True,
+    )
+
+    assert response.status_code == 200, response.text
+    assert "via-otari" in response.text
+    assert len(seen.loop_calls) == 2, "the walk must have tried both candidates' tool loops"
+
+
+def test_a_streamed_loop_that_ran_a_round_does_not_fall_over(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A failure after the first round stays on its candidate, so the next one does not run the tools again."""
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, WEB_SEARCH_HEADER: "otari"},
+        _messages_body("claude-then-vertex", _SEARCH, stream=True),
+        loop_stream_fails_after_round=True,
+    )
+
+    assert response.status_code >= 400, response.text
+    assert len(seen.loop_calls) == 1
 
 
 @pytest.mark.parametrize("tool", ["search", "fetch"])
