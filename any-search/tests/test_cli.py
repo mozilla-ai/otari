@@ -130,6 +130,13 @@ def test_describe_says_when_the_key_and_the_query_travel_in_the_url(capsys: pyte
     assert "The key travels" not in _describe("exa", capsys)
 
 
+def test_describe_says_the_query_travels_in_the_url_without_the_key(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("serply", capsys)
+    assert "API key: required, from SERPLY_API_KEY" in out
+    assert "The query travels in the request URL." in out
+    assert "The key travels" not in out
+
+
 def test_describe_refuses_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         main(["--describe", "nope"])

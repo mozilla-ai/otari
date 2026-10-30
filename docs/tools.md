@@ -1009,5 +1009,14 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what
   your plan costs you. A search returns at most 10 results, the Startup plan's
   limit, whatever the plan, and its hits carry a snippet but no page text.
+- **Serply** (`serply`) needs an API key, read from the tool's `api_key`, such as
+  `${SERPLY_API_KEY}`. Serply returns Google's results; it takes the key in a
+  header and the query in the request URL, which Otari keeps out of its logs. It
+  reports no cost, so a search is billed at the tool's rate,
+  `serply:<search-tool-name>`. Serply's [pricing](https://serply.io/pricing), read
+  2026-10-15, is prepaid credits, one per search not served from its cache, from
+  $2.00 per 1,000 (2,500 for $5) down to $0.75 per 1,000 in the largest packs; a
+  new account gets 2,500 credits for its first 30 days. A search returns at most
+  10 results, and its hits carry a snippet but no page text.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate.
