@@ -50,8 +50,7 @@ export function SearchField({
   /**
    * How many rows the caller's search found, shown beside the field while there
    * is a term and announced politely once it changes. The caller counts; the
-   * field only reports it. The region is rendered empty without a term, because
-   * a live region added at the moment it speaks is not reliably announced.
+   * field only reports it.
    */
   resultCount?: number
   className?: string
@@ -109,13 +108,13 @@ export function SearchField({
   return (
     <div className={`flex items-center gap-3 ${className}`}>
       {field}
-      {resultCount === undefined ? null : (
-        <span role="status" className="shrink-0 text-caption">
-          {value.trim() === ""
-            ? ""
-            : `${formatNumber(resultCount)} ${resultCount === 1 ? "match" : "matches"}`}
-        </span>
-      )}
+      {/* Mounted before it speaks, even with no count yet: a live region added
+          with its text already in it is not reliably announced. */}
+      <span role="status" className="shrink-0 text-caption">
+        {resultCount === undefined || value.trim() === ""
+          ? ""
+          : `${formatNumber(resultCount)} ${resultCount === 1 ? "match" : "matches"}`}
+      </span>
     </div>
   )
 }

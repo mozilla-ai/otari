@@ -236,8 +236,21 @@ describe("SearchField resultCount", () => {
     expect(input).toHaveFocus()
   })
 
-  it("renders no region when the caller does not count", () => {
-    render(<SearchField label="Search" value="gpt" onChange={() => {}} />)
-    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  it("keeps an empty region mounted before a count arrives", () => {
+    const { rerender } = render(
+      <SearchField label="Search" value="gpt" onChange={() => {}} />,
+    )
+    const region = screen.getByRole("status")
+    expect(region).toHaveTextContent("")
+    rerender(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={2}
+      />,
+    )
+    expect(screen.getByRole("status")).toBe(region)
+    expect(region).toHaveTextContent("2 matches")
   })
 })
