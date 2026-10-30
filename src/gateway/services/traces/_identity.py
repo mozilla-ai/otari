@@ -44,6 +44,13 @@ _HARNESS_PRODUCTS: Mapping[str, str] = {"claude-cli": "claude-code"}
 
 _MAX_KEY_LENGTH = 512
 
+# An exporter's session id is its harness's own (Claude Code's ``session.id`` is the
+# ``x-claude-code-session-id`` it routes with, and ``otari hook`` reports under the
+# id its harness hands it), so the two hash alike: a session routed through the
+# gateway and the spans exported for it land on one trace. A client's chosen key
+# stays apart.
+_NAMESPACES: Mapping[str, str] = {"otlp": "harness"}
+
 
 @dataclass(frozen=True)
 class SessionRef:
@@ -55,7 +62,7 @@ class SessionRef:
     def trace_id(self, workspace_id: uuid.UUID, user_id: str | None, api_key_id: str | None = None) -> str:
         """The session's trace id, scoped to the workspace and the user, or to the key where it has no user."""
         owner = user_id if user_id is not None else f"key:{api_key_id or ''}"
-        material = "\x00".join((str(workspace_id), owner, self.source, self.key))
+        material = "\x00".join((str(workspace_id), owner, _NAMESPACES.get(self.source, self.source), self.key))
         return "s-" + hashlib.sha256(material.encode()).hexdigest()[:40]
 
     @property

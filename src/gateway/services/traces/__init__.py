@@ -24,6 +24,7 @@ from gateway.services.traces._otlp import (
 )
 from gateway.services.traces._retention import run_trace_retention
 from gateway.services.traces._service import TraceService
+from gateway.services.traces._turn_content import TurnContent, read_turn_content
 from gateway.services.traces._turns import AnsweredCall, TurnFacts, read_turn
 from gateway.services.traces._writer import TraceWriter
 
@@ -44,6 +45,7 @@ __all__ = [
     "TraceMembershipListener",
     "TraceService",
     "TraceWriter",
+    "TurnContent",
     "TurnFacts",
     "harness_of",
     "identifier_or_none",
@@ -53,6 +55,7 @@ __all__ = [
     "project_otlp_spans",
     "read_context",
     "read_turn",
+    "read_turn_content",
     "record_otlp_export",
     "record_priced_requests",
     "resolve_session",

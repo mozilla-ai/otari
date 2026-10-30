@@ -20928,7 +20928,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.",
+            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, tool.output), only where the workspace keeps content, the client sent it or Otari ran the tool that produced it, and the reader may open it. Empty otherwise.",
             "title": "Content",
             "type": "object"
           },
@@ -21944,10 +21944,16 @@
             "description": "Days after it started that a session is deleted, however active it still is.",
             "title": "Session Max Age Days",
             "type": "integer"
+          },
+          "tool_output": {
+            "description": "Whether content also keeps what each tool returned, on a request routed through the gateway. Never true where content_available is false.",
+            "title": "Tool Output",
+            "type": "boolean"
           }
         },
         "required": [
           "content_available",
+          "tool_output",
           "platform_break_glass",
           "retention_days",
           "session_max_age_days"

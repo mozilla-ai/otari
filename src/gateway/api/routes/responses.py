@@ -82,7 +82,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.services.traces import read_context, read_turn
+from gateway.services.traces import read_context, read_turn, read_turn_content
 from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -524,6 +524,7 @@ async def create_response(
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=resolved_tags(tags_header, request_body.metadata),
             turn=read_turn("responses", request_body.input),
+            turn_content=lambda: read_turn_content("responses", request_body.input),
             context=lambda: read_context(
                 "responses",
                 request_body.input,

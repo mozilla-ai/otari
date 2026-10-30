@@ -168,6 +168,7 @@ _SETTING_NAMES = frozenset(
         "trace_content_kms_key_id",
         "trace_content_kms_previous_key_ids",
         "trace_content_kms_region",
+        "trace_content_tool_output",
         "trace_flush_interval_s",
         "trace_flush_max_spans",
         "trace_max_spans_per_request",

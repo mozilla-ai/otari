@@ -13,7 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
 from gateway.container import Container
-from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    TRACE_CONTENT_HEADER,
+    TRACE_CONTENT_KEEP,
+    X_API_KEY_HEADER,
+    GatewayConfig,
+)
 from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db, release_session
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
@@ -1984,6 +1991,35 @@ async def workspace_keeps_trace_content(
         logger.warning("Could not read whether a workspace keeps trace content (%s)", describe_database_error(exc))
         return False
     return keeps
+
+
+async def routed_trace_content_generation(
+    request: Request, config: GatewayConfig, workspace_id: uuid.UUID, user_id: str | None
+) -> int | None:
+    """The content generation a routed request's content is captured on, or None when it keeps none.
+
+    The request asks for it with ``Otari-Trace-Content: keep``, and then the rule an
+    OTLP export is held to applies: the deployment can seal content, and the
+    workspace keeps it for this member, read after the generation so a workspace
+    that turns content off meanwhile keeps nothing. Read on a session of its own,
+    so a failed read keeps no content and leaves the request's session untouched.
+    """
+    if not config.trace_content_enabled:
+        return None
+    if request.headers.get(TRACE_CONTENT_HEADER, "").strip().lower() != TRACE_CONTENT_KEEP:
+        return None
+    content: SpanContent | None = getattr(request.app.state, "trace_content", None)
+    if content is None or not content.sealing:
+        return None
+    try:
+        async with create_unit_of_work_with_session() as (db, uow):
+            generation = await build_trace_service(uow, content, NoSessionOwners()).content_generation(workspace_id)
+            if not await workspace_keeps_trace_content(db, config, workspace_id, user_id):
+                return None
+    except DATABASE_ERRORS as exc:
+        logger.warning("Could not read a workspace's trace content generation (%s)", describe_database_error(exc))
+        return None
+    return generation
 
 
 def get_trace_service(

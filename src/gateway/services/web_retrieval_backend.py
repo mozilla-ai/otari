@@ -324,16 +324,34 @@ class WebRetrievalBackend:
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
-            self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=False)
+            self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=False, arguments=arguments)
             raise
         if self._tally is not None:
             self._tally.record_result(WEB_SEARCH_TOOL_NAME, result, deployment_paid=not self._on_credential)
-        self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=not is_tool_error(result))
+        self._record_span(
+            WEB_SEARCH_TOOL_NAME,
+            "otari_web_search",
+            started,
+            ok=not is_tool_error(result),
+            arguments=arguments,
+            result=result,
+        )
         return result
 
-    def _record_span(self, tool_name: str, tool_type: str, started: datetime, *, ok: bool) -> None:
+    def _record_span(
+        self,
+        tool_name: str,
+        tool_type: str,
+        started: datetime,
+        *,
+        ok: bool,
+        arguments: dict[str, Any],
+        result: str | None = None,
+    ) -> None:
         if self._trace is not None:
-            self._trace.record_tool_call(tool_name=tool_name, tool_type=tool_type, started=started, ok=ok)
+            self._trace.record_tool_call(
+                tool_name=tool_name, tool_type=tool_type, started=started, ok=ok, arguments=arguments, result=result
+            )
 
     async def _search_tool(self, arguments: dict[str, Any]) -> str:
         if self._client is None:

@@ -56,6 +56,7 @@ function policy(
 ): TraceContentPolicy {
   return {
     content_available: true,
+    tool_output: false,
     platform_break_glass: false,
     retention_days: 30,
     session_max_age_days: 90,
@@ -115,6 +116,26 @@ describe("WorkspaceTraceContent", () => {
         name: "Keep what agent sessions were about",
       }),
     ).not.toBeChecked()
+  })
+
+  it("says tool output is kept only where the deployment keeps it", async () => {
+    mockApi()
+    const { unmount } = await renderToggle(
+      <WorkspaceTraceContent workspace={workspace()} />,
+    )
+    expect(
+      screen.getByText(/It does not keep what tools return/),
+    ).toBeInTheDocument()
+    unmount()
+
+    await renderToggle(
+      <WorkspaceTraceContent workspace={workspace()} />,
+      true,
+      { tool_output: true },
+    )
+    expect(
+      screen.getByText(/it also keeps what each tool returned/),
+    ).toBeInTheDocument()
   })
 
   it("asks before turning it on, then turns it on", async () => {

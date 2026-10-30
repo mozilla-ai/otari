@@ -90,6 +90,25 @@ export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Conversation-Id: bug-fix-1234\nOtari-Tag
 It takes the place of Claude Code's own session id for grouping. See
 [Sessions from your own agent](traces.md#sessions-from-your-own-agent).
 
+A routed session can also keep what it was about: the prompt that opened each
+turn and each tool call's arguments, and what each tool returned where the
+deployment keeps tool output. The deployment and the workspace have to keep
+content, and Claude Code asks with a header:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS="Otari-Trace-Content: keep"
+```
+
+`ANTHROPIC_CUSTOM_HEADERS` holds every header Claude Code adds, so setting it
+again replaces the first value. To send this header and
+[`Otari-Tags`](#tag-claude-code-traffic) together, put one per line:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Trace-Content: keep\nOtari-Tags: agent=bug-fix'
+```
+
+See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+
 ## Budgets
 
 A request a budget refuses answers `403` with `Otari-Error-Code: budget_exceeded`.
@@ -313,8 +332,12 @@ To keep them, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
 ```
 
 See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
-Do not both [route](#route-claude-code-through-otari) and export one session,
-or its cost appears twice.
+Do not both [route](#route-claude-code-through-otari) and export one session.
+Requests routed with Claude Code's own session id and spans exported under the
+same id, by the same person in the same workspace, land on one trace, so each
+turn and its cost appear twice. A request that sends `Otari-Conversation-Id`
+names a session of its own and joins neither. `otari hook` is the exception:
+its gates open no turn and carry no cost, so a routed session can report them.
 
 ## Import Claude Code usage without routing
 

@@ -284,10 +284,19 @@ class MCPClientPool:
             if self._tally is not None:
                 self._tally.record_failure(name)
             if self._trace is not None:
-                self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=False)
+                self._trace.record_tool_call(
+                    tool_name=name, tool_type="mcp", started=started, ok=False, arguments=arguments
+                )
             raise
         if self._trace is not None:
-            self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=not result.is_error)
+            self._trace.record_tool_call(
+                tool_name=name,
+                tool_type="mcp",
+                started=started,
+                ok=not result.is_error,
+                arguments=arguments,
+                result=_result_text(result),
+            )
         return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
@@ -311,8 +320,7 @@ class MCPClientPool:
                 is_error=True,
                 transport_error=True,
             )
-        parts = [_render_content_block(block) for block in result.content]
-        flattened = "\n".join(p for p in parts if p)
+        flattened = _result_text(result)
         rendered = f"[tool error] {flattened}" if result.is_error else flattened
         if self._tally is not None:
             self._tally.record_result(name, rendered)
@@ -408,3 +416,8 @@ def _render_content_block(block: Any) -> str:
         uri = getattr(resource, "uri", None) if resource else None
         return f"[resource uri={uri or '?'}]"
     return f"[content type={btype}]"
+
+
+def _result_text(result: CallToolResult) -> str:
+    """An MCP result as the text the model reads, without the error marker the loop adds."""
+    return "\n".join(part for part in (_render_content_block(block) for block in result.content) if part)

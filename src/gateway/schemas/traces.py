@@ -124,8 +124,9 @@ class SpanPublic(BaseModel):
     attributes: dict[str, str | int | float | bool]
     content: dict[str, str] = Field(
         description=(
-            "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the "
-            "workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise."
+            "What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, "
+            "tool.output), only where the workspace keeps content, the client sent it or Otari ran the tool that "
+            "produced it, and the reader may open it. Empty otherwise."
         )
     )
     content_private: bool = Field(
@@ -198,6 +199,12 @@ class TraceContentPolicyPublic(BaseModel):
         description=(
             "Whether this deployment lets a workspace keep what its agent sessions were about. A workspace "
             "keeps it only once its managers turn it on as well."
+        )
+    )
+    tool_output: bool = Field(
+        description=(
+            "Whether content also keeps what each tool returned, on a request routed through the gateway. Never "
+            "true where content_available is false."
         )
     )
     platform_break_glass: bool = Field(

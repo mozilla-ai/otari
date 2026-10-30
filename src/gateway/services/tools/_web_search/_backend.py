@@ -211,7 +211,7 @@ class WebSearchBackend:
                 span.set_status(trace.StatusCode.ERROR, INTERNAL_ERROR_TAG)
                 if self._tally is not None:
                     self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
-                self._record_span(started, ok=False)
+                self._record_span(started, ok=False, arguments=arguments)
                 raise
             if self._last_failure is not None:
                 span.set_status(trace.StatusCode.ERROR, self._last_failure.tag)
@@ -229,13 +229,20 @@ class WebSearchBackend:
                 enrichment_cost=searched.enrichment_cost,
                 deployment_paid=not self._search.on_credential,
             )
-        self._record_span(started, ok=not is_tool_error(searched.text))
+        self._record_span(started, ok=not is_tool_error(searched.text), arguments=arguments, result=searched.text)
         return searched.text
 
-    def _record_span(self, started: datetime, *, ok: bool) -> None:
+    def _record_span(
+        self, started: datetime, *, ok: bool, arguments: dict[str, Any], result: str | None = None
+    ) -> None:
         if self._trace is not None:
             self._trace.record_tool_call(
-                tool_name=WEB_SEARCH_TOOL_NAME, tool_type="otari_web_search", started=started, ok=ok
+                tool_name=WEB_SEARCH_TOOL_NAME,
+                tool_type="otari_web_search",
+                started=started,
+                ok=ok,
+                arguments=arguments,
+                result=result,
             )
 
     async def _call(self, arguments: dict[str, Any]) -> _Searched:

@@ -18,8 +18,8 @@ const LABEL = "Keep what agent sessions were about"
 type Pending = "on" | "off" | "delete"
 
 /**
- * Whether a workspace keeps what its agent sessions were about: the prompts,
- * commands and file paths its coding agents report.
+ * Whether a workspace keeps what its agent sessions were about: the prompts
+ * and tool calls its members' agents send.
  *
  * The explanation is always on the page rather than in a tooltip, because a
  * tooltip does not exist on a phone and this is what a manager has to read
@@ -37,6 +37,9 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
   const [deleteStored, setDeleteStored] = useState(false)
   const enabled = workspace.trace_content_enabled ?? false
   const exceptions = exceptionalAccess(policy.platform_break_glass)
+  const toolOutput = policy.tool_output
+    ? "On requests routed through Otari it also keeps what each tool returned. Never model responses."
+    : "It does not keep what tools return, though any it kept before stays until it is deleted, and never model responses."
   const retention = `A session is deleted, with what it was about, ${policy.retention_days} days after its last activity, and ${policy.session_max_age_days} days after it started at the latest.`
 
   const close = () => {
@@ -71,7 +74,7 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
           <p className="text-body">{LABEL}</p>
           <p className="mt-1 max-w-md text-caption">
             {available
-              ? `Stores the prompt that starts each turn, the commands and file paths your agents' tools use, and what guardrail checks looked at. Never tool output or model responses. It is stored encrypted, though not end to end: this deployment holds the keys, so it can read it. Otari shows it only to the person whose session it is, unless they share a session for review. ${exceptions} Other members of this workspace, including its admins, see that a session ran and what it cost, but not what it was about. It is collected only for the workspace's current members; what is already stored stays until it is deleted, after its owner leaves too. Your agents also have to be set to send it. ${retention}`
+              ? `Stores the prompt that starts each turn, the commands, file paths and arguments your agents' tools use, and what guardrail checks looked at. ${toolOutput} It is stored encrypted, though not end to end: this deployment holds the keys, so it can read it. Otari shows it only to the person whose session it is, unless they share a session for review. ${exceptions} Other members of this workspace, including its admins, see that a session ran and what it cost, but not what it was about. It is collected only for the workspace's current members; what is already stored stays until it is deleted, after its owner leaves too. Your agents also have to be set to send it. ${retention}`
               : `This deployment does not keep session content, so a workspace cannot turn it on. Sessions still record their tools, costs and outcomes. ${retention}`}
           </p>
         </div>
@@ -107,11 +110,10 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
         body={
           pending === "on" ? (
             <p>
-              From the next export on, this workspace keeps the prompts,
-              commands and file paths its members' agents send. Otari shows each
-              person only their own sessions' content. Nobody else sees it, you
-              included, unless they share a session with you. {exceptions}{" "}
-              {retention}
+              From the next request on, this workspace keeps the prompts and
+              tool calls its members' agents send. Otari shows each person only
+              their own sessions' content. Nobody else sees it, you included,
+              unless they share a session with you. {exceptions} {retention}
             </p>
           ) : pending === "off" ? (
             <div className="flex flex-col gap-3">
@@ -130,10 +132,9 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
             </div>
           ) : (
             <p>
-              Deletes the prompts, commands and file paths stored for every
-              session in this workspace, and anything sent but not yet stored.
-              The sessions, their costs and outcomes stay. This cannot be
-              undone.
+              Deletes the prompts and tool calls stored for every session in
+              this workspace, and anything sent but not yet stored. The
+              sessions, their costs and outcomes stay. This cannot be undone.
             </p>
           )
         }

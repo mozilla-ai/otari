@@ -58,6 +58,7 @@ export function useTraceScope(): { base: string; isReady: boolean } {
 // loads: no content, so nothing is offered before the deployment says it keeps any.
 const NO_CONTENT_POLICY: TraceContentPolicy = {
   content_available: false,
+  tool_output: false,
   platform_break_glass: false,
   retention_days: 30,
   session_max_age_days: 90,

@@ -17376,7 +17376,7 @@ export interface components {
             cache_write_tokens: number | null;
             /**
              * Content
-             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, tool.output), only where the workspace keeps content, the client sent it or Otari ran the tool that produced it, and the reader may open it. Empty otherwise.
              */
             content: {
                 [key: string]: string;
@@ -17865,6 +17865,11 @@ export interface components {
              * @description Days after it started that a session is deleted, however active it still is.
              */
             session_max_age_days: number;
+            /**
+             * Tool Output
+             * @description Whether content also keeps what each tool returned, on a request routed through the gateway. Never true where content_available is false.
+             */
+            tool_output: boolean;
         };
         /** TraceCountPublic */
         TraceCountPublic: {
