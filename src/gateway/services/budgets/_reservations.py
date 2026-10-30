@@ -163,9 +163,13 @@ async def get_budget_state(db: AsyncSession, user_id: str, scope: BudgetScopeReq
     the total the budget gate enforces (:func:`reserve_budget`). Bare spend would
     let a tier-down rule read a smaller number than the gate does and fire late.
 
-    Both fields are ``None`` when no finite budget applies. An undefined value
-    never matches a condition, so the policy falls through to its default.
+    Both fields are ``None`` when no finite budget applies, which includes a key
+    flagged ``exclude_from_budget``: no budget gates it, so none may tier it
+    down. An undefined value never matches a condition, so the policy falls
+    through to its default.
     """
+    if scope is not None and scope.api_key is not None and scope.api_key.exclude_from_budget:
+        return BudgetState()
     caps: list[tuple[float, float]] = []
     row = (
         await db.execute(

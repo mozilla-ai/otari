@@ -2426,9 +2426,7 @@ async def _compile_request_plan(
         )
 
     budget = BudgetState()
-    # A budget-exempt key is gated by no budget, so none of them may tier it down either.
-    budget_exempt = api_key is not None and api_key.exclude_from_budget
-    if needs_budget_state(spec) and user_id is not None and not budget_exempt:
+    if needs_budget_state(spec) and user_id is not None:
         budget = await get_budget_state(db, user_id, BudgetScopeRequest(api_key=api_key, workspace_id=workspace_id))
 
     # The signal is built here rather than by the endpoint because flattening the
