@@ -133,6 +133,8 @@ async def validate_mcp_url(url: str, *, has_authorization_token: bool, label: st
     if scheme == "http" and has_authorization_token:
         raise UnsafeURLError(f"{label} URL must use https when a credential travels with it")
 
+    _reject_malformed_authority(parsed.netloc, label=label)
+
     host = parsed.hostname
     if not host:
         raise UnsafeURLError(f"{label} URL must include a hostname")
@@ -169,6 +171,35 @@ async def validate_mcp_url(url: str, *, has_authorization_token: bool, label: st
                 f"{label} host {host!r} resolves to {addr} which is {reason}; "
                 "rejecting to prevent SSRF. Set OTARI_MCP_ALLOW_PRIVATE_HOSTS=true to override."
             )
+
+
+def _reject_malformed_authority(netloc: str, *, label: str) -> None:
+    """Reject a URL whose host and port cannot be parsed as written.
+
+    ``urlparse`` stops the hostname at the first colon, so an IPv6 literal
+    without brackets (``http://2400:8901::1:8787/mcp``) reads as host
+    ``2400`` with a port of ``8901::1:8787``. Left alone, that host goes on to
+    DNS resolution, where a bare number is read as an IPv4 address
+    (``0.0.9.96``) and the URL is rejected as an SSRF risk, which sends the
+    operator looking for a network problem instead of a typo. Reading the port
+    is what surfaces the mistake: ``SplitResult.port`` raises ``ValueError`` for
+    anything that is not a number in range.
+    """
+    # Everything after the last "@" is host[:port]; userinfo may hold colons.
+    authority = netloc.rpartition("@")[2]
+    if authority.count(":") > 1 and not authority.startswith("["):
+        raise UnsafeURLError(f"{label} URL has an IPv6 address without brackets; write it as http://[address]:port/...")
+    # A bracketed IPv6 literal's own colons are not a port separator.
+    host_end = authority.rfind("]") + 1
+    # Split at the first colon so a stray second one ("[::1]:bad:8787") stays in the port.
+    _, separator, port = authority[host_end:].partition(":")
+    if not separator:
+        return
+    # isascii() too: isdigit() accepts digits such as "²" that int() rejects.
+    # The length check runs before int(), which raises ValueError for digit
+    # strings longer than sys.get_int_max_str_digits() (4300 by default).
+    if port and not (port.isascii() and port.isdigit() and len(port.lstrip("0")) <= 5 and int(port) <= 65535):
+        raise UnsafeURLError(f"{label} URL has an invalid port {port!r}")
 
 
 def _blocked_reason(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str | None:

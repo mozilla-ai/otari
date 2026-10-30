@@ -71,6 +71,59 @@ async def test_no_host_rejected() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://2400:8901::1:8787/mcp",
+        "http://2400:8901::1/mcp",
+        "http://::1/mcp",
+        "https://user:pass@fe80::1/mcp",
+    ],
+)
+async def test_unbracketed_ipv6_names_the_missing_brackets(url: str) -> None:
+    """An unbracketed IPv6 literal must not be misreported as an SSRF risk (#2693)."""
+    with pytest.raises(UnsafeURLError, match="IPv6 address without brackets"):
+        await validate_mcp_url(url, has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+async def test_unbracketed_ipv6_is_rejected_even_with_private_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The override allows private hosts; it does not make a malformed URL usable."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    with pytest.raises(UnsafeURLError, match="IPv6 address without brackets"):
+        await validate_mcp_url("http://2400:8901::1:8787/mcp", has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com:abc/mcp",
+        "https://example.com:70000/mcp",
+        "https://example.com:\u00b2/mcp",
+        "https://[2400:8901::1]:bad:8787/mcp",
+        pytest.param("https://example.com:" + "9" * 5000 + "/mcp", id="port-past-int-digit-limit"),
+    ],
+)
+async def test_invalid_port_rejected(url: str) -> None:
+    with pytest.raises(UnsafeURLError, match="invalid port"):
+        await validate_mcp_url(url, has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://[2400:8901::1]:8787/mcp",
+        "http://[2400:8901::1]/mcp",
+        "https://user:pa:ss@93.184.215.14:8443/mcp",
+    ],
+)
+async def test_well_formed_authority_reaches_the_address_check(url: str) -> None:
+    await validate_mcp_url(url, has_authorization_token=False)
+
+
+@pytest.mark.asyncio
 async def test_the_label_names_the_surface_the_url_was_written_for() -> None:
     """A caller that is not an MCP server must not tell its admin about one."""
     with pytest.raises(UnsafeURLError, match="guardrail endpoint host"):
