@@ -509,7 +509,9 @@ export function HealthChecksPage() {
               .
             </InfoBanner>
           ) : null}
-          {data.providers.length > 0 || search.value ? (
+          {data.providers.length > 0 ||
+          data.results.length > 0 ||
+          search.value ? (
             <Toolbar>
               <SearchField
                 label="Search providers and models"

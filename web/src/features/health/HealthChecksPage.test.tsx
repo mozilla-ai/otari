@@ -245,6 +245,30 @@ describe("HealthChecksPage", () => {
     expect(within(second).getByText("bedrock:model-29")).toBeInTheDocument()
   })
 
+  it("offers the search when there are model results but no provider summary", async () => {
+    // Every result skipped, as for offerings that are not chat models: the
+    // provider summary counts none of them, but the models are still listed.
+    mockApi(
+      status({
+        providers: [],
+        results: [
+          {
+            ...status().results[1],
+            selector: "openai:embed-3",
+            status: "skip",
+          },
+        ],
+      }),
+    )
+    await renderPage()
+
+    expect(
+      await screen.findByRole("searchbox", {
+        name: "Search providers and models",
+      }),
+    ).toBeInTheDocument()
+  })
+
   it("says the failing-only view is why a search finds no model", async () => {
     mockApi(status())
     const user = userEvent.setup()
