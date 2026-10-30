@@ -102,6 +102,7 @@ async def test_unbracketed_ipv6_is_rejected_even_with_private_override(monkeypat
         "https://example.com:70000/mcp",
         "https://example.com:\u00b2/mcp",
         "https://[2400:8901::1]:bad:8787/mcp",
+        pytest.param("https://example.com:" + "9" * 5000 + "/mcp", id="port-past-int-digit-limit"),
     ],
 )
 async def test_invalid_port_rejected(url: str) -> None:

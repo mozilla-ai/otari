@@ -196,7 +196,9 @@ def _reject_malformed_authority(netloc: str, *, label: str) -> None:
     if not separator:
         return
     # isascii() too: isdigit() accepts digits such as "²" that int() rejects.
-    if port and not (port.isascii() and port.isdigit() and int(port) <= 65535):
+    # The length check runs before int(), which raises ValueError for digit
+    # strings longer than sys.get_int_max_str_digits() (4300 by default).
+    if port and not (port.isascii() and port.isdigit() and len(port.lstrip("0")) <= 5 and int(port) <= 65535):
         raise UnsafeURLError(f"{label} URL has an invalid port {port!r}")
 
 
