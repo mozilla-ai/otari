@@ -262,7 +262,9 @@ export function HostedProviderModelsPanel({
                 setQuery(next)
                 setPage(0)
               }}
-              resultCount={models.data?.count ?? 0}
+              resultCount={
+                models.isPlaceholderData ? undefined : models.data?.count
+              }
               className="w-full md:w-96"
             />
           </Toolbar>
