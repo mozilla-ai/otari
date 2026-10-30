@@ -1378,7 +1378,11 @@ export function OrganizationMembersPage() {
             search.onChange(next)
             setPage(0)
           }}
-          resultCount={members.data?.count ?? 0}
+          // Not a previous term's total, held as placeholder data while the
+          // new one is asked for.
+          resultCount={
+            members.isPlaceholderData ? undefined : members.data?.count
+          }
           className="w-full md:w-96"
         />
       </Toolbar>

@@ -377,7 +377,9 @@ export function ProviderModelsPanel({
               placeholder="Search by model name"
               value={search.value}
               onChange={search.onChange}
-              resultCount={models.data?.count ?? 0}
+              resultCount={
+                models.isPlaceholderData ? undefined : models.data?.count
+              }
               className="w-full md:w-96"
             />
           </Toolbar>
