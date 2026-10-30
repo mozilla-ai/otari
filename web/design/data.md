@@ -221,7 +221,10 @@ TablePagination    the narrowed total, when the list pages
 ```tsx
 // Correct: the term is the URL's, and the rows are narrowed before paging
 const search = useListSearch()
-const rows = keys.filter((key) => matchesSearch(search.term, key.name, key.key_prefix))
+const keys = useKeys()
+const rows = (keys.data ?? []).filter((key) =>
+  matchesSearch(search.term, key.key_name ?? "", key.key_prefix ?? ""),
+)
 
 <Toolbar>
   <SearchField
