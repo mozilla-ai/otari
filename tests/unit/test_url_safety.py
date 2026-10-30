@@ -95,7 +95,15 @@ async def test_unbracketed_ipv6_is_rejected_even_with_private_override(monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("url", ["https://example.com:abc/mcp", "https://example.com:70000/mcp"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com:abc/mcp",
+        "https://example.com:70000/mcp",
+        "https://example.com:\u00b2/mcp",
+        "https://[2400:8901::1]:bad:8787/mcp",
+    ],
+)
 async def test_invalid_port_rejected(url: str) -> None:
     with pytest.raises(UnsafeURLError, match="invalid port"):
         await validate_mcp_url(url, has_authorization_token=False)

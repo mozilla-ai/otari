@@ -191,10 +191,12 @@ def _reject_malformed_authority(netloc: str, *, label: str) -> None:
         raise UnsafeURLError(f"{label} URL has an IPv6 address without brackets; write it as http://[address]:port/...")
     # A bracketed IPv6 literal's own colons are not a port separator.
     host_end = authority.rfind("]") + 1
-    _, separator, port = authority[host_end:].rpartition(":")
+    # Split at the first colon so a stray second one ("[::1]:bad:8787") stays in the port.
+    _, separator, port = authority[host_end:].partition(":")
     if not separator:
         return
-    if port and not (port.isdigit() and int(port) <= 65535):
+    # isascii() too: isdigit() accepts digits such as "²" that int() rejects.
+    if port and not (port.isascii() and port.isdigit() and int(port) <= 65535):
         raise UnsafeURLError(f"{label} URL has an invalid port {port!r}")
 
 
