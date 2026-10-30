@@ -426,6 +426,32 @@ describe("WorkspaceMembersPage", () => {
     )
   })
 
+  it("ends a search once a member is added, so they are on screen", async () => {
+    mockApi({
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+        organizationMember({
+          organization_member_id: "analyst-membership",
+          user_id: "77777777-7777-7777-7777-777777777777",
+          full_name: "Analyst",
+          role: "member",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByText("Alex Avery")
+    const search = screen.getByRole("searchbox", { name: "Search members" })
+    await user.type(search, "alex")
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    const dialog = await screen.findByRole("dialog")
+    await pickOption(user, "Organization member", "Analyst")
+    await user.click(within(dialog).getByRole("button", { name: "Add member" }))
+
+    await waitFor(() => expect(search).toHaveValue(""))
+  })
+
   it("offers a non-manager the roster but none of its write controls", async () => {
     // A viewer at the organization level with no role on this workspace: the
     // roster still reads, and nothing on it can be changed.

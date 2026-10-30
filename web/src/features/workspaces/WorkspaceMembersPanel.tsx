@@ -47,6 +47,7 @@ export function AddWorkspaceMemberDialog({
   candidates,
   rosterResolved,
   canManageOrganization,
+  onAdded,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -66,6 +67,8 @@ export function AddWorkspaceMemberDialog({
    * counts as false, which is the sentence that is true either way.
    */
   canManageOrganization: boolean
+  /** Fired before `onClose` when the member was added, and only then. */
+  onAdded?: () => void
 }) {
   const add = useAddWorkspaceMember()
   const [userId, setUserId] = useState("")
@@ -86,7 +89,15 @@ export function AddWorkspaceMemberDialog({
       title="New workspace member"
       submitLabel="Add member"
       onSubmit={() =>
-        add.mutate({ workspaceId, userId, role }, { onSuccess: onClose })
+        add.mutate(
+          { workspaceId, userId, role },
+          {
+            onSuccess: () => {
+              onAdded?.()
+              onClose()
+            },
+          },
+        )
       }
       isPending={add.isPending}
       isSubmitDisabled={userId === ""}

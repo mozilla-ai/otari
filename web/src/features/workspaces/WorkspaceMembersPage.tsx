@@ -112,6 +112,9 @@ export function WorkspaceMembersPage() {
           candidates={candidates}
           rosterResolved={bothRostersAnswered}
           canManageOrganization={canManageOrganization}
+          // The dialog closes with no other word that the member was added, so
+          // a search they do not match would hide them: adding ends the search.
+          onAdded={() => search.onChange("")}
         />
       ) : null}
       {/* The organization roster is what the panel picks candidates from, and
