@@ -239,6 +239,39 @@ describe("FeedbackDialog", () => {
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ message: "Idea" })
   })
 
+  it("keeps the tick cleared when the first address comes back", async () => {
+    const { user, showEmail } = setup({ email: "ada@example.com" })
+    await user.click(screen.getByRole("checkbox"))
+    showEmail("grace@example.com")
+    showEmail("ada@example.com")
+    expect(screen.getByRole("checkbox")).not.toBeChecked()
+  })
+
+  it("thanks with the address the send carried, even if another shows meanwhile", async () => {
+    const { fetch, user, showEmail } = setup({ email: "ada@example.com" })
+    let answer: (response: Response) => void = () => {}
+    fetch.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        answer = resolve
+      }),
+    )
+    await user.type(field(), "Idea")
+    await user.click(screen.getByRole("checkbox"))
+    await user.click(screen.getByRole("button", { name: SEND }))
+    showEmail("grace@example.com")
+    answer(new Response(null, { status: 204 }))
+    await screen.findByRole("heading", { name: "Thank you!" })
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      message: "Idea",
+      share_email: "ada@example.com",
+    })
+    expect(
+      screen.getByRole("dialog", { name: "Thank you!" }),
+    ).toHaveAccessibleDescription(
+      "Every message reaches the people building Otari. If we have a question, we’ll write to ada@example.com.",
+    )
+  })
+
   it("asks again every time it opens, and an unticked send stays anonymous", async () => {
     const { fetch, user } = setup({ email: "ada@example.com" })
     await user.click(screen.getByRole("checkbox"))

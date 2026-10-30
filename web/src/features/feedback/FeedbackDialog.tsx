@@ -69,9 +69,17 @@ export function FeedbackDialog({
   const [message, setMessage] = useState("")
   const [isEmptySend, setIsEmptySend] = useState(false)
   const [isSent, setIsSent] = useState(false)
-  // The address the tick agreed to, so the box reads unticked once another
-  // shows (a session changed in another tab), and that one is what is sent.
+  // What the sent message carried, so the thanks name it even if the shown
+  // address has changed while it was in flight.
+  const [sentTo, setSentTo] = useState<string | null>(null)
+  // The address the tick agreed to. Another one showing (a session changed in
+  // another tab) clears it, and it stays cleared if the first one comes back.
   const [agreedTo, setAgreedTo] = useState<string | null>(null)
+  const [shownAddress, setShownAddress] = useState(shareable)
+  if (shareable !== shownAddress) {
+    setShownAddress(shareable)
+    setAgreedTo(null)
+  }
   const repliesTo =
     agreedTo !== null && agreedTo === shareable ? agreedTo : null
   const { mutate, reset, isPending, error } = useSendFeedback()
@@ -95,6 +103,7 @@ export function FeedbackDialog({
     setMessage("")
     setIsEmptySend(false)
     setIsSent(false)
+    setSentTo(null)
     // Opt-in each time: a tick from an earlier message is not consent to this one.
     setAgreedTo(null)
     reset()
@@ -119,7 +128,12 @@ export function FeedbackDialog({
       repliesTo
         ? { message: trimmed, share_email: repliesTo }
         : { message: trimmed },
-      { onSuccess: () => setIsSent(true) },
+      {
+        onSuccess: () => {
+          setSentTo(repliesTo)
+          setIsSent(true)
+        },
+      },
     )
   }
 
@@ -189,8 +203,8 @@ export function FeedbackDialog({
                     className="text-muted max-w-100 text-base text-balance max-sm:max-w-80"
                   >
                     Every message reaches the people building Otari.{" "}
-                    {repliesTo
-                      ? `If we have a question, we’ll write to ${repliesTo}.`
+                    {sentTo
+                      ? `If we have a question, we’ll write to ${sentTo}.`
                       : "We read them all, and they shape what comes next."}
                   </p>
                 </div>
