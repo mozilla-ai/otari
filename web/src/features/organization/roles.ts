@@ -129,6 +129,10 @@ export function activeOwnerCount(
  * active owner cannot be demoted or deactivated, which would leave the
  * organization with nobody able to manage or delete it. Stated here as a
  * sentence so the disabled control says why rather than just refusing.
+ *
+ * `members` is undefined when the caller cannot see every owner, as under a
+ * search; the last-owner rule is then left to the server rather than read off
+ * a subset, where it would lock an owner who is not the last.
  */
 export function membershipChangeBlockedReason({
   member,
@@ -137,7 +141,7 @@ export function membershipChangeBlockedReason({
 }: {
   member: OrganizationMember
   context: OrganizationContext | undefined
-  members: readonly OrganizationMember[]
+  members: readonly OrganizationMember[] | undefined
 }): string | undefined {
   if (!canManage(context)) {
     return "Only organization owners and admins can change memberships."
@@ -151,6 +155,7 @@ export function membershipChangeBlockedReason({
   if (
     member.role === "owner" &&
     member.status === "active" &&
+    members !== undefined &&
     activeOwnerCount(members) <= 1
   ) {
     return "This is the last active owner. Promote someone else first."

@@ -131,6 +131,16 @@ describe("membershipChangeBlockedReason", () => {
     ).toBeUndefined()
   })
 
+  it("leaves the last-owner rule to the server when not every owner is in view", () => {
+    expect(
+      membershipChangeBlockedReason({
+        member: owner,
+        context: organizationContext({ role: "owner" }),
+        members: undefined,
+      }),
+    ).toBeUndefined()
+  })
+
   it("refuses a row that has no membership behind it yet", () => {
     // An invitation is a roster row with no organization_member_id; the
     // endpoints that change a membership have nothing to address.
