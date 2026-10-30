@@ -28,7 +28,7 @@ import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
 
 import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
-import { BackupsCell, MainModelCell } from "./PolicyCells"
+import { BackupsCell, MainModelCell, selectorText } from "./PolicyCells"
 import type { Intent } from "./policyDraft"
 import {
   findBudgetConditions,
@@ -53,19 +53,24 @@ export function RoutingPage() {
     writeWorkspaceId,
   } = useRoutingRows()
   const search = useListSearch()
-  // What the row shows: its name, who it applies to, the model it sends to,
-  // the targets a budget switches it to, and the pool and backups behind them.
-  const shown = rows.filter((row) =>
-    matchesSearch(
-      search.term,
-      row.name,
-      row.user_id ?? "",
+  // What the row shows: its name, who it applies to, and every model it can
+  // send to (the main one, a budget's tier-downs, the pool and the backups),
+  // each by its selector and by the model and provider names the cells print.
+  const shown = rows.filter((row) => {
+    const selectors = [
       findFallthroughTarget(row.spec),
       ...findCandidates(row.spec),
       ...findBudgetConditions(row.spec).map((condition) => condition.target),
       ...(row.spec.on_failure ?? []),
-    ),
-  )
+    ]
+    return matchesSearch(
+      search.term,
+      row.name,
+      row.user_id ?? "",
+      ...selectors,
+      ...selectors.map(selectorText),
+    )
+  })
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   const deleteOrgPolicy = useDeleteOrganizationRoutingPolicy()
