@@ -195,9 +195,17 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
 
     async def get_usage(self, scoped_budget_id: str) -> CeilingUsage | None:
         """Return this ceiling's cap, recorded use, holds and window end, or None when it no longer exists."""
-        row = (
+        usages = await self.get_usages((scoped_budget_id,))
+        return usages.get(scoped_budget_id)
+
+    async def get_usages(self, scoped_budget_ids: Sequence[str]) -> dict[str, CeilingUsage]:
+        """Return each of these ceilings' usage by ID, leaving out any that no longer exist."""
+        if not scoped_budget_ids:
+            return {}
+        rows = (
             await self.db.execute(
                 select(
+                    ScopedBudget.id,
                     Budget.max_budget,
                     ScopedBudget.current_spend,
                     ScopedBudget.reserved_spend,
@@ -210,10 +218,10 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                     ScopedBudget.period_end,
                 )
                 .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-                .where(ScopedBudget.id == scoped_budget_id)
+                .where(ScopedBudget.id.in_(scoped_budget_ids))
             )
-        ).first()
-        return None if row is None else CeilingUsage(**row._asdict())
+        ).all()
+        return {scoped_budget_id: CeilingUsage(*usage) for scoped_budget_id, *usage in rows}
 
     async def has_ceiling(self, scope_type: ScopeType, scope_id: str, provider_key_id: str | None) -> bool:
         """Report whether a ceiling caps this scope for this provider, where None means every provider."""

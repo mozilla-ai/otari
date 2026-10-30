@@ -2395,7 +2395,7 @@ async def _compile_request_plan(
     config: GatewayConfig,
     model: str,
     user_id: str | None,
-    api_key_id: str | None,
+    api_key: APIKey | None,
     allowlist: list[str] | None,
     endpoint: str,
     started_at: float,
@@ -2418,6 +2418,7 @@ async def _compile_request_plan(
     else (a policy exists partly to keep its targets off the wire); the enumerated
     per-candidate reasons go to the activity log, which is a master-key surface.
     """
+    api_key_id = api_key.id if api_key is not None else None
     spec = resolve_effective_policy(config, model, user_id, workspace_id=workspace_id)
     if spec is None:
         return compile_catalog_plan(
@@ -2426,7 +2427,7 @@ async def _compile_request_plan(
 
     budget = BudgetState()
     if needs_budget_state(spec) and user_id is not None:
-        budget = await get_budget_state(db, user_id)
+        budget = await get_budget_state(db, user_id, BudgetScopeRequest(api_key=api_key))
 
     # The signal is built here rather than by the endpoint because flattening the
     # prompt is not free on a long conversation, and only a policy with a router
@@ -2808,7 +2809,7 @@ async def resolve_request_context(
         config=config,
         model=model,
         user_id=user_id,
-        api_key_id=api_key_id,
+        api_key=api_key,
         allowlist=key_allowlist,
         endpoint=adapter.endpoint,
         started_at=started_at,

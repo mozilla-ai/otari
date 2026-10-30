@@ -675,6 +675,72 @@ def test_a_user_without_a_budget_uses_the_default_candidate(client: TestClient) 
     assert _awaited_model(mock) == "openai:gpt-5-mini"
 
 
+def _key_with_ceiling(client: TestClient, *, provider_key_id: str | None = None) -> tuple[str, dict[str, str]]:
+    """A key with a $1 ceiling of its own and no per-user budget, the shape a hosted organization gets."""
+    _create_user(client)
+    key = client.post(f"{API_ROOT}/keys", json={"user_id": "test-user"}, headers=HEADERS)
+    assert key.status_code == 200, key.text
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 1.0}, headers=HEADERS)
+    assert budget.status_code == 200, budget.text
+    ceiling = client.post(
+        f"{API_ROOT}/scoped-budgets",
+        json={
+            "scope_type": "api_token",
+            "scope_id": key.json()["id"],
+            "budget_id": budget.json()["budget_id"],
+            "provider_key_id": provider_key_id,
+        },
+        headers=HEADERS,
+    )
+    assert ceiling.status_code == 200, ceiling.text
+    return str(ceiling.json()["id"]), {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+
+
+def _chat_with_key(client: TestClient, headers: dict[str, str], model: str) -> Any:
+    return client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": model, "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers,
+    )
+
+
+def _set_ceiling_spend(config: GatewayConfig, ceiling_id: str, spend: float) -> None:
+    engine = create_engine(config.database_url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        conn.execute(
+            text("UPDATE scoped_budgets SET current_spend = :spend WHERE id = :id"), {"spend": spend, "id": ceiling_id}
+        )
+        conn.commit()
+    engine.dispose()
+
+
+def test_tier_down_reads_the_spend_ceiling_on_the_calling_key(
+    client: TestClient, routing_config: GatewayConfig
+) -> None:
+    ceiling_id, headers = _key_with_ceiling(client)
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat_with_key(client, headers, "thrifty").status_code == 200
+    assert _awaited_model(mock) == "openai:gpt-5-mini"
+
+    _set_ceiling_spend(routing_config, ceiling_id, 0.9)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-nano"))) as mock:
+        assert _chat_with_key(client, headers, "thrifty").status_code == 200
+    assert _awaited_model(mock) == "openai:gpt-5-nano"
+
+
+def test_a_provider_narrowed_ceiling_does_not_drive_tier_down(
+    client: TestClient, routing_config: GatewayConfig
+) -> None:
+    """Which provider the request reaches is what the policy decides, so a ceiling on one provider is not read."""
+    ceiling_id, headers = _key_with_ceiling(client, provider_key_id="openai")
+    _set_ceiling_spend(routing_config, ceiling_id, 0.9)
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat_with_key(client, headers, "thrifty").status_code == 200
+    assert _awaited_model(mock) == "openai:gpt-5-mini"
+
+
 # ---------------------------------------------------------------------------
 # Catalog
 # ---------------------------------------------------------------------------

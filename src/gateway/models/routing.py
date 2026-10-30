@@ -130,14 +130,14 @@ class WhenClause(BaseModel):
     budget_used_pct: Threshold | None = Field(
         default=None,
         description=(
-            "Percentage of the caller's budget already committed (spend + reserved). "
-            "Undefined for a caller with no budget, an unlimited budget, or the master key; "
-            "an undefined value never matches, so the default entry is used."
+            "Percentage already committed (spend + reserved) of the tightest budget gating the request: "
+            "the user's own, or a spend ceiling on the request's scopes that caps every provider. "
+            "Undefined when none of them is finite; an undefined value never matches, so the default entry is used."
         ),
     )
     budget_remaining_usd: Threshold | None = Field(
         default=None,
-        description="USD left in the caller's budget. Undefined in the same cases as budget_used_pct.",
+        description="USD left under the tightest of those budgets. Undefined in the same cases as budget_used_pct.",
     )
     user_id: str | list[str] | None = Field(default=None, description="Match one user id, or any in a list.")
     key_id: str | list[str] | None = Field(default=None, description="Match one API key id, or any in a list.")

@@ -31,7 +31,7 @@ from gateway.models.budgets import (
 from gateway.models.money import to_usd
 from gateway.models.pricing import MAX_REPORTED_UNITS, ModelPricing
 from gateway.models.users import User
-from gateway.repositories.budgets import ApplicableCeiling, HeldAmounts
+from gateway.repositories.budgets import ApplicableCeiling, HeldAmounts, ScopedBudgetRepository
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
@@ -150,18 +150,23 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
     return user
 
 
-async def get_budget_state(db: AsyncSession, user_id: str) -> BudgetState:
-    """Read what a routing policy's budget conditions need, in one round trip.
+async def get_budget_state(db: AsyncSession, user_id: str, scope: BudgetScopeRequest | None = None) -> BudgetState:
+    """Read what a routing policy's budget conditions need.
 
-    ``used_pct`` and ``remaining_usd`` are computed from ``spend + reserved``
-    against ``max_budget``, which is the same committed total the budget gate
-    enforces (:func:`reserve_budget`). Using bare ``spend`` instead would let a
-    tier-down rule read a smaller number than the gate does and fire late.
+    The numbers are those of the tightest budget gating the request: the user's
+    own and, given ``scope``, every spend ceiling on the scopes it bills to that
+    caps all providers. A provider-narrowed ceiling is left out, since which
+    provider the request reaches is what the policy is deciding. ``used_pct`` is
+    the highest of their percentages and ``remaining_usd`` the least headroom.
 
-    Both fields are ``None`` when the percentage is undefined: no user row, no
-    budget attached, or an unlimited budget (``max_budget is None``). An undefined
-    value never matches a condition, so the policy falls through to its default.
+    Each is computed from what is committed, recorded spend plus holds, which is
+    the total the budget gate enforces (:func:`reserve_budget`). Bare spend would
+    let a tier-down rule read a smaller number than the gate does and fire late.
+
+    Both fields are ``None`` when no finite budget applies. An undefined value
+    never matches a condition, so the policy falls through to its default.
     """
+    caps: list[tuple[float, float]] = []
     row = (
         await db.execute(
             select(User.spend, User.reserved, Budget.max_budget)
@@ -169,18 +174,33 @@ async def get_budget_state(db: AsyncSession, user_id: str) -> BudgetState:
             .where(User.user_id == user_id, User.deleted_at.is_(None))
         )
     ).one_or_none()
-    if row is None:
-        return BudgetState()
-    spend, reserved, max_budget = row
-    if max_budget is None or max_budget <= 0:
+    if row is not None:
+        spend, reserved, max_budget = row
+        if max_budget is not None and max_budget > 0:
+            caps.append((float(spend or 0) + float(reserved or 0), float(max_budget)))
+
+    if scope is not None:
+        ceilings = await get_scope_ceilings(db, user_id=user_id, scope=scope)
+        usages = await ScopedBudgetRepository(db).get_usages(
+            [ceiling.scoped_budget_id for ceiling in ceilings if ceiling.provider_key_id is None]
+        )
+        now = datetime.now(UTC)
+        for usage in usages.values():
+            if usage.max_budget is None or usage.max_budget <= 0:
+                continue
+            # An ended window is rolled before the request reserves against it,
+            # which zeroes recorded spend and keeps the holds.
+            recorded = ZERO if usage.period_end is not None and now >= usage.period_end else usage.current_spend
+            caps.append((float(recorded + usage.reserved_spend), float(usage.max_budget)))
+
+    if not caps:
         return BudgetState()
     # Narrowed deliberately: ``BudgetState`` feeds a routing policy's percentage
     # and headroom conditions, which are thresholds rather than accounting, and
     # the compiler that reads them is float throughout.
-    committed = float(spend or 0) + float(reserved or 0)
     return BudgetState(
-        used_pct=committed / float(max_budget) * 100.0,
-        remaining_usd=max(0.0, float(max_budget) - committed),
+        used_pct=max(committed / cap * 100.0 for committed, cap in caps),
+        remaining_usd=min(max(0.0, cap - committed) for committed, cap in caps),
     )
 
 
