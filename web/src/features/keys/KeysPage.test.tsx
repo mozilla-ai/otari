@@ -531,6 +531,59 @@ describe("KeysPage", () => {
     expect(screen.getByText("raw")).toBeInTheDocument()
   })
 
+  it("keeps a select-all to the keys on screen when it was made", async () => {
+    stubRegionWidth(1440)
+    const member = "33333333-3333-3333-3333-333333333333"
+    // The roster lands after the keys, so an owner match appears only then.
+    let release: () => void = () => {}
+    const roster = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "alice-prod", is_active: true }),
+        apiKey({
+          id: "key-2",
+          key_name: "ci",
+          user_id: member,
+          is_active: true,
+        }),
+      ],
+      members: [
+        organizationMember({
+          attribution_user_id: member,
+          full_name: "Alice Example",
+        }),
+      ],
+    })
+    const answer = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/organizations/me/members")) await roster
+      return answer(input, init)
+    })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+    await screen.findByText("alice-prod")
+    await usr.type(
+      screen.getByRole("searchbox", { name: "Search API keys" }),
+      "alice",
+    )
+    await waitFor(() => expect(screen.queryByText("ci")).toBeNull())
+    await usr.click(screen.getByRole("checkbox", { name: "Select all rows" }))
+
+    release()
+    // Alice's other key joins the list, but not the selection.
+    expect(await screen.findByText("ci")).toBeInTheDocument()
+    await usr.click(await screen.findByRole("button", { name: /^Disable/ }))
+    await waitFor(() => {
+      const patches = fetchMock.mock.calls.filter(
+        ([, init]) => init?.method === "PATCH",
+      )
+      expect(patches).toHaveLength(1)
+      expect(String(patches[0][0])).toContain("key-1")
+    })
+  })
+
   it("starts the selection over when the search changes", async () => {
     stubRegionWidth(1440)
     mockApi({
