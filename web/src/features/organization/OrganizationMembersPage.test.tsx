@@ -349,6 +349,31 @@ describe("OrganizationMembersPage", () => {
     expect(within(owner).getByText("ACTIVE")).toBeInTheDocument()
   })
 
+  it("does not lock an owner as the last one when a search hides the others", async () => {
+    const second = organizationMember({
+      organization_member_id: "second-owner",
+      user_id: "second-owner-user",
+      full_name: "Second Owner",
+      role: "owner",
+    })
+    mockApi({ members: [OWNER, second, ANALYST] })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationMembersPage />)
+    await screen.findByText("Second Owner")
+
+    // Only Operator matches, but Second Owner still exists.
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search members" }),
+      "operator",
+    )
+    await waitFor(() => expect(screen.queryByText("Second Owner")).toBeNull())
+    const owner = rowFor("Operator")
+    expect(within(owner).getByLabelText(/^Role for Operator/)).toBeEnabled()
+    expect(
+      within(owner).queryByLabelText(/This is the last active owner/),
+    ).toBeNull()
+  })
+
   it("suspends a member rather than deleting them, and says so", async () => {
     const requests = mockApi({ members: [OWNER, ANALYST] })
     const user = userEvent.setup()

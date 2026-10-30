@@ -906,6 +906,9 @@ export function OrganizationMembersPage() {
   const budgets = isOperator ? deploymentBudgets : organizationBudgets
 
   const rows = useMemo(() => members.data?.data ?? [], [members.data])
+  // A searched page holds only the owners who matched, so it cannot say who
+  // the last one is; that is left to the server while a term is applied.
+  const ownersInView = search.term ? undefined : rows
 
   // Removing the last member on a page leaves it empty while earlier pages
   // still hold rows. Adjusted during render, the way `TablePagination` adjusts
@@ -1024,7 +1027,7 @@ export function OrganizationMembersPage() {
           const blocked = membershipChangeBlockedReason({
             member,
             context: activeContext,
-            members: rows,
+            members: ownersInView,
           })
           return (
             // `title` reaches a mouse; the reason is folded into the control's
@@ -1154,7 +1157,7 @@ export function OrganizationMembersPage() {
           const blocked = membershipChangeBlockedReason({
             member,
             context: activeContext,
-            members: rows,
+            members: ownersInView,
           })
           // An invited row's actions are about its link, expired or not: Reissue
           // sends a new one (the way back for a lost link), Revoke withdraws
@@ -1235,7 +1238,7 @@ export function OrganizationMembersPage() {
     )
   }, [
     activeContext,
-    rows,
+    ownersInView,
     update.isPending,
     update.mutate,
     manages,
