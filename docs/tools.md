@@ -175,7 +175,9 @@ take the request past a limit is not run: the model is told it was refused
 Completions' `otari_tool_calls`), it is recorded as a failed call and not
 charged, and the request goes on. A call priced only by the cost its provider
 reports, with no rate, holds nothing, since that cost is known only once it
-returns.
+returns. A request on a free model whose budgets and ceilings cap only dollars
+holds nothing for its model call, and its tool calls are not held either: they
+are charged at settlement, and that request can still end past the cap.
 
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what

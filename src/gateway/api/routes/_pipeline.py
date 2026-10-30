@@ -202,6 +202,7 @@ from gateway.services.budgets import (
     estimate_cost,
     estimate_tokens,
     get_budget_state,
+    hold_tool_call,
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
@@ -2395,23 +2396,15 @@ class ReservationToolGate:
 
     async def admit(self, call: LabelCalls) -> bool:
         ctx, handle = self._ctx, self._ctx.reservation
-        if handle is None or not handle.counts_toward_budget or not (handle.reserved or handle.scoped_budgets):
+        if handle is None or not handle.counts_toward_budget or handle.reservation_id is None:
             return True
         try:
             unit = await self._unit_cost(call)
             if unit <= ZERO:
                 return True
-            await increase_reservation(
-                ctx.db,
-                handle,
-                estimate=max(handle.estimate, handle.scoped_estimate) + unit,
-                model_is_free=False,
-                strategy=ctx.config.budget_strategy,
-            )
-        except HTTPException:
-            logger.info("Gateway tool call %s refused: its price does not fit the request's budget", call.tool)
+            # Ends whatever the request left pending, so a failed hold rolls back only the hold.
             await release_session(ctx.db)
-            return False
+            held = await hold_tool_call(ctx.db, handle, unit, strategy=ctx.config.budget_strategy)
         except DATABASE_ERRORS as exc:
             logger.error(
                 "Could not hold gateway tool call %s on the budget; not running it: %s",
@@ -2421,15 +2414,19 @@ class ReservationToolGate:
             with contextlib.suppress(*DATABASE_ERRORS):
                 await ctx.db.rollback()
             return False
+        if not held:
+            logger.info("Gateway tool call %s refused: its price does not fit the request's budget", call.tool)
+            return False
         ctx.tool_hold += unit
-        # The grown hold locks budget rows; the connection must not be held across the next provider call.
-        return await release_session(ctx.db)
+        return True
 
     async def _unit_cost(self, call: LabelCalls) -> Decimal:
         key = (call.tool, call.label, call.rate_keys, call.deployment_paid)
         if key not in self._unit_costs:
             charges = await price_tool_calls(self._ctx.db, [call], organization_id=self._ctx.organization_id)
             self._unit_costs[key] = charges.total
+            # The lookup's connection must not be held across the next provider call either.
+            await release_session(self._ctx.db)
         return self._unit_costs[key]
 
 
