@@ -438,6 +438,13 @@ export function HealthChecksPage() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0])
   const search = useListSearch()
+  // Page 1 for every new term, however it changed: typed, or by Back and
+  // Forward, which move `q` without passing through the field.
+  const [pagedFor, setPagedFor] = useState(search.term)
+  if (pagedFor !== search.term) {
+    setPagedFor(search.term)
+    setPage(0)
+  }
   const data = status.data
 
   if (status.isPending && !data) {
@@ -508,10 +515,8 @@ export function HealthChecksPage() {
                 label="Search providers and models"
                 placeholder="Search by provider or model"
                 value={search.value}
-                onChange={(next) => {
-                  search.onChange(next)
-                  setPage(0)
-                }}
+                onChange={search.onChange}
+                resultCount={providerRows.length + results.length}
                 className="w-full md:w-96"
               />
             </Toolbar>
