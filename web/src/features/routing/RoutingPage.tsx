@@ -53,12 +53,13 @@ export function RoutingPage() {
     writeWorkspaceId,
   } = useRoutingRows()
   const search = useListSearch()
-  // What the row shows: its name, the model it sends to, the targets a budget
-  // switches it to, and the pool and backups behind them.
+  // What the row shows: its name, who it applies to, the model it sends to,
+  // the targets a budget switches it to, and the pool and backups behind them.
   const shown = rows.filter((row) =>
     matchesSearch(
       search.term,
       row.name,
+      row.user_id ?? "",
       findFallthroughTarget(row.spec),
       ...findCandidates(row.spec),
       ...findBudgetConditions(row.spec).map((condition) => condition.target),
@@ -287,6 +288,9 @@ export function RoutingPage() {
         isDeploymentWide={isOperator}
         workspaceId={writeWorkspaceId}
         onClose={closeCreate}
+        // The dialog closes with no other word that the policy exists, so a
+        // search it does not match would hide it: making one ends the search.
+        onSaved={() => search.onChange("")}
       />
 
       {rows.length === 0 && !isListLoading ? (

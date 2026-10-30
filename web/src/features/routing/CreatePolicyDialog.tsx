@@ -77,6 +77,7 @@ export function CreatePolicyDialog({
   isDeploymentWide,
   workspaceId,
   onClose,
+  onSaved,
 }: {
   /**
    * The page keeps this mounted while it goes false, so the frame plays its
@@ -97,8 +98,14 @@ export function CreatePolicyDialog({
   /** The workspace the write lands in; null only for a caller in none. */
   workspaceId: string | null
   onClose: () => void
+  /** Fired before `onClose` when the policy was written, and only then. */
+  onSaved?: () => void
 }) {
   const save = useSetRoutingPolicy()
+  const saved = () => {
+    onSaved?.()
+    onClose()
+  }
   const saveOrgPolicy = useSetOrganizationRoutingPolicy()
   const isTenantScoped = !isDeploymentWide
   // `/users` is a deployment-wide operator read, and a tenant admin is offered
@@ -172,7 +179,7 @@ export function CreatePolicyDialog({
     setWritten({ key, userIds: done })
     setIsWritingScopes(false)
     if (failed.length === 0) {
-      onClose()
+      saved()
       return
     }
     setPartialFailure(
@@ -191,7 +198,7 @@ export function CreatePolicyDialog({
     if (isTenantScoped && workspaceId !== null) {
       saveOrgPolicy.mutate(
         { name: name.trim(), spec, workspace_id: workspaceId },
-        { onSuccess: onClose },
+        { onSuccess: saved },
       )
       return
     }
@@ -201,7 +208,7 @@ export function CreatePolicyDialog({
     }
     save.mutate(
       { name: name.trim(), spec, user_id: null, workspace_id: workspaceId },
-      { onSuccess: onClose },
+      { onSuccess: saved },
     )
   }
 
