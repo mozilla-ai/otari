@@ -31,7 +31,7 @@ from gateway.models.budgets import (
 from gateway.models.money import to_usd
 from gateway.models.pricing import MAX_REPORTED_UNITS, ModelPricing
 from gateway.models.users import User
-from gateway.repositories.budgets import ApplicableCeiling, HeldAmounts, ScopedBudgetRepository
+from gateway.repositories.budgets import ApplicableCeiling, HeldAmounts
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
@@ -184,18 +184,15 @@ async def get_budget_state(db: AsyncSession, user_id: str, scope: BudgetScopeReq
             caps.append((float(spend or 0) + float(reserved or 0), float(max_budget)))
 
     if scope is not None:
-        ceilings = await get_scope_ceilings(db, user_id=user_id, scope=scope)
-        usages = await ScopedBudgetRepository(db).get_usages(
-            [ceiling.scoped_budget_id for ceiling in ceilings if ceiling.provider_key_id is None]
-        )
         now = datetime.now(UTC)
-        for usage in usages.values():
-            if usage.max_budget is None or usage.max_budget <= 0:
+        for ceiling in await get_scope_ceilings(db, user_id=user_id, scope=scope):
+            if ceiling.provider_key_id is not None or ceiling.max_budget is None or ceiling.max_budget <= 0:
                 continue
             # An ended window is rolled before the request reserves against it,
             # which zeroes recorded spend and keeps the holds.
-            recorded = ZERO if usage.period_end is not None and now >= usage.period_end else usage.current_spend
-            caps.append((float(recorded + usage.reserved_spend), float(usage.max_budget)))
+            ended = ceiling.period_end is not None and now >= ceiling.period_end
+            recorded = ZERO if ended else ceiling.current_spend
+            caps.append((float(recorded + ceiling.reserved_spend), float(ceiling.max_budget)))
 
     if not caps:
         return BudgetState()
