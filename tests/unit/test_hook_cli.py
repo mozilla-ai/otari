@@ -76,6 +76,12 @@ def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     monkeypatch.setattr(hook_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
 
 
+@pytest.fixture(autouse=True)
+def _no_stop_diff_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Range selection is tested with real repositories in test_hook_judge_diff."""
+    monkeypatch.setattr(hook_cli, "_hook_collect_stop_diff_range", lambda root: None)
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
@@ -2057,7 +2063,7 @@ def test_a_judge_gate_past_the_cap_is_reported_as_skipped_in_the_system_message(
     )
     _guardrail_path(tmp_path).write_text(gates_yaml, encoding="utf-8")
     monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda *args, **kwargs: "")
-    monkeypatch.setattr(hook_cli, "_hook_collect_changed_paths", lambda root: [])
+    monkeypatch.setattr(hook_cli, "_hook_collect_changed_paths", lambda root, diff_range: [])
     monkeypatch.setattr(hook_cli, "_hook_run_judge", lambda *args, **kwargs: ("pass", "ok"))
 
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)}, max_judges=str(cap))
@@ -2085,7 +2091,7 @@ def test_a_bad_judge_gate_cap_runs_the_default_and_says_so_without_blocking(
     )
     _guardrail_path(tmp_path).write_text(gates_yaml, encoding="utf-8")
     monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda *args, **kwargs: "")
-    monkeypatch.setattr(hook_cli, "_hook_collect_changed_paths", lambda root: [])
+    monkeypatch.setattr(hook_cli, "_hook_collect_changed_paths", lambda root, diff_range: [])
     judged: list[str] = []
 
     def fake_run_judge(rubric: str, *args: object, **kwargs: object) -> tuple[str, str]:

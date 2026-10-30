@@ -59,6 +59,12 @@ def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     monkeypatch.setattr(hook_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
 
 
+@pytest.fixture(autouse=True)
+def _no_stop_diff_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Range selection is tested with real repositories in test_hook_judge_diff."""
+    monkeypatch.setattr(hook_cli, "_hook_collect_stop_diff_range", lambda root: None)
+
+
 def _gates_yaml(judge_cli: str | None = None) -> str:
     judge_cli_line = f"    judge_cli: {judge_cli}\n" if judge_cli is not None else ""
     return (
