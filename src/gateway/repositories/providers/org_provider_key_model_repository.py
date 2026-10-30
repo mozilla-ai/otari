@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.sql import LIKE_ESCAPE, contains_pattern
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.provider_keys import (
     OrgProviderKeyModel,
@@ -81,19 +82,24 @@ class OrgProviderKeyModelRepository(
         return result.scalar_one_or_none()
 
     async def list_for_key(
-        self, org_provider_key_id: uuid.UUID, *, skip: int = 0, limit: int = 500
+        self, org_provider_key_id: uuid.UUID, *, skip: int = 0, limit: int = 500, search: str | None = None
     ) -> tuple[Sequence[OrgProviderKeyModel], int]:
         """One page of a key's offered models, and how many there are in total.
 
         ``count`` is the total rather than the page length, so a client knows
         whether another page is owed; counted in the database rather than by
         loading every row, because a provider can offer several hundred models.
+        ``search`` narrows on the model name, case-insensitively, and the count
+        narrows with it.
         """
+        filters = [col(OrgProviderKeyModel.org_provider_key_id) == org_provider_key_id]
+        if term := (search or "").strip():
+            filters.append(func.lower(col(OrgProviderKeyModel.model)).like(contains_pattern(term), escape=LIKE_ESCAPE))
         rows = (
             (
                 await self.db.execute(
                     select(OrgProviderKeyModel)
-                    .where(col(OrgProviderKeyModel.org_provider_key_id) == org_provider_key_id)
+                    .where(*filters)
                     .order_by(col(OrgProviderKeyModel.model))
                     .offset(skip)
                     .limit(limit)
@@ -103,11 +109,7 @@ class OrgProviderKeyModelRepository(
             .all()
         )
         total = (
-            await self.db.execute(
-                select(func.count())
-                .select_from(OrgProviderKeyModel)
-                .where(col(OrgProviderKeyModel.org_provider_key_id) == org_provider_key_id)
-            )
+            await self.db.execute(select(func.count()).select_from(OrgProviderKeyModel).where(*filters))
         ).scalar_one()
         return rows, total
 

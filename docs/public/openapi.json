@@ -32309,7 +32309,7 @@
     },
     "/api/v1/hosted-providers/{provider}/models": {
       "get": {
-        "description": "List the models offered on one provider, with the price each currently serves at.",
+        "description": "List the models offered on one provider, with the price each currently serves at.\n\n``search`` narrows the page and the count together.",
         "operationId": "hosted-providers-list_hosted_models",
         "parameters": [
           {
@@ -32342,6 +32342,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Narrow to models whose name contains this text, case-insensitively.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Narrow to models whose name contains this text, case-insensitively.",
+              "title": "Search"
             }
           }
         ],
@@ -37914,7 +37933,7 @@
     },
     "/api/v1/organizations/me/provider-keys/{key_id}/models": {
       "get": {
-        "description": "List the models offered on one key, each with the rate it currently serves at.\n\nOrganization owners and admins only. ``count`` is the total rather than the\npage length, so a client knows whether another page is owed.",
+        "description": "List the models offered on one key, each with the rate it currently serves at.\n\nOrganization owners and admins only. ``count`` is the total rather than the\npage length, so a client knows whether another page is owed. ``search``\nnarrows the page and the count together.",
         "operationId": "provider-keys-list_org_provider_key_models",
         "parameters": [
           {
@@ -37952,6 +37971,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Narrow to models whose name contains this text, case-insensitively.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Narrow to models whose name contains this text, case-insensitively.",
+              "title": "Search"
             }
           }
         ],

@@ -240,6 +240,35 @@ def test_an_unknown_provider_is_a_400_and_an_unknown_row_a_404(
     assert client.delete(f"{PATH}/openai/models/{uuid.uuid4()}", headers=master_key_header).status_code == 404
 
 
+def test_a_search_narrows_the_models_and_their_count(client: TestClient, master_key_header: dict[str, str]) -> None:
+    _create(client, master_key_header)
+    for model in ("gpt-4o-mini", "o3_pro", "o3-mini"):
+        response = client.post(
+            f"{PATH}/openai/models",
+            json={"model": model, "input_price_per_million": 1, "output_price_per_million": 2},
+            headers=master_key_header,
+        )
+        assert response.status_code == 201, response.text
+
+    def search(term: str) -> tuple[list[str], int]:
+        body = client.get(f"{PATH}/openai/models", params={"search": term}, headers=master_key_header).json()
+        return [row["model"] for row in body["data"]], body["count"]
+
+    assert search("GPT-4O") == (["gpt-4o", "gpt-4o-mini"], 2)
+    # An underscore is the text it says, not LIKE's any-character wildcard.
+    assert search("o3_") == (["o3_pro"], 1)
+    assert search("nothing-like-this") == ([], 0)
+    assert search("  ")[1] == 4
+
+
+def test_a_search_longer_than_200_characters_is_a_422(client: TestClient, master_key_header: dict[str, str]) -> None:
+    _create(client, master_key_header)
+
+    response = client.get(f"{PATH}/openai/models", params={"search": "x" * 201}, headers=master_key_header)
+
+    assert response.status_code == 422
+
+
 def test_half_a_price_is_a_422(client: TestClient, master_key_header: dict[str, str]) -> None:
     _create(client, master_key_header)
 
