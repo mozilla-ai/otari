@@ -371,6 +371,28 @@ describe("DeploymentAccountsPage", () => {
     expect(await screen.findByText("2 matches")).toBeInTheDocument()
   })
 
+  it("states no count until the accounts have answered", async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockApi({ accounts: [OPERATOR, ANALYST] })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes("/admin/users")) await held
+      return answer(input, init)
+    })
+    await renderPage(<DeploymentAccountsPage />, "/admin/accounts?q=analyst")
+
+    expect(
+      await screen.findByRole("searchbox", { name: "Search accounts" }),
+    ).toHaveValue("analyst")
+    expect(screen.queryByText(/\bmatch(es)?\b/)).toBeNull()
+
+    release()
+    expect(await screen.findByText("2 matches")).toBeInTheDocument()
+  })
+
   it("pages through the accounts on the server", async () => {
     const requests = mockApi({ accounts: [OPERATOR, ANALYST], count: 60 })
     await renderPage(<DeploymentAccountsPage />, "/admin/accounts?page=1")

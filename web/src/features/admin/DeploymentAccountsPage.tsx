@@ -303,7 +303,9 @@ export function DeploymentAccountsPage() {
         placeholder="Search by name or email"
         value={search.value}
         onChange={search.onChange}
-        resultCount={accounts.data?.count ?? 0}
+        resultCount={
+          accounts.isPlaceholderData ? undefined : accounts.data?.count
+        }
         className="mb-3 md:w-80"
       />
 
