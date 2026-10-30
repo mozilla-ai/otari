@@ -467,14 +467,6 @@ def _agent_model_recommender(session: AsyncSession | None) -> AgentModelRecommen
     return DecisionProviderRecommender()
 
 
-def _shared(adapter: T) -> PortFactory[T]:
-    """A factory that serves the one ``adapter`` to every request.
-
-    NOTE: The adapter must hold no per-request state, because concurrent requests share it.
-    """
-    return lambda session: adapter
-
-
 def build_container(
     bootstrap_selector: str | None = None,
     config: GatewayConfig | None = None,

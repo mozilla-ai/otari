@@ -14,6 +14,7 @@ nowhere else; nothing here logs it.
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 
 from pydantic import ValidationError
 
@@ -26,7 +27,6 @@ from gateway.ports.agent_model_recommender_port import (
     AgentModelRecommenderPort,
     ModelRecommendation,
     Quote,
-    RecommendationUsage,
     SubagentSpawn,
 )
 from gateway.schemas.inference import DecisionResponse
@@ -103,14 +103,7 @@ class DecisionProviderRecommender(AgentModelRecommenderPort):
             if counted
             else None
         )
-        return ModelRecommendation(
-            model=recommendation.model,
-            reason=recommendation.reason,
-            probabilities=recommendation.probabilities,
-            usage=RecommendationUsage(
-                input_tokens=tokens.input_tokens, output_tokens=tokens.output_tokens, charge=charge
-            ),
-        )
+        return replace(recommendation, usage=replace(tokens, charge=charge))
 
     def _router(self) -> StoredRecommender:
         """The router switched on when this instance first asked, kept for the rest of the request."""

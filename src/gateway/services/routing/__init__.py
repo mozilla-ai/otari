@@ -30,7 +30,6 @@ from gateway.services.routing._agent_recommender_price import HOLD_INPUT_TOKENS,
 from gateway.services.routing._agent_recommender_rules import check_recommender
 from gateway.services.routing._agent_recommender_service import AgentRecommenderService
 from gateway.services.routing._agent_recommenders import (
-    REFRESH_SECONDS,
     StoredRecommender,
     active_agent_recommender,
     apply_agent_recommenders,
@@ -85,7 +84,6 @@ __all__ = [
     "KNN_BACKEND",
     "NOOP_BACKEND",
     "PRIORITY_BACKEND",
-    "REFRESH_SECONDS",
     "ROUTER_LABEL",
     "ROUTER_LABEL_MODEL",
     "ROUTER_LABEL_PROVIDER",
