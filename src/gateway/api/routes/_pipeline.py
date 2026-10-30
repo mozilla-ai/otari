@@ -2426,8 +2426,10 @@ async def _compile_request_plan(
         )
 
     budget = BudgetState()
-    if needs_budget_state(spec) and user_id is not None:
-        budget = await get_budget_state(db, user_id, BudgetScopeRequest(api_key=api_key))
+    # A budget-exempt key is gated by no budget, so none of them may tier it down either.
+    budget_exempt = api_key is not None and api_key.exclude_from_budget
+    if needs_budget_state(spec) and user_id is not None and not budget_exempt:
+        budget = await get_budget_state(db, user_id, BudgetScopeRequest(api_key=api_key, workspace_id=workspace_id))
 
     # The signal is built here rather than by the endpoint because flattening the
     # prompt is not free on a long conversation, and only a policy with a router
@@ -3020,10 +3022,10 @@ async def resolve_request_context(
             estimated_tokens=estimated_tokens,
             strategy=config.budget_strategy,
             counts_toward_budget=not budget_exempt,
-            # The tenancy-scoped ceilings resolve from the key's workspace and
+            # The tenancy-scoped ceilings resolve from the request's workspace and
             # the identity behind it, and from the provider this attempt is
             # about to call.
-            scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance),
+            scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance, workspace_id=workspace_id),
             # Already resolved for the pricing gate above, so the free-model
             # check reads the same rate the estimate was built from.
             organization_id=organization_id,
