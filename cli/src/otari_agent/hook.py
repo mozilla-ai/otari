@@ -994,6 +994,35 @@ def _hook_extract_codex_judge_transcript(transcript_path: Path) -> str:
     return "\n".join(texts)
 
 
+_GIT_LOCATION_VARS = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"})
+
+
+def _hook_list_files(repo_root: Path, *flags: str) -> list[str] | None:
+    """`git ls-files` for `repo_root` with `flags`, or None when Git could not list them.
+
+    Inside a Git hook, Git exports `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, which override `cwd`.
+    They are dropped so the list is always for `repo_root` and not for whichever repository ran the hook.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_VARS}
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+            ["git", "ls-files", *flags, "--exclude-standard", "-z"],
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [path for path in result.stdout.split("\0") if path]
+
+
 def _hook_untracked_paths(repo_root: Path) -> list[str] | None:
     """Paths Git does not track and the ignore rules do not exclude.
 
@@ -1007,22 +1036,16 @@ def _hook_untracked_paths(repo_root: Path) -> list[str] | None:
     collapsing them would send a judge an empty diff for a change made
     entirely of new files.
     """
-    try:
-        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
-            ["git", "ls-files", "--others", "--exclude-standard", "-z"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
-            check=False,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    return [path for path in result.stdout.split("\0") if path]
+    return _hook_list_files(repo_root, "--others")
+
+
+def _hook_repo_files(repo_root: Path) -> list[str] | None:
+    """Paths a guardrail glob can match: tracked files plus untracked ones the ignore rules keep.
+
+    A file created this session counts, so a glob naming it is not reported as matching nothing.
+    None means Git could not list them, and the caller skips the check rather than report on a guess.
+    """
+    return _hook_list_files(repo_root, "--cached", "--others")
 
 
 def _hook_render_untracked_file(repo_root: Path, path: str) -> str:
@@ -3895,14 +3918,16 @@ def guardrails_validate(
     because no single file can show them: a gate id declared twice across the
     set, or more judge gates in total than one Stop event will run.
     `--guardrail-file` narrows it back to one file, which is how a snippet
-    from somewhere else is checked before being dropped in.
+    from somewhere else is checked before being dropped in. Its globs are checked against this repo's files too,
+    since naming one file and one tree says they should match here.
     `--repo-only` leaves out the files under `~/.otari/`, so a personal warning cannot fail `--strict` on a repo.
 
     Offline and gateway-free: it parses the guardrail the same way a
     submitted one is parsed, then reports what running it would have taught
     the hard way. An error is a gate that cannot do its job (a missing or
     unrunnable verifier script). A warning is a gate that runs and may not
-    mean what its author intended: a `**` glob that cannot reach the
+    mean what its author intended: a `when_changed` glob that matches no file in
+    this repo's own gates, a `**` glob that cannot reach the
     repository root, a one-token forbidden phrase that also refuses commands
     merely mentioning the word, a path gate blind to every shell write, more
     judge gates than one Stop event evaluates. A warning never fails on its
@@ -3951,11 +3976,21 @@ def guardrails_validate(
     target = guardrail.name if guardrail_file_option is None else str(guardrail_file_option)
     spec = guardrail.spec
     origins = guardrail.origins
+    # The tree can only answer for a gate written for this repo. A user-level gate is written for every repo,
+    # so a glob there that matches nothing here is not a finding. `--guardrail-file` names one file and one tree,
+    # which is the author asserting that these should match here.
+    tree_gate_ids = (
+        None
+        if guardrail_file_option is not None
+        else {gate_id for gate_id, origin in origins.items() if origin is GuardrailOrigin.REPO}
+    )
     findings = validate_policy(
         spec,
         judge_gate_limit=max_judges,
         verifier_gate_limit=_HOOK_CHECK_MAX_GATES_PER_RUN,
         probe_verifier=lambda gate: _guardrails_probe_verifier(root, gate.verifier, origins[gate.id]),
+        repo_files=_hook_repo_files(root),
+        tree_gate_ids=tree_gate_ids,
     )
     # `policy_id` is the composed set's own name where several files compose,
     # which is `target` again; one file declares its own, worth showing.
