@@ -36,7 +36,7 @@ export OTARI_JUNIE_KEY=<your-otari-key>
 junie --model custom:otari "Add a docstring to the add function in calc.py"
 ```
 
-Any model in your catalog works in `id`, `primaryModel` and `fasterModel`, using the `provider:model` selector that `GET /api/v1/models` returns for your key.
+Any model in your catalog works in `id`, `primaryModel` and `fasterModel`: the catalog id that `GET /api/v1/models` returns for your key, which lets Otari choose the provider, or a `provider:model` selector, which pins one (see [Listing available models](models.md#listing-available-models)).
 
 ### Junie sends a `user` field
 
