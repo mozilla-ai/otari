@@ -142,6 +142,71 @@ describe("ActivityPage request panel", () => {
     expect(location.search.request).toBeUndefined()
   })
 
+  it("opens a request by its Otari-Request-ID on the row that served it", async () => {
+    // A fallback: the first attempt was absorbed, the second served. Neither row's
+    // own id is the id the caller holds.
+    const rows = [
+      entry({
+        id: "row-b",
+        model: "served-model",
+        request_group_id: "req-7",
+        status: "success",
+        attempt_position: 2,
+      }),
+      entry({
+        id: "row-a",
+        model: "absorbed-model",
+        request_group_id: "req-7",
+        status: "absorbed",
+        attempt_position: 1,
+      }),
+      entry({ id: "row-c", model: "other-model", request_group_id: "req-8" }),
+    ]
+    renderLog("/activity?request=req-7", rows)
+
+    await findPanel()
+    expect(shownModel()).toBe("served-model")
+    // The model's name is in the panel too, so the row is found among the rows.
+    const servedRow = screen
+      .getAllByRole("row")
+      .find((row) => within(row).queryByText("served-model"))
+    expect(servedRow).toHaveClass("is-peeked")
+    expect(
+      screen.queryByText("That request is not in the current results."),
+    ).toBeNull()
+    // It sits on the page, so the page walk starts from it.
+    expect(
+      within(panel()).getByRole("button", { name: "Next request" }),
+    ).toBeEnabled()
+  })
+
+  it("opens a request by its Otari-Request-ID when its rows are off the page", async () => {
+    mockApi({
+      rows: ROWS,
+      groupRows: [
+        entry({
+          id: "old-row",
+          model: "older-model",
+          request_group_id: "req-old",
+          status: "error",
+        }),
+      ],
+    })
+    renderPage(
+      <>
+        <ActivityPage />
+        <LocationProbe />
+      </>,
+      "/activity?request=req-old",
+    )
+
+    await findPanel()
+    expect(shownModel()).toBe("older-model")
+    expect(
+      within(panel()).getByRole("button", { name: "Next request" }),
+    ).toBeDisabled()
+  })
+
   it("says so, and can dismiss it, when the linked request is not on the page", async () => {
     const user = userEvent.setup()
     renderLog("/activity?request=gone")

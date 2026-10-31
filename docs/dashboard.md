@@ -332,7 +332,10 @@ be deleted from the page.
 
 ## Observability
 
-The Overview's Requests tab is the per-request log. Its Sessions tab lists [agent
+The Overview's Requests tab is the per-request log. A request opens from the
+`Otari-Request-ID` its response carried, at `/requests?request=<id>`, on the
+attempt that served it or the one that failed last, wherever it sits in the log;
+its detail shows that same id. Its Sessions tab lists [agent
 sessions](traces.md) where the deployment records traces
 (`trace_capture_enabled`, on by default), and is not offered where it does not.
 Sessions applies the user, API key, model and status filters carried from the

@@ -59,6 +59,7 @@ export function RequestDetail({
   const isUnpricedServed = entry.status === "success" && entry.cost === null
   const pricingKey = findPricingSelector(entry)
   const isSkipped = isSkippedAttempt(entry)
+  const requestId = entry.request_group_id || entry.id
   const user =
     entry.user_id === null
       ? null
@@ -185,8 +186,10 @@ export function RequestDetail({
         >
           {entry.api_key_id ?? "—"}
         </DetailField>
-        <DetailField label="Request ID" copyValue={entry.id} isId>
-          {entry.id}
+        {/* The id the request was answered under (`Otari-Request-ID`), which every
+            attempt's row shares; a row older than request groups has only its own. */}
+        <DetailField label="Request ID" copyValue={requestId} isId>
+          {requestId}
         </DetailField>
       </div>
       {isUnpricedServed ? (
