@@ -38,7 +38,17 @@ import operator
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Coroutine, Iterable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -5542,8 +5552,8 @@ async def _eager_backend_stream(
     stack: AsyncExitStack,
     tool_ctx: ToolContext,
     on_first_response: Callable[[], None] | None = None,
-) -> AsyncIterator[ChunkT]:
-    # The backends on ``stack`` were entered in ``open_stream``; this generator
+) -> AsyncGenerator[ChunkT]:
+    # The backends on ``stack`` were entered by the caller; this generator
     # closes them once the stream finishes or errors, and hands them the error
     # so a backend can abandon work nobody will read.
     kind = _ToolBackendKind.of(tool_ctx)
