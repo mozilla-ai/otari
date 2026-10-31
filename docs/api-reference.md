@@ -723,7 +723,9 @@ would get unstreamed: a `400` for a parameter the provider does not accept, a
 `502` for a provider outage. Otari holds the response until the provider's first
 chunk to make that possible. The gateway holds it for at most
 `streaming_first_chunk_hold_ms` (15 seconds by default; `0` turns the hold off
-and commits the `200` as soon as the stream opens). A stream running the
+and commits the `200` as soon as the stream opens). For a stream running the
+gateway's tools, opening their backends (connecting to MCP servers, leasing a
+sandbox) counts toward that window too. A stream running the
 gateway's tools (MCP servers, sandbox, web search) locks onto its candidate
 once the first round of that loop ends instead, which can happen before
 anything is sent: a failure past that point cannot fall over either, even

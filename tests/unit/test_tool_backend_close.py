@@ -15,6 +15,7 @@ from gateway.api.routes._pipeline import (
     _eager_backend_stream,
     _OpenedTools,
     _ToolBackendKind,
+    open_stream,
 )
 
 
@@ -93,6 +94,9 @@ class _TwoChunkAdapter:
 
     name = "chat"
 
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        return kwargs
+
     def inject_hints(self, kwargs: dict[str, Any], hints: object, *, header: str | None) -> dict[str, Any]:
         return kwargs
 
@@ -160,3 +164,49 @@ async def test_a_stream_that_failed_closes_its_backends_with_that_error(monkeypa
 
     assert backend.closed_with is failure
     assert warnings == ["The MCP tool backend failed to close: RuntimeError"]
+
+
+def _held_tool_ctx(hold_ms: int) -> Any:
+    return SimpleNamespace(
+        use_tool_loop=True,
+        config=SimpleNamespace(streaming_first_chunk_hold_ms=hold_ms),
+        mcp_server_configs=[object()],
+        use_sandbox=False,
+        use_web_search=False,
+        use_web_fetch=False,
+        tools_header=None,
+        max_tool_iterations=10,
+        use_budget=None,
+        native_tools=lambda _name: frozenset(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_backend_slower_than_the_hold_opens_after_the_stream_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    release = asyncio.Event()
+
+    async def slow_open(*_args: object) -> _OpenedTools:
+        await release.wait()
+        return _OpenedTools(pool=cast(Any, SimpleNamespace(purpose_hints=lambda: [])), sandbox=None)
+
+    monkeypatch.setattr("gateway.api.routes._pipeline._open_tool_backends", slow_open)
+
+    stream = await asyncio.wait_for(
+        open_stream(adapter=cast(Any, _TwoChunkAdapter()), tool_ctx=_held_tool_ctx(10), call_kwargs={}), timeout=5
+    )
+    release.set()
+
+    assert [chunk async for chunk in stream] == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_a_backend_that_fails_within_the_hold_raises_before_the_stream_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failing_open(*_args: object) -> _OpenedTools:
+        raise ConnectionError("the MCP server is down")
+
+    monkeypatch.setattr("gateway.api.routes._pipeline._open_tool_backends", failing_open)
+
+    with pytest.raises(ConnectionError):
+        await open_stream(adapter=cast(Any, _TwoChunkAdapter()), tool_ctx=_held_tool_ctx(5_000), call_kwargs={})

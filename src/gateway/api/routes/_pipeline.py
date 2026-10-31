@@ -5507,6 +5507,34 @@ async def _close_tool_backend(closing: Awaitable[object], kind: _ToolBackendKind
         logger.warning("The %s tool backend failed to close: %s", kind, failure_class(exc))
 
 
+async def _enter_tool_backends(
+    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, stack: AsyncExitStack
+) -> _OpenedTools:
+    """:func:`_open_tool_backends`, closing whatever it entered on ``stack`` when it raises."""
+    try:
+        # May raise SandboxNotReachableError, WebSearchNotReachableError or a refusal.
+        return await _open_tool_backends(adapter, tool_ctx, stack)
+    except BaseException as exc:
+        await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(tool_ctx))
+        raise
+
+
+async def _opening_backend_stream(
+    adapter: FormatAdapter[Any, ChunkT],
+    kwargs: dict[str, Any],
+    tool_ctx: ToolContext,
+    on_first_response: Callable[[], None] | None = None,
+) -> AsyncIterator[ChunkT]:
+    """The tool loop's stream, opening its backends on the first read."""
+    stack = AsyncExitStack()
+    opened = await _enter_tool_backends(adapter, tool_ctx, stack)
+    async with contextlib.aclosing(
+        _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx, on_first_response)
+    ) as stream:
+        async for event in stream:
+            yield event
+
+
 async def _eager_backend_stream(
     adapter: FormatAdapter[Any, ChunkT],
     kwargs: dict[str, Any],
@@ -5553,26 +5581,24 @@ async def open_stream(
     ``on_first_response`` once its first provider round has ended, since the
     gateway's tools may run before anything reaches the hold.
 
-    The tool backends are opened eagerly (their ``__aenter__`` runs before this
-    function returns) so a backend-unreachable error or a refused MCP tool name
-    surfaces as an HTTP error rather than landing in the SSE channel after the
-    response has already committed to 200 OK.
+    The tool backends open before the response commits, so a backend-unreachable
+    error or a refused MCP tool name surfaces as an HTTP error rather than landing
+    in the SSE channel after a 200 OK. With a hold, opening counts toward its
+    window, so a slow MCP server cannot keep the headers waiting past it; a backend
+    slower than that still opens, and its failure arrives as an error event.
     """
     kwargs = adapter.prepare_stream_kwargs(call_kwargs)
 
     if not tool_ctx.use_tool_loop:
         return await hold_for_first_chunk(await adapter.open_provider_stream(kwargs), tool_ctx.config)
 
+    if tool_ctx.config.streaming_first_chunk_hold_ms > 0:
+        return await hold_for_first_chunk(
+            _opening_backend_stream(adapter, kwargs, tool_ctx, on_first_response), tool_ctx.config
+        )
     stack = AsyncExitStack()
-    try:
-        # May raise SandboxNotReachableError, WebSearchNotReachableError or a refusal.
-        opened = await _open_tool_backends(adapter, tool_ctx, stack)
-    except BaseException as exc:
-        await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(tool_ctx))
-        raise
-    return await hold_for_first_chunk(
-        _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx, on_first_response), tool_ctx.config
-    )
+    opened = await _enter_tool_backends(adapter, tool_ctx, stack)
+    return _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx, on_first_response)
 
 
 # ---------------------------------------------------------------------------
