@@ -30,7 +30,6 @@ import {
 import { useObserveScope } from "@/features/observe/useObserveScope"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
-import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSetPricing } from "@/shared/api/pricing"
 import {
   useInFlightRequests,
@@ -114,11 +113,9 @@ const URL_DEFAULTS = {
 /**
  * Inside the Overview the page waits for its scope, so it never fetches the wrong one.
  *
- * It also waits while the workspace switcher lags the organization context it is
- * read from, which can reach the switcher a render after this page: mounting in
- * that gap would see the workspace arrive as a filter change, which resets the page
- * and drops a linked `?request=`. A context that failed lists no workspaces, so
- * nothing waits on it.
+ * It also waits for the workspace selection: mounted before it, the page would see
+ * the workspace arrive as a filter change, which resets the page and drops a
+ * linked `?request=`.
  */
 export function ActivityPage({
   embedded = false,
@@ -126,12 +123,8 @@ export function ActivityPage({
   embedded?: boolean
 } = {}) {
   const observe = useObserveScope(embedded)
-  const context = useOrganizationContext()
   const workspace = useSelectedWorkspace()
-  const workspaceLagging =
-    (context.data?.workspace_memberships?.length ?? 0) > 0 &&
-    workspace.selected === null
-  return observe.isResolved && !workspaceLagging ? (
+  return observe.isResolved && workspace.isSettled ? (
     <ActivityPageContent embedded={embedded} observe={observe} />
   ) : (
     <PageLoading />
@@ -629,7 +622,9 @@ function ActivityPageContent({
   // list is a history entry, so Back closes it; walking and closing replace it.
   const navigate = useNavigate()
   const requestId = url.get("request")
-  const pageSettled = !usage.isLoading && !usage.isPlaceholderData
+  // Answered for this view: a query still disabled (its scope unresolved) is
+  // neither loading nor fetching, and has answered nothing.
+  const pageSettled = usage.isSuccess && !usage.isPlaceholderData
   const pageIndex = rows.findIndex((row) => row.id === requestId)
   // A link may name the request rather than one of its rows: the
   // `Otari-Request-ID` a caller got back is the `request_group_id` its rows share,
@@ -662,12 +657,14 @@ function ActivityPageContent({
       : undefined
   // A link to a row that is not on this page, and names no request either, opens
   // nothing; say so rather than ignore it. Only once the page and the lookup have
-  // settled, or a loading page would flash it.
+  // both answered, or a loading page would flash it; a failed lookup is reported
+  // in the error banner instead.
   const requestMissing =
     requestId !== "" &&
     openEntry === undefined &&
     pageSettled &&
-    !linkedRequest.isFetching
+    linkedRequest.isSuccess &&
+    !linkedRequest.isPlaceholderData
   // Below md the panel covers the page, which then takes no focus or presses.
   const isMobile = useIsMobile()
   // Stable per open row, so DataTable's row cache holds while the page polls.
@@ -825,7 +822,11 @@ function ActivityPageContent({
           dropped on failure rather than left to go stale. */}
         <ErrorBanner
           error={
-            usage.error ?? count.error ?? contextSummary.error ?? inFlight.error
+            usage.error ??
+            linkedRequest.error ??
+            count.error ??
+            contextSummary.error ??
+            inFlight.error
           }
         />
 

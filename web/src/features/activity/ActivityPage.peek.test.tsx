@@ -227,6 +227,28 @@ describe("ActivityPage request panel", () => {
     expect(location.search.request).toBeUndefined()
   })
 
+  it("reports a failed request lookup rather than calling the request missing", async () => {
+    const { mock } = mockApi({ rows: ROWS })
+    const serve = mock.getMockImplementation()
+    mock.mockImplementation(async (input, init) =>
+      String(input).includes("request_group_id=req-x")
+        ? Response.json({ detail: "lookup is down" }, { status: 500 })
+        : serve!(input, init),
+    )
+    renderPage(
+      <>
+        <ActivityPage />
+        <LocationProbe />
+      </>,
+      "/activity?request=req-x",
+    )
+
+    expect(await screen.findByText(/lookup is down/)).toBeInTheDocument()
+    expect(
+      screen.queryByText("That request is not in the current results."),
+    ).toBeNull()
+  })
+
   it("drops the request from the URL when the page changes", async () => {
     const user = userEvent.setup()
     renderLog(
