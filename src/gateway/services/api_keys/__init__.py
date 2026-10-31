@@ -24,9 +24,19 @@ from gateway.services.api_keys._federation import (
 from gateway.services.api_keys._membership import ApiKeyMembershipListener
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
 from gateway.services.api_keys._service import ApiKeyService
+from gateway.services.api_keys._service_keys import (
+    DEFAULT_ORGANIZATION_MAX_END_USERS,
+    END_USER_SETTINGS,
+    admit_organization_key,
+    operator_max_end_users,
+    organization_key_changes,
+    refuse_service_key_flag_change,
+)
 from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace
 
 __all__ = [
+    "DEFAULT_ORGANIZATION_MAX_END_USERS",
+    "END_USER_SETTINGS",
     "JWT_BEARER_GRANT",
     "AccessTokenClaims",
     "ApiKeyMembershipListener",
@@ -40,14 +50,18 @@ __all__ = [
     "FederationUnavailableError",
     "OrganizationOfWorkspace",
     "access_token_expiry",
+    "admit_organization_key",
     "declared_secret_problem",
     "grant_names_organization",
     "is_access_token",
     "key_refusal",
     "match_federation_rules",
     "mint_access_token",
+    "operator_max_end_users",
     "operator_set_active",
+    "organization_key_changes",
     "read_access_token",
+    "refuse_service_key_flag_change",
     "refuse_unusable_declared_secrets",
     "rule_matches",
     "unverified_issuer",

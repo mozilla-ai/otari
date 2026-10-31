@@ -6279,7 +6279,7 @@
         {
           "name": "List Own Keys",
           "request": {
-            "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does.",
+            "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does. An owner or admin\nalso sees the organization's service keys, which they manage.",
             "header": [],
             "method": "GET",
             "url": {
@@ -6327,9 +6327,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"key_name\": \"my-key\"\n}"
             },
-            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.",
+            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.\n\nA service key is the organization's rather than the caller's: only an\norganization owner or admin may create one, its end-user budgets must be\nthis organization's, and it is owned by a user minted for it alone.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6362,9 +6362,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"key_name\": \"my-key\"\n}"
             },
-            "description": "Update one of the caller's own API keys.",
+            "description": "Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.",
             "header": [
               {
                 "key": "Content-Type",

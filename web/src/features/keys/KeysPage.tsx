@@ -47,7 +47,10 @@ import {
   useCurrentOwnerId,
   useMemberAttributionLabels,
 } from "@/features/organization/attribution"
-import { canContributeToWorkspace } from "@/features/organization/roles"
+import {
+  canContributeToWorkspace,
+  canManage,
+} from "@/features/organization/roles"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
@@ -453,6 +456,11 @@ function CreateKeyDialog({
   const [toolScopeValid, setToolScopeValid] = useState(true)
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
   const [serviceKey, setServiceKey] = useState(NO_SERVICE_KEY)
+  // An organization's owner or admin may also make the organization a service
+  // key, on its own budgets; a member is refused one, so is not offered it.
+  const organizationContext = useOrganizationContext()
+  const offersServiceKey =
+    isDeploymentWide || canManage(organizationContext.data)
   const [rejectUserMismatch, setRejectUserMismatch] =
     useState<UserMismatchChoice>("inherit")
   const [scopeValid, setScopeValid] = useState(true)
@@ -492,7 +500,10 @@ function CreateKeyDialog({
   // caller belongs to that default, which is the answer this form surfaces
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
-  const serviceKeyReady = useServiceKeyReady(serviceKey)
+  const serviceKeyReady = useServiceKeyReady(
+    serviceKey,
+    isDeploymentWide ? "deployment" : "organization",
+  )
   const budgetIncomplete =
     !excludeFromBudget && keyBudgetIncomplete(budgetDraft)
   const isBlocked =
@@ -580,7 +591,10 @@ function CreateKeyDialog({
           exclude_from_budget: excludeFromBudget,
           ...serviceKeyBody(serviceKey),
         }
-      : shared
+      : {
+          ...shared,
+          ...serviceKeyBody(offersServiceKey ? serviceKey : NO_SERVICE_KEY),
+        }
     // An exempt key is never gated, so a cap on it would never bind.
     const cap = excludeFromBudget ? EMPTY_KEY_BUDGET : budgetDraft
     create.mutate(body, {
@@ -763,8 +777,12 @@ function CreateKeyDialog({
               onChange={setExcludeFromBudget}
             />
           ) : null}
-          {isDeploymentWide ? (
-            <ServiceKeyFields value={serviceKey} onChange={setServiceKey} />
+          {offersServiceKey ? (
+            <ServiceKeyFields
+              value={serviceKey}
+              onChange={setServiceKey}
+              scope={isDeploymentWide ? "deployment" : "organization"}
+            />
           ) : null}
           <UserMismatchPicker
             value={rejectUserMismatch}
@@ -862,9 +880,17 @@ function EditKeyForm({
       userMismatchChoice(apiKey.reject_user_mismatch),
     )
   const [scopeValid, setScopeValid] = useState(true)
-  // Only the deployment-wide form shows the service key fields, so only it waits on the budgets.
+  // The deployment-wide form shows the service key fields for every key; an
+  // organization's form only for the organization's own service keys, which
+  // only an owner or admin reaches, and there whether it is one is fixed. An
+  // operator's service key a member holds is the operator's to change.
+  const showsServiceKey = isDeploymentWide || apiKey.is_organization_service_key
+  const serviceKeyScope = apiKey.is_organization_service_key
+    ? "organization"
+    : "deployment"
   const serviceKeyReady = useServiceKeyReady(
-    isDeploymentWide ? serviceKey : NO_SERVICE_KEY,
+    showsServiceKey ? serviceKey : NO_SERVICE_KEY,
+    serviceKeyScope,
   )
   const { isDirty, reset: reseed } = useDirtySnapshot({
     keyName,
@@ -927,7 +953,9 @@ function EditKeyForm({
           exclude_from_budget: excludeFromBudget,
           ...serviceKeyBody(serviceKey),
         }
-      : shared
+      : apiKey.is_organization_service_key
+        ? { ...shared, ...serviceKeyBody(serviceKey) }
+        : shared
     update.mutate(
       { id: apiKey.id, body },
       {
@@ -1038,8 +1066,13 @@ function EditKeyForm({
           onChange={setExcludeFromBudget}
         />
       ) : null}
-      {isDeploymentWide ? (
-        <ServiceKeyFields value={serviceKey} onChange={setServiceKey} />
+      {showsServiceKey ? (
+        <ServiceKeyFields
+          value={serviceKey}
+          onChange={setServiceKey}
+          scope={serviceKeyScope}
+          isLocked={!isDeploymentWide}
+        />
       ) : null}
       <UserMismatchPicker
         value={rejectUserMismatch}
