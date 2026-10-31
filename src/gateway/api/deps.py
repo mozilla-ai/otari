@@ -110,7 +110,7 @@ from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
-from gateway.services.pricing_service import model_context_window
+from gateway.services.pricing_service import RequestPrices, model_context_window
 from gateway.services.providers import (
     HostedCatalogUpdate,
     HostedProviderService,
@@ -121,7 +121,12 @@ from gateway.services.providers import (
     refresh_provider_endpoint_cache,
 )
 from gateway.services.rate_limits import RateLimitService
-from gateway.services.routing import AgentRecommenderService, RoutingService, clear_router_backend_cache
+from gateway.services.routing import (
+    AgentRecommenderService,
+    AutomaticRouter,
+    RoutingService,
+    clear_router_backend_cache,
+)
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
@@ -2125,6 +2130,22 @@ async def get_platform_break_glass(
         workspace_id=workspace_id,
         organization_id=workspace.organization_id,
     )
+
+
+def get_request_prices(db: AsyncSession, organization_id: uuid.UUID | None) -> RequestPrices:
+    """Build the request pricing cache with its batched pricing repository."""
+    return RequestPrices(organization_id, OrganizationModelPricingRepository(db))
+
+
+def get_automatic_router(request: Request) -> AutomaticRouter:
+    """Build one automatic router per application worker."""
+    app_state = getattr(request.scope.get("app"), "state", None)
+    router = getattr(app_state, "automatic_router", None)
+    if router is None:
+        router = AutomaticRouter()
+        if app_state is not None:
+            app_state.automatic_router = router
+    return router
 
 
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:

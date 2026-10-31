@@ -44,7 +44,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, StrEnum, auto
-from functools import reduce
+from functools import partial, reduce
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
 
 import httpx
@@ -71,7 +71,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ToolPorts,
+    get_automatic_router,
     get_budget_service,
+    get_request_prices,
     verify_api_key_or_master_key,
 )
 from gateway.api.request_id import set_request_id
@@ -165,7 +167,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerNotFoundError,
     WorkspaceWebSearchDomainsExcludedError,
 )
-from gateway.inflight import track_request
+from gateway.inflight import on_request_finished, track_request
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Histogram
 from gateway.metrics import Counter as PrometheusCounter
@@ -208,6 +210,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.catalog import organization_offerings
 from gateway.services.code_execution import (
     ContainerLease,
     SandboxContainerRegistry,
@@ -298,6 +301,8 @@ from gateway.services.providers import (
     unpriced_model_refusal,
 )
 from gateway.services.routing import (
+    AutomaticObservation,
+    AutomaticRouter,
     BudgetState,
     CompiledPlan,
     NoEligibleCandidatesError,
@@ -306,6 +311,7 @@ from gateway.services.routing import (
     compile_policy,
     decide_ordering,
     needs_budget_state,
+    preferred_region,
     selection_consults_router,
 )
 from gateway.services.sandbox_backend import (
@@ -1537,7 +1543,8 @@ async def _prepare_for_dispatch(
     port: ModelProviderPort,
     billing: BillingPort,
 ) -> ResolvedProvider:
-    if ctx.plan is not None and len(ctx.plan.attempts) > 1:
+    """Prepare credentials and enforce admission, or pin the network client for an owned endpoint."""
+    if ctx.plan is not None and (len(ctx.plan.attempts) > 1 or ctx.plan.automatic is not None):
         ctx.credential_candidate = _hosted_candidate(ctx, port=port, billing=billing)
     if resolved.owned_endpoint is not None:
         # The client re-checks and pins the endpoint's address on every request
@@ -1958,14 +1965,8 @@ async def _serve_from_hosted_credential(
     A candidate the port does not serve either answers the ``MissingApiKeyError``
     :func:`require_declared_credential` raised for it, as a 424.
     """
-    if ctx.plan is not None and len(ctx.plan.attempts) > 1:
-        # A multi-candidate plan dispatches from ``ctx.plan.attempts``, whose
-        # kwargs the routing compiler built; what this function returns is not
-        # what those candidates are called with. Asking anyway would meter a
-        # resolve that never serves, so a routed chain keeps the ladder's own
-        # answer for now, and the walk refuses each candidate it leaves
-        # uncredentialed. Reaching the port from the compiler is separate work:
-        # the compiler is synchronous and documented as doing no I/O.
+    if ctx.plan is not None and (len(ctx.plan.attempts) > 1 or ctx.plan.automatic is not None):
+        # The walk resolves each candidate's credential immediately before dispatch.
         return resolved
     try:
         require_declared_credential(ctx.config, resolved.instance, resolved.provider, resolved.kwargs)
@@ -2261,7 +2262,7 @@ async def move_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) ->
             attempt,
             estimate_inputs=ctx.estimate_inputs,
             price_of=_request_price_of(
-                ctx.db, ctx.prices if ctx.prices is not None else RequestPrices(ctx.organization_id)
+                ctx.db, ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
             ),
         )
     except ProviderSpendCeilingExceededError as exc:
@@ -2335,7 +2336,7 @@ async def _grow_reservation(
     """
     if ctx.reservation is None or ctx.estimate_inputs is None:
         return
-    prices = ctx.prices if ctx.prices is not None else RequestPrices(ctx.organization_id)
+    prices = ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
     resolved = await prices.resolve(ctx.db, instance, model, deployment_paid=deployment_paid)
     pricing = resolved.pricing if resolved is not None else None
     # `require_pricing` is a billing safety gate: it refuses a request the gateway
@@ -2478,7 +2479,13 @@ async def _compile_request_plan(
     spec = resolve_effective_policy(config, model, user_id, workspace_id=workspace_id)
     if spec is None:
         return compile_catalog_plan(
-            config, model, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id, country_gate=country_gate
+            config,
+            model,
+            user_id=user_id,
+            allowlist=allowlist,
+            workspace_id=workspace_id,
+            candidate_limit=32 if config.automatic_routing.enabled else 5,
+            country_gate=country_gate,
         )
 
     budget = BudgetState()
@@ -2703,6 +2710,7 @@ async def resolve_request_context(
     model: str,
     user_id_from_request: str | None,
     estimate_prompt_chars: int,
+    streaming: bool = False,
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
@@ -2863,6 +2871,8 @@ async def resolve_request_context(
     country_gate = country_gate_for(config, raw_request)
     # A policy name, or a catalog ID with several offerings, resolves to a plan.
     # Everything below keys on the plan's head candidate, as it would on a plain model.
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    prices = get_request_prices(db, organization_id)
     plan = await _compile_request_plan(
         adapter=adapter,
         db=db,
@@ -2881,6 +2891,31 @@ async def resolve_request_context(
         safety_identifier=upstream_user,
         country_gate=country_gate,
     )
+    if plan is not None and AutomaticRouter.accepts(plan, model, config.automatic_routing):
+        automatic_router = get_automatic_router(raw_request)
+        costs = await prices.estimate_candidates(
+            [(candidate.instance, candidate.model) for candidate in plan.attempts],
+            partial(
+                estimate_cost,
+                prompt_chars=estimate_prompt_chars,
+                max_output_tokens=estimate_max_output_tokens,
+                default_output_tokens=config.budget_estimate_default_output_tokens,
+                cache_write_ttl=estimate_cache_write_ttl,
+            ),
+        )
+        signal = routing_signal() if routing_signal is not None else RoutingSignal()
+        plan = automatic_router.rank(
+            plan,
+            settings=config.automatic_routing,
+            costs=costs,
+            scope=f"{workspace_id}:{user_id}:{api_key_id}:{adapter.endpoint}",
+            anchor=signal.conversation_id or "",
+            region=preferred_region(config.automatic_routing, raw_request.headers),
+            mode=f"{adapter.endpoint}:{'stream' if streaming else 'completion'}",
+            own=organization_offerings(workspace_id=workspace_id, organization_id=organization_id),
+        )
+        if plan.automatic is not None:
+            on_request_finished(raw_request, plan.automatic.close)
     if plan is not None:
         head = plan.head
         gate_instance, gate_impl, gate_model = head.instance, head.provider, head.model
@@ -3021,13 +3056,6 @@ async def resolve_request_context(
                 )
             raise
 
-    # Derived from the workspace already resolved above, not via
-    # `organization_for_key_id` (which would re-derive the same workspace
-    # from `api_key_id` internally): a master-key request's workspace
-    # lookup is deliberately never memoized, so re-deriving it here would
-    # pay that cost twice for one request.
-    organization_id = await organization_for_workspace_id(db, workspace_id)
-    prices = RequestPrices(organization_id)
     gate_resolved = await prices.resolve(db, gate_instance, gate_model)
     gate_pricing = gate_resolved.pricing if gate_resolved is not None else None
     # Captured so a fallover can reprice against a different candidate; see
@@ -3072,30 +3100,58 @@ async def resolve_request_context(
     # precedence over the missing-pricing rejection (402); refund if we
     # then reject for missing pricing.
     try:
-        reservation = await reserve_budget(
-            db,
-            user_id,
-            estimate,
-            model=gate_model,
-            pricing_provider=gate_instance,
-            estimated_tokens=estimated_tokens,
-            strategy=config.budget_strategy,
-            counts_toward_budget=not budget_exempt,
-            # The tenancy-scoped ceilings resolve from the request's workspace and
-            # the identity behind it, and from the provider this attempt is
-            # about to call.
-            scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance, workspace_id=workspace_id),
-            # Already resolved for the pricing gate above, so the free-model
-            # check reads the same rate the estimate was built from.
-            organization_id=organization_id,
-            model_is_free=is_free_pricing(gate_pricing),
-            # The completion path is the one reserve site with the config
-            # object to hand, so it is the one that can honor a deployment's
-            # own TTL; the batch, search and pass-through sites take the
-            # module default.
-            reservation_ttl_sec=config.budget_reservation_ttl_sec,
-            reserved_output_tokens=estimate_inputs.get_reserved_output_tokens(gate_pricing),
-        )
+        while True:
+            try:
+                reservation = await reserve_budget(
+                    db,
+                    user_id,
+                    estimate,
+                    model=gate_model,
+                    pricing_provider=gate_instance,
+                    estimated_tokens=estimated_tokens,
+                    strategy=config.budget_strategy,
+                    counts_toward_budget=not budget_exempt,
+                    scope=BudgetScopeRequest(
+                        api_key=api_key, provider_instance=gate_instance, workspace_id=workspace_id
+                    ),
+                    organization_id=organization_id,
+                    model_is_free=is_free_pricing(gate_pricing),
+                    reservation_ttl_sec=config.budget_reservation_ttl_sec,
+                    reserved_output_tokens=estimate_inputs.get_reserved_output_tokens(gate_pricing),
+                )
+                break
+            except HTTPException as budget_refusal:
+                if plan is None or plan.automatic is None or error_code_of(budget_refusal.headers) != BUDGET_EXCEEDED:
+                    raise
+                plan.automatic.forget(plan.head)
+                if len(plan.attempts) == 1:
+                    raise
+                # A refused reserve leaves no hold. Try the next offering at its full price.
+                plan = replace(
+                    plan,
+                    attempts=[
+                        replace(a, position=i, selection_reason="catalog" if i == 1 else "on_failure")
+                        for i, a in enumerate(plan.attempts[1:], 1)
+                    ],
+                )
+                head = plan.head
+                gate_instance, gate_impl, gate_model = head.instance, head.provider, head.model
+                resolved_provider = ResolvedProvider(
+                    instance=head.instance,
+                    provider=head.provider,
+                    model=head.model,
+                    kwargs=head.kwargs,
+                    alias=head.display_model,
+                )
+                gate_resolved = await prices.resolve(db, gate_instance, gate_model)
+                gate_pricing = gate_resolved.pricing if gate_resolved is not None else None
+                estimate = estimate_cost(
+                    gate_pricing,
+                    prompt_chars=estimate_inputs.prompt_chars,
+                    max_output_tokens=estimate_inputs.max_output_tokens,
+                    default_output_tokens=estimate_inputs.default_output_tokens,
+                    cache_write_ttl=estimate_inputs.cache_write_ttl,
+                )
     except HTTPException as exc:
         # A blocked or over-budget user is refused inside reserve_budget,
         # which reserves nothing on the paths that raise, so there is no
@@ -5645,6 +5701,7 @@ def build_streaming_response(
     tool_funding: DeploymentCharge | None = None,
     source_label: str | None = None,
     safety_identifier: str | None = None,
+    automatic_observation: AutomaticObservation | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -5703,8 +5760,11 @@ def build_streaming_response(
     reported_usage: CompletionUsage | None = None
 
     def _on_first_chunk() -> None:
+        """Record time to first output for usage accounting and automatic routing."""
         nonlocal first_chunk_at
         first_chunk_at = time.monotonic()
+        if automatic_observation is not None:
+            automatic_observation.first_response()
 
     def _extract_usage(chunk: ChunkT) -> CompletionUsage | None:
         nonlocal reported_usage
@@ -5714,6 +5774,9 @@ def build_streaming_response(
         return chunk_usage
 
     async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
+        """Record a successful stream and settle its reported usage and reservations."""
+        if automatic_observation is not None:
+            automatic_observation.finish(success=True)
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(usage_data))
         logged = await record_usage(
@@ -5747,6 +5810,9 @@ def build_streaming_response(
         return inline_settlement(logged)
 
     async def _on_no_usage() -> None:
+        """Record routing success and settle an unmetered stream under the configured billing policy."""
+        if automatic_observation is not None:
+            automatic_observation.finish(success=True)
         # Stream completed but the provider sent no usage data: settle the
         # reservation per stream_missing_usage_policy instead of billing $0.
         if reservation is None:
@@ -5857,6 +5923,9 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
+        """Record provider health and settle reported work, refunding unused reservations."""
+        if automatic_observation is not None:
+            automatic_observation.finish(unhealthy=_automatic_unhealthy(exc))
         if isinstance(exc, IncompleteStreamError):
             # codeql[py/clear-text-logging-sensitive-data]
             logger.warning(
@@ -5908,6 +5977,9 @@ def build_streaming_response(
                 await refund_reservation(db, reservation)
 
     async def _on_incomplete() -> None:
+        """Release routing load on disconnect and bill reported work before releasing the hold."""
+        if automatic_observation is not None:
+            automatic_observation.finish()
         # Client disconnected mid-stream: release the reservation.
         #
         # Tokens the provider already reported and tool work already done are still
@@ -6010,6 +6082,29 @@ async def _prepared(
         raise domain_error(adapter, exc) from exc
 
 
+def _automatic_unhealthy(exc: BaseException) -> bool:
+    """Identify upstream failures that trigger cooldown, excluding local refusals and cancellation."""
+    if isinstance(
+        exc,
+        (
+            HTTPException,
+            asyncio.CancelledError,
+            MaxToolIterationsExceeded,
+            SandboxNotReachableError,
+            WebSearchNotReachableError,
+        ),
+    ):
+        return False
+    kind, code = upstream_exception_shape(exc)
+    return (
+        isinstance(exc, IncompleteStreamError)
+        or is_provider_credential_rejection(exc)
+        or kind in {"timeout", "conn_err"}
+        or code == 429
+        or (code is not None and code >= 500)
+    )
+
+
 def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
     """Admit each candidate of a walk under the budgets and rate limits that bind it.
 
@@ -6018,8 +6113,14 @@ def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
     admit_model = _model_admission(ctx)
 
     async def _admit(attempt: Attempt) -> DropAdmission | None:
-        await move_reservation_for_attempt(ctx, attempt)
-        return await admit_model(attempt) if admit_model is not None else None
+        """Apply candidate budgets and rate limits, forgetting affinity when admission refuses it."""
+        try:
+            await move_reservation_for_attempt(ctx, attempt)
+            return await admit_model(attempt) if admit_model is not None else None
+        except CandidateCannotServe:
+            if ctx.plan is not None and ctx.plan.automatic is not None:
+                ctx.plan.automatic.forget(attempt)
+            raise
 
     return _admit
 
@@ -6149,22 +6250,37 @@ async def run_single_attempt_stream(
     """
     # The tools of the candidate last opened, which is the one that served once the walk returns.
     served_tools = tool_ctx
+    observation: AutomaticObservation | None = None
     try:
-        if ctx.plan is not None and len(ctx.plan.attempts) > 1 and base_request_fields is not None:
+        if (
+            ctx.plan is not None
+            and (len(ctx.plan.attempts) > 1 or ctx.plan.automatic is not None)
+            and base_request_fields is not None
+        ):
 
             async def _open_candidate(
                 attempt: Attempt,
                 attempt_kwargs: dict[str, Any],
                 mark_locked_in: Callable[[], None],
             ) -> AsyncIterator[ChunkT]:
-                nonlocal served_tools
+                """Top up the hold and open a candidate stream while tracking load and startup failures."""
+                nonlocal served_tools, observation
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
-                _mark_dispatched(ctx)
-                return await open_stream(
-                    adapter=adapter, tool_ctx=served_tools, call_kwargs=attempt_kwargs, on_first_response=mark_locked_in
-                )
+                observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
+                try:
+                    _mark_dispatched(ctx)
+                    return await open_stream(
+                        adapter=adapter,
+                        tool_ctx=served_tools,
+                        call_kwargs=attempt_kwargs,
+                        on_first_response=mark_locked_in,
+                    )
+                except BaseException as exc:
+                    if observation is not None:
+                        observation.finish(unhealthy=_automatic_unhealthy(exc))
+                    raise
 
             absorbed_rows: list[asyncio.Task[None]] = []
             # Each absorbed failure is a candidate sent the request before the one that served.
@@ -6285,6 +6401,7 @@ async def run_single_attempt_stream(
         tool_loop=served_tools.use_tool_loop,
         deployment_charge=ctx.deployment_charge,
         tool_funding=ctx.tool_funding,
+        automatic_observation=observation,
     )
 
 
@@ -6528,24 +6645,38 @@ async def run_non_stream(
     # The tools of the candidate last dispatched, which is the one that served once the walk returns.
     served_tools = tool_ctx
     try:
-        if ctx.plan is not None and len(ctx.plan.attempts) > 1 and base_request_fields is not None:
+        if (
+            ctx.plan is not None
+            and (len(ctx.plan.attempts) > 1 or ctx.plan.automatic is not None)
+            and base_request_fields is not None
+        ):
 
             async def _run_candidate(
                 attempt: Attempt,
                 attempt_kwargs: dict[str, Any],
                 mark_locked_in: Callable[[], None],
             ) -> ResultT:
+                """Dispatch a candidate with its tools and record automatic routing success or failure."""
                 nonlocal served_tools
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
-                _mark_dispatched(ctx)
-                return await dispatch_non_stream(
-                    adapter=adapter,
-                    tool_ctx=served_tools,
-                    call_kwargs=attempt_kwargs,
-                    on_first_response=mark_locked_in,
-                )
+                observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
+                try:
+                    _mark_dispatched(ctx)
+                    result = await dispatch_non_stream(
+                        adapter=adapter,
+                        tool_ctx=served_tools,
+                        call_kwargs=attempt_kwargs,
+                        on_first_response=mark_locked_in,
+                    )
+                except BaseException as exc:
+                    if observation is not None:
+                        observation.finish(unhealthy=_automatic_unhealthy(exc))
+                    raise
+                if observation is not None:
+                    observation.finish(success=True)
+                return result
 
             absorbed_rows: list[asyncio.Task[None]] = []
             # Each absorbed failure is a candidate sent the request before the one that served.

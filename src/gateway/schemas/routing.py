@@ -132,7 +132,10 @@ class AutomaticFallbackPublic(BaseModel):
     id: str = Field(description="The catalog ID a caller sends to get the fallback, e.g. `anthropic/claude-sonnet-5`.")
     name: str
     offerings: list[FallbackOfferingPublic] = Field(
-        description="What a request sent by catalog ID tries, first first. One entry means no backup."
+        description=(
+            "Offerings in baseline catalog order. Automatic selection can reorder them per request "
+            "using cost, recent health, load, region, latency and cache continuity. One entry means no backup."
+        )
     )
     requests: int = Field(description="Requests served in the window, each counted once however many attempts.")
     fell_back: int = Field(description="Of `requests`, the successful ones a later offering served.")

@@ -28,6 +28,7 @@ from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.providers import ProviderSettings
+from gateway.core.settings.routing import RoutingSettings
 from gateway.core.settings.tools import ToolSettings
 from gateway.core.settings.traces import TraceSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
@@ -128,7 +129,7 @@ OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 # Mapping fields an OTARI_<FIELD> variable sets as a JSON object. The variable
 # replaces the file's block whole, as a top-level key of OTARI_CONFIG_YAML does,
 # rather than merging into it per entry.
-JSON_ENV_FIELDS = ("hosted_providers", "provider_supported_countries")
+JSON_ENV_FIELDS = ("hosted_providers", "provider_supported_countries", "automatic_routing")
 # GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
 # code. The read sites still consult otari_env() (they have no config object in
 # scope), so load_config bridges values set in the YAML config into the process
@@ -555,6 +556,7 @@ def _validate_bedrock_client_config(instance: str, client_args: Any, *, block: s
 
 
 class GatewayConfig(
+    RoutingSettings,
     InferenceSettings,
     BudgetSettings,
     ApiKeySettings,

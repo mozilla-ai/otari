@@ -223,6 +223,14 @@ def catalog_models(*, organization_id: uuid.UUID | None = None) -> list[CatalogM
     return models
 
 
+def organization_offerings(
+    *, workspace_id: uuid.UUID | None = None, organization_id: uuid.UUID | None = None
+) -> frozenset[str]:
+    """The selectors the caller's organization serves on its own provider keys, or none."""
+    view = _organization_view(_index, workspace_id, organization_id)
+    return view.full if view is not None else frozenset()
+
+
 def resolve_catalog_offerings(
     model_selector: str,
     *,

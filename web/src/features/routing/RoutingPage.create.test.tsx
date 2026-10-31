@@ -108,16 +108,18 @@ describe("Creating a routing policy", () => {
 
     await user.click(await createTrigger())
     expect(screen.getByRole("dialog")).toHaveAccessibleName("New policy")
-    expect(dialog().getAllByRole("radio")).toHaveLength(5)
+    expect(dialog().getAllByRole("radio")).toHaveLength(4)
     for (const choice of [
       "Fallback",
       "Split traffic",
-      "Smart router",
       "Spill over at rate limits",
       "Tier down on budget",
     ]) {
       expect(dialog().getByRole("radio", { name: choice })).toBeInTheDocument()
     }
+    expect(
+      dialog().queryByRole("radio", { name: "Smart router" }),
+    ).not.toBeInTheDocument()
     expect(dialog().getByRole("radio", { name: "Fallback" })).toBeChecked()
     expect(
       dialog().getByText(/backups tried in order when it fails/),
@@ -160,10 +162,10 @@ describe("Creating a routing policy", () => {
     await startCreate(user)
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
     await user.click(dialog().getByRole("button", { name: "Back" }))
-    await user.click(dialog().getByRole("radio", { name: "Smart router" }))
+    await user.click(dialog().getByRole("radio", { name: "Split traffic" }))
     await user.click(dialog().getByRole("button", { name: "Continue" }))
 
-    expect(screen.getByRole("dialog")).toHaveAccessibleName("New smart router")
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("New traffic split")
     expect(screen.getByRole("textbox", { name: /^name$/i })).toHaveValue(
       "cheap",
     )
@@ -472,34 +474,12 @@ describe("Creating a routing policy", () => {
     })
   })
 
-  it("creates a smart router with the marked model as its default", async () => {
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await startCreate(user, "Smart router")
-    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "smart")
-    await typeModel(user, /model 1/i, "openai:gpt-5-nano")
-    await typeModel(user, /model 2/i, "openai:gpt-5")
-    await user.click(
-      screen.getAllByRole("radio", { name: /serves when unsure/i })[1],
-    )
-    await submitDialog(user)
-
-    expect(lastSpec(calls)).toEqual({
-      select: [
-        { router: "knn", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
-        { default: "openai:gpt-5" },
-      ],
-    })
-  })
-
   it("will not save a pool of one, which is not a routing decision", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await startCreate(user, "Smart router")
+    await startCreate(user, "Split traffic")
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "smart")
     await typeModel(user, /model 1/i, "openai:gpt-5")
     await user.click(screen.getByRole("button", { name: "Remove model 2" }))
@@ -514,7 +494,7 @@ describe("Creating a routing policy", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await startCreate(user, "Smart router")
+    await startCreate(user, "Split traffic")
     // Seeded with two; three more reach the cap of 5.
     for (let i = 0; i < 3; i += 1) {
       await user.click(screen.getByRole("button", { name: "Add a model" }))
