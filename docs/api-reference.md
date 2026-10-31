@@ -573,6 +573,9 @@ and any other failure returns 502.
 
 Routing-policy management lives under `/api/v1/routing/policies`; learned-routing
 examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`.
+A subagent model recommendation is asked at `POST /api/v1/routing/recommend`, and the
+operator manages the subagent routers that answer it under `/api/v1/routing/recommenders`
+(see [Agent model recommendations](routing.md#agent-model-recommendations)).
 See [Routing policies](routing.md) for configuration and behavior, and OpenAPI for
 the request schemas.
 
