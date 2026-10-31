@@ -13,9 +13,9 @@ import pytest
 from gateway.api.routes._pipeline import (
     _close_tool_backend,
     _eager_backend_stream,
-    _held_tool_backend,
     _OpenedTools,
     _ToolBackendKind,
+    open_stream,
 )
 
 
@@ -89,60 +89,28 @@ class _Backend:
             raise self.close_failure
 
 
-@pytest.mark.asyncio
-async def test_a_held_backend_yields_what_entering_returns_and_closes_after_a_failed_block(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    warnings = _capture_warnings(monkeypatch)
-    backend = _Backend(close_failure=RuntimeError("the server hung up"))
-
-    with pytest.raises(ValueError, match="the block failed"):
-        async with _held_tool_backend(backend, _ToolBackendKind.MCP) as entered:
-            assert entered == "entered"
-            raise ValueError("the block failed")
-
-    assert backend.closed
-    assert warnings == ["The MCP tool backend failed to close: RuntimeError"]
-
-
-@pytest.mark.asyncio
-async def test_a_held_backend_is_closed_with_the_error_that_ended_the_block() -> None:
-    """A backend can abandon work nobody will read only if it is told the request failed."""
-    backend = _Backend()
-    failure = ValueError("the provider failed")
-
-    with pytest.raises(ValueError):
-        async with _held_tool_backend(backend, _ToolBackendKind.MCP):
-            raise failure
-
-    assert backend.closed_with is failure
-
-
-@pytest.mark.asyncio
-async def test_a_held_backend_is_closed_cleanly_after_a_block_that_finished() -> None:
-    backend = _Backend()
-
-    async with _held_tool_backend(backend, _ToolBackendKind.MCP):
-        pass
-
-    assert backend.closed
-    assert backend.closed_with is None
-
-
 class _TwoChunkAdapter:
     """A format adapter whose tool loop streams two chunks."""
 
     name = "chat"
 
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        return kwargs
+
     def inject_hints(self, kwargs: dict[str, Any], hints: object, *, header: str | None) -> dict[str, Any]:
         return kwargs
 
+    def __init__(self, failure: BaseException | None = None) -> None:
+        self.failure = failure
+
     async def open_tool_loop_stream(self, *args: object, **kwargs: object) -> AsyncIterator[str]:
         yield "first"
+        if self.failure is not None:
+            raise self.failure
         yield "second"
 
 
-def _eager_stream(stack: AsyncExitStack) -> AsyncIterator[str]:
+def _eager_stream(stack: AsyncExitStack, failure: BaseException | None = None) -> AsyncIterator[str]:
     """The stream over backends entered on ``stack``, as ``open_stream`` builds it."""
     tool_ctx = SimpleNamespace(
         mcp_server_configs=[object()],
@@ -155,7 +123,7 @@ def _eager_stream(stack: AsyncExitStack) -> AsyncIterator[str]:
         native_tools=lambda _name: frozenset(),
     )
     opened = _OpenedTools(pool=cast(Any, SimpleNamespace(purpose_hints=lambda: [])), sandbox=None)
-    return _eager_backend_stream(cast(Any, _TwoChunkAdapter()), {}, opened, stack, cast(Any, tool_ctx))
+    return _eager_backend_stream(cast(Any, _TwoChunkAdapter(failure)), {}, opened, stack, cast(Any, tool_ctx))
 
 
 @pytest.mark.asyncio
@@ -180,3 +148,65 @@ async def test_a_stream_that_finished_closes_its_backends_cleanly() -> None:
     assert [chunk async for chunk in _eager_stream(stack)] == ["first", "second"]
     assert backend.closed
     assert backend.closed_with is None
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_failed_closes_its_backends_with_that_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A backend can abandon work nobody will read only if it is told the request failed."""
+    warnings = _capture_warnings(monkeypatch)
+    backend = _Backend(close_failure=RuntimeError("the server hung up"))
+    stack = AsyncExitStack()
+    await stack.enter_async_context(backend)
+    failure = ValueError("the provider failed")
+
+    with pytest.raises(ValueError, match="the provider failed"):
+        _ = [chunk async for chunk in _eager_stream(stack, failure)]
+
+    assert backend.closed_with is failure
+    assert warnings == ["The MCP tool backend failed to close: RuntimeError"]
+
+
+def _held_tool_ctx(hold_ms: int) -> Any:
+    return SimpleNamespace(
+        use_tool_loop=True,
+        config=SimpleNamespace(streaming_first_chunk_hold_ms=hold_ms),
+        mcp_server_configs=[object()],
+        use_sandbox=False,
+        use_web_search=False,
+        use_web_fetch=False,
+        tools_header=None,
+        max_tool_iterations=10,
+        use_budget=None,
+        native_tools=lambda _name: frozenset(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_backend_slower_than_the_hold_opens_after_the_stream_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    release = asyncio.Event()
+
+    async def slow_open(*_args: object) -> _OpenedTools:
+        await release.wait()
+        return _OpenedTools(pool=cast(Any, SimpleNamespace(purpose_hints=lambda: [])), sandbox=None)
+
+    monkeypatch.setattr("gateway.api.routes._pipeline._open_tool_backends", slow_open)
+
+    stream = await asyncio.wait_for(
+        open_stream(adapter=cast(Any, _TwoChunkAdapter()), tool_ctx=_held_tool_ctx(10), call_kwargs={}), timeout=5
+    )
+    release.set()
+
+    assert [chunk async for chunk in stream] == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_a_backend_that_fails_within_the_hold_raises_before_the_stream_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failing_open(*_args: object) -> _OpenedTools:
+        raise ConnectionError("the MCP server is down")
+
+    monkeypatch.setattr("gateway.api.routes._pipeline._open_tool_backends", failing_open)
+
+    with pytest.raises(ConnectionError):
+        await open_stream(adapter=cast(Any, _TwoChunkAdapter()), tool_ctx=_held_tool_ctx(5_000), call_kwargs={})
