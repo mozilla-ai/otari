@@ -8,7 +8,10 @@ from gateway.core.settings.api_keys import ApiKeyConfig
 from gateway.core.settings.budgets import BudgetConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
-from gateway.exceptions.budget_exceptions import DeclaredAccessError, DeploymentBudgetIsEndUserDefaultError
+from gateway.exceptions.budget_exceptions import (
+    DeclaredAccessError,
+    DeploymentBudgetIsEndUserDefaultError,
+)
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, ScopedBudget, ScopeType
@@ -158,7 +161,7 @@ class BudgetService:
                     listed, to_check = end_user_budget_list(
                         key.end_user_budget_ids, key.end_user_budget_id, check_default=True, check_list=True
                     )
-                    await self._end_users.require_assignable_budgets(to_check)
+                    await self._end_users.require_assignable_budgets(to_check, None)
                     key_id, written = await self._api_keys.apply_declared_key(
                         name,
                         key,
@@ -214,9 +217,15 @@ class BudgetService:
             await self._member_policies.delete_policy(user=user, workspace_id=workspace_id, policy_id=policy_id)
 
     async def delete_organization_budget(self, *, user: User, budget_id: str) -> None:
-        """Delete a budget the caller's organization owns, unless something still names it."""
+        """Delete a budget the caller's organization owns, unless something still names it.
+
+        A key's default end-user budget counts as naming it; a key that only lists it loses it from the list.
+        """
         async with self._uow:
-            await self._organization.delete_budget(user=user, budget_id=budget_id)
+            await self._organization.delete_budget(
+                user=user, budget_id=budget_id, keys_defaulting_to=self._api_keys.keys_defaulting_end_users_to
+            )
+            await self._api_keys.forget_end_user_budget(budget_id)
 
     async def delete_organization_ceiling(self, *, user: User, ceiling_id: str) -> None:
         """Remove a ceiling inside the caller's organization."""
@@ -255,18 +264,25 @@ class BudgetService:
             return await self._deployment.put_budget(budget_id, request)
 
     async def check_end_user_budgets(
-        self, budget_ids: list[str] | None, default_id: str | None, *, check_default: bool, check_list: bool = True
+        self,
+        budget_ids: list[str] | None,
+        default_id: str | None,
+        *,
+        check_default: bool,
+        check_list: bool = True,
+        organization_id: uuid.UUID | None = None,
     ) -> list[str] | None:
         """Return a key's end-user budget list, deduplicated, once it holds together with the default.
 
-        Refuses a default off the list, and a budget an end user may not be capped at: an unknown one, or a tenant's.
+        Refuses a default off the list, and a budget an end user may not be capped at: an unknown one, or one owned by
+        anyone but ``organization_id`` (the deployment when ``None``, for an operator's key).
         """
         listed, to_check = end_user_budget_list(
             budget_ids, default_id, check_default=check_default, check_list=check_list
         )
         if to_check:
             async with self._uow:
-                await self._end_users.require_assignable_budgets(to_check)
+                await self._end_users.require_assignable_budgets(to_check, organization_id)
         return listed
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:

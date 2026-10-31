@@ -5623,6 +5623,11 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "is_organization_service_key": {
+            "default": false,
+            "title": "Is Organization Service Key",
+            "type": "boolean"
+          },
           "is_service_key": {
             "title": "Is Service Key",
             "type": "boolean"
@@ -5728,7 +5733,8 @@
         "type": "object"
       },
       "CreateOwnKeyRequest": {
-        "description": "Create-key body for the member surface.\n\nDeliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner\nis always the caller) and no ``exclude_from_budget`` (a member must not\nexempt their own spend from enforcement).",
+        "additionalProperties": false,
+        "description": "Create-key body for the member surface.\n\nDeliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner\nis the caller, or one of the key's own for a service key) and no\n``exclude_from_budget`` (a member must not exempt their own spend from\nenforcement). A field it does not take is refused rather than dropped.",
         "properties": {
           "allowed_models": {
             "anyOf": [
@@ -5772,6 +5778,34 @@
             "description": "Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it.",
             "title": "Capture Agent Telemetry"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Budget of this organization each end user this key creates is capped at, unless the request names another with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.",
+            "title": "End User Budget Id"
+          },
+          "end_user_budget_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Budgets of this organization a request may start a new end user on by naming one in Otari-End-User-Budget. Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.",
+            "title": "End User Budget Ids"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -5785,6 +5819,12 @@
             "description": "Optional expiration timestamp",
             "title": "Expires At"
           },
+          "is_service_key": {
+            "default": false,
+            "description": "When true, a request may name an end user in its 'user' field. Each end user is created on first use and billed to its own budget, while this key's own ceiling caps all of them together. Only an organization owner or admin may create one. It belongs to the organization rather than to you: every owner or admin manages it, and its end users are reachable from no other key. Fixed once the key exists.",
+            "title": "Is Service Key",
+            "type": "boolean"
+          },
           "key_name": {
             "anyOf": [
               {
@@ -5796,6 +5836,19 @@
             ],
             "description": "Optional name for the key",
             "title": "Key Name"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most live end users this service key may have. A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is 10000: an organization's service key always has a cap.",
+            "title": "Max End Users"
           },
           "metadata": {
             "additionalProperties": true,
@@ -11073,6 +11126,11 @@
           },
           "is_active": {
             "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_organization_service_key": {
+            "default": false,
+            "title": "Is Organization Service Key",
             "type": "boolean"
           },
           "is_service_key": {
@@ -22663,7 +22721,8 @@
         "type": "object"
       },
       "UpdateOwnKeyRequest": {
-        "description": "Update-key body for the member surface.\n\nThe operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the\nreason the create body gives. The tri-state fields follow the same\n``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,\na value = pin it.",
+        "additionalProperties": false,
+        "description": "Update-key body for the member surface.\n\nThe operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the\nreason the create body gives. The tri-state fields follow the same\n``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,\na value = pin it. ``is_service_key`` is accepted only unchanged, and\n``max_end_users`` takes no null: an organization's service key always has a\ncap, so null is refused with 400.",
         "properties": {
           "allowed_models": {
             "anyOf": [
@@ -22704,6 +22763,32 @@
             ],
             "title": "Capture Agent Telemetry"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Id"
+          },
+          "end_user_budget_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Ids"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -22727,6 +22812,17 @@
             ],
             "title": "Is Active"
           },
+          "is_service_key": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Service Key"
+          },
           "key_name": {
             "anyOf": [
               {
@@ -22737,6 +22833,18 @@
               }
             ],
             "title": "Key Name"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max End Users"
           },
           "metadata": {
             "anyOf": [
@@ -36054,7 +36162,7 @@
     },
     "/api/v1/organizations/me/keys": {
       "get": {
-        "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does.",
+        "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does. An owner or admin\nalso sees the organization's service keys, which they manage.",
         "operationId": "organization-keys-list_own_keys",
         "parameters": [
           {
@@ -36140,7 +36248,7 @@
         ]
       },
       "post": {
-        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.",
+        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.\n\nA service key is the organization's rather than the caller's: only an\norganization owner or admin may create one, its end-user budgets must be\nthis organization's, and it is owned by a user minted for it alone.",
         "operationId": "organization-keys-create_own_key",
         "requestBody": {
           "content": {
@@ -36232,7 +36340,7 @@
         ]
       },
       "patch": {
-        "description": "Update one of the caller's own API keys.",
+        "description": "Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.",
         "operationId": "organization-keys-update_own_key",
         "parameters": [
           {
