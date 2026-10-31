@@ -25,6 +25,7 @@ from gateway.services.api_keys._membership import ApiKeyMembershipListener
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
 from gateway.services.api_keys._service import ApiKeyService
 from gateway.services.api_keys._service_keys import (
+    DEFAULT_ORGANIZATION_MAX_END_USERS,
     END_USER_SETTINGS,
     admit_organization_key,
     organization_key_changes,
@@ -33,6 +34,7 @@ from gateway.services.api_keys._service_keys import (
 from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace
 
 __all__ = [
+    "DEFAULT_ORGANIZATION_MAX_END_USERS",
     "END_USER_SETTINGS",
     "JWT_BEARER_GRANT",
     "AccessTokenClaims",

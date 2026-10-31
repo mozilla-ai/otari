@@ -11,10 +11,6 @@ from gateway.models.base import Base, UtcDateTime
 
 # How many budgets one key may list for its end users.
 MAX_END_USER_BUDGETS = 100
-# The end users an organization's service key may have until the organization
-# sets another cap. Each new id a request names creates a row, so an
-# organization's key always has a cap; only an operator may leave one off.
-DEFAULT_ORGANIZATION_MAX_END_USERS = 10_000
 # Prefixes the owner minted for an organization's service key. Not a UUID, so it
 # is never mistaken for a member's attribution row.
 SERVICE_KEY_OWNER_ID_PREFIX = "svc_"

@@ -32,9 +32,10 @@ from sqlmodel import col
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import API_KEY_HEADER, API_ROOT
-from gateway.models.api_keys import DEFAULT_ORGANIZATION_MAX_END_USERS, SERVICE_KEY_OWNER_ID_PREFIX, APIKey
+from gateway.models.api_keys import SERVICE_KEY_OWNER_ID_PREFIX, APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as BillingUser
+from gateway.services.api_keys import DEFAULT_ORGANIZATION_MAX_END_USERS
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.tenancy import OrganizationService
 

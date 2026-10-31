@@ -77,7 +77,7 @@ from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
-from gateway.models.api_keys import DEFAULT_ORGANIZATION_MAX_END_USERS, MAX_END_USER_BUDGETS, APIKey
+from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
@@ -85,6 +85,7 @@ from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import add_service_key_owner, get_or_create_attribution_user
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.services.api_keys import (
+    DEFAULT_ORGANIZATION_MAX_END_USERS,
     END_USER_SETTINGS,
     admit_organization_key,
     organization_key_changes,

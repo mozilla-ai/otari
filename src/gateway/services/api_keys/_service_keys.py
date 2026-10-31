@@ -12,13 +12,18 @@ from gateway.exceptions.api_keys_exceptions import (
     OrganizationServiceKeyUncappedError,
     ServiceKeyFlagFixedError,
 )
-from gateway.models.api_keys import DEFAULT_ORGANIZATION_MAX_END_USERS, APIKey
+from gateway.models.api_keys import APIKey
 
 if TYPE_CHECKING:
     # Type-only: the budgets service imports this package, so a runtime import would be a cycle.
     from gateway.models.tenancy import Organization, User
     from gateway.services.budgets import BudgetService
     from gateway.services.tenancy import OrganizationService
+
+# The end users an organization's service key may have until the organization
+# sets another cap. Each new id a request names creates a row, so an
+# organization's key always has a cap; only an operator may leave one off.
+DEFAULT_ORGANIZATION_MAX_END_USERS = 10_000
 
 END_USER_SETTINGS = frozenset({"end_user_budget_id", "end_user_budget_ids", "max_end_users"})
 
