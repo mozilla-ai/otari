@@ -752,7 +752,9 @@ def test_an_update_cannot_exempt_the_key_from_budget(client: TestClient, world: 
 
 
 @pytest.mark.parametrize("field", [{"user_id": "somebody-else"}, {"exclude_from_budget": True}])
-def test_a_create_cannot_name_an_owner_or_exempt_itself(client: TestClient, world: _World, field: dict) -> None:
+def test_a_create_cannot_name_an_owner_or_exempt_itself(
+    client: TestClient, world: _World, field: dict[str, Any]
+) -> None:
     """The escalation fields of the operator body are refused here, not silently dropped."""
     code, body = _create(client, world, "alpha_member", {"key_name": "escalation", **field})
     assert code == status.HTTP_422_UNPROCESSABLE_CONTENT, body
@@ -1106,6 +1108,7 @@ def test_an_owner_creates_a_service_key_with_an_owner_and_a_cap_of_its_own(clien
     key = _service_key(client, world, budget_id)
 
     assert key["is_service_key"] is True
+    assert key["is_organization_service_key"] is True
     assert key["end_user_budget_id"] == budget_id
     assert key["max_end_users"] == DEFAULT_ORGANIZATION_MAX_END_USERS
     assert key["user_id"].startswith(SERVICE_KEY_OWNER_ID_PREFIX)
@@ -1205,7 +1208,7 @@ def test_its_end_users_go_on_the_organizations_budget(
     assert _chat(client, key["key"], "bob").status_code == status.HTTP_200_OK
 
     end_users = db_session.query(BillingUser).filter(col(BillingUser.parent_user_id) == key["user_id"]).all()
-    assert sorted(user.external_id for user in end_users) == ["alice", "bob"]
+    assert sorted(user.external_id or "" for user in end_users) == ["alice", "bob"]
     assert {user.budget_id for user in end_users} == {budget_id}
 
 

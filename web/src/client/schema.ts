@@ -9969,6 +9969,11 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /**
+             * Is Organization Service Key
+             * @default false
+             */
+            is_organization_service_key: boolean;
             /** Is Service Key */
             is_service_key: boolean;
             /** Key */
@@ -12588,6 +12593,11 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /**
+             * Is Organization Service Key
+             * @default false
+             */
+            is_organization_service_key: boolean;
             /** Is Service Key */
             is_service_key: boolean;
             /** Key Name */
@@ -18168,7 +18178,9 @@ export interface components {
          *     The operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the
          *     reason the create body gives. The tri-state fields follow the same
          *     ``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,
-         *     a value = pin it. ``is_service_key`` is accepted only unchanged.
+         *     a value = pin it. ``is_service_key`` is accepted only unchanged, and
+         *     ``max_end_users`` takes no null: an organization's service key always has a
+         *     cap, so null is refused with 400.
          */
         UpdateOwnKeyRequest: {
             /** Allowed Models */

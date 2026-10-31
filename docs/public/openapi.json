@@ -5623,6 +5623,11 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "is_organization_service_key": {
+            "default": false,
+            "title": "Is Organization Service Key",
+            "type": "boolean"
+          },
           "is_service_key": {
             "title": "Is Service Key",
             "type": "boolean"
@@ -11121,6 +11126,11 @@
           },
           "is_active": {
             "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_organization_service_key": {
+            "default": false,
+            "title": "Is Organization Service Key",
             "type": "boolean"
           },
           "is_service_key": {
@@ -22712,7 +22722,7 @@
       },
       "UpdateOwnKeyRequest": {
         "additionalProperties": false,
-        "description": "Update-key body for the member surface.\n\nThe operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the\nreason the create body gives. The tri-state fields follow the same\n``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,\na value = pin it. ``is_service_key`` is accepted only unchanged.",
+        "description": "Update-key body for the member surface.\n\nThe operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the\nreason the create body gives. The tri-state fields follow the same\n``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,\na value = pin it. ``is_service_key`` is accepted only unchanged, and\n``max_end_users`` takes no null: an organization's service key always has a\ncap, so null is refused with 400.",
         "properties": {
           "allowed_models": {
             "anyOf": [

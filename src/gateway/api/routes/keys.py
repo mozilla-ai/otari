@@ -29,7 +29,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
-from gateway.services.api_keys import operator_set_active
+from gateway.services.api_keys import operator_set_active, refuse_member_key_as_service_key
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -193,6 +193,7 @@ class CreateKeyResponse(BaseModel):
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
     is_service_key: bool
+    is_organization_service_key: bool = False
     end_user_budget_id: str | None
     end_user_budget_ids: list[str]
     max_end_users: int | None
@@ -223,6 +224,9 @@ class KeyInfo(BaseModel):
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
     is_service_key: bool
+    # A service key an organization made for itself, whose end users go on that
+    # organization's budgets; an operator's service key uses the deployment's.
+    is_organization_service_key: bool = False
     end_user_budget_id: str | None
     # The budgets a request may start an end user on: the key's list, or its default alone.
     end_user_budget_ids: list[str]
@@ -256,6 +260,7 @@ class KeyInfo(BaseModel):
                 None if key.capture_agent_telemetry is None else bool(key.capture_agent_telemetry)
             ),
             is_service_key=bool(key.is_service_key),
+            is_organization_service_key=key.is_organization_service_key(),
             end_user_budget_id=key.end_user_budget_id,
             end_user_budget_ids=key.assignable_end_user_budgets(),
             max_end_users=key.max_end_users,
@@ -497,14 +502,7 @@ async def update_key(
     Requires master key authentication.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
-    if request.is_service_key and key.self_service and not key.is_service_key:
-        # Its end users would belong to the member's own user, which every
-        # organization they belong to shares; an organization's service key gets
-        # an owner of its own when it is created.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A key a member created cannot become a service key; create a service key instead.",
-        )
+    refuse_member_key_as_service_key(key, request.is_service_key)
     # Before the key is changed, for the reason create_key gives. The pair is
     # checked as the key will hold it, so a field left out keeps its stored value.
     fields = request.model_fields_set

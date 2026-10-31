@@ -881,12 +881,16 @@ function EditKeyForm({
     )
   const [scopeValid, setScopeValid] = useState(true)
   // The deployment-wide form shows the service key fields for every key; an
-  // organization's form only for its own service keys, which only an owner or
-  // admin reaches, and there whether it is one is fixed.
-  const showsServiceKey = isDeploymentWide || apiKey.is_service_key
+  // organization's form only for the organization's own service keys, which
+  // only an owner or admin reaches, and there whether it is one is fixed. An
+  // operator's service key a member holds is the operator's to change.
+  const showsServiceKey = isDeploymentWide || apiKey.is_organization_service_key
+  const serviceKeyScope = apiKey.is_organization_service_key
+    ? "organization"
+    : "deployment"
   const serviceKeyReady = useServiceKeyReady(
     showsServiceKey ? serviceKey : NO_SERVICE_KEY,
-    isDeploymentWide ? "deployment" : "organization",
+    serviceKeyScope,
   )
   const { isDirty, reset: reseed } = useDirtySnapshot({
     keyName,
@@ -949,7 +953,7 @@ function EditKeyForm({
           exclude_from_budget: excludeFromBudget,
           ...serviceKeyBody(serviceKey),
         }
-      : apiKey.is_service_key
+      : apiKey.is_organization_service_key
         ? { ...shared, ...serviceKeyBody(serviceKey) }
         : shared
     update.mutate(
@@ -1066,7 +1070,7 @@ function EditKeyForm({
         <ServiceKeyFields
           value={serviceKey}
           onChange={setServiceKey}
-          scope={isDeploymentWide ? "deployment" : "organization"}
+          scope={serviceKeyScope}
           isLocked={!isDeploymentWide}
         />
       ) : null}

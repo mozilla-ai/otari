@@ -77,18 +77,18 @@ from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
-from gateway.models.api_keys import (
-    DEFAULT_ORGANIZATION_MAX_END_USERS,
-    MAX_END_USER_BUDGETS,
-    SERVICE_KEY_OWNER_ID_PREFIX,
-    APIKey,
-)
+from gateway.models.api_keys import DEFAULT_ORGANIZATION_MAX_END_USERS, MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthActivationEvent
-from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.repositories.users_repository import add_service_key_owner, get_or_create_attribution_user
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
+from gateway.services.api_keys import (
+    organization_max_end_users,
+    refuse_end_user_settings_on_plain_key,
+    refuse_service_key_flag_change,
+)
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
     KEY_TOOLS_EXCEED_USER_DETAIL,
@@ -192,7 +192,9 @@ class UpdateOwnKeyRequest(BaseModel):
     The operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the
     reason the create body gives. The tri-state fields follow the same
     ``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,
-    a value = pin it. ``is_service_key`` is accepted only unchanged.
+    a value = pin it. ``is_service_key`` is accepted only unchanged, and
+    ``max_end_users`` takes no null: an organization's service key always has a
+    cap, so null is refused with 400.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -284,11 +286,10 @@ async def create_own_key(
             check_default=True,
             organization_id=organization.id,
         )
-    elif any(getattr(request, name) is not None for name in _SERVICE_KEY_FIELDS):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="end_user_budget_id, end_user_budget_ids and max_end_users apply only to a service key.",
-        )
+    refuse_end_user_settings_on_plain_key(
+        is_service_key=request.is_service_key,
+        sets_end_users=any(getattr(request, name) is not None for name in _SERVICE_KEY_FIELDS),
+    )
 
     if request.workspace_id is not None:
         workspace = await resolve_workspace_in_organization(
@@ -376,15 +377,7 @@ async def create_own_key(
     ).scalar_one_or_none() is None
 
     if request.is_service_key:
-        # Created with the key and narrowed to the caller's own access, so the
-        # key grants no model or tool its creator lacks.
-        owner = User(
-            user_id=f"{SERVICE_KEY_OWNER_ID_PREFIX}{uuid.uuid4().hex}",
-            alias=request.key_name or "Service key",
-            allowed_models=owner.allowed_models,
-            allowed_tools=owner.allowed_tools,
-        )
-        db.add(owner)
+        owner = add_service_key_owner(db, alias=request.key_name or "Service key", creator=owner)
 
     api_key = key_format.mint()
     db_key = APIKey(
@@ -405,11 +398,7 @@ async def create_own_key(
         is_service_key=request.is_service_key,
         end_user_budget_id=request.end_user_budget_id,
         end_user_budget_ids=end_user_budget_ids,
-        max_end_users=(
-            (request.max_end_users if request.max_end_users is not None else DEFAULT_ORGANIZATION_MAX_END_USERS)
-            if request.is_service_key
-            else None
-        ),
+        max_end_users=organization_max_end_users(request.max_end_users) if request.is_service_key else None,
         metadata_=request.metadata,
     )
 
@@ -492,11 +481,7 @@ async def update_own_key(
     fields = request.model_fields_set
     switching_off = fields == {"is_active"} and request.is_active is False
     key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
-    if request.is_service_key is not None and request.is_service_key != key.is_service_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Whether a key is a service key is fixed when it is created.",
-        )
+    refuse_service_key_flag_change(key, request.is_service_key)
 
     # Tri-state via model_fields_set: the nullable columns take null to clear
     # them, so "absent" and "null" have to be told apart. ``is_active`` and
@@ -509,18 +494,9 @@ async def update_own_key(
 
     if fields & _SERVICE_KEY_FIELDS:
         organization = await organizations.get_active_organization_for_user(identity)
-        if not key.is_organization_service_key():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="end_user_budget_id, end_user_budget_ids and max_end_users apply only to a service key.",
-            )
+        refuse_end_user_settings_on_plain_key(is_service_key=key.is_organization_service_key(), sets_end_users=True)
         if "max_end_users" in fields:
-            if request.max_end_users is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="An organization's service key always has a max_end_users.",
-                )
-            changes["max_end_users"] = request.max_end_users
+            changes["max_end_users"] = organization_max_end_users(request.max_end_users, explicit=True)
         changes["end_user_budget_ids"] = await budgets.check_end_user_budgets(
             request.end_user_budget_ids if "end_user_budget_ids" in fields else key.end_user_budget_ids,
             request.end_user_budget_id if "end_user_budget_id" in fields else key.end_user_budget_id,

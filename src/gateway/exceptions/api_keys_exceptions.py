@@ -64,3 +64,34 @@ class OperatorDisabledKeyError(TenancyForbiddenError):
 
     def __init__(self) -> None:
         super().__init__("An operator switched this key off; ask them to switch it back on.")
+
+
+class EndUserSettingsOnPlainKeyError(TenancyValidationError):
+    """End-user budgets or a cap were sent for a key that is not a service key."""
+
+    def __init__(self) -> None:
+        super().__init__("end_user_budget_id, end_user_budget_ids and max_end_users apply only to a service key.")
+
+
+class ServiceKeyFlagFixedError(TenancyValidationError):
+    """An organization's key was asked to become, or stop being, a service key."""
+
+    def __init__(self) -> None:
+        super().__init__("Whether a key is a service key is fixed when it is created.")
+
+
+class MemberKeyNotServiceKeyError(TenancyValidationError):
+    """An operator tried to make a key a member created into a service key.
+
+    Its end users would belong to the member's own user, which every organization they belong to shares.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("A key a member created cannot become a service key; create a service key instead.")
+
+
+class OrganizationServiceKeyUncappedError(TenancyValidationError):
+    """An organization's service key was asked to drop its ``max_end_users``."""
+
+    def __init__(self) -> None:
+        super().__init__("An organization's service key always has a max_end_users.")

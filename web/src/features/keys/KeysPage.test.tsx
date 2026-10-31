@@ -1241,6 +1241,32 @@ describe("KeysPage", () => {
     })
   })
 
+  it("leaves an operator's service key to the operator on a member's edit form", async () => {
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "issued",
+          is_service_key: true,
+          end_user_budget_ids: ["deployment-budget"],
+        }),
+      ],
+      deploymentOperator: false,
+      role: "owner",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("issued")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    const dialog = await screen.findByRole("dialog", { name: "Edit key" })
+
+    expect(within(dialog).getByLabelText("Name")).toBeInTheDocument()
+    expect(
+      within(dialog).queryByLabelText("Service key"),
+    ).not.toBeInTheDocument()
+  })
+
   it("does not offer a member a service key", async () => {
     mockApi({ keys: [], deploymentOperator: false, role: "member" })
     const user = userEvent.setup()

@@ -373,8 +373,12 @@ from an operator's in four ways:
 - It belongs to the organization: every owner and admin lists, edits, rotates
   and deletes it on the same routes, and removing its creator from the
   organization leaves it working. Other members do not see it.
-- It always has a `max_end_users`, 10,000 unless the request sets another.
-  Whether a key is a service key is fixed when it is created, on either side.
+- It always has a `max_end_users`, 10,000 unless the request sets another, and
+  an update cannot clear it. Whether a key is a service key is fixed when it is
+  created, on either side.
+
+The key's responses carry `is_organization_service_key: true`, which tells it
+apart from an operator's service key in the same organization.
 
 The organization's app then manages its end users with the key itself, as
 under [Managing end users](#managing-end-users). Deleting one of the
