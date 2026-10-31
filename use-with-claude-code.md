@@ -17,6 +17,8 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
+Accounts in otari.ai's EU region set `ANTHROPIC_BASE_URL="https://eu.api.otari.ai/api"` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use.
+
 Claude Code puts a telemetry value in `metadata.user_id`; the next section
 says how a key accepts it.
 
@@ -152,24 +154,24 @@ when its own requests go to Anthropic directly.
 
 `POST /api/v1/routing/recommend` takes the facts a harness holds at spawn
 time and recommends the model to start the subagent on. Otari puts one choice
-question to a decision model, TypeSafe's Jev by default: given the subagent
+question to a decision model, such as TypeSafe's Jev: given the subagent
 type, the task and the parent's model, which is the cheapest candidate that
-would do the task well? The candidate Jev picks is the recommendation. Any
+would do the task well? The candidate it picks is the recommendation. Any
 active API key may ask. The decision call is billed to the caller and recorded
 in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
 the harness acts on the answer with its own provider credentials.
 
-Who answers depends on the build. A self-run deployment asks the decision
-model `agent_recommender_model` names, which may be a local one, and the call
-costs what that provider charges. On otari.ai a managed recommender answers
-behind the same route, which you never configure, at the price of one
-recommendation.
+Who answers is the deployment's choice. An operator stores one or more
+decision models on the **Subagent router** page of the deployment view, each
+with its key and a price per million tokens, and switches one on; a
+recommendation is then charged to the caller at that price (see
+[Subagent routers](routing.md#subagent-routers)). The router may be a local
+model, and both prices at 0 make it free. On otari.ai that router is managed
+for you.
 
-A self-run deployment needs a
-[decision provider](configuration.md#decision-providers) the
-`agent_recommender_model` selector resolves to, `typesafe` with an API key by
-default. Without one, the route answers 400 and the plugin falls back to the
-model the subagent would have had anyway.
+With no router stored, or every stored router switched off, the route answers
+400 and the plugin falls back to the model the subagent would have had
+anyway.
 
 ```bash
 curl "$OTARI_URL/api/v1/routing/recommend" \
@@ -222,7 +224,7 @@ must be `https` unless the gateway runs on the same machine, since the key
 travels in a header. The plugin is
 active from then on, in that session and
 every one after. The
-[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.34.0/plugins/otari-router/README.md) has the options, the
+[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.35.0/plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 The plugin hooks `agent.spawn`, sends the request above, and passes the

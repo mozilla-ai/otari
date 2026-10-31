@@ -140,12 +140,20 @@ rate, `default` for the models.dev fallback, `dynamic` for a routing policy
 that picks its model per request, and `none` for an unpriced model. An alias is
 priced from its target.
 
+The two surfaces differ on a value the gateway does not know.
+`GET /api/v1/models` and `GET /api/v1/models/{model_id}` leave the field out
+altogether, including a nested one such as a per-tier rate override. The grouped
+catalog under `GET /api/v1/catalog/models` sends `null` instead. Both model
+routes always send `pricing_source`, where `none` says nobody has priced the
+model. The grouped catalog's offering carries `price_source`, which is `null`
+when nothing prices it.
+
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 so a client does not have to guess them. Both come from models.dev's entry for
 the model under the provider serving it. Where that entry has no context window,
 the bundled or accepted models.dev pricing snapshot supplies one; the snapshot
-keeps no output limit, so a model the live catalog does not describe reports
-`max_output_tokens` as `null`, as it does any limit neither source knows. An alias reports its target's
+keeps no output limit, so a model the live catalog does not describe reports no
+`max_output_tokens`. The same is true of any limit neither source knows. An alias reports its target's
 limits, and the grouped catalog reports the same values for each offering. An
 instance declared `openai-compatible` is looked up under OpenAI, so a model it
 serves under another name usually has no models.dev entry. With
@@ -158,7 +166,7 @@ that calls tools, `response_format` for one with structured output, and
 `reasoning` for a reasoning model; it names only the parameters models.dev records
 a flag for, not every parameter the model takes. `architecture` carries
 `input_modalities` and `output_modalities`, such as `["text", "image"]`. All three
-are `null` for a model models.dev does not describe, which means unknown rather
+are unset for a model models.dev does not describe, which means unknown rather
 than unsupported. An alias reports its target's capabilities but no `name`,
 because the target's name would say what the alias points at.
 
@@ -330,9 +338,9 @@ Each offering also carries the provider's list price from the live models.dev
 catalog, where it has one. The default is billed from the accepted models.dev
 snapshot, which can lag that catalog, so a difference between the two means a
 price update is waiting for review. Each offering also carries, for a signed-in
-caller, for a signed-in caller the organization's last thirty
-days on that offering: requests, cache hit rate, and the effective price per
-million tokens after cache reads and tiers.
+caller, the organization's last thirty days on that offering: requests, cache
+hit rate, and the effective price per million tokens after cache reads and
+tiers.
 
 ### Browsing the grouped catalog
 

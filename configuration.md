@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.34.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.35.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -606,8 +606,10 @@ Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
 `otari gen-secret-key`. To rotate it, configure the new key before the old key,
 run the hosted provider and search-tool re-encryption endpoints
 (`POST /api/v1/hosted-providers/reencrypt` and
-`POST /api/v1/search-tools/reencrypt`), then remove the old key. Losing every
-configured encryption key makes stored credentials unrecoverable.
+`POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
+router's key has no re-encryption endpoint yet: re-enter it on the Subagent
+router page after the rotation. Losing every configured encryption key makes
+stored credentials unrecoverable.
 
 #### Upgrading from the Deployment providers page
 
@@ -851,7 +853,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.34.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.35.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1387,20 +1389,17 @@ model like any other, as `<provider>:<model>` in `pricing`.
 `POST /api/v1/routing/recommend` asks a decision model which of a few
 candidate models a coding agent's subagent should run on (see
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model)).
-Two settings shape the question:
+The decision model is set only on the
+[Subagent router](routing.md#subagent-routers) page of the dashboard, never in
+`config.yml`. One setting shapes the question:
 
 ```yaml
-agent_recommender_model: typesafe:jev-latest
 agent_recommender_candidates:
   haiku: Simple, well-specified, mechanical work. Little judgment needed.
   sonnet: Moderate reasoning across a few files, contained code changes.
   opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
 ```
 
-These are a deployment's own settings. On otari.ai a managed
-recommender answers behind the same route, so neither applies there.
-`agent_recommender_model` is a `decision_providers` selector, resolved per
-request, so a deployment that never asks need not configure the provider.
 `agent_recommender_candidates` maps each model name, as Claude Code spells it,
 to what it is for; `null` is allowed when the name says enough. At least two
 are required, and at most 255, the limit a choice question has. The defaults
@@ -1576,17 +1575,23 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.34.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.35.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback
 
 Signed-in dashboard users can choose **Feedback**, beside Documentation in the
 top bar (in the account menu on a phone), to send a message to the Otari team.
-The team receives it privately in Slack. Only the message is sent: no email,
-screenshot, page URL, account identifier, deployment identifier, or usage
-history is attached. Opening the form, typing, and canceling make no outbound
-request.
+The team receives it privately in Slack. By default only the message is sent:
+no email, screenshot, page URL, account identifier, deployment identifier, or
+usage history is attached. Someone whose account has an email also sees a box
+under the message, **Share _their address_ so the team can reply**. Ticked, the
+gateway adds the signed-in account's email, never an address from the request,
+and only when it is the address the form showed: a page left open while another
+tab signed in as someone else shares nothing. The Slack post shows it as the
+address to reply to. The box starts unticked every time the form opens, and an
+account without an email is not offered it. Opening the form, typing, and
+canceling make no outbound request.
 
 The gateway forwards the message to
 `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the

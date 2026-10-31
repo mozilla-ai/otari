@@ -25,6 +25,7 @@
 
 * [API reference](api-reference.md)
   * [Admin](api-endpoints/admin.md)
+  * [Agent recommenders](api-endpoints/agent-recommenders.md)
   * [Agent telemetry](api-endpoints/agent-telemetry.md)
   * [Aliases](api-endpoints/aliases.md)
   * [Audio](api-endpoints/audio.md)

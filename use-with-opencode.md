@@ -27,7 +27,7 @@ Add Otari as a provider in your `opencode.jsonc`:
 `baseURL` is the Otari API root, `/api/v1` (opencode appends `/chat/completions`
 itself). Point it at the gateway you are actually using: `http://localhost:8000/api/v1`
 for local development, your self-hosted gateway URL plus `/api/v1`, or
-`https://api.otari.ai/api/v1` when using otari.ai.
+`https://api.otari.ai/api/v1` when using otari.ai. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use.
 
 Export your key so opencode reads it from the environment instead of the config
 file, then run with a model:

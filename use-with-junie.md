@@ -26,7 +26,7 @@ Junie CLI reaches an OpenAI-compatible backend through a custom model profile. W
 
 Two details differ from most clients:
 
-- `baseUrl` is the full chat completions URL, not the API root. Most clients take `/api/v1` and append the path themselves. Junie does not, so give it your Otari base URL plus `/api/v1/chat/completions`: `http://localhost:8000/api/v1/chat/completions` for local development, or your own deployment's URL.
+- `baseUrl` is the full chat completions URL, not the API root. Most clients take `/api/v1` and append the path themselves. Junie does not, so give it your Otari base URL plus `/api/v1/chat/completions`: `http://localhost:8000/api/v1/chat/completions` for local development, or your own deployment's URL. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1/chat/completions`.
 - `apiKey` accepts a `${VAR}` reference, so the key stays out of the file.
 
 Export the key, then select the profile by its **file name** without the extension, which is why `otari.json` is reached as `custom:otari`. The `providerName` inside the file is a label and is not the selector:
@@ -36,7 +36,7 @@ export OTARI_JUNIE_KEY=<your-otari-key>
 junie --model custom:otari "Add a docstring to the add function in calc.py"
 ```
 
-Any model in your catalog works in `id`, `primaryModel` and `fasterModel`, using the `provider:model` selector that `GET /api/v1/models` returns for your key.
+Any model in your catalog works in `id`, `primaryModel` and `fasterModel`: the catalog id that `GET /api/v1/models` returns for your key, which lets Otari choose the provider, or a `provider:model` selector, which pins one (see [Listing available models](models.md#listing-available-models)).
 
 ### Junie sends a `user` field
 

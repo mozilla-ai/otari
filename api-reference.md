@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.34.0/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.34.0/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.35.0/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.35.0/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 The default server address is `http://localhost:8000`. The API is mounted at
@@ -573,6 +573,9 @@ and any other failure returns 502.
 
 Routing-policy management lives under `/api/v1/routing/policies`; learned-routing
 examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`.
+A subagent model recommendation is asked at `POST /api/v1/routing/recommend`, and the
+operator manages the subagent routers that answer it under `/api/v1/routing/recommenders`
+(see [Agent model recommendations](routing.md#agent-model-recommendations)).
 See [Routing policies](routing.md) for configuration and behavior, and OpenAPI for
 the request schemas.
 
@@ -723,10 +726,14 @@ would get unstreamed: a `400` for a parameter the provider does not accept, a
 `502` for a provider outage. Otari holds the response until the provider's first
 chunk to make that possible. The gateway holds it for at most
 `streaming_first_chunk_hold_ms` (15 seconds by default; `0` turns the hold off
-and commits the `200` as soon as the stream opens), and does not hold a stream
-that runs gateway tools (MCP, code execution, web search). A provider slower than
-that to start still streams, and a failure after that point is reported as
-below.
+and commits the `200` as soon as the stream opens). For a stream running the
+gateway's tools, opening their backends (connecting to MCP servers, leasing a
+sandbox) counts toward that window too. A stream running the
+gateway's tools (MCP servers, sandbox, web search) locks onto its candidate
+once the first round of that loop ends instead, which can happen before
+anything is sent: a failure past that point cannot fall over either, even
+though no output has reached the client yet. A provider slower than that to start still streams, and a
+failure after that point is reported as below.
 
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:

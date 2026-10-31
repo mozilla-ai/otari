@@ -175,6 +175,17 @@ gateway process rather than to any organization on it:
   automatically at startup. Any that could not be moved are listed in a banner
   with the reason: once the cause is fixed, move it from there, or Discard it,
   since a row left behind serves nothing.
+- Subagent router, the decision models that pick the model a coding agent's
+  subagent runs on when the otari-router plugin for Claude Code, or pi-otari,
+  asks `POST /api/v1/routing/recommend`. A router is a provider (TypeSafe,
+  OpenRouter or a llama.cpp server), a model, an optional API base, a key stored
+  encrypted and shown by its last four characters, and the price per million
+  input and output tokens the caller is charged. Several may be added and one
+  is switched on at a time: the first one added is on, and the Serving switch
+  moves it. Both prices at 0 make a free router, such as a local model. With
+  none added, or every router switched off, no model is picked. This page is
+  the only place the router is set. See
+  [Subagent routers](routing.md#subagent-routers).
 - Web search, the search and fetch tools the deployment runs for every
   workspace and what each call costs. Its two tables list the search tools and
   the fetch tools, `builtin_fetch` first, each with its key's last four and its
@@ -321,7 +332,10 @@ be deleted from the page.
 
 ## Observability
 
-The Overview's Requests tab is the per-request log. Its Sessions tab lists [agent
+The Overview's Requests tab is the per-request log. A request opens from the
+`Otari-Request-ID` its response carried, at `/requests?request=<id>`, on the
+attempt that served it or the one that failed last, wherever it sits in the log;
+its detail shows that same id. Its Sessions tab lists [agent
 sessions](traces.md) where the deployment records traces
 (`trace_capture_enabled`, on by default), and is not offered where it does not.
 Sessions applies the user, API key, model and status filters carried from the
@@ -422,4 +436,4 @@ privacy notice live. The account menu links each row it has an address for; see
 
 The dashboard source is under `web/`. The published Docker image includes the
 bundle. A source checkout needs `make dashboard` for the gateway to serve it, or
-`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.34.0/web/README.md).
+`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.35.0/web/README.md).

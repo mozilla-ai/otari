@@ -833,6 +833,274 @@
         "title": "AgentModelRecommendationRequest",
         "type": "object"
       },
+      "AgentRecommenderCreate": {
+        "additionalProperties": false,
+        "description": "Add a subagent router. The first one added is switched on; a later one waits to be.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Root URL of the provider; blank for its own.",
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stored encrypted, never returned.",
+            "title": "Api Key"
+          },
+          "input_price_per_million": {
+            "default": 0.0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model": {
+            "description": "The decision model, as the provider names it.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "default": 0.0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "provider": {
+            "description": "The decision provider: typesafe, openrouter or llamacpp.",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "AgentRecommenderCreate",
+        "type": "object"
+      },
+      "AgentRecommenderPublic": {
+        "description": "One stored subagent router, known by its provider, model and the tail of its key.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key_last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Last4"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_api_key": {
+            "title": "Has Api Key",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_price_per_million": {
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "model",
+          "api_base",
+          "api_key_last4",
+          "has_api_key",
+          "input_price_per_million",
+          "output_price_per_million",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentRecommenderPublic",
+        "type": "object"
+      },
+      "AgentRecommenderUpdate": {
+        "additionalProperties": false,
+        "description": "Change a subagent router. An omitted field keeps its stored value.\n\nOmitting ``api_key`` keeps the stored key while the provider and the API\nbase stay the same, so a price change never has to re-send a secret. A new\nprovider or address needs its own key, unless it is a self-hosted server\nthat takes none. A blank ``api_base`` goes back to the provider's own\naddress. Switching one on switches every other one off.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "title": "AgentRecommenderUpdate",
+        "type": "object"
+      },
+      "AgentRecommendersPublic": {
+        "description": "Every stored subagent router, oldest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRecommenderPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AgentRecommendersPublic",
+        "type": "object"
+      },
       "AgentTelemetryBehavior": {
         "description": "Counts from the behavioral events already captured on the logs signal.",
         "properties": {
@@ -5355,6 +5623,11 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "is_organization_service_key": {
+            "default": false,
+            "title": "Is Organization Service Key",
+            "type": "boolean"
+          },
           "is_service_key": {
             "title": "Is Service Key",
             "type": "boolean"
@@ -5460,7 +5733,8 @@
         "type": "object"
       },
       "CreateOwnKeyRequest": {
-        "description": "Create-key body for the member surface.\n\nDeliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner\nis always the caller) and no ``exclude_from_budget`` (a member must not\nexempt their own spend from enforcement).",
+        "additionalProperties": false,
+        "description": "Create-key body for the member surface.\n\nDeliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner\nis the caller, or one of the key's own for a service key) and no\n``exclude_from_budget`` (a member must not exempt their own spend from\nenforcement). A field it does not take is refused rather than dropped.",
         "properties": {
           "allowed_models": {
             "anyOf": [
@@ -5504,6 +5778,34 @@
             "description": "Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it.",
             "title": "Capture Agent Telemetry"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Budget of this organization each end user this key creates is capped at, unless the request names another with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.",
+            "title": "End User Budget Id"
+          },
+          "end_user_budget_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Budgets of this organization a request may start a new end user on by naming one in Otari-End-User-Budget. Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.",
+            "title": "End User Budget Ids"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -5517,6 +5819,12 @@
             "description": "Optional expiration timestamp",
             "title": "Expires At"
           },
+          "is_service_key": {
+            "default": false,
+            "description": "When true, a request may name an end user in its 'user' field. Each end user is created on first use and billed to its own budget, while this key's own ceiling caps all of them together. Only an organization owner or admin may create one. It belongs to the organization rather than to you: every owner or admin manages it, and its end users are reachable from no other key. Fixed once the key exists.",
+            "title": "Is Service Key",
+            "type": "boolean"
+          },
           "key_name": {
             "anyOf": [
               {
@@ -5528,6 +5836,19 @@
             ],
             "description": "Optional name for the key",
             "title": "Key Name"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most live end users this service key may have. A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is 10000: an organization's service key always has a cap.",
+            "title": "Max End Users"
           },
           "metadata": {
             "additionalProperties": true,
@@ -10805,6 +11126,11 @@
           },
           "is_active": {
             "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_organization_service_key": {
+            "default": false,
+            "title": "Is Organization Service Key",
             "type": "boolean"
           },
           "is_service_key": {
@@ -18125,6 +18451,21 @@
         "title": "RateLimitRulesPublic",
         "type": "object"
       },
+      "RecommendationRefusal": {
+        "description": "The body of a recommendation request the gateway refuses.",
+        "properties": {
+          "detail": {
+            "description": "Why the request was refused.",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "RecommendationRefusal",
+        "type": "object"
+      },
       "RecordedPool": {
         "description": "How warm one pool is after the write.",
         "properties": {
@@ -22380,7 +22721,8 @@
         "type": "object"
       },
       "UpdateOwnKeyRequest": {
-        "description": "Update-key body for the member surface.\n\nThe operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the\nreason the create body gives. The tri-state fields follow the same\n``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,\na value = pin it.",
+        "additionalProperties": false,
+        "description": "Update-key body for the member surface.\n\nThe operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the\nreason the create body gives. The tri-state fields follow the same\n``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,\na value = pin it. ``is_service_key`` is accepted only unchanged, and\n``max_end_users`` takes no null: an organization's service key always has a\ncap, so null is refused with 400.",
         "properties": {
           "allowed_models": {
             "anyOf": [
@@ -22421,6 +22763,32 @@
             ],
             "title": "Capture Agent Telemetry"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Id"
+          },
+          "end_user_budget_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Ids"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -22444,6 +22812,17 @@
             ],
             "title": "Is Active"
           },
+          "is_service_key": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Service Key"
+          },
           "key_name": {
             "anyOf": [
               {
@@ -22454,6 +22833,18 @@
               }
             ],
             "title": "Key Name"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max End Users"
           },
           "metadata": {
             "anyOf": [
@@ -26685,7 +27076,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
     "title": "otari",
-    "version": "0.34.0"
+    "version": "0.35.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -30596,6 +30987,19 @@
                     "minLength": 1,
                     "title": "Message",
                     "type": "string"
+                  },
+                  "share_email": {
+                    "anyOf": [
+                      {
+                        "maxLength": 255,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The signed-in account's email as the form showed it, to send with the message so the Otari team can reply. Refused when the caller has no email the team can reply to, or when it is not this one.",
+                    "title": "Share Email"
                   }
                 },
                 "required": [
@@ -33944,7 +34348,7 @@
     },
     "/api/v1/models": {
       "get": {
-        "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A limit nobody knows is null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
+        "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A value nobody knows is omitted rather than sent as null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
         "operationId": "models-list_models",
         "parameters": [
           {
@@ -34088,7 +34492,7 @@
     },
     "/api/v1/models/{model_id}": {
       "get": {
-        "description": "Get details for a specific model, by catalog id, alias or `instance:model` selector.",
+        "description": "Get details for a specific model, by catalog id, alias or `instance:model` selector.\n\nA value the gateway does not know is omitted rather than sent as null.",
         "operationId": "models-get_model",
         "parameters": [
           {
@@ -35758,7 +36162,7 @@
     },
     "/api/v1/organizations/me/keys": {
       "get": {
-        "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does.",
+        "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does. An owner or admin\nalso sees the organization's service keys, which they manage.",
         "operationId": "organization-keys-list_own_keys",
         "parameters": [
           {
@@ -35844,7 +36248,7 @@
         ]
       },
       "post": {
-        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.",
+        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.\n\nA service key is the organization's rather than the caller's: only an\norganization owner or admin may create one, its end-user budgets must be\nthis organization's, and it is owned by a user minted for it alone.",
         "operationId": "organization-keys-create_own_key",
         "requestBody": {
           "content": {
@@ -35936,7 +36340,7 @@
         ]
       },
       "patch": {
-        "description": "Update one of the caller's own API keys.",
+        "description": "Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.",
         "operationId": "organization-keys-update_own_key",
         "parameters": [
           {
@@ -44651,7 +45055,7 @@
     },
     "/api/v1/routing/recommend": {
       "post": {
-        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the subagent router an operator switched on\nin the dashboard to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
         "operationId": "routing-recommend_model_for_agent",
         "requestBody": {
           "content": {
@@ -44669,6 +45073,94 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentModelRecommendation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationRefusal"
+                }
+              }
+            },
+            "description": "No subagent router is switched on, or a master-key call names no `user`."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Recommend Model For Agent",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/routing/recommenders": {
+      "get": {
+        "description": "List the subagent routers.",
+        "operationId": "agent-recommenders-list_agent_recommenders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRecommendersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Agent Recommenders",
+        "tags": [
+          "agent-recommenders"
+        ]
+      },
+      "post": {
+        "description": "Add a subagent router: a decision model, its key, and the prices a recommendation is charged at.\n\nThe first router added is switched on; a later one waits to be switched\non in place of the one that is.",
+        "operationId": "agent-recommenders-create_agent_recommender",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRecommenderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRecommenderPublic"
                 }
               }
             },
@@ -44693,9 +45185,114 @@
             "XApiKeyAuth": []
           }
         ],
-        "summary": "Recommend Model For Agent",
+        "summary": "Create Agent Recommender",
         "tags": [
-          "routing"
+          "agent-recommenders"
+        ]
+      }
+    },
+    "/api/v1/routing/recommenders/{recommender_id}": {
+      "delete": {
+        "description": "Remove a subagent router and its key. With none left, no recommendation is served.",
+        "operationId": "agent-recommenders-delete_agent_recommender",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recommender_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recommender Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Agent Recommender",
+        "tags": [
+          "agent-recommenders"
+        ]
+      },
+      "patch": {
+        "description": "Change a subagent router, or switch it on in place of the one that is.\n\nAn omitted field keeps its stored value, the key included while the\nprovider and the API base stay the same.",
+        "operationId": "agent-recommenders-update_agent_recommender",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recommender_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recommender Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRecommenderUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRecommenderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Agent Recommender",
+        "tags": [
+          "agent-recommenders"
         ]
       }
     },

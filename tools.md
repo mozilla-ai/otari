@@ -168,6 +168,17 @@ refusal names the tool's `otari:` row, which prices it on any instance. A failed
 tool invocation is recorded but not charged. Charges settle on the final usage
 row alongside model tokens.
 
+Each call is also held against the caller's budgets and spend ceilings at its
+rate before it runs, on top of the hold the model call took. A call that would
+take the request past a limit is not run: the model is told it was refused
+(`[tool error] budget_exceeded`, with the tag `budget_exceeded` in Chat
+Completions' `otari_tool_calls`), it is recorded as a failed call and not
+charged, and the request goes on. A call priced only by the cost its provider
+reports, with no rate, holds nothing, since that cost is known only once it
+returns. A request on a free model whose budgets and ceilings cap only dollars
+holds nothing for its model call, and its tool calls are not held either: they
+are charged at settlement, and that request can still end past the cap.
+
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what
 served the calls:

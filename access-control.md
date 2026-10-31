@@ -2,7 +2,7 @@
 
 Otari separates deployment administration, human identity, workload credentials,
 and spend limits. This page explains how those pieces relate. The generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.34.0/docs/public/openapi.json) is the source of truth for endpoint
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.35.0/docs/public/openapi.json) is the source of truth for endpoint
 schemas.
 
 ## Deployment-wide account administration
@@ -184,7 +184,8 @@ their own key one instead; see [Workload identity](workload-identity.md).
 deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than
 accepting one, mints only into a workspace the caller may see, and never issues
-a budget-exempt key. A viewer may list their keys there and is refused (`403`)
+a budget-exempt key. It refuses a field it does not take, such as `user_id` or
+`exclude_from_budget`, with `422` rather than ignoring it. A viewer may list their keys there and is refused (`403`)
 every write: creating, editing, rotating or deleting a key takes organization
 owner or admin, or a caller who is a viewer neither of the organization nor of
 the key's workspace. To give a viewer a key, an
@@ -241,7 +242,9 @@ Settings page or with `PATCH /api/v1/settings`.
 
 A service key lets one application track spend per end user without sharing
 the master key or minting a key per end user. Mark a key with `is_service_key`
-on `POST` or `PATCH /api/v1/keys`; only a deployment operator can.
+on `POST` or `PATCH /api/v1/keys`; only a deployment operator can. An
+organization makes its own on `POST /api/v1/organizations/me/keys`: see
+[An organization's own service keys](#an-organizations-own-service-keys).
 
 A request on a service key names its end user the way any client names a user:
 the `user` field on `/v1/chat/completions`, `/v1/responses` and `/v1/search`,
@@ -322,7 +325,8 @@ POST /api/v1/keys
 
 A key with a default and no list may assign the default alone, which is how
 every key behaves until it is given a list. When both are set, the default must
-be on the list. Each entry must be a deployment budget, not an organization's.
+be on the list. Each entry must be a deployment budget, not an organization's;
+an organization's own service key lists that organization's budgets instead.
 Deleting a budget takes it off every list, but a budget that is some key's
 default cannot be deleted until that key's default changes: without one, the
 key's new end users would start uncapped.
@@ -349,6 +353,38 @@ at every deploy. An id is up to 128 letters, digits, `.`, `_` and `-`, and
 starts with a letter or digit.
 `POST /api/v1/budgets` still generates an id, and `GET /api/v1/budgets`
 reports how many users are on each budget in `user_count`.
+
+### An organization's own service keys
+
+An organization owner or admin creates a service key for the organization's
+app on `POST /api/v1/organizations/me/keys`, or in the dashboard's Create key
+dialog under Advanced, with the same `is_service_key`, `end_user_budget_id` and
+`end_user_budget_ids` fields. A member is refused with 403. Such a key differs
+from an operator's in four ways:
+
+- Its end users go on the organization's own budgets (Spend & budgets), and a
+  budget of the deployment or of another organization is refused with 404.
+- It is owned by a user created for it alone, not by the person who made it.
+  End users belong to their key's user, and a person's own user serves every
+  organization they belong to, so this keeps the key's end users out of reach
+  of any other key or organization. That owner has no member ceiling, which is
+  why only an owner or admin, who sets those ceilings, may create one; cap the
+  key itself to pool its end users.
+- It belongs to the organization: every owner and admin lists, edits, rotates
+  and deletes it on the same routes, and removing its creator from the
+  organization leaves it working. Other members do not see it.
+- It always has a `max_end_users`, 10,000 unless the request sets another, and
+  an update cannot clear it. Whether a key is a service key is fixed when it is
+  created, on the operator's route too.
+
+The key's responses carry `is_organization_service_key: true`, which tells it
+apart from an operator's service key in the same organization.
+
+The organization's app then manages its end users with the key itself, as
+under [Managing end users](#managing-end-users). Deleting one of the
+organization's budgets is refused while a key starts its end users on it by
+default, or while end users are on it; a key that only lists it loses it from
+the list.
 
 ### Declaring a service key in config
 
