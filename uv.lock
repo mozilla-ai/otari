@@ -310,7 +310,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.40.2"
+version = "1.41.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -321,9 +321,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/09/0b/eb499ce7aeafa406a8fa09d321110437483f15bca184b9cc1c3e903e9863/any_llm_sdk-1.40.2.tar.gz", hash = "sha256:bb3de5fb787279a44d1ba9d1492f05a0ed771f7e02032da6f621485383e66e70", size = 306117, upload-time = "2026-10-26T08:22:53.746Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/99/0f2dab7b3f08d073d9511146b0c84057275afbd60e8aac42e813204c3aba/any_llm_sdk-1.41.0.tar.gz", hash = "sha256:a75872651d69dc2368b347dcaf3619b9982cb626e8c2f1f98560a5394c2e9a03", size = 306641, upload-time = "2026-10-30T18:17:25.951Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/29/74e21da207fbd677d1099cec97db541420e947e3c7c680f14811f74073c2/any_llm_sdk-1.40.2-py3-none-any.whl", hash = "sha256:4f6fc08aa965147b37d8ee6ba6d4b94d4a375c3276882ffdd3e9d3342faba55f", size = 372086, upload-time = "2026-10-26T08:22:52.002Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/9d/6fca89b3577fb3107e833193ef5f992987b89802addbb9630df83c2e67e3/any_llm_sdk-1.41.0-py3-none-any.whl", hash = "sha256:87e75e6bbb90b90db77cdb37ce4f81169394cd3453f131be7dda5de149189df3", size = 372596, upload-time = "2026-10-30T18:17:24.219Z" },
 ]
 
 [package.optional-dependencies]
@@ -1406,7 +1406,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "any-fetch", editable = "any-fetch" },
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.40.2" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.41.0" },
     { name = "any-search", editable = "any-search" },
     { name = "apron-auth", specifier = ">=0.18.0,<0.19.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
