@@ -29,7 +29,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
-from gateway.services.api_keys import operator_set_active, refuse_member_key_as_service_key
+from gateway.services.api_keys import operator_set_active, refuse_service_key_flag_change
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -502,7 +502,7 @@ async def update_key(
     Requires master key authentication.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
-    refuse_member_key_as_service_key(key, request.is_service_key)
+    refuse_service_key_flag_change(key, request.is_service_key)
     # Before the key is changed, for the reason create_key gives. The pair is
     # checked as the key will hold it, so a field left out keeps its stored value.
     fields = request.model_fields_set

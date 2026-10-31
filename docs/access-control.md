@@ -375,7 +375,7 @@ from an operator's in four ways:
   organization leaves it working. Other members do not see it.
 - It always has a `max_end_users`, 10,000 unless the request sets another, and
   an update cannot clear it. Whether a key is a service key is fixed when it is
-  created, on either side.
+  created, on the operator's route too.
 
 The key's responses carry `is_organization_service_key: true`, which tells it
 apart from an operator's service key in the same organization.

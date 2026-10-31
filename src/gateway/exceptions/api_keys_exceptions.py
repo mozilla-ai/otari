@@ -74,20 +74,10 @@ class EndUserSettingsOnPlainKeyError(TenancyValidationError):
 
 
 class ServiceKeyFlagFixedError(TenancyValidationError):
-    """An organization's key was asked to become, or stop being, a service key."""
+    """A key a member or an organization made was asked to become, or stop being, a service key."""
 
     def __init__(self) -> None:
         super().__init__("Whether a key is a service key is fixed when it is created.")
-
-
-class MemberKeyNotServiceKeyError(TenancyValidationError):
-    """An operator tried to make a key a member created into a service key.
-
-    Its end users would belong to the member's own user, which every organization they belong to shares.
-    """
-
-    def __init__(self) -> None:
-        super().__init__("A key a member created cannot become a service key; create a service key instead.")
 
 
 class OrganizationServiceKeyUncappedError(TenancyValidationError):

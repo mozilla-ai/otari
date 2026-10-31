@@ -85,8 +85,9 @@ from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import add_service_key_owner, get_or_create_attribution_user
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.services.api_keys import (
-    organization_max_end_users,
-    refuse_end_user_settings_on_plain_key,
+    END_USER_SETTINGS,
+    admit_organization_key,
+    organization_key_changes,
     refuse_service_key_flag_change,
 )
 from gateway.services.model_access import (
@@ -183,9 +184,6 @@ class CreateOwnKeyRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
-_SERVICE_KEY_FIELDS = frozenset({"end_user_budget_id", "end_user_budget_ids", "max_end_users"})
-
-
 class UpdateOwnKeyRequest(BaseModel):
     """Update-key body for the member surface.
 
@@ -275,20 +273,13 @@ async def create_own_key(
     this organization's, and it is owned by a user minted for it alone.
     """
     organization = await organizations.get_active_organization_for_user(identity)
-    end_user_budget_ids: list[str] | None = None
-    if request.is_service_key:
-        await organizations.require_active_organization_management_access(user=identity, organization=organization)
-        # Before anything is staged or locked: the check runs in a Unit of Work
-        # block, whose commit would store what this route had added by then.
-        end_user_budget_ids = await budgets.check_end_user_budgets(
-            request.end_user_budget_ids,
-            request.end_user_budget_id,
-            check_default=True,
-            organization_id=organization.id,
-        )
-    refuse_end_user_settings_on_plain_key(
+    end_users = await admit_organization_key(
+        organizations,
+        budgets,
+        user=identity,
+        organization=organization,
         is_service_key=request.is_service_key,
-        sets_end_users=any(getattr(request, name) is not None for name in _SERVICE_KEY_FIELDS),
+        requested=request.model_dump(include=set(END_USER_SETTINGS)),
     )
 
     if request.workspace_id is not None:
@@ -396,9 +387,7 @@ async def create_own_key(
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
         is_service_key=request.is_service_key,
-        end_user_budget_id=request.end_user_budget_id,
-        end_user_budget_ids=end_user_budget_ids,
-        max_end_users=organization_max_end_users(request.max_end_users) if request.is_service_key else None,
+        **end_users,
         metadata_=request.metadata,
     )
 
@@ -486,33 +475,19 @@ async def update_own_key(
     # Tri-state via model_fields_set: the nullable columns take null to clear
     # them, so "absent" and "null" have to be told apart. ``is_active`` and
     # ``metadata`` are not nullable, so ``is not None`` is the whole distinction there.
-    changes = request.model_dump(include=fields - {"is_active", "metadata", "is_service_key"} - _SERVICE_KEY_FIELDS)
+    changes = request.model_dump(include=fields - {"is_active", "metadata", "is_service_key"} - END_USER_SETTINGS)
     if request.is_active is not None:
         changes["is_active"] = request.is_active
     if request.metadata is not None:
         changes["metadata_"] = request.metadata
-
-    if fields & _SERVICE_KEY_FIELDS:
-        organization = await organizations.get_active_organization_for_user(identity)
-        refuse_end_user_settings_on_plain_key(is_service_key=key.is_organization_service_key(), sets_end_users=True)
-        if "max_end_users" in fields:
-            changes["max_end_users"] = organization_max_end_users(request.max_end_users, explicit=True)
-        changes["end_user_budget_ids"] = await budgets.check_end_user_budgets(
-            request.end_user_budget_ids if "end_user_budget_ids" in fields else key.end_user_budget_ids,
-            request.end_user_budget_id if "end_user_budget_id" in fields else key.end_user_budget_id,
-            check_default="end_user_budget_id" in fields,
-            check_list="end_user_budget_ids" in fields,
-            organization_id=organization.id,
-        )
-        if "end_user_budget_id" in fields:
-            changes["end_user_budget_id"] = request.end_user_budget_id
-        # The check's commit released the workspace lock the load took.
-        await organizations.hold_workspace_write_access(
-            user=identity,
-            organization_id=organization.id,
-            workspace_id=key.workspace_id,
-            revoking=switching_off,
-        )
+    changes |= await organization_key_changes(
+        organizations,
+        budgets,
+        user=identity,
+        key=key,
+        requested=request.model_dump(include=fields & END_USER_SETTINGS),
+        revoking=switching_off,
+    )
 
     try:
         await api_keys.update_owned(config, key, changes, owner_id=str(key.user_id))

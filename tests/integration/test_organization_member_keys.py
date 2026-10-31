@@ -1176,18 +1176,19 @@ def test_whether_a_key_is_a_service_key_is_fixed(client: TestClient, world: _Wor
     assert code == status.HTTP_400_BAD_REQUEST, body
 
 
-def test_an_operator_cannot_turn_a_members_key_into_a_service_key(
+def test_an_operator_cannot_change_what_a_members_or_organizations_key_is(
     client: TestClient, world: _World, master_key_header: dict[str, str]
 ) -> None:
-    """Its end users would belong to the member's own user, which every organization they are in shares."""
+    """A member's key stays plain, and an organization's service key stays one, on the operator route too."""
     code, mine = _create(client, world, "alpha_operator", {"key_name": "mine"})
     assert code == status.HTTP_200_OK
+    service = _service_key(client, world, _org_budget(client, world))
 
-    code, body = _request(
-        client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{mine['id']}", {"is_service_key": True}
-    )
-
-    assert code == status.HTTP_400_BAD_REQUEST, body
+    for key, flag in ((mine, True), (service, False)):
+        code, body = _request(
+            client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{key['id']}", {"is_service_key": flag}
+        )
+        assert code == status.HTTP_400_BAD_REQUEST, (key["key_name"], body)
 
 
 def test_its_end_users_go_on_the_organizations_budget(
