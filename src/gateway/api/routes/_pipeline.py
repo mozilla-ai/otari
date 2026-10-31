@@ -135,6 +135,7 @@ from gateway.core.metered_pricing import (
 )
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.core.settings.tools import effective_web_search_max_calls
+from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -4694,11 +4695,15 @@ async def record_usage(
     source_label: str | None = None,
     safety_identifier: str | None = None,
     upstream_attempt: bool = True,
+    settle: Callable[[LoggedUsage], Awaitable[None]] | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
     ``prices`` holds the rates the request already resolved; a model it priced is
     settled at that rate instead of being looked up again.
+
+    ``settle`` is given the computed cost and runs while the row is written (see
+    :func:`_put_while_settling`); both have finished when this returns.
 
     Spend is not written here; the budget reservation reconcile path owns
     ``users.spend``. This returns the cost it computed so the caller can
@@ -4908,8 +4913,43 @@ async def record_usage(
             ttft_ms=ttft_ms,
         )
 
-    await log_writer.put(usage_log)
-    return LoggedUsage(usage_log.cost, pricing_source, deployment_paid_cost)
+    logged = LoggedUsage(usage_log.cost, pricing_source, deployment_paid_cost)
+    if settle is None:
+        await log_writer.put(usage_log)
+    else:
+        await _put_while_settling(db, log_writer, usage_log, settle(logged))
+    return logged
+
+
+# Usage rows being written beside their request's settlement, held so a request
+# cancelled mid-settlement cannot leave its write to be garbage collected half done.
+_USAGE_ROW_WRITES: set[asyncio.Task[bool]] = set()
+
+
+async def _put_while_settling(
+    db: AsyncSession, log_writer: LogWriter, usage_log: UsageLog, settlement: Awaitable[None]
+) -> None:
+    """Write ``usage_log`` while ``settlement`` runs on the request's session, and wait for both.
+
+    The writer opens a session of its own, so on PostgreSQL the two transactions
+    overlap rather than queue, and the response waits for the slower one instead
+    of their sum. SQLite admits one writer at a time, so there the row is written
+    first, as it is without a settlement. Neither outcome depends on the other:
+    a row the writer drops still settles, as it did when the two ran in turn.
+    """
+    if dialect_name(db) != "postgresql":
+        await log_writer.put(usage_log)
+        await settlement
+        return
+    task = asyncio.create_task(log_writer.put(usage_log))
+    _USAGE_ROW_WRITES.add(task)
+    task.add_done_callback(_USAGE_ROW_WRITES.discard)
+    try:
+        await settlement
+    finally:
+        # ``asyncio.wait`` leaves the write running if this wait is cancelled.
+        await asyncio.wait((task,))
+    task.result()
 
 
 async def bills_per_request(
@@ -5716,6 +5756,14 @@ def build_streaming_response(
     async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(usage_data))
+
+        async def _settle(logged: LoggedUsage) -> None:
+            assert reservation is not None
+            await _charge(logged, expects_cost=True)
+            await reconcile_reservation(
+                db, reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
+            )
+
         logged = await record_usage(
             db=db,
             log_writer=log_writer,
@@ -5738,12 +5786,8 @@ def build_streaming_response(
             safety_identifier=safety_identifier,
             prices=prices,
             deployment_paid=deployment_paid,
+            settle=_settle if reservation is not None else None,
         )
-        if reservation is not None:
-            await _charge(logged, expects_cost=True)
-            await reconcile_reservation(
-                db, reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
-            )
         return inline_settlement(logged)
 
     async def _on_no_usage() -> None:
@@ -6609,6 +6653,25 @@ async def run_non_stream(
         usage_data = adapter.extract_usage(result)
         if ctx.rate_limit_grant is not None:
             await ctx.rate_limit_grant.settle(_settled_tokens(usage_data))
+        reservation = ctx.reservation
+
+        async def _settle(logged: LoggedUsage) -> None:
+            assert reservation is not None
+            await charge_deployment_paid(
+                ctx.deployment_charge,
+                ctx.db,
+                logged.deployment_paid_cost,
+                provider=provider,
+                model=model,
+                expects_cost=True,
+                tool_funding=ctx.tool_funding,
+            )
+            await reconcile_reservation(
+                ctx.db, reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
+            )
+
+        settle = _settle if reservation is not None else None
+
         logged = LoggedUsage(None, None)
         # A request whose provider reported no usage still owes for the tool
         # calls it ran, so a non-empty tally forces the row that
@@ -6649,20 +6712,10 @@ async def run_non_stream(
                 safety_identifier=ctx.upstream_user,
                 prices=ctx.prices,
                 deployment_paid=ctx.deployment_charge is not None,
+                settle=settle,
             )
-        if ctx.reservation is not None:
-            await charge_deployment_paid(
-                ctx.deployment_charge,
-                ctx.db,
-                logged.deployment_paid_cost,
-                provider=provider,
-                model=model,
-                expects_cost=True,
-                tool_funding=ctx.tool_funding,
-            )
-            await reconcile_reservation(
-                ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
-            )
+        elif settle is not None:
+            await settle(logged)
         _attach_settled_cost(adapter, result, logged)
         if tool_ctx.sandbox_files is not None:
             await store_inline_outputs(adapter.name, result, tool_ctx.sandbox_files.store_provider_output)
