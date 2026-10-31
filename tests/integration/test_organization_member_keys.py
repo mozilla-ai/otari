@@ -20,8 +20,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import patch
 
 import pytest
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -29,12 +31,14 @@ from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
-from gateway.core.config import API_ROOT
-from gateway.models.api_keys import APIKey
+from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.models.api_keys import DEFAULT_ORGANIZATION_MAX_END_USERS, SERVICE_KEY_OWNER_ID_PREFIX, APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.tenancy import OrganizationService
+
+from .conftest import MODEL_NAME
 
 _PREFIX = f"{API_ROOT}/organizations/me/keys"
 
@@ -728,7 +732,7 @@ def test_a_colleagues_key_answers_the_404_a_missing_one_does(
 
 
 def test_an_update_cannot_exempt_the_key_from_budget(client: TestClient, world: _World) -> None:
-    """The member body has no such field, and sending one anyway changes nothing."""
+    """The member body has no such field, so sending one is refused and changes nothing."""
     code, created = _create(client, world, "alpha_member", {"key_name": "enforced"})
     assert code == status.HTTP_200_OK
     assert created["exclude_from_budget"] is False
@@ -741,25 +745,20 @@ def test_an_update_cannot_exempt_the_key_from_budget(client: TestClient, world: 
         f"{_PREFIX}/{created['id']}",
         json={"exclude_from_budget": True},
     )
-    assert code == status.HTTP_200_OK, updated
-    assert updated["exclude_from_budget"] is False
+    assert code == status.HTTP_422_UNPROCESSABLE_CONTENT, updated
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert [key["exclude_from_budget"] for key in listed if key["id"] == created["id"]] == [False]
 
 
-def test_a_create_cannot_name_an_owner_or_exempt_itself(client: TestClient, world: _World) -> None:
-    """The escalation fields of the operator body are inert here, not honored."""
-    code, body = _create(
-        client,
-        world,
-        "alpha_member",
-        {
-            "key_name": "escalation",
-            "user_id": "somebody-else",
-            "exclude_from_budget": True,
-        },
-    )
-    assert code == status.HTTP_200_OK, body
-    assert body["user_id"] == str(world.users["alpha_member"])
-    assert body["exclude_from_budget"] is False
+@pytest.mark.parametrize("field", [{"user_id": "somebody-else"}, {"exclude_from_budget": True}])
+def test_a_create_cannot_name_an_owner_or_exempt_itself(client: TestClient, world: _World, field: dict) -> None:
+    """The escalation fields of the operator body are refused here, not silently dropped."""
+    code, body = _create(client, world, "alpha_member", {"key_name": "escalation", **field})
+    assert code == status.HTTP_422_UNPROCESSABLE_CONTENT, body
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert [key for key in listed if key["key_name"] == "escalation"] == []
 
 
 # =============================================================================
@@ -1046,3 +1045,180 @@ def test_a_member_minted_key_records_its_origin(
     code, minted = _create(client, world, "alpha_member", {"key_name": "mine"})
     assert code == status.HTTP_200_OK, minted
     assert _key_row(db_session_factory, minted["id"]).self_service is True
+
+
+# =============================================================================
+# Service keys: the organization's, not the member's
+# =============================================================================
+# A service key lets an organization's app bill each of its own customers to a
+# budget of the organization's. These pin who may make one (an owner or admin),
+# which budgets it may use (its own organization's), that its end users are
+# reachable from no other key, and that every owner or admin manages it.
+
+
+_BUDGETS = f"{API_ROOT}/organizations/me/budgets"
+
+
+def _org_budget(client: TestClient, world: _World, who: str = "alpha_owner", *, request_limit: int = 1) -> str:
+    code, body = _request(
+        client,
+        world,
+        who,
+        "POST",
+        _BUDGETS,
+        json={"name": f"per customer {request_limit}", "request_limit": request_limit, "budget_duration_sec": 86400},
+    )
+    assert code == status.HTTP_201_CREATED, body
+    return str(body["budget_id"])
+
+
+def _service_key(client: TestClient, world: _World, budget_id: str, who: str = "alpha_owner", **extra: Any) -> Any:
+    code, body = _create(
+        client,
+        world,
+        who,
+        {"key_name": "app", "is_service_key": True, "end_user_budget_id": budget_id, **extra},
+    )
+    assert code == status.HTTP_200_OK, body
+    return body
+
+
+async def _mock_acompletion(**_kwargs: Any) -> ChatCompletion:
+    return ChatCompletion(
+        id="chatcmpl-x",
+        object="chat.completion",
+        created=0,
+        model=MODEL_NAME,
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")],
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+
+def _chat(client: TestClient, key: str, user: str) -> Any:
+    body = {"model": MODEL_NAME, "messages": [{"role": "user", "content": "hi"}], "user": user}
+    with patch("gateway.api.routes.chat.acompletion", side_effect=_mock_acompletion):
+        return client.post(f"{API_ROOT}/chat/completions", json=body, headers={API_KEY_HEADER: f"Bearer {key}"})
+
+
+def test_an_owner_creates_a_service_key_with_an_owner_and_a_cap_of_its_own(client: TestClient, world: _World) -> None:
+    budget_id = _org_budget(client, world)
+
+    key = _service_key(client, world, budget_id)
+
+    assert key["is_service_key"] is True
+    assert key["end_user_budget_id"] == budget_id
+    assert key["max_end_users"] == DEFAULT_ORGANIZATION_MAX_END_USERS
+    assert key["user_id"].startswith(SERVICE_KEY_OWNER_ID_PREFIX)
+    assert key["user_id"] != str(world.users["alpha_owner"])
+
+
+def test_a_member_cannot_create_a_service_key(client: TestClient, world: _World) -> None:
+    budget_id = _org_budget(client, world)
+
+    code, body = _create(
+        client, world, "alpha_member", {"key_name": "app", "is_service_key": True, "end_user_budget_id": budget_id}
+    )
+
+    assert code == status.HTTP_403_FORBIDDEN, body
+
+
+def test_a_budget_outside_the_organization_is_refused(
+    client: TestClient, world: _World, master_key_header: dict[str, str]
+) -> None:
+    """The deployment's budget and another tenant's answer the 404 an unknown id does."""
+    deployment = client.post(f"{API_ROOT}/budgets", json={"request_limit": 1}, headers=master_key_header).json()
+    theirs = _org_budget(client, world, "beta_owner")
+
+    for budget_id in (deployment["budget_id"], theirs, "no-such-budget"):
+        code, body = _create(
+            client, world, "alpha_owner", {"key_name": "app", "is_service_key": True, "end_user_budget_id": budget_id}
+        )
+        assert code == status.HTTP_404_NOT_FOUND, (budget_id, body)
+
+
+def test_end_user_settings_on_a_plain_key_are_refused(client: TestClient, world: _World) -> None:
+    code, body = _create(client, world, "alpha_owner", {"key_name": "plain", "max_end_users": 5})
+
+    assert code == status.HTTP_400_BAD_REQUEST, body
+
+
+def test_every_owner_or_admin_manages_it_and_a_member_does_not_see_it(client: TestClient, world: _World) -> None:
+    key = _service_key(client, world, _org_budget(client, world))
+
+    code, listed = _request(client, world, "alpha_operator", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert key["id"] in [row["id"] for row in listed]
+    code, updated = _request(client, world, "alpha_operator", "PATCH", f"{_PREFIX}/{key['id']}", {"max_end_users": 3})
+    assert code == status.HTTP_200_OK, updated
+    assert updated["max_end_users"] == 3
+
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert key["id"] not in [row["id"] for row in listed]
+    code, body = _request(client, world, "alpha_member", "PATCH", f"{_PREFIX}/{key['id']}", {"key_name": "mine"})
+    assert code == status.HTTP_404_NOT_FOUND, body
+    code, body = _request(client, world, "beta_owner", "POST", f"{_PREFIX}/{key['id']}/rotate")
+    assert code == status.HTTP_404_NOT_FOUND, body
+
+
+def test_whether_a_key_is_a_service_key_is_fixed(client: TestClient, world: _World) -> None:
+    key = _service_key(client, world, _org_budget(client, world))
+    code, plain = _create(client, world, "alpha_owner", {"key_name": "plain"})
+    assert code == status.HTTP_200_OK
+
+    code, body = _request(client, world, "alpha_owner", "PATCH", f"{_PREFIX}/{key['id']}", {"is_service_key": False})
+    assert code == status.HTTP_400_BAD_REQUEST, body
+    code, body = _request(client, world, "alpha_owner", "PATCH", f"{_PREFIX}/{plain['id']}", {"is_service_key": True})
+    assert code == status.HTTP_400_BAD_REQUEST, body
+    code, body = _request(client, world, "alpha_owner", "PATCH", f"{_PREFIX}/{key['id']}", {"max_end_users": None})
+    assert code == status.HTTP_400_BAD_REQUEST, body
+
+
+def test_an_operator_cannot_turn_a_members_key_into_a_service_key(
+    client: TestClient, world: _World, master_key_header: dict[str, str]
+) -> None:
+    """Its end users would belong to the member's own user, which every organization they are in shares."""
+    code, mine = _create(client, world, "alpha_operator", {"key_name": "mine"})
+    assert code == status.HTTP_200_OK
+
+    code, body = _request(
+        client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{mine['id']}", {"is_service_key": True}
+    )
+
+    assert code == status.HTTP_400_BAD_REQUEST, body
+
+
+def test_its_end_users_go_on_the_organizations_budget(
+    client: TestClient, world: _World, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 1.0, "output_price_per_million": 1.0},
+        headers=master_key_header,
+    )
+    budget_id = _org_budget(client, world, request_limit=1)
+    key = _service_key(client, world, budget_id)
+
+    assert _chat(client, key["key"], "alice").status_code == status.HTTP_200_OK
+    refused = _chat(client, key["key"], "alice")
+    assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
+    assert refused.json()["code"] == "budget_exceeded"
+    assert _chat(client, key["key"], "bob").status_code == status.HTTP_200_OK
+
+    end_users = db_session.query(BillingUser).filter(col(BillingUser.parent_user_id) == key["user_id"]).all()
+    assert sorted(user.external_id for user in end_users) == ["alice", "bob"]
+    assert {user.budget_id for user in end_users} == {budget_id}
+
+
+def test_deleting_its_budget_is_refused_while_a_key_defaults_to_it(client: TestClient, world: _World) -> None:
+    default = _org_budget(client, world, request_limit=1)
+    listed_only = _org_budget(client, world, request_limit=2)
+    key = _service_key(client, world, default, end_user_budget_ids=[default, listed_only])
+
+    code, body = _request(client, world, "alpha_owner", "DELETE", f"{_BUDGETS}/{default}")
+    assert code == status.HTTP_409_CONFLICT, body
+    assert "app" in body["detail"]
+
+    code, body = _request(client, world, "alpha_owner", "DELETE", f"{_BUDGETS}/{listed_only}")
+    assert code == status.HTTP_200_OK, body
+    code, listed = _request(client, world, "alpha_owner", "GET", _PREFIX)
+    assert [row["end_user_budget_ids"] for row in listed if row["id"] == key["id"]] == [[default]]

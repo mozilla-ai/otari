@@ -3097,7 +3097,8 @@ export interface paths {
          *     Only keys billed to the caller's own user: an operator-minted key assigned
          *     to them is theirs to see here, and nobody else's key ever is. Naming a
          *     workspace outside their organization lists nothing rather than refusing, so
-         *     the filter reports no more than the unfiltered read does.
+         *     the filter reports no more than the unfiltered read does. An owner or admin
+         *     also sees the organization's service keys, which they manage.
          */
         get: operations["organization-keys-list_own_keys"];
         put?: never;
@@ -3110,6 +3111,10 @@ export interface paths {
          *     workspace must be visible to the caller (a member of it, or an organization
          *     owner/admin, who see every workspace). A viewer of the workspace is refused
          *     with 403. The secret is returned once.
+         *
+         *     A service key is the organization's rather than the caller's: only an
+         *     organization owner or admin may create one, its end-user budgets must be
+         *     this organization's, and it is owned by a user minted for it alone.
          */
         post: operations["organization-keys-create_own_key"];
         delete?: never;
@@ -3137,7 +3142,7 @@ export interface paths {
         head?: never;
         /**
          * Update Own Key
-         * @description Update one of the caller's own API keys.
+         * @description Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.
          */
         patch: operations["organization-keys-update_own_key"];
         trace?: never;
@@ -9990,8 +9995,9 @@ export interface components {
          * @description Create-key body for the member surface.
          *
          *     Deliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner
-         *     is always the caller) and no ``exclude_from_budget`` (a member must not
-         *     exempt their own spend from enforcement).
+         *     is the caller, or one of the key's own for a service key) and no
+         *     ``exclude_from_budget`` (a member must not exempt their own spend from
+         *     enforcement). A field it does not take is refused rather than dropped.
          */
         CreateOwnKeyRequest: {
             /**
@@ -10010,15 +10016,36 @@ export interface components {
              */
             capture_agent_telemetry?: boolean | null;
             /**
+             * End User Budget Id
+             * @description Budget of this organization each end user this key creates is capped at, unless the request names another with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.
+             */
+            end_user_budget_id?: string | null;
+            /**
+             * End User Budget Ids
+             * @description Budgets of this organization a request may start a new end user on by naming one in Otari-End-User-Budget. Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.
+             */
+            end_user_budget_ids?: string[] | null;
+            /**
              * Expires At
              * @description Optional expiration timestamp
              */
             expires_at?: string | null;
             /**
+             * Is Service Key
+             * @description When true, a request may name an end user in its 'user' field. Each end user is created on first use and billed to its own budget, while this key's own ceiling caps all of them together. Only an organization owner or admin may create one. It belongs to the organization rather than to you: every owner or admin manages it, and its end users are reachable from no other key. Fixed once the key exists.
+             * @default false
+             */
+            is_service_key: boolean;
+            /**
              * Key Name
              * @description Optional name for the key
              */
             key_name?: string | null;
+            /**
+             * Max End Users
+             * @description Most live end users this service key may have. A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is 10000: an organization's service key always has a cap.
+             */
+            max_end_users?: number | null;
             /**
              * Metadata
              * @description Optional metadata
@@ -18141,7 +18168,7 @@ export interface components {
          *     The operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the
          *     reason the create body gives. The tri-state fields follow the same
          *     ``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,
-         *     a value = pin it.
+         *     a value = pin it. ``is_service_key`` is accepted only unchanged.
          */
         UpdateOwnKeyRequest: {
             /** Allowed Models */
@@ -18150,12 +18177,20 @@ export interface components {
             allowed_tools?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
+            /** End User Budget Id */
+            end_user_budget_id?: string | null;
+            /** End User Budget Ids */
+            end_user_budget_ids?: string[] | null;
             /** Expires At */
             expires_at?: string | null;
             /** Is Active */
             is_active?: boolean | null;
+            /** Is Service Key */
+            is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;

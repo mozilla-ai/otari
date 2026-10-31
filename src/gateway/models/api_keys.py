@@ -11,6 +11,13 @@ from gateway.models.base import Base, UtcDateTime
 
 # How many budgets one key may list for its end users.
 MAX_END_USER_BUDGETS = 100
+# The end users an organization's service key may have until the organization
+# sets another cap. Each new id a request names creates a row, so an
+# organization's key always has a cap; only an operator may leave one off.
+DEFAULT_ORGANIZATION_MAX_END_USERS = 10_000
+# Prefixes the owner minted for an organization's service key. Not a UUID, so it
+# is never mistaken for a member's attribution row.
+SERVICE_KEY_OWNER_ID_PREFIX = "svc_"
 # How many federation rules one key may hold.
 MAX_FEDERATION_RULES_PER_KEY = 20
 
@@ -121,6 +128,14 @@ class APIKey(Base):
 
     user = relationship("User", back_populates="api_keys")
     usage_logs = relationship("UsageLog", back_populates="api_key", passive_deletes=True)
+
+    def is_organization_service_key(self) -> bool:
+        """Whether an organization made this service key for itself, so its end users go on that organization's budgets.
+
+        Such a key is minted on the member surface (``self_service``) under an owner of its own, and only an
+        operator's service key starts end users on the deployment's budgets.
+        """
+        return bool(self.is_service_key and self.self_service)
 
     def assignable_end_user_budgets(self) -> list[str]:
         """The budgets this key may start an end user on: its list, or else its default alone."""

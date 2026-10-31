@@ -1212,6 +1212,49 @@ describe("KeysPage", () => {
     })
   })
 
+  it("lets an organization owner create the organization a service key", async () => {
+    const fetchMock = mockApi({
+      keys: [],
+      deploymentOperator: false,
+      role: "owner",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByLabelText("Service key"))
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/organizations/me/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      is_service_key: true,
+      end_user_budget_ids: [],
+      end_user_budget_id: null,
+    })
+  })
+
+  it("does not offer a member a service key", async () => {
+    mockApi({ keys: [], deploymentOperator: false, role: "member" })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+
+    expect(screen.queryByLabelText("Service key")).not.toBeInTheDocument()
+  })
+
   it("creates a budget-exempt key when the toggle is checked", async () => {
     const fetchMock = mockApi({ keys: [] })
     const user = userEvent.setup()
