@@ -90,6 +90,7 @@ from gateway.services.api_keys import (
     admit_organization_key,
     organization_key_changes,
     refuse_service_key_flag_change,
+    service_key_owner_access,
 )
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -369,7 +370,7 @@ async def create_own_key(
     ).scalar_one_or_none() is None
 
     if request.is_service_key:
-        owner = add_service_key_owner(db, alias=request.key_name or "Service key", creator=owner)
+        owner = add_service_key_owner(db, alias=request.key_name or "Service key", **service_key_owner_access(owner))
 
     api_key = key_format.mint()
     db_key = APIKey(

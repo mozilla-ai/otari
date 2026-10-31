@@ -31,6 +31,7 @@ from gateway.services.api_keys._service_keys import (
     operator_max_end_users,
     organization_key_changes,
     refuse_service_key_flag_change,
+    service_key_owner_access,
 )
 from gateway.services.api_keys._token_exchange import FederationTokenExchange, OrganizationOfWorkspace
 
@@ -64,5 +65,6 @@ __all__ = [
     "refuse_service_key_flag_change",
     "refuse_unusable_declared_secrets",
     "rule_matches",
+    "service_key_owner_access",
     "unverified_issuer",
 ]

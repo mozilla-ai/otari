@@ -17,6 +17,7 @@ from gateway.models.api_keys import APIKey
 if TYPE_CHECKING:
     # Type-only: the budgets service imports this package, so a runtime import would be a cycle.
     from gateway.models.tenancy import Organization, User
+    from gateway.models.users import User as BillingUser
     from gateway.services.budgets import BudgetService
     from gateway.services.tenancy import OrganizationService
 
@@ -131,3 +132,11 @@ def operator_max_end_users(key: APIKey, requested: int | None) -> int | None:
     if key.is_organization_service_key():
         return organization_max_end_users(requested, explicit=True)
     return requested
+
+
+def service_key_owner_access(creator: "BillingUser") -> dict[str, list[str] | None]:
+    """The model and tool access an organization's service key's owner starts with: its creator's.
+
+    So the key grants nothing its creator lacks.
+    """
+    return {"allowed_models": creator.allowed_models, "allowed_tools": creator.allowed_tools}
