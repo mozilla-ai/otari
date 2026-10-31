@@ -29,7 +29,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
-from gateway.services.api_keys import operator_set_active, refuse_service_key_flag_change
+from gateway.services.api_keys import operator_max_end_users, operator_set_active, refuse_service_key_flag_change
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -503,6 +503,9 @@ async def update_key(
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
     refuse_service_key_flag_change(key, request.is_service_key)
+    max_end_users = (
+        operator_max_end_users(key, request.max_end_users) if "max_end_users" in request.model_fields_set else None
+    )
     # Before the key is changed, for the reason create_key gives. The pair is
     # checked as the key will hold it, so a field left out keeps its stored value.
     fields = request.model_fields_set
@@ -556,7 +559,7 @@ async def update_key(
     if "end_user_budget_ids" in request.model_fields_set:
         key.end_user_budget_ids = end_user_budget_ids
     if "max_end_users" in request.model_fields_set:
-        key.max_end_users = request.max_end_users
+        key.max_end_users = max_end_users
     if request.metadata is not None:
         key.metadata_ = request.metadata
 

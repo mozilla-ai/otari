@@ -124,3 +124,10 @@ async def organization_key_changes(
         user=user, organization_id=organization.id, workspace_id=key.workspace_id, revoking=revoking
     )
     return changes
+
+
+def operator_max_end_users(key: APIKey, requested: int | None) -> int | None:
+    """The cap an operator's update leaves a key: ``requested``, except that an organization's service key keeps one."""
+    if key.is_organization_service_key():
+        return organization_max_end_users(requested, explicit=True)
+    return requested

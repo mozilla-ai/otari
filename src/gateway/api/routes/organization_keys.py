@@ -566,9 +566,9 @@ async def _federation_rule_key(
     """The key a federation rule route acts on, or 404.
 
     The deployment operator may act on any key in their active organization, as on ``/api/v1/keys``; anyone else
-    only on their own. Adding a rule also takes an owner or admin of the organization (or the operator), since a
-    rule decides which workloads may act as the key; listing and deleting do not, so a caller whose role was lowered
-    can still see and take back what they set up.
+    only on their own, and an owner or admin also on the organization's service keys. Adding a rule also takes an
+    owner or admin of the organization (or the operator), since a rule decides which workloads may act as the key;
+    listing and deleting do not, so a caller whose role was lowered can still see and take back what they set up.
     """
     operates = await deployment_users.has_administration_access(identity)
     organization = await organizations.get_active_organization_for_user(identity)
@@ -576,7 +576,13 @@ async def _federation_rule_key(
         return await _load_key_in_organization(db, key_id, organization.id)
     if adding:
         await organizations.require_active_organization_management_access(user=identity, organization=organization)
-    return await _load_key_in_organization(db, key_id, organization.id, owner_user_id=str(identity.id))
+    return await _load_key_in_organization(
+        db,
+        key_id,
+        organization.id,
+        owner_user_id=str(identity.id),
+        or_organization_service_keys=await organizations.manages_organization(user=identity, organization=organization),
+    )
 
 
 @router.post("/{key_id}/federation-rules", status_code=status.HTTP_201_CREATED)

@@ -332,8 +332,10 @@ curl -X POST "https://otari.example.com/api/v1/organizations/me/keys/$KEY_ID/fed
 
 `GET` on the same path lists the key's rules and `DELETE .../{rule_id}`
 removes one. The key must be the caller's own, as on the rest of
-`/api/v1/organizations/me/keys`, and anyone else's answers 404, except for the
-deployment operator. Adding a rule as a plain member answers 403.
+`/api/v1/organizations/me/keys`, or, for an organization owner or admin, one of
+the organization's [service keys](access-control.md#an-organizations-own-service-keys).
+Anyone else's answers 404, except for the deployment operator. Adding a rule as
+a plain member answers 403.
 
 A member's rule differs from the operator's in three ways, and each is what
 keeps one tenant's rule from reaching another tenant's workload:

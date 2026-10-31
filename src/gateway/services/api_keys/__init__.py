@@ -28,6 +28,7 @@ from gateway.services.api_keys._service_keys import (
     DEFAULT_ORGANIZATION_MAX_END_USERS,
     END_USER_SETTINGS,
     admit_organization_key,
+    operator_max_end_users,
     organization_key_changes,
     refuse_service_key_flag_change,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "key_refusal",
     "match_federation_rules",
     "mint_access_token",
+    "operator_max_end_users",
     "operator_set_active",
     "organization_key_changes",
     "read_access_token",

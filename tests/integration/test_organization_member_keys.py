@@ -1192,6 +1192,20 @@ def test_an_operator_cannot_change_what_a_members_or_organizations_key_is(
         assert code == status.HTTP_400_BAD_REQUEST, (key["key_name"], body)
 
 
+def test_an_operator_cannot_uncap_an_organizations_service_key(client: TestClient, world: _World) -> None:
+    service = _service_key(client, world, _org_budget(client, world))
+
+    code, body = _request(
+        client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{service['id']}", {"max_end_users": None}
+    )
+    assert code == status.HTTP_400_BAD_REQUEST, body
+    code, body = _request(
+        client, world, "alpha_operator", "PATCH", f"{API_ROOT}/keys/{service['id']}", {"max_end_users": 7}
+    )
+    assert code == status.HTTP_200_OK, body
+    assert body["max_end_users"] == 7
+
+
 def test_its_end_users_go_on_the_organizations_budget(
     client: TestClient, world: _World, master_key_header: dict[str, str], db_session: Session
 ) -> None:
