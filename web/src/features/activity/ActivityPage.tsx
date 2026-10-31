@@ -56,6 +56,7 @@ import { ActivityTimeline } from "./ActivityTimeline"
 import {
   describeSource,
   findGroupsMissingEarlierAttempts,
+  findRequestOutcome,
   formatLatencyCell,
   getActivityRowClassName,
   getActivityRowKey,
@@ -104,18 +105,26 @@ const URL_DEFAULTS = {
   tool: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
-  // The usage row open in the panel.
+  // The request open in the panel: a usage row's id, or the `Otari-Request-ID`
+  // the request was answered under.
   request: "",
 } as const
 
-/** Inside the Overview the page waits for its scope, so it never fetches the wrong one. */
+/**
+ * Inside the Overview the page waits for its scope, so it never fetches the wrong one.
+ *
+ * It also waits for the workspace selection: mounted before it, the page would see
+ * the workspace arrive as a filter change, which resets the page and drops a
+ * linked `?request=`.
+ */
 export function ActivityPage({
   embedded = false,
 }: {
   embedded?: boolean
 } = {}) {
   const observe = useObserveScope(embedded)
-  return observe.isResolved ? (
+  const workspace = useSelectedWorkspace()
+  return observe.isResolved && workspace.isSettled ? (
     <ActivityPageContent embedded={embedded} observe={observe} />
   ) : (
     <PageLoading />
@@ -613,8 +622,26 @@ function ActivityPageContent({
   // list is a history entry, so Back closes it; walking and closing replace it.
   const navigate = useNavigate()
   const requestId = url.get("request")
-  const openIndex = rows.findIndex((row) => row.id === requestId)
-  const openEntry = openIndex >= 0 ? rows[openIndex] : undefined
+  // Answered for this view: a query still disabled (its scope unresolved) is
+  // neither loading nor fetching, and has answered nothing.
+  const pageSettled = usage.isSuccess && !usage.isPlaceholderData
+  const pageIndex = rows.findIndex((row) => row.id === requestId)
+  // A link may name the request rather than one of its rows: the
+  // `Otari-Request-ID` a caller got back is the `request_group_id` its rows share,
+  // never a row's own id. Looked up once the page holds no such row, and opened on
+  // the request's outcome row, whether or not that row is on this page.
+  const linkedRequest = useRequestGroups(
+    requestId !== "" && pageIndex < 0 && pageSettled ? [requestId] : [],
+  )
+  const linkedEntry =
+    pageIndex < 0
+      ? findRequestOutcome(linkedRequest.data ?? [], requestId)
+      : undefined
+  const openIndex =
+    pageIndex >= 0
+      ? pageIndex
+      : rows.findIndex((row) => row.id === linkedEntry?.id)
+  const openEntry = openIndex >= 0 ? rows[openIndex] : linkedEntry
   const openRequest = (id: string) => {
     if (id === requestId) return
     navigate({
@@ -628,27 +655,31 @@ function ActivityPageContent({
     openIndex >= 0 && openIndex < rows.length - 1
       ? rows[openIndex + 1]
       : undefined
-  // A link to a row that is not on this page opens nothing; say so rather than
-  // ignore it. Only once the page has settled, or a loading page would flash it.
+  // A link to a row that is not on this page, and names no request either, opens
+  // nothing; say so rather than ignore it. Only once the page and the lookup have
+  // both answered, or a loading page would flash it; a failed lookup is reported
+  // in the error banner instead.
   const requestMissing =
     requestId !== "" &&
     openEntry === undefined &&
-    !usage.isLoading &&
-    !usage.isPlaceholderData
+    pageSettled &&
+    linkedRequest.isSuccess &&
+    !linkedRequest.isPlaceholderData
   // Below md the panel covers the page, which then takes no focus or presses.
   const isMobile = useIsMobile()
   // Stable per open row, so DataTable's row cache holds while the page polls.
   // `is-peeked` washes the cells (see globals.css) and composes with the row's
   // own failure tint.
+  const openId = openEntry?.id ?? ""
   const rowClassName = useCallback(
     (entry: UsageEntry) =>
       [
         getActivityRowClassName(entry),
-        entry.id === requestId ? "is-peeked" : undefined,
+        entry.id === openId ? "is-peeked" : undefined,
       ]
         .filter(Boolean)
         .join(" ") || undefined,
-    [requestId],
+    [openId],
   )
 
   // Sets the model's own price (a ModelPricing row), which is what future
@@ -791,7 +822,11 @@ function ActivityPageContent({
           dropped on failure rather than left to go stale. */}
         <ErrorBanner
           error={
-            usage.error ?? count.error ?? contextSummary.error ?? inFlight.error
+            usage.error ??
+            linkedRequest.error ??
+            count.error ??
+            contextSummary.error ??
+            inFlight.error
           }
         />
 
