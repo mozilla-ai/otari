@@ -118,7 +118,7 @@ export function ObserveFilterBar({
     if (value === CUSTOM) return
     patch(
       value === TODAY
-        ? { range: "", start_date: midnight, end_date: "" }
+        ? { range: "", start_date: localMidnightIso(), end_date: "" }
         : { range: value, start_date: "", end_date: "" },
     )
   }

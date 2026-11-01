@@ -143,12 +143,13 @@ describe("useObserveScope", () => {
 
   it("drops a legacy Mine from the URL", async () => {
     mockApi({ members: [ME] })
-    renderPage(<Probe />, "/?scope=mine")
+    renderPage(<Probe />, "/?scope=mine&user_id=u1")
     await waitFor(() => expect(state().scope).toBe("mine"))
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "clear mine" }))
     await waitFor(() => expect(state().scope).toBe("everyone"))
+    expect(state().users).toEqual([])
     expect(screen.getByLabelText("Search")).not.toHaveTextContent("scope")
   })
 

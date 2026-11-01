@@ -9,12 +9,11 @@ const URL_DEFAULTS = { scope: "", user_id: "", page: "0" } as const
 
 /**
  * Whose requests the Overview shows. Everyone's, narrowed by the User filter,
- * unless the URL carries `scope=mine` (a link from before the switch was
- * removed), which reads the caller's own usage identity. A caller without one
- * falls back to Everyone. Until that identity has resolved, `isResolved` is
- * false and a page must not fetch, or Mine would flash team data.
- * `active: false` is for a page outside the Overview, which reads the URL's
- * `user_id` as it always did.
+ * unless the URL carries `scope=mine`, which reads the caller's own usage
+ * identity. A caller without one falls back to Everyone. Until that identity
+ * has resolved, `isResolved` is false and a page must not fetch, or Mine would
+ * flash team data. `active: false` is for a page outside the Overview, which
+ * reads the URL's `user_id`.
  */
 export function useObserveScope(active = true) {
   const url = useUrlState(URL_DEFAULTS)
@@ -40,11 +39,15 @@ export function useObserveScope(active = true) {
   )
 
   const patch = url.patch
-  const clearMine = useCallback(() => patch({ scope: "", page: 0 }), [patch])
+  // Mine hides the URL's users, so they go with it rather than resurfacing.
+  const clearMine = useCallback(
+    () => patch({ scope: "", user_id: [], page: 0 }),
+    [patch],
+  )
 
   return {
     scope,
-    /** Drops a legacy `scope=mine`, back to Everyone. */
+    /** Drops `scope=mine` and the users it hid, back to Everyone. */
     clearMine,
     ownerId: owner.ownerId,
     isResolved,
