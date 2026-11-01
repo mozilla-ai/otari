@@ -82,6 +82,15 @@ serves the request is what the policy decides. A $0 budget reads as fully used.
 A budget condition does not match a caller with no finite budget, a key excluded
 from budget enforcement, or any request while `budget_strategy` is `disabled`.
 
+A budget condition decides which target serves a request the budget admits; it
+does not admit a request the budget refuses. Each request first holds its
+estimated cost, priced from its output token limit (see
+[Budgets](access-control.md#budgets)), and a request whose hold is larger than
+what the budget has left is refused with `403 budget_exceeded`, even while
+`budget_used_pct` is far below the policy's threshold. For a tier-down rule to
+have room to act, size the budget well above one request's hold, or send a
+lower `max_tokens`.
+
 In a policy that can fall over, each candidate gets one upstream call unless a
 retry count is configured, so a throttled provider hands over to the next
 candidate at once rather than after its SDK's own retries. See
