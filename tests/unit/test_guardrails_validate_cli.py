@@ -242,6 +242,9 @@ def test_a_dry_run_path_is_reported_at_both_moments_it_could_be_read(repo: Path)
     result = _invoke("--path", "CHANGELOG.md")
     assert "PreToolUse, Edit/Write: CHANGELOG.md" in result.output
     assert "Stop, the finished turn: 1 changed path(s), 0 command(s)" in result.output
+    assert (
+        "judge diff base: the branch merge base with its upstream, falling back to the default branch" in result.output
+    )
     assert result.output.count("fires      no-hand-edited-changelog (required)") == 2
 
 

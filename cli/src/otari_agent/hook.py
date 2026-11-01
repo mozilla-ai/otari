@@ -551,53 +551,168 @@ def _hook_load_one_origin(files: list[GuardrailFile], root: Path) -> tuple[Guard
     return None
 
 
-def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
-    """Evidence for a `path` gate on a Stop event: what Git sees changed.
+_HOOK_STOP_DIFF_BASE_DESCRIPTION = (
+    "the branch merge base with its upstream, falling back to the default branch and then HEAD"
+)
 
-    Claude Code's Stop payload carries no file list of its own (unlike
-    PreToolUse, whose tool_input already names a target), so a Stop-time
-    path check has nothing to evaluate unless something goes and
-    finds out what changed. Git status is that something: harness-agnostic
-    (the same command regardless of which tool wrote the change, unlike
-    parsing Claude Code's own transcript format) and ground truth for the
-    working tree, including a change a `Bash` call made that no tool_input
-    ever named. Specific to path: a future gate type collects its
-    own evidence in its own way, not through this function.
-    """
+
+def _hook_run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
+    """Run a bounded, read-only Git command for Stop evidence collection."""
     try:
-        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
-            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        return subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+            ["git", *args],
             cwd=repo_root,
             capture_output=True,
             text=True,
-            encoding="utf-8",  # not the platform locale default, which is not always UTF-8
-            errors="replace",  # a pathologically-named file's bytes need not be valid UTF-8 either
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
-    if result.returncode != 0:
+
+
+def _hook_stop_upstream(repo_root: Path) -> str | None:
+    """Return the current branch's configured upstream when it resolves to a commit."""
+    result = _hook_run_git(repo_root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    if result is None or result.returncode != 0:
         return None
+    upstream = result.stdout.strip()
+    return upstream if upstream and _hook_revision(repo_root, upstream) is not None else None
+
+
+def _hook_revision(repo_root: Path, revision: str) -> str | None:
+    """Resolve ``revision`` to a commit, or return ``None`` when it is unavailable."""
+    result = _hook_run_git(repo_root, "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}")
+    if result is None or result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value if re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value) else None
+
+
+def _hook_default_branch(repo_root: Path) -> tuple[str, str] | None:
+    """Find a local remote's advertised default branch, then common local defaults."""
+    remotes_result = _hook_run_git(repo_root, "remote")
+    remotes = [] if remotes_result is None or remotes_result.returncode != 0 else remotes_result.stdout.splitlines()
+    for remote in [*remotes, "origin"]:
+        remote = remote.strip()
+        if not remote:
+            continue
+        result = _hook_run_git(repo_root, "symbolic-ref", "--quiet", f"refs/remotes/{remote}/HEAD")
+        if result is None or result.returncode != 0:
+            continue
+        reference = result.stdout.strip()
+        if reference and _hook_revision(repo_root, reference) is not None:
+            return reference, f"default branch {reference}"
+    for branch in ("main", "master"):
+        if _hook_revision(repo_root, branch) is not None:
+            return branch, f"default branch {branch}"
+    return None
+
+
+def _hook_stop_merge_base(repo_root: Path, head: str, reference: str, source: str) -> "_DiffRange | None":
+    result = _hook_run_git(repo_root, "merge-base", reference, head)
+    if result is None or result.returncode != 0:
+        return None
+    merge_base = result.stdout.strip()
+    if not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", merge_base):
+        return None
+    return _DiffRange(
+        base=merge_base,
+        description=f"{source} merge base {merge_base[:12]}",
+    )
+
+
+def _hook_collect_stop_diff_range(repo_root: Path) -> "_DiffRange | None":
+    """Select the committed and working-tree range a Stop event should judge.
+
+    Prefer the upstream merge base when it is ahead of the default-branch
+    merge base and differs from HEAD; otherwise use the default-branch base.
+    This avoids including default-branch commits after a rebase. A
+    repository with neither falls back to ``HEAD`` so the hook still sees
+    unstaged changes. The returned description is included in judge evidence
+    so a reader can tell which history was reviewed.
+    """
+    head = _hook_revision(repo_root, "HEAD")
+    if head is None:
+        return None
+
+    has_candidate = False
+    upstream = _hook_stop_upstream(repo_root)
+    upstream_range: _DiffRange | None = None
+    if upstream is not None:
+        has_candidate = True
+        diff_range = _hook_stop_merge_base(repo_root, head, upstream, f"upstream {upstream}")
+        upstream_range = diff_range
+
+    default_branch = _hook_default_branch(repo_root)
+    if default_branch is not None:
+        has_candidate = True
+        diff_range = _hook_stop_merge_base(repo_root, head, *default_branch)
+        if diff_range is not None:
+            if upstream_range is not None and upstream_range.base != head:
+                ancestor = _hook_run_git(repo_root, "merge-base", "--is-ancestor", diff_range.base, upstream_range.base)
+                if ancestor is not None and ancestor.returncode == 0:
+                    return upstream_range
+            return diff_range
+
+    if upstream_range is not None:
+        return upstream_range
+
+    if not has_candidate:
+        return _DiffRange(
+            base=head,
+            description="HEAD (no upstream or default branch was available)",
+        )
+    return _DiffRange(base=head, description="HEAD (the configured upstream/default branch had no common history)")
+
+
+def _hook_status_paths(stdout: str) -> list[str]:
+    """Parse NUL-delimited porcelain status output, including renames."""
     # -z: NUL-delimited and never quotes or octal-escapes a path (unlike the
     # human-readable format, which renders a non-ASCII name like "café.txt"
-    # as the escaped "caf\303\251.txt" and would report an untracked file
+    # as the escaped "caf\\303\\251.txt" and would report an untracked file
     # literally named "weird -> name.txt" as a rename by matching " -> " as
     # a substring of the one path it has, rather than the separator between
     # two). A rename or copy (status X or Y is 'R'/'C') is two consecutive
     # tokens, new path then old path, not one token with an arrow in it.
-    tokens = result.stdout.split("\0")
-    paths = []
+    tokens = stdout.split("\0")
+    paths: list[str] = []
     index = 0
     while index < len(tokens):
         token = tokens[index]
-        if not token:
+        if not token or token.startswith("## "):
             index += 1
             continue
         status, path = token[:2], token[3:]
         paths.append(path)
         index += 2 if ("R" in status or "C" in status) else 1
     return paths
+
+
+def _hook_collect_changed_paths(repo_root: Path, diff_range: "_DiffRange | None" = None) -> list[str] | None:
+    """Collect Stop paths from a committed range plus the working tree.
+
+    When ``diff_range`` is omitted, branch metadata was not available and only
+    the current working-tree status can be collected. Stop supplies the
+    selected range whenever Git can resolve one, so committed changes and
+    untracked files are both visible.
+    """
+    if diff_range is not None:
+        result = _hook_run_git(repo_root, "diff", "--name-only", "--no-renames", "-z", *diff_range.git_diff_args())
+        if result is None or result.returncode != 0:
+            return None
+        paths = [path for path in result.stdout.split("\0") if path]
+        untracked = _hook_untracked_paths(repo_root)
+        if untracked is None:
+            return None
+        return list(dict.fromkeys([*paths, *untracked]))
+
+    result = _hook_run_git(repo_root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if result is None or result.returncode != 0:
+        return None
+    return _hook_status_paths(result.stdout)
 
 
 # Claude Code's own wrapper around a hook's blocking stderr, written as the
@@ -1106,6 +1221,7 @@ class _DiffRange(NamedTuple):
 
     base: str = "HEAD"
     head: str | None = None
+    description: str | None = None
 
     def git_diff_args(self) -> list[str]:
         """Return the revision arguments `git diff` takes for this range."""
@@ -1774,7 +1890,10 @@ def _hook_collect_judge_verdicts(
     # (and, verified against a real call, does) still say "pass".
     diff = _hook_collect_diff(change.repo_root, change.diff_range)
     diff_collection_failed = diff is None
-    diff = diff or ""
+    if diff is None:
+        diff = ""
+    elif change.diff_range.description is not None:
+        diff = f"Diff base: {change.diff_range.description}\n\n{diff}"
     extract_transcript = (
         _hook_extract_codex_judge_transcript if settings.harness == "codex" else _hook_extract_judge_transcript
     )
@@ -1827,6 +1946,8 @@ def _hook_collect_judge_verdicts(
                 dry_run=settings.dry_run,
                 usage=usage,
             )
+        if change.diff_range.description is not None and outcome != "not_run":
+            reasoning = f"Diff base: {change.diff_range.description}\n{reasoning}"[:_HOOK_MAX_JUDGE_REASONING_LENGTH]
         if runs is not None:
             runs[gate.id] = _GateRun(started_ns, time.time_ns(), _usage_by_model(usage))
         _hook_log_judge_call(change.repo_root, gate.id, outcome, detail=reasoning if settings.dry_run else None)
@@ -2547,7 +2668,8 @@ def hook(
         else:
             return  # A tool this harness integration does not check yet.
     elif event == "Stop":
-        collected = _hook_collect_changed_paths(root)
+        stop_diff_range = _hook_collect_stop_diff_range(root)
+        collected = _hook_collect_changed_paths(root, stop_diff_range)
         if collected is None:
             _hook_not_enforcing("could not read Git state; no gate is being enforced.")
             return
@@ -2590,7 +2712,12 @@ def hook(
         evidence_ns = time.time_ns()
         judge_results = _hook_collect_judge_verdicts(
             spec,
-            _JudgedChange(repo_root=root, changed_paths=paths, transcript_path=transcript_path),
+            _JudgedChange(
+                repo_root=root,
+                changed_paths=paths,
+                diff_range=stop_diff_range or _DiffRange(),
+                transcript_path=transcript_path,
+            ),
             _JudgeSettings(
                 model=judge_model,
                 dry_run=judge_dry_run,
@@ -4033,7 +4160,7 @@ def guardrails_validate(
             _DryRunMoment(
                 heading=(
                     f"Stop, the finished turn: {len(dry_run_targets)} changed path(s), "
-                    f"{len(dry_run_commands)} command(s)"
+                    f"{len(dry_run_commands)} command(s); judge diff base: {_HOOK_STOP_DIFF_BASE_DESCRIPTION}"
                 ),
                 paths=[working_tree for _edit_target, working_tree in dry_run_targets],
                 path_source="stop.working_tree",
