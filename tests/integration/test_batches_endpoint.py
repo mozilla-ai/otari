@@ -17,9 +17,10 @@ from openai.types.batch import Batch
 from openai.types.batch_request_counts import BatchRequestCounts
 
 from gateway.api.routes._pipeline import PROVIDER_CREDENTIALS_DETAIL
-from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
 
+from .conftest import build_test_client
 from .test_rate_limiting import _make_rate_limit_client
 
 
@@ -1192,6 +1193,86 @@ def test_recorded_batch_results_defers_accounting_until_pricing_exists(
     assert results_logs[0]["cost"] == pytest.approx(expected_cost)
     user_resp = client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header)
     assert user_resp.json()["spend"] == pytest.approx(expected_cost)
+
+
+def _served_model_patches(served_model: str, tokens: CompletionUsage) -> tuple[Any, Any]:
+    """Patches for a completed batch whose result line names ``served_model``."""
+    mock_completion = MagicMock()
+    mock_completion.model = served_model
+    mock_completion.usage = tokens
+    mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
+    mock_result = BatchResult(results=[BatchResultItem(custom_id="req-1", result=mock_completion, error=None)])
+    return (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="completed"),
+        ),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    )
+
+
+def test_recorded_batch_is_priced_at_the_requested_model_not_the_served_one(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A result line names the checkpoint the upstream served, not the model asked for."""
+    pricing_resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": "openai:gpt-4o-mini", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    retrieve_patch, results_patch = _served_model_patches(
+        "gpt-4o-mini-2024-07-18", CompletionUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+    )
+    with retrieve_patch, results_patch:
+        resp = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+    assert resp.status_code == 200
+
+    usage_resp = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 1
+    assert results_logs[0]["cost"] == pytest.approx(100 / 1_000_000 * 1.0 + 50 / 1_000_000 * 2.0)
+
+
+def test_recorded_batch_on_a_named_instance_is_priced_under_the_instance(postgres_url: str) -> None:
+    """``otium:otium-echo`` is priced under ``otium``, not under ``openai:<served model>``."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        model_discovery=False,
+        providers={"otium": {"provider_type": "openai", "api_base": "http://otium.test/v1", "api_key": "k"}},
+    )
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    for client in build_test_client(config):
+        assert client.post(f"{API_ROOT}/users", json={"user_id": "otium-user"}, headers=headers).status_code == 200
+        for model_key, price in (("otium:otium-echo", 0.0), ("openai:echo", 5.0)):
+            resp = client.post(
+                f"{API_ROOT}/pricing",
+                json={"model_key": model_key, "input_price_per_million": price, "output_price_per_million": price},
+                headers=headers,
+            )
+            assert resp.status_code == 200
+        batch_id = _create_recorded_batch(client, headers, model="otium:otium-echo", user="otium-user")
+
+        retrieve_patch, results_patch = _served_model_patches(
+            "echo", CompletionUsage(prompt_tokens=57, completion_tokens=19, total_tokens=76)
+        )
+        with retrieve_patch, results_patch:
+            resp = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=otium", headers=headers)
+        assert resp.status_code == 200
+
+        usage_resp = client.get(f"{API_ROOT}/users/otium-user/usage", headers=headers)
+        results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+        assert len(results_logs) == 1
+        assert results_logs[0]["cost"] == 0
 
 
 def test_unrecorded_batch_results_logs_every_retrieval(
