@@ -681,7 +681,7 @@ export function HostedProvidersPage() {
         <section
           key={expanded.name}
           aria-label={`Models on ${expanded.name}`}
-          className="mt-4 rounded-lg border border-border bg-surface"
+          className="mt-4 rounded-lg border border-border bg-surface [--table-fill:var(--color-surface)]"
         >
           <HostedProviderModelsPanel provider={expanded} />
         </section>
