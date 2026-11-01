@@ -1203,6 +1203,16 @@ more are added that a parser does not see:
 A **warning** is a gate that parses, runs, and may not mean what its author
 intended. Each kind has a stable code, which `validate` prints beside it:
 
+- `glob-matches-no-file`: a `when_changed` glob that matches no file Git tracks and no untracked file
+  the ignore rules keep. A `when_changed` glob names paths expected to exist and change, so this is
+  what a typo in a path looks like. A glob naming a file that does not exist yet, such as build
+  output, is the legitimate case, and the gate names this code in its `accept_warnings`.
+  A `forbidden` glob is not checked: it names a path that should not exist, and the gate still
+  refuses an edit that would create the file, so matching nothing is the state you want.
+  A `**` glob and its shallower twin in the same list, such as `.env` beside `**/.env`, count as one
+  unit: a file either one reaches covers both. Only gates from this repo's own files are checked,
+  because a gate in `~/.otari/` is written for every repo; `--guardrail-file` checks its gates too.
+  Skipped when Git cannot list the files.
 - `glob-misses-shallower-depth`: a `**` glob whose shallower depth nothing else in the same field covers.
   `**` must consume at least one path segment, so `**/CLAUDE.md` reaches
   `web/CLAUDE.md` and never the root file, and `src/**/conftest.py` never
