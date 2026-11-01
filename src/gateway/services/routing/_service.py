@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
-from gateway.core.unit_of_work import UnitOfWork
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.catalog import catalog_models, offering_input_rate
 from gateway.services.tools import provider_tools
@@ -78,10 +77,9 @@ def _served_selectors(row: ServedTraffic) -> tuple[str, ...]:
 class RoutingService:
     """What routing gives an organization's callers."""
 
-    def __init__(self, config: GatewayConfig, usage: UsageService, uow: UnitOfWork, keys: ApiKeyService) -> None:
+    def __init__(self, config: GatewayConfig, usage: UsageService, keys: ApiKeyService) -> None:
         self._config = config
         self._usage = usage
-        self._uow = uow
         self._keys = keys
 
     async def automatic_fallbacks(
@@ -119,8 +117,7 @@ class RoutingService:
                 tally.pinned_keys[(row.api_key_id, provider)] += row.requests
 
         key_ids = {key_id for tally in tallies.values() for key_id, _provider in tally.pinned_keys if key_id}
-        async with self._uow:
-            key_names = await self._keys.key_names(key_ids)
+        key_names = await self._keys.key_names(key_ids)
 
         tools: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
 
