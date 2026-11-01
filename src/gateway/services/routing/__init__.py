@@ -38,6 +38,7 @@ from gateway.services.routing._agent_recommenders import (
     reset_agent_recommenders,
     run_agent_recommender_refresher,
 )
+from gateway.services.routing._automatic import AutomaticObservation, AutomaticRouter, preferred_region
 from gateway.services.routing._service import FALLBACK_WINDOW, AutomaticFallback, FallbackOffering, RoutingService
 from gateway.services.routing.backends import (
     KNN_BACKEND,
@@ -78,6 +79,9 @@ from gateway.services.routing.recommend import (
 from gateway.types.budget_state import BudgetState
 
 __all__ = [
+    "AutomaticObservation",
+    "AutomaticRouter",
+    "preferred_region",
     "FALLBACK_WINDOW",
     "HOLD_INPUT_TOKENS",
     "HOLD_OUTPUT_TOKENS",

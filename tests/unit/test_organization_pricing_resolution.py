@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TypeVar, cast
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -1421,3 +1422,45 @@ def test_a_provider_the_port_does_not_serve_is_asked_once_for_all_its_models() -
     assert supplied == {"openai:gpt-4o"}
     assert [ask for ask in port.asked if ask[0] == "nebius"] == [("nebius", None)]
     assert ("openai", "gpt-off") in port.asked
+
+
+def test_batched_request_prices_match_single_lookup_and_keep_payer_isolation() -> None:
+    """Batch pricing preserves lookup precedence and payer isolation with two reusable queries."""
+    from gateway.repositories.pricing import OrganizationModelPricingRepository
+    from gateway.services.pricing_service import RequestPrices, resolve_model_pricing
+
+    async def scenario(session: AsyncSession) -> None:
+        """Compare batched and individual pricing across overrides, tenants and deployment payment."""
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        await _override(session, organization_id, rate=0, origin=API_ORIGIN)
+        await _override(session, organization_id, model_key="openai/legacy", rate=3)
+        await _override(session, organization_id, model_key="openai/dual", rate=5)
+        await _override(session, organization_id, model_key="openai:dual", rate=7)
+        other_id = await _organization(session, "other")
+        await _override(session, other_id, model_key="openai:missing", rate=1)
+        candidates = [("openai", name) for name in ("gpt-4o", "legacy", "dual", "missing")]
+        prices = RequestPrices(organization_id, OrganizationModelPricingRepository(session))
+        with patch.object(session, "execute", wraps=session.execute) as execute:
+            await prices.prime(candidates)
+            assert execute.await_count == 2
+            await prices.prime(candidates)
+            for provider, model in candidates:
+                await prices.resolve(session, provider, model)
+            assert execute.await_count == 2
+        for provider, model in candidates:
+            batched = await prices.resolve(session, provider, model)
+            single = await resolve_model_pricing(session, provider, model, organization_id=organization_id)
+            assert (batched is None) == (single is None)
+            if single is not None and batched is not None:
+                assert (batched.source, batched.reference, batched.pricing.input_price_per_million) == (
+                    single.source,
+                    single.reference,
+                    single.pricing.input_price_per_million,
+                )
+        paid = await prices.resolve(session, "openai", "gpt-4o", deployment_paid=True)
+        assert paid is not None
+        assert paid.source == "deployment"
+        assert paid.pricing.input_price_per_million == _DEPLOYMENT_INPUT_RATE
+
+    _run(scenario)

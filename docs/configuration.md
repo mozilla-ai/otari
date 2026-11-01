@@ -100,6 +100,7 @@ the corresponding startup value after the database is available.
 | `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
+| `automatic_routing` | Request-aware ordering of providers for unpinned catalog IDs. Enabled by default. See [Automatic routing](#automatic-routing). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
 | `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
@@ -457,6 +458,46 @@ providers:
 
 Call it as `home_lab:qwen3-32b`. The optional `models` list supplies discovery
 for backends without a model-listing endpoint. See [Models](models.md).
+
+### Automatic routing
+
+```yaml
+automatic_routing:
+  enabled: true
+  session_ttl_seconds: 3600
+  # Set only behind an edge that overwrites this header and blocks direct access.
+  country_header: CF-IPCountry
+  offerings:
+    nebius-us: {region: us, capacity: 10}
+    nebius-eu: {region: eu, capacity: 10}
+    # An exact instance:model entry overrides the instance-wide hint.
+    "bedrock:eu.anthropic.claude-sonnet-4-6": {region: eu, capacity: 5}
+```
+
+Offering keys name configured provider instances or exact `instance:model`
+selectors. Declare a region only when that endpoint actually serves it; Otari
+never guesses a provider's location from its brand. `region` accepts `us` or
+`eu`; omitted means unknown. `capacity` is a positive relative concurrency
+weight, default 1, not a limit. Use rate-limit rules for enforced limits, including
+`max_concurrent`. A sticky session falls back when those limits refuse its provider.
+
+Send `Otari-Conversation-Id` to reuse the provider and credential that served the
+conversation. `session_ttl_seconds` sets the inactivity expiry (1–86400 seconds,
+default 3600), refreshed by successful responses. Requests without a conversation
+ID are ranked independently.
+
+Both `country_header` and `default_region` are unset by default. With a trusted
+country header, US visitors prefer US endpoints and visitors in EU member
+countries prefer EU endpoints. Server-to-server traffic reflects the location of
+the calling server; applications that know the end user's preference can send
+`Otari-Region: us` or `eu`, which takes precedence. Other locations use
+`default_region` if set, otherwise there is no region preference. These settings
+allow cross-region fallback and do not enforce data residency.
+
+This is startup configuration, also accepted as JSON in
+`OTARI_AUTOMATIC_ROUTING`. Set `enabled: false` to use the baseline catalog order.
+The [model guide](models.md#automatic-provider-selection) explains cost, load,
+latency, sticky sessions and the limits of local feedback.
 
 ### Provider retries
 

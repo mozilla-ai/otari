@@ -69,7 +69,8 @@ def test_mcp_constraint_resolves_to_an_importable_version(tmp_path: Path) -> Non
     # python3-venv without python3-pip). Skipping it keeps this failing only on
     # what it's actually checking, not on an unrelated ensurepip gap.
     venv_dir = tmp_path / "venv"
-    venv.create(venv_dir, with_pip=False)
+    # A copied macOS interpreter can lose its relative libpython lookup.
+    venv.create(venv_dir, with_pip=False, symlinks=sys.platform != "win32")
     venv_python = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
     # 60s here plus 30s on the import check below keeps both subprocesses inside

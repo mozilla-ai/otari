@@ -31,7 +31,7 @@ class FallbackOffering:
 
 @dataclass(frozen=True)
 class AutomaticFallback:
-    """One model callers used in the window, its offerings in the order a catalog ID tries them, and its traffic."""
+    """One model callers used in the window, its offerings in baseline order, and its traffic."""
 
     id: str
     name: str
@@ -69,14 +69,14 @@ class RoutingService:
     ) -> list[AutomaticFallback]:
         """Every model these workspaces sent requests to in the window, most requested first.
 
-        A request that sent the model's catalog ID tried its offerings in the
-        catalog's order for this organization (``resolve_catalog_offerings``),
-        moving to the next when one failed; one that named an offering itself
+        The catalog order is a baseline; automatic selection can reorder it
+        per request. A catalog request moves to the next offering when one fails;
+        one that named an offering itself
         (``bedrock:…``) or a routing policy is counted as pinned. A row is
         matched to a model by the catalog ID it sent, else by the offering it
         reached, so traffic on an offering the catalog no longer serves is left
         out. The order is the catalog's, before a key's allow-list or a missing
-        credential drops an offering from a request's plan.
+        credential drops an offering, or automatic selection reorders it.
         """
         traffic = await self._usage.served_traffic(
             workspace_ids=workspace_ids, since=datetime.now(UTC) - FALLBACK_WINDOW
