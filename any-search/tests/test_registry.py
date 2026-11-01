@@ -9,7 +9,7 @@ from any_search.providers.fake import FakeProvider
 
 
 def test_supported_providers() -> None:
-    assert AnySearch.get_supported_providers() == ["deepseek", "exa", "fake", "mojeek"]
+    assert AnySearch.get_supported_providers() == ["deepseek", "exa", "fake", "mojeek", "serply"]
 
 
 def test_provider_class_and_metadata() -> None:
@@ -19,7 +19,7 @@ def test_provider_class_and_metadata() -> None:
 
 @pytest.mark.parametrize("lookup", ["create", "get_provider_class", "get_provider_metadata"])
 def test_an_unknown_provider_is_refused_with_the_supported_ones(lookup: str) -> None:
-    with pytest.raises(UnsupportedProviderError, match="supported: deepseek, exa, fake, mojeek"):
+    with pytest.raises(UnsupportedProviderError, match="supported: deepseek, exa, fake, mojeek, serply"):
         getattr(AnySearch, lookup)("nope")
 
 

@@ -1,0 +1,27 @@
+{
+  "status": 200,
+  "body": {
+    "results": [],
+    "ads": [],
+    "ads_count": 0,
+    "answers": [],
+    "image_results": [],
+    "shopping_ads": [],
+    "places": [],
+    "local_businesses": [],
+    "related_searches": {
+      "images": [],
+      "text": []
+    },
+    "carousel": [],
+    "company": {},
+    "total": null,
+    "knowledge_graph": "",
+    "related_questions": [],
+    "carousel_count": 0,
+    "ts": 0.5803725719451904,
+    "device_region": "",
+    "device_type": "mobile",
+    "query": "q=site:nonexistent-domain-zz9q.invalid+zzqqxx&num=3"
+  }
+}

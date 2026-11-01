@@ -44,6 +44,7 @@ jobs:
       # step, and the key is exposed to the steps that need it only.
       HAS_EXA_KEY: ${{ secrets.EXA_API_KEY != '' }}
       HAS_MOJEEK_KEY: ${{ secrets.MOJEEK_API_KEY != '' }}
+      HAS_SERPLY_KEY: ${{ secrets.SERPLY_API_KEY != '' }}
       HAS_TABSTACK_KEY: ${{ secrets.TABSTACK_API_KEY != '' }}
       HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
 
@@ -66,6 +67,16 @@ jobs:
       if: env.HAS_MOJEEK_KEY != 'true' && github.event_name != 'pull_request'
       run: |
         echo "::error::The MOJEEK_API_KEY secret is not set, so the Mojeek live tests cannot run."
+        exit 1
+
+    - name: Say so when the Serply key is absent
+      if: env.HAS_SERPLY_KEY != 'true' && github.event_name == 'pull_request'
+      run: echo "::notice::The SERPLY_API_KEY secret is not available to this run; the Serply live tests skip."
+
+    - name: Fail a scheduled or manual run without the Serply key
+      if: env.HAS_SERPLY_KEY != 'true' && github.event_name != 'pull_request'
+      run: |
+        echo "::error::The SERPLY_API_KEY secret is not set, so the Serply live tests cannot run."
         exit 1
 
     - name: Say so when the Tabstack key is absent
@@ -107,6 +118,7 @@ jobs:
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         MOJEEK_API_KEY: ${{ secrets.MOJEEK_API_KEY }}
         DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        SERPLY_API_KEY: ${{ secrets.SERPLY_API_KEY }}
       run: uv run pytest -v -rs any-search/tests/test_live.py
 
     - name: Live fetches

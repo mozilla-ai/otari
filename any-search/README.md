@@ -205,6 +205,38 @@ request (`timestamp` with `date=1`), so neither is required: the date is read fr
 is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
 behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
 
+## Serply
+
+`serply` calls Serply's [Google Search API](https://serply.io/docs/resources/google-search),
+`GET /v1/search`, with the key read from `SERPLY_API_KEY` when not passed. The key travels in the
+`X-Api-Key` header; the query travels in the URL, which the log filter above keeps out of httpx's
+log. Each request names the library in its `User-Agent`.
+
+| `SearchHit` | From Serply |
+|---|---|
+| `url`, `title` | `link`, `title` |
+| `snippet` | `description`; Serply returns no page text, so `text` is always `None` |
+| `published` | always `None`: Serply's results carry no date |
+
+Serply reports no cost. `max_results` becomes `num`, at most 10, one page of Google's results;
+a page can hold one more than asked for, so the hits are cut to the count as well. `time_range`
+becomes Google's `tbs` window, `qdr:d`, `qdr:w`, `qdr:m` or `qdr:y`, and wins over the `tbs`
+option. The other native options are `gl`, `start`, `tbs` and `tbm` (`nws` for Google News),
+sent as query parameters, and `X-Proxy-Location` and `X-User-Agent`, sent as headers under those
+names; `--describe serply` lists them. An option set to `None` is not sent.
+
+Serply signals every failure with an HTTP status and a `detail` sentence in the body. Any status
+from 400 raises `ProviderError`, tagged `invalid_api_key` or `missing_api_key` from how the detail
+starts, else `http_error`; the detail itself never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `link`, `title` or `description`, or with any of these of the wrong type, raises
+`ProviderError` with the tag `unexpected_response`. A `link` that is not an http or https URL,
+such as an opaque Google redirect token, which Serply sometimes returns in its place, is dropped
+rather than failing the search, and the count is filled from the items after it. Ads, the
+knowledge graph and Serply's other SERP features come in fields of their own, which the adapter
+does not read, so a field Serply adds breaks nothing.
+
 ## The fake provider
 
 `fake` is a provider like any other, in the `test` tier. It answers from canned data and takes its
