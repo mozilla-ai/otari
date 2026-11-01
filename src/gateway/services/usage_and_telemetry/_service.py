@@ -16,6 +16,6 @@ class UsageService:
         self._usage_logs = usage_logs
 
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
-        """The requests served here since ``since`` in these workspaces, by name sent and offering reached."""
+        """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key."""
         async with self._uow:
             return await self._usage_logs.served_traffic(workspace_ids=workspace_ids, since=since)

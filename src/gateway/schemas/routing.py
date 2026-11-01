@@ -115,6 +115,10 @@ class FallbackOfferingPublic(BaseModel):
     selector: str = Field(description="The offering, in `instance:model` form.")
     provider: str = Field(description="The provider instance the selector names.")
     provider_type: str = Field(description="The any-llm implementation behind the instance.")
+    input_price: float | None = Field(
+        description="USD per million input tokens at the organization's rates, the price the order ranks by. "
+        "Null where the offering is unpriced."
+    )
     own_tools: list[str] = Field(
         description=(
             "Built-in tools this provider runs itself, for a caller that declares them in the provider's own words "
@@ -122,6 +126,19 @@ class FallbackOfferingPublic(BaseModel):
         )
     )
     otari_tools: list[str] = Field(description="Built-in tools Otari runs in this provider's place, for that caller.")
+
+
+class PinnedTrafficPublic(BaseModel):
+    """The requests one API key sent to one provider by naming it, and so with no automatic fallback."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    api_key_id: str | None = Field(
+        description="The key, or null for requests made without one or whose key was deleted."
+    )
+    key_name: str | None = Field(description="The key's name, or null where it has none.")
+    provider: str = Field(description="The provider instance the requests reached.")
+    requests: int
 
 
 class AutomaticFallbackPublic(BaseModel):
@@ -141,6 +158,7 @@ class AutomaticFallbackPublic(BaseModel):
         "and so got no automatic fallback."
     )
     pinned_provider: str | None = Field(description="The instance most pinned requests reached.")
+    pinned_keys: list[PinnedTrafficPublic] = Field(description="`pinned` by API key and provider, most first.")
 
 
 class AutomaticFallbacksResponse(BaseModel):

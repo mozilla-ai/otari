@@ -37,8 +37,8 @@ class ApiKeyService:
     """Answer questions about API keys and their workspaces, and manage their federation rules and access lists.
 
     The lookups run in the caller's Unit of Work block and raise ``OutsideUnitOfWorkError`` outside one; the
-    federation-rule and access-list methods are business steps of their own. A key's owner's lists come from
-    ``users``.
+    federation-rule and access-list methods and ``key_names`` are business steps of their own. A key's owner's
+    lists come from ``users``.
     """
 
     def __init__(self, uow: UnitOfWork, repositories: ApiKeyRepositories, *, users: UserAccess) -> None:
@@ -54,6 +54,11 @@ class ApiKeyService:
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""
         return await self._keys.get_key_ids_in_workspaces(workspace_ids)
+
+    async def key_names(self, key_ids: Collection[str]) -> dict[str, str | None]:
+        """Each of these keys that still exists, to its name, read in a block of its own."""
+        async with self._uow:
+            return await self._keys.names_by_id(key_ids)
 
     async def keys_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name the keys that start a new end user on this budget when a request names none."""
