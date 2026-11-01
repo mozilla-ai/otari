@@ -393,23 +393,20 @@ A request that names a catalog id with more than one offering falls back across 
 
 The Routing page's "Automatic fallback" section, read from
 `GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
-organization sent requests to in the last 30 days, most requested first, with
-its offerings in the order a request sent by catalog id tries them for your
-organization. Beside each it counts the requests (an absorbed attempt is not one), the
-successful ones a later offering served, and the ones that named one offering
-or a policy rather than the catalog id and so had no automatic fallback. A model
-most of whose requests named one provider shows that provider alone, marked "No
-backup · pinned", because those requests get no fallback until they send the
-catalog id. Under each provider it says who runs the built-in tools: "Own
-tools" where the provider runs at least one itself, "Otari's tools" where Otari
-runs them all; the response's `own_tools` and `otari_tools` name which tool is
-whose. That assumes a caller who declares
-the tools in the provider's own words and sends no `Otari-*` executor header,
-so the deployment's code execution executor and web search interception decide;
-a workspace's code execution pin is not reflected. The order is the catalog's,
-before a key's allow-list or a missing credential leaves an offering out of a
-request's plan. An owner or admin reads every workspace in the organization,
-anyone else the workspaces they belong to.
+organization sent requests to in the last 30 days, most requested first, by
+catalog id. Each row shows its requests (an absorbed attempt is not one), the
+share of them that sent the catalog id and so could fall back, and its providers
+in the order such a request tries them for your organization, each at the input
+price that order ranks by. The share is a dash for a model one provider serves,
+and is flagged below half. A row with requests that named a provider opens on
+the API keys that sent them, with the provider each reached. The order is the
+catalog's, before a key's allow-list or a missing credential leaves an offering
+out of a request's plan. Requests from before a deployment recorded the catalog
+id they sent count as having named a provider. An owner or admin reads every
+workspace in the organization, anyone else the workspaces they belong to. The
+response also says who runs the built-in tools on each offering (`own_tools`,
+`otari_tools`), for a caller that declares them in the provider's own words and
+sends no `Otari-*` executor header.
 
 The dashboard's Models page is this catalog: one card per model, with a rail
 of filters beside it, and a page per model with its facts and every offering

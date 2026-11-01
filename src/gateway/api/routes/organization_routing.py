@@ -454,9 +454,10 @@ async def list_automatic_fallbacks(
 
     A request that sends a model's catalog ID moves to the model's next offering
     when one fails, with no policy. Each model lists its offerings in the order
-    such a request tries them, priced for this organization, with who runs the
-    built-in tools on each, beside its traffic: how many requests a backup served,
-    and how many named one offering and so had no fallback. The traffic is the
+    such a request tries them, each with its input price for this organization and
+    who runs the built-in tools on it, beside its traffic: how many requests a
+    backup served, and how many named one offering and so had no fallback, by API
+    key and provider. The traffic is the
     workspaces the caller may see in their active organization, by the rule the
     organization's usage reads use.
     """

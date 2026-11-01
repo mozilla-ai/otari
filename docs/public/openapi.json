@@ -2209,6 +2209,14 @@
             "title": "Pinned",
             "type": "integer"
           },
+          "pinned_keys": {
+            "description": "`pinned` by API key and provider, most first.",
+            "items": {
+              "$ref": "#/components/schemas/PinnedTrafficPublic"
+            },
+            "title": "Pinned Keys",
+            "type": "array"
+          },
           "pinned_provider": {
             "anyOf": [
               {
@@ -2234,7 +2242,8 @@
           "requests",
           "fell_back",
           "pinned",
-          "pinned_provider"
+          "pinned_provider",
+          "pinned_keys"
         ],
         "title": "AutomaticFallbackPublic",
         "type": "object"
@@ -8060,6 +8069,18 @@
       "FallbackOfferingPublic": {
         "description": "One offering a catalog ID tries, and who runs the built-in tools on it.",
         "properties": {
+          "input_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD per million input tokens at the organization's rates, the price the order ranks by. Null where the offering is unpriced.",
+            "title": "Input Price"
+          },
           "otari_tools": {
             "description": "Built-in tools Otari runs in this provider's place, for that caller.",
             "items": {
@@ -8096,6 +8117,7 @@
           "selector",
           "provider",
           "provider_type",
+          "input_price",
           "own_tools",
           "otari_tools"
         ],
@@ -16119,6 +16141,52 @@
           "count"
         ],
         "title": "PendingOrganizationInvitationsPublic",
+        "type": "object"
+      },
+      "PinnedTrafficPublic": {
+        "description": "The requests one API key sent to one provider by naming it, and so with no automatic fallback.",
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key, or null for requests made without one or whose key was deleted.",
+            "title": "Api Key Id"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's name, or null where it has none.",
+            "title": "Key Name"
+          },
+          "provider": {
+            "description": "The provider instance the requests reached.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_key_id",
+          "key_name",
+          "provider",
+          "requests"
+        ],
+        "title": "PinnedTrafficPublic",
         "type": "object"
       },
       "PlatformBreakGlassCreate": {
@@ -35081,7 +35149,7 @@
     },
     "/api/v1/organizations/me/automatic-fallbacks": {
       "get": {
-        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them, priced for this organization, with who runs the\nbuilt-in tools on each, beside its traffic: how many requests a backup served,\nand how many named one offering and so had no fallback. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
+        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them, each with its input price for this organization and\nwho runs the built-in tools on it, beside its traffic: how many requests a\nbackup served, and how many named one offering and so had no fallback, by API\nkey and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
         "operationId": "routing-list_automatic_fallbacks",
         "responses": {
           "200": {

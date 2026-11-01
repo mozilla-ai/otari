@@ -38,7 +38,13 @@ from gateway.services.routing._agent_recommenders import (
     reset_agent_recommenders,
     run_agent_recommender_refresher,
 )
-from gateway.services.routing._service import FALLBACK_WINDOW, AutomaticFallback, FallbackOffering, RoutingService
+from gateway.services.routing._service import (
+    FALLBACK_WINDOW,
+    AutomaticFallback,
+    FallbackOffering,
+    PinnedTraffic,
+    RoutingService,
+)
 from gateway.services.routing.backends import (
     KNN_BACKEND,
     NOOP_BACKEND,
@@ -96,6 +102,7 @@ __all__ = [
     "FallbackOffering",
     "KnnRoutingMemory",
     "NoEligibleCandidatesError",
+    "PinnedTraffic",
     "RecommenderPrice",
     "RouterBackend",
     "RouterOrdering",

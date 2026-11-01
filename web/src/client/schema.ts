@@ -2717,9 +2717,10 @@ export interface paths {
          *
          *     A request that sends a model's catalog ID moves to the model's next offering
          *     when one fails, with no policy. Each model lists its offerings in the order
-         *     such a request tries them, priced for this organization, with who runs the
-         *     built-in tools on each, beside its traffic: how many requests a backup served,
-         *     and how many named one offering and so had no fallback. The traffic is the
+         *     such a request tries them, each with its input price for this organization and
+         *     who runs the built-in tools on it, beside its traffic: how many requests a
+         *     backup served, and how many named one offering and so had no fallback, by API
+         *     key and provider. The traffic is the
          *     workspaces the caller may see in their active organization, by the rule the
          *     organization's usage reads use.
          */
@@ -8458,6 +8459,11 @@ export interface components {
              */
             pinned: number;
             /**
+             * Pinned Keys
+             * @description `pinned` by API key and provider, most first.
+             */
+            pinned_keys: components["schemas"]["PinnedTrafficPublic"][];
+            /**
              * Pinned Provider
              * @description The instance most pinned requests reached.
              */
@@ -11158,6 +11164,11 @@ export interface components {
          * @description One offering a catalog ID tries, and who runs the built-in tools on it.
          */
         FallbackOfferingPublic: {
+            /**
+             * Input Price
+             * @description USD per million input tokens at the organization's rates, the price the order ranks by. Null where the offering is unpriced.
+             */
+            input_price: number | null;
             /**
              * Otari Tools
              * @description Built-in tools Otari runs in this provider's place, for that caller.
@@ -15095,6 +15106,29 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["PendingOrganizationInvitationPublic"][];
+        };
+        /**
+         * PinnedTrafficPublic
+         * @description The requests one API key sent to one provider by naming it, and so with no automatic fallback.
+         */
+        PinnedTrafficPublic: {
+            /**
+             * Api Key Id
+             * @description The key, or null for requests made without one or whose key was deleted.
+             */
+            api_key_id: string | null;
+            /**
+             * Key Name
+             * @description The key's name, or null where it has none.
+             */
+            key_name: string | null;
+            /**
+             * Provider
+             * @description The provider instance the requests reached.
+             */
+            provider: string;
+            /** Requests */
+            requests: number;
         };
         /**
          * PlatformBreakGlassCreate
