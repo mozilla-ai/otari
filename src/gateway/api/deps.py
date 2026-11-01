@@ -2128,8 +2128,13 @@ async def get_platform_break_glass(
 
 
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
-    """Build the routing service, and the usage service it reads traffic through, on the request's Unit of Work."""
-    return RoutingService(config, UsageService(uow, UsageLogRepository(uow)))
+    """Build the routing service, and the usage and key services it reads through, on the request's Unit of Work."""
+    return RoutingService(
+        config,
+        UsageService(uow, UsageLogRepository(uow)),
+        uow,
+        ApiKeyService(uow, ApiKeyRepositories.on(uow), users=get_user_access(uow)),
+    )
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]

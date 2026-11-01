@@ -60,6 +60,13 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
             values["operator_disabled"] = True
         await self.db.execute(statement.values(**values))
 
+    async def names_by_id(self, key_ids: Collection[str]) -> dict[str, str | None]:
+        """Each of these keys that still exists, to its name."""
+        if not key_ids:
+            return {}
+        result = await self.db.execute(select(APIKey.id, APIKey.key_name).where(APIKey.id.in_(sorted(key_ids))))
+        return {key_id: name for key_id, name in result.all()}
+
     async def names_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name each key that starts its end users on ``budget_id`` by default, by its name or else its id."""
         result = await self.db.execute(

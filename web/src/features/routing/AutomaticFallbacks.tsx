@@ -1,32 +1,16 @@
-import { Link } from "@tanstack/react-router"
-import { Fragment } from "react"
-import { FiAlertTriangle, FiArrowRight } from "react-icons/fi"
+import { Fragment, useCallback, useMemo, useState } from "react"
+import { FiArrowRight, FiChevronDown, FiChevronRight } from "react-icons/fi"
 
 import type { AutomaticFallback, FallbackOffering } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
+import { RowAction } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { docsSourceHref } from "@/shared/helpers/docs"
-import { formatNumber } from "@/shared/helpers/format"
+import { formatNumber, formatRate } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
-
-function Warning({ children }: { children: string }) {
-  return (
-    <span className="flex items-center gap-1 text-sm text-warning">
-      <FiAlertTriangle aria-hidden className="size-3 shrink-0" />
-      {children}
-    </span>
-  )
-}
-
-/** Who runs the built-in tools on one offering, or nothing where nobody does. */
-function toolsCaption(offering: FallbackOffering): string | undefined {
-  if (offering.own_tools.length > 0) return "Own tools"
-  if (offering.otari_tools.length > 0) return "Otari's tools"
-  return undefined
-}
 
 /** Shorter than the shared display names, for a chain read across a row. */
 const SHORT_NAMES: Record<string, string> = { bedrock: "Bedrock" }
@@ -48,149 +32,166 @@ function byProvider(offerings: FallbackOffering[]): FallbackOffering[] {
   )
 }
 
-/** The providers a catalog ID tries, each with who runs its tools. */
-function Chain({ offerings }: { offerings: FallbackOffering[] }) {
+/** The share of requests that sent the catalog ID, rounded down so 100% means all of them. */
+function fallbackShare(row: AutomaticFallback): number {
+  if (row.requests === 0) return 0
+  return Math.floor(((row.requests - row.pinned) * 100) / row.requests)
+}
+
+function Order({ offerings }: { offerings: FallbackOffering[] }) {
   return (
-    <span className="flex flex-wrap items-start gap-x-2 gap-y-1">
-      {byProvider(offerings).map((offering, index) => {
-        const caption = toolsCaption(offering)
-        return (
-          <Fragment key={offering.selector}>
-            {index > 0 ? (
-              <FiArrowRight
-                aria-label="then"
-                className="mt-1 size-3 shrink-0 text-subtle"
-              />
-            ) : null}
-            <span className="flex flex-col">
-              <span
-                className={`text-sm ${index === 0 ? "text-foreground" : "text-muted"}`}
-              >
-                {providerName(offering.provider)}
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      {byProvider(offerings).map((offering, index) => (
+        <Fragment key={offering.selector}>
+          {index > 0 ? (
+            <FiArrowRight
+              aria-label="then"
+              className="size-3 shrink-0 text-subtle"
+            />
+          ) : null}
+          <span className="text-foreground">
+            {providerName(offering.provider)}
+            {offering.input_price == null ? null : (
+              <span className="text-muted">
+                {" "}
+                {formatRate(offering.input_price)}
               </span>
-              {caption ? (
-                <span className="text-caption text-subtle">{caption}</span>
-              ) : null}
-            </span>
-          </Fragment>
-        )
-      })}
+            )}
+          </span>
+        </Fragment>
+      ))}
     </span>
   )
 }
 
-/**
- * The order cell: the chain, or the one provider a model's traffic reaches and
- * a warning that it has no backup. Traffic that names one provider has none
- * even where the catalog offers more, marked "pinned" because the caller can
- * fix it by sending the catalog ID. A model counts as pinned once most of its
- * requests are, so a handful sent by catalog ID does not make it read covered.
- */
-function OrderCell({ row }: { row: AutomaticFallback }) {
-  const { offerings } = row
-  const hasBackup = byProvider(offerings).length > 1
-  const isPinned = hasBackup && row.pinned * 2 > row.requests
-  if (hasBackup && !isPinned) {
-    return <Chain offerings={offerings} />
-  }
-  const reached = isPinned
-    ? (offerings.find(
-        (offering) => offering.provider === row.pinned_provider,
-      ) ?? offerings[0])
-    : offerings[0]
+function PinnedKeys({ row }: { row: AutomaticFallback }) {
   return (
-    <span className="flex flex-wrap items-start gap-x-2">
-      {reached ? <Chain offerings={[reached]} /> : null}
-      <Warning>{isPinned ? "No backup · pinned" : "No backup"}</Warning>
-    </span>
+    <table className="mx-4 my-2 text-sm">
+      <tbody>
+        {row.pinned_keys.map((entry) => (
+          <tr key={`${entry.api_key_id ?? ""}:${entry.provider}`}>
+            <td className="py-1 pr-6 text-foreground">
+              {entry.key_name ?? entry.api_key_id ?? "No key"}
+            </td>
+            <td className="py-1 pr-6 text-muted">
+              {providerName(entry.provider)}
+            </td>
+            <td className="py-1 text-right tabular-nums text-muted">
+              {formatNumber(entry.requests)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 
-const COLUMNS: DataTableColumn<AutomaticFallback>[] = [
-  {
-    id: "model",
-    header: "Model",
-    isRowHeader: true,
-    cell: (row) => (
-      <span title={row.id}>
-        <CopyableValue
-          value={row.id}
-          label="catalog ID"
-          className="text-sm text-foreground"
-        >
-          {row.name}
-        </CopyableValue>
-      </span>
-    ),
-  },
-  {
-    id: "requests",
-    header: "Requests (30d)",
-    cell: (row) => (
-      <span className="text-sm tabular-nums text-muted">
-        {formatNumber(row.requests)}
-      </span>
-    ),
-  },
-  {
-    id: "fellBack",
-    header: "Fell back (30d)",
-    cell: (row) => (
-      <span
-        className={`text-sm tabular-nums ${row.fell_back ? "text-foreground" : "text-subtle"}`}
-      >
-        {formatNumber(row.fell_back)}
-      </span>
-    ),
-  },
-  {
-    id: "order",
-    header: "Tried in order",
-    cell: (row) => <OrderCell row={row} />,
-  },
-]
-
 /**
- * The fallbacks a gateway gives with no policy: a model served on
- * several providers fails over between them when callers send its catalog ID.
- * A model on one provider is listed too, marked as having no backup.
+ * The models used in the last 30 days, the providers their catalog ID tries,
+ * and how much of their traffic sent that ID. A row whose traffic named a
+ * provider opens on the keys that did.
  */
 export function AutomaticFallbacks({
   fallbacks,
-  toolsNote,
   isLoading = false,
   error,
 }: {
   fallbacks: AutomaticFallback[]
-  /** How the tools caption under each provider is decided, in one sentence. */
-  toolsNote?: string
   isLoading?: boolean
   error?: unknown
 }) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  // Stable so DataTable's row cache holds; see its docstring.
+  const renderDetail = useCallback(
+    (row: AutomaticFallback) => <PinnedKeys row={row} />,
+    [],
+  )
+
+  const columns = useMemo<DataTableColumn<AutomaticFallback>[]>(
+    () => [
+      {
+        id: "model",
+        header: "Model",
+        isRowHeader: true,
+        cell: (row) => (
+          <CopyableValue
+            value={row.id}
+            label="catalog ID"
+            className="text-sm text-foreground"
+          >
+            {row.id}
+          </CopyableValue>
+        ),
+      },
+      {
+        id: "requests",
+        header: "Requests",
+        align: "end",
+        cell: (row) => (
+          <span className="text-sm tabular-nums text-muted">
+            {formatNumber(row.requests)}
+          </span>
+        ),
+      },
+      {
+        id: "fallback",
+        header: "Fallback",
+        align: "end",
+        cell: (row) => {
+          const hasBackup = byProvider(row.offerings).length > 1
+          const share = fallbackShare(row)
+          const isOpen = expanded === row.id
+          return (
+            <span className="inline-flex items-center gap-2">
+              {hasBackup ? (
+                <span
+                  className={`text-sm tabular-nums ${share < 50 ? "text-warning" : "text-muted"}`}
+                >
+                  {share}%
+                </span>
+              ) : (
+                <span className="text-sm text-subtle">—</span>
+              )}
+              {/* A slot on every row, so the shares line up. */}
+              <span className="inline-flex w-4">
+                {hasBackup && row.pinned_keys.length > 0 ? (
+                  <RowAction
+                    icon={isOpen ? FiChevronDown : FiChevronRight}
+                    label={isOpen ? "Hide keys" : "Keys that named a provider"}
+                    onPress={() => setExpanded(isOpen ? null : row.id)}
+                  />
+                ) : null}
+              </span>
+            </span>
+          )
+        },
+      },
+      {
+        id: "order",
+        header: "Order",
+        cell: (row) => <Order offerings={row.offerings} />,
+      },
+    ],
+    [expanded],
+  )
+
   return (
     <SettingsGroup
       title="Automatic fallback"
-      count={isLoading || error ? undefined : fallbacks.length}
-      description="Models used in the last 30 days. Sent by catalog ID, they move to the next provider when one fails, no policy needed."
       docsHref={docsSourceHref("models.md", "catalog-spellings")}
     >
-      {toolsNote ? (
-        <p className="py-3 text-caption">
-          {toolsNote}{" "}
-          <Link to="/tools" className="text-link hover:underline">
-            Change in Tools
-          </Link>
-        </p>
-      ) : null}
       {error ? (
         <ErrorBanner error={error} />
       ) : (
         <TableScrollFrame className="otari-fallbacks-table">
           <DataTable
             ariaLabel="Automatic fallback"
-            columns={COLUMNS}
+            columns={columns}
             rows={fallbacks}
             getRowKey={(row) => row.id}
+            detailKey={expanded}
+            renderDetail={renderDetail}
             isLoading={isLoading}
             emptyContent="No traffic in the last 30 days."
           />
