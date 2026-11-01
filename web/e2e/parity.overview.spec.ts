@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { login, table, tableRows, tileValue } from "./helpers"
+import { login, pickOption, table, tableRows, tileValue } from "./helpers"
 import { PARITY } from "./parity-data"
 
 // The seeded fixture is shared, and nothing here mutates it, but the suite runs
@@ -34,7 +34,7 @@ test.describe("overview", () => {
   }) => {
     await login(page)
 
-    await page.getByRole("button", { name: "Today", exact: true }).click()
+    await pickOption(page, "Time range", "Today")
     await expect(page).toHaveURL(/\/\?.*start_date=/)
 
     await page

@@ -329,14 +329,16 @@ describe("the Overview's layout", () => {
     expect(hrefOf("Requests").searchParams.get("range")).toBe("30d")
   })
 
-  it("puts the scope switch ahead of the tabs", async () => {
+  it("puts the tabs ahead of the filters", async () => {
     mockApi({})
     renderPage(<OverviewIndex />, "/")
 
-    const mine = await screen.findByRole("button", { name: "Mine" })
-    const views = screen.getByRole("navigation", { name: "Overview views" })
+    const views = await screen.findByRole("navigation", {
+      name: "Overview views",
+    })
     expect(
-      mine.compareDocumentPosition(views) & Node.DOCUMENT_POSITION_FOLLOWING,
+      views.compareDocumentPosition(screen.getByText("Time range")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
   })
 
@@ -406,7 +408,7 @@ describe("the Overview on a phone", () => {
 
   const covered = () =>
     screen
-      .getByRole("button", { name: "Everyone", hidden: true })
+      .getByRole("navigation", { name: "Overview views", hidden: true })
       .closest("[inert]")
 
   async function renderOnPhone(url: string) {
@@ -418,7 +420,10 @@ describe("the Overview on a phone", () => {
     })) as unknown as typeof window.matchMedia
     mockApi({})
     renderPage(<OverviewIndex />, url)
-    await screen.findByRole("button", { name: "Everyone", hidden: true })
+    await screen.findByRole("navigation", {
+      name: "Overview views",
+      hidden: true,
+    })
   }
 
   it("takes the controls behind an open request out of reach", async () => {
@@ -502,7 +507,7 @@ describe("the operator's status bands", () => {
     expect(errors.pathname).toBe("/requests")
     expect(errors.searchParams.get("status")).toBe("error")
     expect(errors.searchParams.get("start_date")).toBeTruthy()
-    expect(errors.searchParams.get("scope")).toBe("everyone")
+    expect(errors.searchParams.has("user_id")).toBe(false)
   })
 
   it("is absent when nothing needs attention", async () => {

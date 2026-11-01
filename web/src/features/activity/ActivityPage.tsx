@@ -833,6 +833,7 @@ function ActivityPageContent({
         <div className="flex flex-col gap-3">
           <ActivityTimeline
             presets={ACTIVITY_PRESETS}
+            hidePresets={embedded}
             extentKey={extentKey}
             onPreset={pickPreset}
             onSelectRange={pickCustom}

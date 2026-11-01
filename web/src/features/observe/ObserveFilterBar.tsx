@@ -11,9 +11,15 @@ import { STATUS_OPTIONS } from "@/features/activity/activityModel"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { useUsageSummary } from "@/shared/api/usage"
+import { findPreset, localMidnightIso } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { type ObserveView, statusApplies, windowFor } from "./observeSearch"
+import {
+  type ObserveView,
+  rangesFor,
+  statusApplies,
+  windowFor,
+} from "./observeSearch"
 import { useObserveScope } from "./useObserveScope"
 
 // The pickers read these two summaries. by_user and by_api_key carry each
@@ -22,6 +28,7 @@ const MODEL_BREAKDOWN: SummaryDimension[] = ["model"]
 const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"]
 
 const URL_DEFAULTS = {
+  scope: "",
   range: "",
   start_date: "",
   end_date: "",
@@ -40,9 +47,14 @@ const labelFrom = (
   value: string,
 ) => options.find((option) => option.value === value)?.label ?? value
 
+// The window select's own values for a window no preset names. Today is the
+// caller's local day so far, offered on Usage, which buckets by day.
+const TODAY = "today"
+const CUSTOM = "custom"
+
 /**
- * The filters every Overview tab reads under one name: model, user, API key and
- * status. Their options come from the usage summary over the window the current
+ * The filters every Overview tab reads under one name: the window, model, user,
+ * API key and status. Their options come from the usage summary over the window the current
  * view shows, each picker's own filter left out so its list stays complete.
  * A filter the current view cannot apply stays visible and removable, marked as
  * not applied, rather than being dropped silently.
@@ -61,7 +73,7 @@ export function ObserveFilterBar({
 
   const status = url.get("status")
   const models = url.getAll("model")
-  const { scope, userIds: users, isResolved } = useObserveScope()
+  const { scope, userIds: users, isResolved, clearMine } = useObserveScope()
   const isMine = scope === "mine"
   const apiKeys = url.getAll("api_key_id")
 
@@ -80,6 +92,36 @@ export function ObserveFilterBar({
       }),
     [view, range, startParam, endParam],
   )
+
+  const patch = (updates: Parameters<typeof url.patch>[0]) =>
+    url.patch({ ...updates, page: 0 })
+
+  const ranges = rangesFor(view)
+  const midnight = localMidnightIso()
+  const offersToday = view === "usage"
+  const rangeValue =
+    startParam || endParam
+      ? offersToday && startParam === midnight && !endParam
+        ? TODAY
+        : CUSTOM
+      : (findPreset(ranges.presets, range)?.key ?? ranges.defaultKey)
+  const rangeOptions = [
+    ...(offersToday ? [{ value: TODAY, label: "Today" }] : []),
+    ...ranges.presets.map((preset) => ({
+      value: preset.key,
+      label: preset.label,
+    })),
+    // Shown only while it is the window: a dragged selection on the chart.
+    ...(rangeValue === CUSTOM ? [{ value: CUSTOM, label: "Custom" }] : []),
+  ]
+  const pickRange = (value: string) => {
+    if (value === CUSTOM) return
+    patch(
+      value === TODAY
+        ? { range: "", start_date: localMidnightIso(), end_date: "" }
+        : { range: value, start_date: "", end_date: "" },
+    )
+  }
 
   const applied = statusApplies(view, status)
   const base: UsageFilters = useMemo(
@@ -142,9 +184,6 @@ export function ObserveFilterBar({
     }),
   )
 
-  const patch = (updates: Parameters<typeof url.patch>[0]) =>
-    url.patch({ ...updates, page: 0 })
-
   const valueChips = (
     dimension: string,
     label: string,
@@ -175,7 +214,14 @@ export function ObserveFilterBar({
         ]
       : []),
     ...(isMine
-      ? []
+      ? [
+          {
+            key: "mine",
+            label: "User",
+            value: "You",
+            onClear: clearMine,
+          },
+        ]
       : valueChips("user", "User", "user_id", users, (value) =>
           labelFrom(userOptions, value),
         )),
@@ -188,11 +234,24 @@ export function ObserveFilterBar({
   return (
     <div className="pb-3">
       <FilterChips
+        alwaysOpen
         chips={chips}
         onClearAll={() =>
-          patch({ status: "", model: [], user_id: [], api_key_id: [] })
+          patch({
+            scope: "",
+            status: "",
+            model: [],
+            user_id: [],
+            api_key_id: [],
+          })
         }
       >
+        <FilterSelect
+          label="Time range"
+          value={rangeValue}
+          onChange={pickRange}
+          options={rangeOptions}
+        />
         {/* Usage reads no status, so the select would do nothing there. */}
         {view === "usage" ? null : (
           <FilterSelect

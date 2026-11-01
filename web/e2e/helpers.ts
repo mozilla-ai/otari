@@ -179,24 +179,6 @@ export async function expectOk(
 
 // ---------- filters ----------
 
-// The shared filter pickers (status, model, user, key) are the Overview's filter bar,
-// above the view, and live behind its "Add filter" toggle (see FilterChips), so a
-// select or combobox cannot be driven until the region is revealed. The request
-// log's own pickers sit behind "More filters". Idempotent:
-// the toggle reads "Done" once open, so a second call is a no-op rather than a
-// close.
-export async function openFilterPickers(page: Page): Promise<void> {
-  // One control under two names, so waiting on it covers a page that has not
-  // painted yet. A bare `isVisible()` on "Add filter" does not wait, so straight
-  // after a navigation it reports false and the region is never opened.
-  const toggle = page.getByRole("button", { name: /^(Add filter|Done)$/ })
-  await expect(toggle).toBeVisible()
-  if ((await toggle.innerText()).trim() === "Add filter") {
-    await toggle.click()
-  }
-  await expect(page.getByRole("button", { name: "Done" })).toBeVisible()
-}
-
 // An applied filter renders as a chip carrying its dimension and value, whatever
 // set it. This is the assertion that a filter was actually applied rather than
 // merely typed, and the ✕ that clears it hangs off the same pill.

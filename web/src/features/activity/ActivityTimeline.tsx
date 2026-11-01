@@ -48,6 +48,9 @@ interface ActivityTimelineProps<B extends ChartBucket> {
   // while a sub-window is selected, since it still describes how far back we span.
   extentKey: string
   onPreset: (preset: RangePreset<B>) => void
+  // The presets are picked elsewhere (the Overview's filter bar), so the row
+  // drops them; they still bound how far the chart zooms out.
+  hidePresets?: boolean
   // A selected sub-window, resolved to absolute instants (end exclusive).
   onSelectRange: (startIso: string, endIso: string) => void
   // The selection was widened back to the whole extent: fall back to the rolling
@@ -104,6 +107,7 @@ export function ActivityTimeline<B extends ChartBucket>({
   presets,
   extentKey,
   onPreset,
+  hidePresets = false,
   onSelectRange,
   onSelectFull,
   series,
@@ -277,17 +281,19 @@ export function ActivityTimeline<B extends ChartBucket>({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <TabRow>
-          {presets.map((preset) => (
-            <Tab
-              key={preset.key}
-              isActive={extentKey === preset.key}
-              onPress={() => onPreset(preset)}
-            >
-              {preset.label}
-            </Tab>
-          ))}
-        </TabRow>
+        {hidePresets ? null : (
+          <TabRow>
+            {presets.map((preset) => (
+              <Tab
+                key={preset.key}
+                isActive={extentKey === preset.key}
+                onPress={() => onPreset(preset)}
+              >
+                {preset.label}
+              </Tab>
+            ))}
+          </TabRow>
+        )}
         <div className="ml-auto flex items-center gap-3">
           <span className="text-caption">Showing {label} · UTC</span>
           {action}
