@@ -31,16 +31,12 @@ function Probe({ active = true }: { active?: boolean }) {
           scope: state.scope,
           resolved: state.isResolved,
           users: state.userIds,
-          hasOwner: state.hasOwner,
           carry: state.scopeSearch,
         })}
       </output>
       <output aria-label="Search">{searchStr}</output>
-      <button type="button" onClick={() => state.setScope("mine")}>
-        pick mine
-      </button>
-      <button type="button" onClick={() => state.setScope("everyone")}>
-        pick everyone
+      <button type="button" onClick={state.clearMine}>
+        clear mine
       </button>
     </>
   )
@@ -51,8 +47,6 @@ const state = () => JSON.parse(screen.getByLabelText("State").textContent ?? "")
 async function settled(route = "/") {
   renderPage(<Probe />, route)
   await waitFor(() => expect(state().resolved).toBe(true))
-  // An operator resolves before the roster has been read.
-  await waitFor(() => expect(state().hasOwner).toBe(true))
 }
 
 describe("useObserveScope", () => {
@@ -60,32 +54,38 @@ describe("useObserveScope", () => {
     mockApi({ members: [ME] })
     await settled("/?user_id=u1")
 
-    expect(state()).toMatchObject({
-      scope: "everyone",
-      users: ["u1"],
-      hasOwner: true,
+    expect(state()).toMatchObject({ scope: "everyone", users: ["u1"] })
+  })
+
+  it("defaults a member to Everyone without reading the roster", async () => {
+    const { calls } = mockApi({
+      deploymentOperator: false,
+      role: "member",
+      members: [ME],
     })
-  })
-
-  it("defaults an organization admin to Everyone", async () => {
-    mockApi({ deploymentOperator: false, role: "admin", members: [ME] })
-    await settled()
-
-    expect(state().scope).toBe("everyone")
-  })
-
-  it("defaults a member to Mine, fetching with their owner id", async () => {
-    mockApi({ deploymentOperator: false, role: "member", members: [ME] })
     await settled("/?user_id=u1")
 
     expect(state()).toMatchObject({
+      scope: "everyone",
+      users: ["u1"],
+      carry: {},
+    })
+    expect(calls.some((call) => call.url.includes("/members"))).toBe(false)
+  })
+
+  it("reads a legacy scope=mine as the caller's owner id", async () => {
+    mockApi({ deploymentOperator: false, role: "member", members: [ME] })
+    renderPage(<Probe />, "/?scope=mine&user_id=u1")
+    await waitFor(() => expect(state().users).toEqual(["me-id"]))
+
+    expect(state()).toMatchObject({
       scope: "mine",
-      users: ["me-id"],
+      resolved: true,
       carry: { scope: "mine" },
     })
   })
 
-  it("holds back while the role and the owner id are pending", async () => {
+  it("holds back while the owner id behind Mine is pending", async () => {
     const { mock } = mockApi({
       deploymentOperator: false,
       role: "viewer",
@@ -100,7 +100,7 @@ describe("useObserveScope", () => {
       await gate
       return answer?.(input, init) as Promise<Response>
     })
-    renderPage(<Probe />, "/")
+    renderPage(<Probe />, "/?scope=mine")
 
     // Nothing has answered: no scope is trusted, so nothing may fetch.
     expect((await screen.findByLabelText("State")).textContent).toContain(
@@ -120,8 +120,6 @@ describe("useObserveScope", () => {
     renderPage(<Probe />, "/?scope=mine")
     await waitFor(() => expect(state().resolved).toBe(true))
     await waitFor(() => expect(state().scope).toBe("everyone"))
-
-    expect(state()).toMatchObject({ scope: "everyone", hasOwner: false })
   })
 
   it("settles on Everyone when the roster cannot be read", async () => {
@@ -136,40 +134,30 @@ describe("useObserveScope", () => {
         ? new Response("{}", { status: 500 })
         : (answer?.(input, init) as Promise<Response>),
     )
-    renderPage(<Probe />, "/")
+    renderPage(<Probe />, "/?scope=mine")
 
     // The owner id cannot be known, so the page may fetch, as Everyone.
     await waitFor(() => expect(state().resolved).toBe(true))
-    expect(state()).toMatchObject({ scope: "everyone", hasOwner: false })
+    expect(state().scope).toBe("everyone")
   })
 
-  it("lets a member choose Everyone", async () => {
-    mockApi({ deploymentOperator: false, role: "member", members: [ME] })
-    await settled("/?scope=everyone")
-    expect(state()).toMatchObject({ scope: "everyone", resolved: true })
-  })
-
-  it("lets an admin choose Mine from the URL", async () => {
-    mockApi({ deploymentOperator: false, role: "admin", members: [ME] })
-    await settled("/?scope=mine")
-    expect(state()).toMatchObject({ scope: "mine", users: ["me-id"] })
-  })
-
-  it("clears the user filter when switching to Mine", async () => {
+  it("drops a legacy Mine from the URL", async () => {
     mockApi({ members: [ME] })
-    await settled("/?user_id=u1&scope=everyone")
+    renderPage(<Probe />, "/?scope=mine")
+    await waitFor(() => expect(state().scope).toBe("mine"))
     const user = userEvent.setup()
 
-    await user.click(screen.getByRole("button", { name: "pick mine" }))
-    await waitFor(() =>
-      expect(screen.getByLabelText("Search")).toHaveTextContent("scope=mine"),
-    )
-    expect(screen.getByLabelText("Search")).not.toHaveTextContent("user_id")
+    await user.click(screen.getByRole("button", { name: "clear mine" }))
+    await waitFor(() => expect(state().scope).toBe("everyone"))
+    expect(screen.getByLabelText("Search")).not.toHaveTextContent("scope")
   })
 
   it("reads the URL's users and fetches nothing extra when inactive", async () => {
     const { calls } = mockApi({ members: [ME] })
-    renderPage(<Probe active={false} />, "/organization/usage?user_id=u1")
+    renderPage(
+      <Probe active={false} />,
+      "/organization/usage?user_id=u1&scope=mine",
+    )
     await waitFor(() => expect(state().users).toEqual(["u1"]))
 
     expect(state()).toMatchObject({ scope: "everyone", resolved: true })

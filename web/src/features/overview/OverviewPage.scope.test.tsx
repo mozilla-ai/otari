@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { OverviewIndex } from "@/features/overview/OverviewPage"
@@ -144,32 +145,53 @@ const errorLink = async () =>
     "http://localhost",
   )
 
+const summaryReads = (requested: URL[]) =>
+  requested.filter((u) => u.pathname.endsWith("/usage/summary"))
+
 describe("Overview scope", () => {
-  it("opens a member on their own requests, and asks for no one else's", async () => {
+  it("opens a member on everyone's requests, narrowed by the User filter", async () => {
     const requested = mockGateway({
       deployment_operator: false,
       role: "member",
     })
     renderOverview()
 
-    expect(await screen.findByText("Your requests in Production")).toBeVisible()
     await waitFor(() =>
-      expect(requested.some((u) => u.pathname.endsWith("/usage/summary"))).toBe(
-        true,
-      ),
+      expect(
+        summaryReads(requested).some((u) => !u.searchParams.has("user_id")),
+      ).toBe(true),
     )
-    // Not one read named anything but the caller, the first included: nothing
-    // is asked before the scope resolves.
-    for (const url of requested.filter((u) => u.pathname.includes("/usage"))) {
-      expect(url.searchParams.getAll("user_id")).toEqual(["me-id"])
-    }
+    expect(screen.queryByText("Mine")).toBeNull()
   })
 
-  it("opens a manager on everyone", async () => {
-    mockGateway({ deployment_operator: false, role: "admin" })
-    renderOverview()
+  it("reads a legacy Mine link as the caller, with a chip to drop it", async () => {
+    const requested = mockGateway({
+      deployment_operator: false,
+      role: "admin",
+    })
+    renderOverview("/overview?scope=mine")
 
-    expect(await screen.findByText("Everyone in Production")).toBeVisible()
+    const remove = await screen.findByRole("button", {
+      name: "Remove User filter",
+      hidden: true,
+    })
+    await waitFor(() =>
+      expect(
+        summaryReads(requested).some((u) =>
+          u.searchParams.getAll("user_id").includes("me-id"),
+        ),
+      ).toBe(true),
+    )
+    const user = userEvent.setup()
+    await user.click(remove)
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", {
+          name: "Remove User filter",
+          hidden: true,
+        }),
+      ).toBeNull(),
+    )
   })
 
   it("judges a manager's attention strip on everyone even under Mine", async () => {
@@ -181,7 +203,9 @@ describe("Overview scope", () => {
 
     expect(await screen.findByText(/error rate 50/)).toBeVisible()
     // And it opens the log on the requests it counted.
-    expect((await errorLink()).searchParams.get("scope")).toBe("everyone")
+    const link = await errorLink()
+    expect(link.searchParams.has("user_id")).toBe(false)
+    expect(link.searchParams.has("scope")).toBe(false)
   })
 
   it("judges an operator's attention strip on everyone", async () => {
@@ -195,48 +219,33 @@ describe("Overview scope", () => {
   })
 
   it("judges a member's attention strip on their own usage", async () => {
-    mockGateway({ deployment_operator: false, role: "member" }, true, {
-      mine: 0,
-      everyone: 20,
-    })
+    const requested = mockGateway(
+      { deployment_operator: false, role: "member" },
+      true,
+      { mine: 0, everyone: 20 },
+    )
     renderOverview()
 
-    await screen.findByText("Your requests in Production")
+    await waitFor(() =>
+      expect(
+        summaryReads(requested).some((u) =>
+          u.searchParams.getAll("user_id").includes("me-id"),
+        ),
+      ).toBe(true),
+    )
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
     expect(screen.queryByText(/error rate 50/)).toBeNull()
   })
 
-  it("judges a member's attention strip on their own usage under Everyone", async () => {
-    mockGateway({ deployment_operator: false, role: "member" }, true, {
-      mine: 0,
-      everyone: 20,
-    })
-    renderOverview("/overview?scope=everyone")
-
-    await screen.findByText("Everyone in Production")
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
-    expect(screen.queryByText(/error rate 50/)).toBeNull()
-  })
-
-  it("links a member's own failures with their scope", async () => {
+  it("links a member's own failures filtered to them", async () => {
     mockGateway({ deployment_operator: false, role: "member" }, true, {
       mine: 20,
       everyone: 0,
     })
     renderOverview()
 
-    expect((await errorLink()).searchParams.get("scope")).toBe("mine")
-  })
-
-  it("leaves Mine off for a caller with no usage identity", async () => {
-    const requested = mockGateway({ deployment_operator: true }, false)
-    renderOverview()
-
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Mine", hidden: true }),
-      ).toHaveAttribute("aria-disabled", "true"),
-    )
-    expect(requested.filter((u) => u.searchParams.has("user_id"))).toEqual([])
+    const link = await errorLink()
+    expect(link.searchParams.getAll("user_id")).toEqual(["me-id"])
+    expect(link.searchParams.has("scope")).toBe(false)
   })
 })

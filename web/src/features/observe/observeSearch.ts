@@ -48,6 +48,9 @@ const RANGES: Record<ObserveView, ViewRanges> = {
   sessions: { presets: SESSION_PRESETS, defaultKey: ACTIVITY_DEFAULT_KEY },
 }
 
+/** The window presets a view offers, and the one it opens on. */
+export const rangesFor = (view: ObserveView): ViewRanges => RANGES[view]
+
 export function viewForPath(pathname: string): ObserveView {
   if (pathname.startsWith(OBSERVE_PATHS.requests)) return "requests"
   if (pathname.startsWith(OBSERVE_PATHS.sessions)) return "sessions"
@@ -135,16 +138,4 @@ const SESSION_STATUSES = ["error", "success"]
 export function statusApplies(view: ObserveView, status: string): boolean {
   if (view === "requests") return true
   return view === "sessions" && SESSION_STATUSES.includes(status)
-}
-
-/**
- * The query a retired route (`/usage`, `/activity`) forwards to its Overview
- * tab. A link from before the scope switch that names a user means that
- * user, which Mine would ignore for a member, so it opens on Everyone unless
- * it already says which.
- */
-export function legacySearch(search: DashboardSearch): DashboardSearch {
-  return firstValue(search.user_id) && !firstValue(search.scope)
-    ? { ...search, scope: "everyone" }
-    : search
 }

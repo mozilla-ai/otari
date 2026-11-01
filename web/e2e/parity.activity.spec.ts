@@ -5,7 +5,6 @@ import {
   filterChip,
   gotoRoute,
   login,
-  openFilterPickers,
   pickOption,
   tableRows,
 } from "./helpers"
@@ -59,7 +58,6 @@ test.describe("activity log", () => {
     await gotoRoute(page, SCOPED)
     await expect(rows(page)).toHaveCount(ALL)
 
-    await openFilterPickers(page)
     await pickOption(page, "Status", "Error")
 
     // The chip is the page's own statement that the filter is applied, so it is
@@ -105,7 +103,6 @@ test.describe("activity log", () => {
   }) => {
     await login(page)
     await gotoRoute(page, SCOPED)
-    await openFilterPickers(page)
 
     await addFilterValue(page, "Model", PARITY.models.unpriced.model)
     await expect(
@@ -186,12 +183,12 @@ test.describe("activity log", () => {
     // nothing at all. The lower bound holds because the densest set puts its
     // newest row ~39 minutes back, which leaves the run twenty-odd minutes of
     // headroom against a job that takes two.
-    await page.getByRole("button", { name: "1h", exact: true }).click()
+    await pickOption(page, "Time range", "1h")
     await expect.poll(() => rows(page).count()).toBeGreaterThan(0)
     await expect.poll(() => rows(page).count()).toBeLessThan(ALL)
 
     // "All" is unbounded rather than a wider preset, so every fixture row is back.
-    await page.getByRole("button", { name: "All", exact: true }).click()
+    await pickOption(page, "Time range", "All")
     await expect(rows(page)).toHaveCount(ALL)
   })
 

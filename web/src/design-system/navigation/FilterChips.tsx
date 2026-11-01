@@ -29,6 +29,7 @@ export function FilterChips({
   start,
   end,
   toggleLabel = "Add filter",
+  alwaysOpen = false,
 }: {
   chips: FilterChip[]
   // The picker controls (comboboxes/selects), revealed by "Add filter".
@@ -43,9 +44,50 @@ export function FilterChips({
   // The toggle's name while closed, for a page that carries two of these and
   // needs the controls told apart.
   toggleLabel?: string
+  // Pickers always shown, with no toggle: for a page whose filters are its
+  // main control rather than a refinement.
+  alwaysOpen?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const regionId = useId()
+
+  const chipRow = (
+    <>
+      {chips.map((chip) => (
+        <DismissChip
+          key={chip.key}
+          label={chip.label}
+          value={chip.value}
+          onDismiss={chip.onClear}
+          dismissLabel={chip.clearLabel ?? `Remove ${chip.label} filter`}
+        />
+      ))}
+      {chips.length > 0 && onClearAll ? (
+        <Button size="sm" variant="ghost" onPress={onClearAll}>
+          Clear all
+        </Button>
+      ) : null}
+    </>
+  )
+
+  if (alwaysOpen) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="otari-toolbar flex flex-wrap items-end gap-3">
+          {start}
+          {children}
+          {end ? (
+            <div className="ml-auto flex items-center gap-3">{end}</div>
+          ) : null}
+        </div>
+        {chips.length > 0 ? (
+          <div className="otari-toolbar flex flex-wrap items-center gap-2">
+            {chipRow}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -63,20 +105,7 @@ export function FilterChips({
         >
           {open ? "Done" : toggleLabel}
         </Button>
-        {chips.map((chip) => (
-          <DismissChip
-            key={chip.key}
-            label={chip.label}
-            value={chip.value}
-            onDismiss={chip.onClear}
-            dismissLabel={chip.clearLabel ?? `Remove ${chip.label} filter`}
-          />
-        ))}
-        {chips.length > 0 && onClearAll ? (
-          <Button size="sm" variant="ghost" onPress={onClearAll}>
-            Clear all
-          </Button>
-        ) : null}
+        {chipRow}
         {end ? (
           <div className="ml-auto flex items-center gap-3">{end}</div>
         ) : null}

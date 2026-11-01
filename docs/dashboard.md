@@ -84,20 +84,13 @@ The workspace view contains day-to-day gateway operations:
   the gateway three ways, as tabs over one time window and one set of filters:
   Usage (spend, tokens and requests over time, with breakdowns, at `/`),
   Requests (the per-request log, at `/requests`) and Sessions (agent sessions,
-  at `/sessions`). The window and the model, user, API key and status filters
-  live in the URL and travel when you switch tab, and clicking a chart bar
-  narrows the window to that bar. Today, beside the window presets on Usage,
-  starts the window at local midnight. The old `/usage` and `/activity`
-  addresses open the matching tab with their filters.
-
-  A Mine | Everyone switch above the tabs sets whose requests every tab shows,
-  and a line beside it says which one it is ("Your requests in Production",
-  "Everyone in Production"). Mine is the caller's own usage identity, so
-  requests made with a shared key count toward the key's owner; it hides the
-  User filter. Members and viewers open on Mine, owners, admins and deployment
-  operators on Everyone, and the choice is the `scope` key in the URL, carried
-  between tabs. Mine is disabled for an account with no usage identity in the
-  organization yet.
+  at `/sessions`). Below the tabs, the time range and the model, user, API key
+  and status filters are always shown; they live in the URL and travel when you
+  switch tab, and clicking a chart bar narrows the window to that bar. Today, a
+  time range on Usage, starts the window at local midnight. Every tab opens on
+  everyone's requests in the workspace; pick yourself in the User filter to see
+  only your own. The old `/usage` and `/activity` addresses open the matching tab
+  with their filters.
 - Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup, including those most requests pin to one provider. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only.
 - Tools
 - API keys and workspace members
@@ -280,7 +273,7 @@ The Overview's attention strip splits the same way. It appears only when there
 is something to act on, above the tabs on every one of them, and each item links
 to the page that explains it: a high error rate today opens Requests on today's
 failures. It is about what the caller answers for, so it does not follow the
-Mine | Everyone switch: for an organization member it carries their own error
+page's filters: for an organization member it carries their own error
 rate when it is high; an owner or admin sees the organization's error rate and a
 spend ceiling at or near its limit; a deployment operator sees the deployment's
 error rate, provider health and the deployment's own budgets.
