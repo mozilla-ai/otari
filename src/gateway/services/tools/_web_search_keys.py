@@ -395,6 +395,11 @@ class WebSearchKeyService:
             )
         search, fetch = chosen["search"], chosen["fetch"]
         effective = {key.id for key in (search, fetch) if key is not None}
+        # The deployment's own tools, which serve the workspace where no key does. The legacy settings' backend
+        # goes by its provider's name.
+        deployment_search = in_loop_default(self.config)
+        deployment_fetch = resolve_fetch(self.config, None, requested=None, for_search=None)
+        searches_on = search if search is not None else deployment_search
         return WorkspaceWebSearchKeysPublic(
             data=[
                 WorkspaceWebSearchKeyPublic(
@@ -413,8 +418,10 @@ class WebSearchKeyService:
                 for key, override in page
             ],
             count=count,
-            search_provider=search.provider if search is not None else self._deployment_search_provider(),
-            fetch_provider=fetch.provider if fetch is not None else self._deployment_fetch_provider(),
+            search_provider=searches_on.provider if searches_on is not None else None,
+            fetch_provider=fetch.provider if fetch is not None else deployment_fetch.provider,
+            deployment_search_tool=deployment_search.name if deployment_search is not None else None,
+            deployment_fetch_tool=deployment_fetch.name,
         )
 
     async def set_workspace_override(
@@ -476,15 +483,6 @@ class WebSearchKeyService:
         return await self.list_workspace_keys(user=user, workspace_id=workspace_id)
 
     # ------------------------------------------------------------------
-
-    def _deployment_search_provider(self) -> str | None:
-        """The provider the deployment's in-loop default searches on, or ``None`` where it has none."""
-        default = in_loop_default(self.config)
-        return default.provider if default is not None else None
-
-    def _deployment_fetch_provider(self) -> str:
-        """The provider the deployment's default fetch instance runs on, ``builtin`` for the built-in fetcher."""
-        return resolve_fetch(self.config, None, requested=None, for_search=None).provider
 
     async def _managed_organization(self, user: User) -> uuid.UUID:
         organization = await self.organizations.get_active_organization_for_user(user)

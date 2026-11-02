@@ -27116,6 +27116,30 @@
             "title": "Data",
             "type": "array"
           },
+          "deployment_fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the deployment's fetch tool, which the workspace's fetches run on when no key serves them, whether or not one does now: builtin_fetch for the built-in fetcher.",
+            "title": "Deployment Fetch Tool"
+          },
+          "deployment_search_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the deployment's search tool, which the workspace's searches run on when no key serves them, whether or not one does now. Null when the deployment has none.",
+            "title": "Deployment Search Tool"
+          },
           "fetch_provider": {
             "anyOf": [
               {

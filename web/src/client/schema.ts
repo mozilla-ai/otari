@@ -19839,6 +19839,16 @@ export interface components {
             /** Data */
             data: components["schemas"]["WorkspaceWebSearchKeyPublic"][];
             /**
+             * Deployment Fetch Tool
+             * @description The name of the deployment's fetch tool, which the workspace's fetches run on when no key serves them, whether or not one does now: builtin_fetch for the built-in fetcher.
+             */
+            deployment_fetch_tool?: string | null;
+            /**
+             * Deployment Search Tool
+             * @description The name of the deployment's search tool, which the workspace's searches run on when no key serves them, whether or not one does now. Null when the deployment has none.
+             */
+            deployment_search_tool?: string | null;
+            /**
              * Fetch Provider
              * @description The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the search's instance names a fetch instance of its own: its effective fetch key's, else the deployment's default fetch instance's, which is builtin for the built-in fetcher.
              */

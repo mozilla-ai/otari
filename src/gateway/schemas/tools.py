@@ -172,6 +172,20 @@ class WorkspaceWebSearchKeysPublic(SQLModel):
             "deployment's default fetch instance's, which is builtin for the built-in fetcher."
         ),
     )
+    deployment_search_tool: str | None = Field(
+        default=None,
+        description=(
+            "The name of the deployment's search tool, which the workspace's searches run on when no key serves "
+            "them, whether or not one does now. Null when the deployment has none."
+        ),
+    )
+    deployment_fetch_tool: str | None = Field(
+        default=None,
+        description=(
+            "The name of the deployment's fetch tool, which the workspace's fetches run on when no key serves "
+            "them, whether or not one does now: builtin_fetch for the built-in fetcher."
+        ),
+    )
 
 
 class SearchProviderOptionSchema(SQLModel):

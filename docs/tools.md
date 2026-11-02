@@ -881,8 +881,10 @@ A workspace web-access policy can:
   `executor`, these are choices rather than narrowings
 
 Manage it under `/api/v1/workspaces/{workspace_id}/web-search`. The dashboard's
-Tools > Web search page sets `enabled`, the two executors, `max_results` and the
-domain lists; the purpose hint and provider options are set through the API.
+Tools > Web search page sets `enabled`, the two executors, `max_results`, the
+domain lists, and the provider options, with a field for each option of the
+provider the workspace's searches run on; the purpose hint is set through the
+API.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
 backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
@@ -947,7 +949,13 @@ archived key, or one this deployment cannot decrypt is passed over. A workspace'
 turn off keys under `/api/v1/workspaces/{workspace_id}/web-search-keys`, which
 any member of the workspace can read to see which keys it uses and, as
 `search_provider` and `fetch_provider`, the providers its searches and fetches
-run on.
+run on; `deployment_search_tool` and `deployment_fetch_tool` name the
+deployment's own tools it uses when no key serves it. On the dashboard, Tools >
+Web search lists, for each kind, the deployment's default tool and the
+organization's keys, and marks the one the workspace uses; its owners and admins
+choose a key there to pin it, or choose the organization's default or the
+deployment's tool to remove the pin, and any other member sees the list
+read-only.
 
 A workspace with a usable search key serves an explicit `otari_web_search`
 declaration even where the deployment has no search of its own, and the
