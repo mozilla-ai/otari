@@ -172,8 +172,7 @@ def resolve_web_search_key(
 
     1. The key the workspace pinned.
     2. Otherwise the organization's default.
-    3. Otherwise none, and the workspace uses the deployment's instance: a key serves
-       a workspace only once the organization makes it the default or the workspace pins it.
+    3. Otherwise none: the workspace uses the deployment's instance.
 
     A key the workspace turned off, or one this deployment cannot decrypt, is passed over.
     ``usable`` is asked of keys in that order and only until one passes.
