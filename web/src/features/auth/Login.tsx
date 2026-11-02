@@ -143,12 +143,15 @@ function LabelRow({
   error,
   errorId,
   className = "",
+  messageOnOwnLine = false,
 }: {
   label: string
   error: unknown
   errorId: string
   /** Placement in the caller's own layout. */
   className?: string
+  /** Break the refusal onto a line of its own under the label. */
+  messageOnOwnLine?: boolean
 }) {
   const message = error ? errorMessage(error) : null
 
@@ -157,8 +160,9 @@ function LabelRow({
   // refusal beside its label rather than at the column's right edge.
   // Deliberate: the password row shares its line with the recovery link, so
   // stretching this to reach that link only parts the refusal from the label it
-  // belongs to. The column is `minmax(0,1fr)`, so at 320px the refusal still
-  // wraps under the label inside it rather than pushing the link off the row.
+  // belongs to. That caller spans both columns and puts the refusal on its own
+  // line (`messageOnOwnLine`), because beside the label it has too little width
+  // at 320px: it wraps to three lines and touches the recovery link.
   return (
     <div
       className={`flex min-h-5 flex-wrap items-center justify-between gap-x-3 ${className}`}
@@ -183,7 +187,7 @@ function LabelRow({
         <span
           id={errorId}
           role="alert"
-          className="flex min-w-0 items-center gap-1 text-caption text-danger"
+          className={`flex min-w-0 items-center gap-1 text-caption text-danger ${messageOnOwnLine ? "basis-full" : ""}`}
         >
           <AlertIcon />
           <span title={message}>{message}</span>
@@ -793,7 +797,8 @@ export function Login() {
                       label="Password"
                       error={errorField === "password" ? error : null}
                       errorId={ERROR_IDS.password}
-                      className="justify-self-start"
+                      className="col-span-2 col-start-1 row-start-1 justify-self-start"
+                      messageOnOwnLine
                     />
                     <Input
                       autoFocus={focusesOnArrival && prefilledEmail !== ""}
@@ -813,7 +818,7 @@ export function Login() {
                       className="col-span-2 h-10 text-base"
                     />
                     {offersRecovery ? (
-                      <div className="col-start-2 row-start-1">
+                      <div className="col-start-2 row-start-1 flex self-start">
                         <PublicAuthLink
                           isInline
                           to="#/recover-password"
