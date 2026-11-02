@@ -2,8 +2,8 @@
 
 Run at release: ``python scripts/update_models_dev_snapshot.py`` fetches
 https://models.dev/api.json, or ``--input FILE`` trims a saved copy. Standard
-library only; the trimming rules live in the gateway so a stored snapshot and
-the bundled one are cut the same way.
+library only; the catalog's typed document lives in the gateway so a stored
+snapshot and the bundled one are cut the same way.
 """
 
 import argparse
@@ -17,17 +17,21 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-TRIM_MODULE = ROOT / "src" / "gateway" / "services" / "pricing" / "catalog_trim.py"
+DOCUMENT_MODULE = ROOT / "src" / "gateway" / "types" / "models_dev.py"
 OUTPUT = ROOT / "src" / "gateway" / "data" / "models_dev_pricing.json"
 URL = "https://models.dev/api.json"
 
 
 def _load_trim() -> Callable[[dict[str, Any]], dict[str, Any]]:
-    spec = importlib.util.spec_from_file_location("catalog_trim", TRIM_MODULE)
+    spec = importlib.util.spec_from_file_location("models_dev", DOCUMENT_MODULE)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    trim: Callable[[dict[str, Any]], dict[str, Any]] = module.trim_catalog
+
+    def trim(raw: dict[str, Any]) -> dict[str, Any]:
+        document: dict[str, Any] = module.snapshot_document(module.parse_catalog(raw))
+        return document
+
     return trim
 
 

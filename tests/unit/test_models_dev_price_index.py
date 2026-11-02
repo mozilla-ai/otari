@@ -28,7 +28,7 @@ def raw() -> dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def index(raw: dict[str, Any]) -> ModelsDevPriceIndex:
-    return ModelsDevPriceIndex.from_catalog(raw)
+    return ModelsDevPriceIndex.from_document(raw)
 
 
 def test_parses_rates_metadata_and_reference(index: ModelsDevPriceIndex) -> None:
@@ -58,7 +58,7 @@ def test_rates_are_exact_decimals(index: ModelsDevPriceIndex) -> None:
 def test_missing_output_stays_none(raw: dict[str, Any]) -> None:
     raw = json.loads(json.dumps(raw))
     del raw["openai"]["models"]["gpt-4.1"]["cost"]["output"]
-    price = ModelsDevPriceIndex.from_catalog(raw).resolve("openai", "gpt-4.1")
+    price = ModelsDevPriceIndex.from_document(raw).resolve("openai", "gpt-4.1")
     assert price is not None
     assert price.input == Decimal("2")
     assert price.output is None
@@ -109,7 +109,7 @@ def test_non_context_tier_types_are_ignored_and_over_200k_ignored_beside_context
     raw["google"]["models"]["gemini-2.5-pro"]["cost"]["tiers"] = [
         {"tier": {"type": "context", "size": 100000}, "input": 9}
     ]
-    both = ModelsDevPriceIndex.from_catalog(raw).resolve("google", "gemini-2.5-pro")
+    both = ModelsDevPriceIndex.from_document(raw).resolve("google", "gemini-2.5-pro")
     assert both is not None
     assert [t["min_input_tokens"] for t in both.pricing_tiers()] == [100000]
 
@@ -262,7 +262,7 @@ def test_unknown_model_is_none(index: ModelsDevPriceIndex) -> None:
 
 
 def test_malformed_catalog_entries_are_skipped() -> None:
-    index = ModelsDevPriceIndex.from_catalog(
+    index = ModelsDevPriceIndex.from_document(
         {
             "a": "nope",
             "b": {"id": "b", "models": []},
@@ -290,7 +290,7 @@ def test_index_is_immutable(index: ModelsDevPriceIndex) -> None:
 def _generation(day: int, input_rate: int, *, baseline: bool = False) -> PriceGeneration:
     catalog = {"p": {"id": "p", "models": {"m": {"id": "m", "cost": {"input": input_rate, "output": 1}}}}}
     return PriceGeneration(
-        datetime(2026, 1, day, tzinfo=UTC), ModelsDevPriceIndex.from_catalog(catalog), baseline=baseline
+        datetime(2026, 1, day, tzinfo=UTC), ModelsDevPriceIndex.from_document(catalog), baseline=baseline
     )
 
 
@@ -340,7 +340,7 @@ def test_as_of_with_no_generations_is_none() -> None:
 
 def _bedrock(*models: tuple[str, int]) -> ModelsDevPriceIndex:
     listing = {m: {"id": m, "cost": {"input": rate, "output": 1}} for m, rate in models}
-    return ModelsDevPriceIndex.from_catalog({"amazon-bedrock": {"id": "amazon-bedrock", "models": listing}})
+    return ModelsDevPriceIndex.from_document({"amazon-bedrock": {"id": "amazon-bedrock", "models": listing}})
 
 
 def test_bedrock_v2_is_never_priced_from_v1() -> None:
@@ -371,7 +371,7 @@ def test_bedrock_global_request_does_not_match_a_regional_listing() -> None:
 
 
 def test_vendor_walk_uses_only_a_head_that_is_a_provider() -> None:
-    index = ModelsDevPriceIndex.from_catalog(
+    index = ModelsDevPriceIndex.from_document(
         {
             "openai": {"id": "openai", "models": {"gpt-4.1": {"id": "gpt-4.1", "cost": {"input": 2, "output": 8}}}},
             "other": {"id": "other", "models": {"x.gpt-4.1": {"id": "x.gpt-4.1", "cost": {"input": 9, "output": 9}}}},
@@ -386,19 +386,19 @@ def test_agnostic_match_blocked_by_an_unpriced_listing() -> None:
         "a": {"id": "a", "models": {"m": {"id": "m", "cost": {"input": 1, "output": 1}}}},
         "b": {"id": "b", "models": {"m": {"id": "m"}}},
     }
-    assert ModelsDevPriceIndex.from_catalog(catalog).resolve("x", "m") is None
+    assert ModelsDevPriceIndex.from_document(catalog).resolve("x", "m") is None
 
 
 def test_agnostic_match_without_a_slash_in_the_canonical_id_is_one_candidate() -> None:
     catalog = {"a": {"id": "a", "models": {"m": {"id": "m", "canonical_model_id": "m", "cost": {"input": 1}}}}}
-    found = ModelsDevPriceIndex.from_catalog(catalog).resolve("x", "m")
+    found = ModelsDevPriceIndex.from_document(catalog).resolve("x", "m")
     assert found is not None
     assert found.provider_id == "a"
 
 
 def _tiers_for(cost: dict[str, Any]) -> list[dict[str, float | int]]:
     catalog = {"p": {"id": "p", "models": {"m": {"id": "m", "cost": {"input": 1, "output": 1, **cost}}}}}
-    found = ModelsDevPriceIndex.from_catalog(catalog).resolve("p", "m")
+    found = ModelsDevPriceIndex.from_document(catalog).resolve("p", "m")
     assert found is not None
     return found.pricing_tiers()
 

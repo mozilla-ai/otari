@@ -16,7 +16,7 @@ def _load() -> tuple[datetime, ModelsDevPriceIndex]:
     document = json.loads(resources.files("gateway").joinpath("data", BUNDLED_SNAPSHOT_NAME).read_text("utf-8"))
     meta = document.pop(_META_KEY, {})
     generated_at = datetime.fromisoformat(meta["generated_at"]).replace(tzinfo=UTC)
-    return generated_at, ModelsDevPriceIndex.from_catalog(document)
+    return generated_at, ModelsDevPriceIndex.from_document(document)
 
 
 def load_bundled_index() -> ModelsDevPriceIndex:

@@ -264,7 +264,7 @@ def test_model_context_window_reads_the_catalog() -> None:
 
 def test_as_of_prices_from_the_snapshot_in_force_then(install_models_dev: Install) -> None:
     """The rate follows the accepted snapshot in effect at the lookup time."""
-    old = ModelsDevPriceIndex.from_catalog(
+    old = ModelsDevPriceIndex.from_document(
         {"openai": {"id": "openai", "models": {"gpt-4.1": {"id": "gpt-4.1", "cost": {"input": 5, "output": 9}}}}}
     )
     new = install_models_dev(None)

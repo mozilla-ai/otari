@@ -160,9 +160,9 @@ async def test_a_catalog_pricing_no_model_is_not_stored(session: AsyncSession, u
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("rate", [-1, 2_000_000])
+@pytest.mark.parametrize("rate", [-1, 2_000_000, "0.5", True])
 async def test_an_implausible_rate_rejects_the_whole_catalog(
-    session: AsyncSession, upstream: dict[str, Any], rate: float
+    session: AsyncSession, upstream: dict[str, Any], rate: object
 ) -> None:
     upstream["catalog"]["test"]["models"]["other"] = {"id": "other", "cost": {"input": 1, "output": rate}}
     with pytest.raises(refresh.PricingRefreshError, match="implausible"):
