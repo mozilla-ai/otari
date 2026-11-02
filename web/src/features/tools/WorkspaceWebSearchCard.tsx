@@ -32,11 +32,10 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
 // The stored row has three states (allowed, blocked, none) and can also narrow
-// results and domains, and pin who runs a provider's own search and fetch. The
-// card shows the switch, which of its organization's keys the workspace
-// searches and fetches with, and who runs a provider's own tools, with the
-// narrowing and the provider's options under Advanced; the purpose hint is set
-// through the API.
+// results and domains, carry the workspace's provider options, and pin who runs
+// a provider's own search and fetch. The purpose hint is the one field set only
+// through the API. Which organization key the workspace uses is not in this
+// row: the key lists read and write the workspace's key routes.
 //
 // What "none" means is the deployment's `default_enabled`. Switching to that
 // value deletes a row that narrows nothing else, and any other change writes.
