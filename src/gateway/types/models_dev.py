@@ -4,6 +4,8 @@ models.dev (https://models.dev, MIT licensed) publishes what each provider serve
 model's modalities, flags, limits, prices and dates. The gateway reads it in three
 places, the metadata a listing shows, the price index and the stored price snapshot,
 and all three read it through this module, so a change upstream is one change here.
+The gateway also stores the whole typed catalog (:func:`catalog_document`), so a
+restart or an offline deployment still has the facts.
 
 models.dev publishes two documents. v2 is the full one, and v1 is a reduced copy
 made from it. Both read into the same types: the v2 reader fills every field the
@@ -17,11 +19,12 @@ snapshot is cut with the same rules as every snapshot the gateway stores.
 
 import math
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass, fields, is_dataclass
 from types import MappingProxyType
 from typing import Any
 
 __all__ = [
+    "CATALOG_FORMAT",
     "LISTING_PREFIX",
     "MAX_ISSUE_EXAMPLES",
     "MODELS_DEV_SOURCES",
@@ -42,10 +45,12 @@ __all__ = [
     "ModelsDevSource",
     "ModelsDevTier",
     "ModelsDevUnitPrice",
+    "catalog_document",
     "models_dev_provider_id",
     "models_dev_provider_ids",
     "parse_catalog",
     "parse_catalog_v2",
+    "read_catalog_document",
     "snapshot_document",
 ]
 
@@ -59,6 +64,11 @@ MAX_ISSUE_EXAMPLES = 5
 # 2026-11-02 the largest provider held about 7% of the catalog's models, so one
 # broken provider stays under it, while a format change upstream damages most.
 REFUSE_DAMAGED_SHARE = 0.25
+
+# The version of the stored catalog format, in ``_meta.format``. A document
+# without it is a price snapshot in the shape of a v1 ``api.json``.
+CATALOG_FORMAT = 2
+_META_KEY = "_meta"
 
 # A key longer than this is cut and quoted in an issue path.
 _MAX_SEGMENT = 64
@@ -888,3 +898,125 @@ def snapshot_document(catalog: ModelsDevCatalog) -> dict[str, Any]:
         entry["models"] = {model_key: _model_document(model_key, model) for model_key, model in provider.models.items()}
         document[key] = entry
     return document
+
+
+def _encoded(value: object) -> object:
+    """A catalog value as JSON: a dataclass without the fields left at their default, a tuple as a list."""
+    if is_dataclass(value) and not isinstance(value, type):
+        document: dict[str, object] = {}
+        for field in fields(value):
+            item = getattr(value, field.name)
+            if field.default is MISSING or item != field.default:
+                document[field.name] = _encoded(item)
+        return document
+    if isinstance(value, Mapping):
+        return {key: _encoded(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_encoded(item) for item in value]
+    return value
+
+
+def catalog_document(catalog: ModelsDevCatalog, **meta: object) -> dict[str, Any]:
+    """The catalog as JSON with every field it has, for :func:`read_catalog_document` to read back.
+
+    ``meta`` joins the format marker under ``_meta``.
+    """
+    document = _encoded(catalog)
+    assert isinstance(document, dict)
+    return {_META_KEY: {"format": CATALOG_FORMAT, **meta}, **document}
+
+
+def _load[T](cls: Callable[..., T], raw: object, **read: Callable[[Any], object]) -> T:
+    """``cls`` from a stored object: ``read`` reads each field that holds catalog types, and the rest read frozen."""
+    if not isinstance(raw, dict):
+        raise TypeError("expected an object")
+    return cls(**{name: read[name](value) if name in read else _frozen(value) for name, value in raw.items()})
+
+
+def _each[T](read: Callable[[Any], T]) -> Callable[[Any], tuple[T, ...]]:
+    return lambda raw: tuple(read(item) for item in raw)
+
+
+def _keyed[T](read: Callable[[Any], T]) -> Callable[[Any], Mapping[str, T]]:
+    return lambda raw: MappingProxyType({str(key): read(item) for key, item in raw.items()})
+
+
+def _stored_rates(raw: object) -> ModelsDevRates:
+    return _load(ModelsDevRates, raw)
+
+
+def _stored_tier(raw: object) -> ModelsDevTier:
+    return _load(ModelsDevTier, raw, rates=_stored_rates)
+
+
+def _stored_cost(raw: object) -> ModelsDevCost:
+    return _load(ModelsDevCost, raw, rates=_stored_rates, tiers=_each(_stored_tier), context_over_200k=_stored_rates)
+
+
+def _stored_cache(raw: object) -> ModelsDevCachePrices:
+    return _load(ModelsDevCachePrices, raw)
+
+
+def _stored_override(raw: object) -> ModelsDevOverride:
+    return _load(ModelsDevOverride, raw, cache=_stored_cache, explicit_cache=_stored_cache)
+
+
+def _stored_unit_price(raw: object) -> ModelsDevUnitPrice:
+    return _load(
+        ModelsDevUnitPrice, raw, cache=_stored_cache, explicit_cache=_stored_cache, overrides=_each(_stored_override)
+    )
+
+
+def _stored_modality(raw: object) -> ModelsDevModalityCost:
+    return _load(ModelsDevModalityCost, raw, input=_stored_unit_price, output=_stored_unit_price)
+
+
+def _stored_multiplier(raw: object) -> ModelsDevMultiplier:
+    return _load(ModelsDevMultiplier, raw)
+
+
+def _stored_pricing(raw: object) -> ModelsDevPricing:
+    return _load(
+        ModelsDevPricing,
+        raw,
+        modalities=_keyed(_stored_modality),
+        web_search=_stored_unit_price,
+        multipliers=_each(_stored_multiplier),
+    )
+
+
+def _stored_api(raw: object) -> ModelsDevApi:
+    return _load(ModelsDevApi, raw)
+
+
+def _stored_model(raw: object) -> ModelsDevModel:
+    return _load(ModelsDevModel, raw, cost=_stored_cost, api=_each(_stored_api), pricing=_stored_pricing)
+
+
+def _stored_provider(raw: object) -> ModelsDevProvider:
+    return _load(ModelsDevProvider, raw, models=_keyed(_stored_model))
+
+
+def _stored_issues(raw: object) -> ModelsDevIssues:
+    return _load(ModelsDevIssues, raw)
+
+
+def read_catalog_document(raw: object) -> ModelsDevCatalog:
+    """Read a document :func:`catalog_document` wrote, or an older price snapshot, which has no format marker.
+
+    The marker, not the shape, says which it is. A stored catalog is the
+    gateway's own copy, so it is read whole or not at all: anything this
+    version cannot read, a newer format included, raises ``ValueError``.
+    """
+    if not isinstance(raw, Mapping):
+        raise ValueError("The stored models.dev catalog is not a JSON object")
+    body = {key: value for key, value in raw.items() if key != _META_KEY}
+    meta = raw.get(_META_KEY)
+    if not isinstance(meta, Mapping) or "format" not in meta:
+        return parse_catalog(body)
+    if meta["format"] != CATALOG_FORMAT:
+        raise ValueError(f"The stored models.dev catalog has format {meta['format']!r}, not {CATALOG_FORMAT}")
+    try:
+        return _load(ModelsDevCatalog, body, providers=_keyed(_stored_provider), issues=_stored_issues)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(f"The stored models.dev catalog cannot be read: {type(exc).__name__}") from exc
