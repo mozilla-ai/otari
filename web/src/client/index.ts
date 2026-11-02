@@ -327,6 +327,10 @@ export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 // own search or fetch tool.
 export type OrgWebSearchKey = Schemas["OrgWebSearchKeyPublic"]
 export type OrgWebSearchKeys = Schemas["OrgWebSearchKeysPublic"]
+export type CreateOrgWebSearchKeyRequest =
+  Schemas["OrgWebSearchKeyCreateRequest"]
+export type UpdateOrgWebSearchKeyRequest =
+  Schemas["OrgWebSearchKeyUpdateRequest"]
 
 // The models an organization offers on one of those keys. `price_source` names
 // the rung of the pricing ladder that answered, in the vocabulary the Models

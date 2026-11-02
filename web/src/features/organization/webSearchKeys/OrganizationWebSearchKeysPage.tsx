@@ -1,8 +1,15 @@
 import { useState } from "react"
 import type { IconType } from "react-icons"
-import { FiArchive, FiRotateCcw, FiStar, FiTrash2 } from "react-icons/fi"
+import {
+  FiArchive,
+  FiEdit2,
+  FiRotateCcw,
+  FiStar,
+  FiTrash2,
+} from "react-icons/fi"
 
-import type { OrgWebSearchKey } from "@/client"
+import type { OrgWebSearchKey, SearchProviderInfo } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
@@ -19,6 +26,7 @@ import {
   useOrganizationContext,
   useProviderKeyEncryption,
 } from "@/shared/api/organizations"
+import { useSearchProviders } from "@/shared/api/tools"
 import {
   KEY_PAGE_LIMIT,
   useArchiveOrgWebSearchKey,
@@ -31,6 +39,7 @@ import {
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { formatNumber, formatRelative } from "@/shared/helpers/format"
 
+import { WebSearchKeyDialog } from "./WebSearchKeyDialog"
 import { KIND_COPY, keyForEveryWorkspace, keysOfKind } from "./webSearchKeys"
 
 // The organization's own search and fetch keys. A workspace uses the key it
@@ -53,6 +62,10 @@ function KeysTable({
   showArchived,
   isLoading,
   canEdit,
+  canAdd,
+  catalogLoaded,
+  onAdd,
+  onEdit,
   onDelete,
 }: {
   kind: WebToolKind
@@ -60,6 +73,11 @@ function KeysTable({
   showArchived: boolean
   isLoading: boolean
   canEdit: boolean
+  canAdd: boolean
+  /** The dialog seeds its fields from the provider catalog, so it opens only once that has loaded. */
+  catalogLoaded: boolean
+  onAdd: () => void
+  onEdit: (key: OrgWebSearchKey) => void
   onDelete: (key: OrgWebSearchKey) => void
 }) {
   const copy = KIND_COPY[kind]
@@ -182,6 +200,13 @@ function KeysTable({
                   )
                 }
               />
+              <RowAction
+                icon={FiEdit2}
+                label="Edit"
+                ariaLabel={`Edit ${row.name}`}
+                isDisabled={!catalogLoaded}
+                onPress={() => onEdit(row)}
+              />
               {/* Reversible, and the step the API requires before a delete. It
                   also stops the key being used for every workspace. */}
               <ConfirmRowAction
@@ -203,6 +228,20 @@ function KeysTable({
       title={copy.title}
       count={isLoading ? undefined : live.length}
       description={copy.serves}
+      action={
+        canEdit ? (
+          <Button
+            variant="primary"
+            className="min-h-11 md:min-h-9"
+            // Disabled without a server secret key, which the banner above
+            // explains, and until the provider catalog loads.
+            isDisabled={!canAdd || !catalogLoaded}
+            onPress={onAdd}
+          >
+            {`Add ${copy.noun}`}
+          </Button>
+        ) : null
+      }
     >
       <ErrorBanner
         error={
@@ -243,12 +282,25 @@ export function OrganizationWebSearchKeysPage() {
   // Without OTARI_SECRET_KEY the gateway cannot encrypt a key, so an add would
   // fail at submit.
   const secretKeyConfigured = useProviderKeyEncryption()
+  const searchCatalog = useSearchProviders("search", canEdit)
+  const fetchCatalog = useSearchProviders("fetch", canEdit)
+  const catalogs: Record<WebToolKind, SearchProviderInfo[] | undefined> = {
+    search: searchCatalog.data,
+    fetch: fetchCatalog.data,
+  }
   const remove = useDeleteOrgWebSearchKey()
 
+  // Bumped on each open, and the add dialog is keyed on it, so its draft (the
+  // secret included) is fresh every time and untouched through the exit.
+  const [adding, setAdding] = useState(false)
+  const [addKind, setAddKind] = useState<WebToolKind>("search")
+  const [addOpenCount, setAddOpenCount] = useState(0)
+  const [editingId, setEditingId] = useState<string>()
   const [showArchived, setShowArchived] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<OrgWebSearchKey>()
 
   const all = keys.data?.data ?? []
+  const editing = all.find((key) => key.id === editingId)
   const archivedCount = all.filter((key) => Boolean(key.archived_at)).length
   // An archived key is out of use, so it is not a problem to report.
   const unreadableCount = all.filter(
@@ -267,7 +319,14 @@ export function OrganizationWebSearchKeysPage() {
         again.
       </PageIntro>
 
-      <ErrorBanner error={context.error ?? keys.error} />
+      <ErrorBanner
+        error={
+          context.error ??
+          keys.error ??
+          searchCatalog.error ??
+          fetchCatalog.error
+        }
+      />
 
       {keys.data && keys.data.count > keys.data.data.length ? (
         <InfoBanner>
@@ -287,7 +346,8 @@ export function OrganizationWebSearchKeysPage() {
       {canEdit && !secretKeyConfigured ? (
         <InfoBanner tone="warning">
           <code>OTARI_SECRET_KEY</code> is not set, so keys can&rsquo;t be
-          encrypted at rest. Set it on the server and restart.
+          encrypted at rest and adding one from the dashboard is disabled. Set
+          it on the server and restart.
         </InfoBanner>
       ) : null}
 
@@ -297,11 +357,8 @@ export function OrganizationWebSearchKeysPage() {
             ? "One key can't be decrypted on this deployment, so every call passes over it."
             : `${unreadableCount} keys can't be decrypted on this deployment, so every call passes over them.`}{" "}
           This happens when <code>OTARI_SECRET_KEY</code> changed since they
-          were stored. Store each one&rsquo;s API key again, with{" "}
-          <code>
-            PATCH /api/v1/organizations/me/web-search-keys/&#123;key_id&#125;
-          </code>{" "}
-          and an <code>api_key</code>, to encrypt it under the current one.
+          were stored. Edit each one and enter its API key again to encrypt it
+          under the current one.
         </InfoBanner>
       ) : null}
 
@@ -322,10 +379,36 @@ export function OrganizationWebSearchKeysPage() {
               showArchived={showArchived}
               isLoading={context.isPending || keys.isLoading}
               canEdit={canEdit}
+              canAdd={secretKeyConfigured}
+              catalogLoaded={catalogs[kind] !== undefined}
+              onAdd={() => {
+                setAddKind(kind)
+                setAddOpenCount((count) => count + 1)
+                setAdding(true)
+              }}
+              onEdit={(key) => setEditingId(key.id)}
               onDelete={setPendingDelete}
             />
           ))
         : null}
+
+      <WebSearchKeyDialog
+        key={`${addKind}-${addOpenCount}`}
+        kind={addKind}
+        providers={catalogs[addKind] ?? []}
+        isOpen={adding}
+        onClose={() => setAdding(false)}
+      />
+      {editing && catalogs[editing.kind] ? (
+        // Remounted per key, since the draft is seeded once.
+        <WebSearchKeyDialog
+          key={editing.id}
+          kind={editing.kind}
+          editing={editing}
+          providers={catalogs[editing.kind] ?? []}
+          onClose={() => setEditingId(undefined)}
+        />
+      ) : null}
 
       <ConfirmDialog
         isOpen={pendingDelete !== undefined}

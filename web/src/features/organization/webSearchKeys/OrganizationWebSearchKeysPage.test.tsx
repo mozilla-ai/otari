@@ -3,10 +3,18 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationContext, OrgWebSearchKey } from "@/client"
+import type {
+  OrganizationContext,
+  OrgWebSearchKey,
+  SearchProviderInfo,
+} from "@/client"
 import { OrganizationWebSearchKeysPage } from "@/features/organization/webSearchKeys/OrganizationWebSearchKeysPage"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { pickOption } from "@/tests/select"
+
+const KEYS = `${API_ROOT}/organizations/me/web-search-keys`
 
 function key(overrides: Partial<OrgWebSearchKey> = {}): OrgWebSearchKey {
   return {
@@ -27,6 +35,57 @@ function key(overrides: Partial<OrgWebSearchKey> = {}): OrgWebSearchKey {
   }
 }
 
+const SEARCH_CATALOG: SearchProviderInfo[] = [
+  {
+    id: "exa",
+    kind: "search",
+    requires_api_key: true,
+    requires_api_base: false,
+    default_api_base: "https://api.exa.ai",
+    tier: "production",
+    options: [
+      {
+        name: "type",
+        type: "string",
+        enum: ["auto", "fast"],
+        default: "auto",
+        description: "How Exa searches.",
+        operator_only: false,
+      },
+    ],
+  },
+  {
+    id: "mojeek",
+    kind: "search",
+    requires_api_key: true,
+    requires_api_base: false,
+    default_api_base: "https://api.mojeek.com",
+    tier: "production",
+    options: [],
+  },
+  // Listed with no tier, as the catalog lists a provider no library serves.
+  {
+    id: "searxng",
+    kind: "search",
+    requires_api_key: false,
+    requires_api_base: true,
+    tier: null,
+    options: null,
+  },
+]
+
+const FETCH_CATALOG: SearchProviderInfo[] = [
+  {
+    id: "tabstack",
+    kind: "fetch",
+    requires_api_key: true,
+    requires_api_base: false,
+    tier: "production",
+    options: [],
+    reports_final_url: false,
+  },
+]
+
 interface Request {
   url: string
   method: string
@@ -45,6 +104,8 @@ function mockApi(
     keys?: OrgWebSearchKey[]
     context?: OrganizationContext
     count?: number
+    patchFails?: boolean
+    catalogFails?: boolean
   } = {},
 ) {
   const keys = opts.keys ?? []
@@ -57,9 +118,29 @@ function mockApi(
       method,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
+    if (url.includes("/search-tools/providers")) {
+      if (opts.catalogFails) {
+        return jsonResponse(
+          { detail: "The provider catalog is unavailable." },
+          503,
+        )
+      }
+      return jsonResponse(
+        url.includes("kind=fetch") ? FETCH_CATALOG : SEARCH_CATALOG,
+      )
+    }
     if (url.includes("/web-search-keys")) {
       if (method === "GET") {
         return jsonResponse({ count: opts.count ?? keys.length, data: keys })
+      }
+      if (method === "PATCH" && opts.patchFails) {
+        return jsonResponse(
+          {
+            detail:
+              "Moving this key to another api_base needs its api_key in the same request.",
+          },
+          400,
+        )
       }
       if (method === "DELETE" && !url.endsWith("/default")) {
         return new Response(null, { status: 204 })
@@ -163,6 +244,117 @@ describe("OrganizationWebSearchKeysPage", () => {
     ).toContain("include_archived=true&limit=1000")
   })
 
+  it("adds a key on a provider the catalog offers, leaving out one no library serves", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add search provider" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: /Provider/ }))
+    expect(screen.getByRole("option", { name: "exa" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "searxng" })).toBeNull()
+    await user.click(screen.getByRole("option", { name: "exa" }))
+    await user.type(within(dialog).getByLabelText(/^Name/), "AAA")
+    await user.type(within(dialog).getByLabelText(/API key/), "exa-secret")
+    await user.click(
+      within(dialog).getByRole("button", { name: "More settings for exa" }),
+    )
+    await pickOption(user, "type", "fast", dialog)
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add search provider" }),
+    )
+
+    await waitFor(() => expect(writes(requests, "POST", KEYS)).toHaveLength(1))
+    expect(writes(requests, "POST", KEYS)[0].body).toEqual({
+      kind: "search",
+      provider: "exa",
+      name: "AAA",
+      api_key: "exa-secret",
+      api_base: null,
+      options: { type: "fast" },
+    })
+  })
+
+  it("edits a key by sending only what changed, and asks for the key again for a new URL", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ keys: [key({ options: { type: "auto" } })] })
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit AAA" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: "More settings for exa" }),
+    )
+    await user.type(
+      within(dialog).getByLabelText(/API base URL/),
+      "https://search.acme.example",
+    )
+    expect(
+      within(dialog).getByText(
+        "Enter the API key again: it goes to the new URL.",
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled()
+    await user.type(within(dialog).getByLabelText(/API key/), "exa-rotated")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    const path =
+      "/organizations/me/web-search-keys/77777777-7777-7777-7777-777777777777"
+    await waitFor(() => expect(writes(requests, "PATCH", path)).toHaveLength(1))
+    expect(writes(requests, "PATCH", path)[0].body).toEqual({
+      api_key: "exa-rotated",
+      api_base: "https://search.acme.example",
+    })
+  })
+
+  it("shows the gateway's refusal in the dialog", async () => {
+    const user = userEvent.setup()
+    mockApi({ keys: [key()], patchFails: true })
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit AAA" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.clear(within(dialog).getByLabelText(/^Name/))
+    await user.type(within(dialog).getByLabelText(/^Name/), "renamed")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    expect(
+      await within(dialog).findByText(/needs its api_key in the same request/),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps adding and editing closed, and says why, while the provider catalog cannot load", async () => {
+    mockApi({ keys: [key()], catalogFails: true })
+    await renderPage()
+
+    expect(
+      await screen.findByText("The provider catalog is unavailable."),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Add search provider" }),
+    ).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Edit AAA" })).toBeDisabled()
+  })
+
+  it("edits only the name and secret of a key on a provider the catalog does not list", async () => {
+    const user = userEvent.setup()
+    mockApi({ keys: [key({ provider: "tavily", name: "old" })] })
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit old" }))
+    const dialog = await screen.findByRole("dialog")
+
+    expect(
+      within(dialog).getByText(/runs on the older search code/),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).queryByRole("button", { name: /More settings/ }),
+    ).toBeNull()
+  })
+
   it("sets a key as workspace default, and unsets it", async () => {
     const user = userEvent.setup()
     const requests = mockApi({
@@ -264,7 +456,7 @@ describe("OrganizationWebSearchKeysPage", () => {
     ).toBe(false)
   })
 
-  it("warns when the gateway cannot encrypt a key", async () => {
+  it("disables adding when the gateway cannot encrypt a key", async () => {
     mockApi({
       context: organizationContext({
         provider_key_encryption_available: false,
@@ -275,5 +467,8 @@ describe("OrganizationWebSearchKeysPage", () => {
     expect(
       await screen.findByText(/is not set, so keys can.t be encrypted/),
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Add search provider" }),
+    ).toBeDisabled()
   })
 })
