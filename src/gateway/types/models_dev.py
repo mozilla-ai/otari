@@ -43,6 +43,7 @@ __all__ = [
     "ModelsDevTier",
     "ModelsDevUnitPrice",
     "models_dev_provider_id",
+    "models_dev_provider_ids",
     "parse_catalog",
     "parse_catalog_v2",
     "snapshot_document",
@@ -83,9 +84,22 @@ _MODELS_DEV_PROVIDER_IDS: dict[str, str] = {
 }
 
 
+# A provider whose models models.dev moved under another one. v2 lists Vertex's
+# Claude models under ``google-vertex``, where v1 and the snapshots cut from it
+# keep ``google-vertex-anthropic``.
+_MODELS_DEV_MOVED_PROVIDERS: dict[str, str] = {"google-vertex-anthropic": "google-vertex"}
+
+
 def models_dev_provider_id(provider_type: str) -> str:
     """The models.dev provider id for an any-llm implementation."""
     return _MODELS_DEV_PROVIDER_IDS.get(provider_type, provider_type)
+
+
+def models_dev_provider_ids(provider_type: str) -> tuple[str, ...]:
+    """Every models.dev provider id an any-llm implementation's models may be under, in the order to try them."""
+    first = models_dev_provider_id(provider_type)
+    moved = _MODELS_DEV_MOVED_PROVIDERS.get(first)
+    return (first,) if moved is None else (first, moved)
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,17 +327,17 @@ class ModelsDevCatalog:
 
     def provider_for(self, provider_type: str) -> ModelsDevProvider | None:
         """The provider an any-llm implementation name is listed under."""
-        return self.providers.get(models_dev_provider_id(provider_type))
+        ids = models_dev_provider_ids(provider_type)
+        return next((self.providers[key] for key in ids if key in self.providers), None)
 
     def model_for(self, provider_type: str, model_id: str) -> ModelsDevModel | None:
         """The model ``model_id`` names under an any-llm implementation, by its listing id or its bare one."""
-        provider = self.provider_for(provider_type)
-        if provider is None:
-            return None
-        model = provider.models.get(model_id)
-        if model is None and model_id.startswith(LISTING_PREFIX):
-            model = provider.models.get(model_id.removeprefix(LISTING_PREFIX))
-        return model
+        names = (model_id, model_id.removeprefix(LISTING_PREFIX))
+        for key in models_dev_provider_ids(provider_type):
+            models = self.providers[key].models if key in self.providers else {}
+            if (model := next((models[name] for name in names if name in models), None)) is not None:
+                return model
+        return None
 
 
 def _number(value: object) -> float | None:

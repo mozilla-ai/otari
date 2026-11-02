@@ -17,6 +17,7 @@ from gateway.types.models_dev import (
     ModelsDevRates,
     ModelsDevTier,
     models_dev_provider_id,
+    models_dev_provider_ids,
     parse_catalog,
     snapshot_document,
 )
@@ -270,6 +271,19 @@ def test_model_for_maps_the_any_llm_name_and_the_listing_prefix(catalog: ModelsD
     assert catalog.model_for("gemini", "models/gemini-9") is None
     assert catalog.model_for("mystery", "gemini-2.5-pro") is None
     assert catalog.provider_for("gemini") is catalog.providers["google"]
+
+
+def test_vertex_claude_is_found_where_v2_lists_it_and_where_v1_does() -> None:
+    """v2 moved Vertex's Claude models under ``google-vertex``; v1 and older snapshots keep them apart."""
+    assert models_dev_provider_ids("vertexaianthropic") == ("google-vertex-anthropic", "google-vertex")
+    assert models_dev_provider_ids("gemini") == ("google",)
+    claude = "claude-sonnet-4-5@20250929"
+    for provider in ("google-vertex-anthropic", "google-vertex"):
+        catalog = parse_catalog({provider: {"models": {claude: {"name": "Claude"}}}})
+        assert catalog.provider_for("vertexaianthropic") is catalog.providers[provider]
+        assert catalog.model_for("vertexaianthropic", claude) is catalog.providers[provider].models[claude]
+    both = parse_catalog({"google-vertex-anthropic": {"models": {}}, "google-vertex": {"models": {claude: {}}}})
+    assert both.model_for("vertexaianthropic", claude) is both.providers["google-vertex"].models[claude]
 
 
 def test_models_walks_every_model_with_its_provider(catalog: ModelsDevCatalog) -> None:
