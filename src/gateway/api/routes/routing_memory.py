@@ -48,7 +48,7 @@ from typing import Annotated
 
 from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,6 +67,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.routing import RouterPreference, RoutingMemory
 from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
+from gateway.schemas.routing import KeyRankRequest, RankRequest, ScoredExample
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing import KNN_BACKEND, KnnRoutingMemory, backend_pool_is_teachable, get_router_backend
@@ -81,94 +82,6 @@ key_router = APIRouter(
     tags=["routing"],
     dependencies=[Depends(verify_api_key)],
 )
-
-# One request may not teach more than this. Each example costs an embedding call,
-# so a batch is a loop with a bound rather than an unbounded fan-out.
-MAX_EXAMPLES_PER_REQUEST = 100
-
-
-class ScoredExample(BaseModel):
-    """One prompt and how well each candidate answered it."""
-
-    prompt: str = Field(min_length=1, description="The prompt that was tried.")
-
-    @field_validator("prompt")
-    @classmethod
-    def _prompt_has_content(cls, value: str) -> str:
-        """Refuse a blank prompt rather than counting it and storing nothing.
-
-        ``record_preference`` returns 0 for a prompt with no content, so a
-        whitespace-only one wrote an audit row, no routing-memory row, and a
-        ``recorded`` count that silently disagreed with both.
-        """
-        if not value.strip():
-            raise ValueError("prompt cannot be blank")
-        return value
-
-    @field_validator("task_id")
-    @classmethod
-    def _normalize_task_id(cls, value: str | None) -> str | None:
-        """Trim the partition label, and treat blank as absent.
-
-        The request side already does this: ``Otari-Router-Task`` is trimmed and a
-        blank header means the default pool. Storing `" support "` verbatim created a
-        partition that ``Otari-Router-Task: support`` could never reach, and
-        ``/status`` listed it as a real pool.
-        """
-        if value is None:
-            return None
-        trimmed = value.strip()
-        return trimmed or None
-
-    scores: dict[str, Annotated[float, Field(ge=0.0, le=1.0)]] = Field(
-        min_length=1,
-        description=(
-            "Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and "
-            "meaningful: two models that both answered well is exactly the case where the router "
-            "should take the cheaper one."
-        ),
-    )
-    task_id: str | None = Field(
-        default=None,
-        description=(
-            "Partition this example belongs to, matching the Otari-Router-Task header requests send. "
-            "Omit to file it in the user's default pool."
-        ),
-    )
-    label_source: str = Field(default="human", description="Provenance of the scores: 'human' or 'judge'.")
-
-
-class _ScoredBatch(BaseModel):
-    """Record how well each candidate did, for one or many prompts.
-
-    A batch because of the arithmetic: a pool routes nothing until it holds
-    ``router_seed_count`` examples (20 by default) and the vote reads the ``k``
-    nearest (5 by default), so a useful first teaching pass is dozens of examples
-    across the kinds of prompt you care about.
-    """
-
-    examples: list[ScoredExample] = Field(
-        min_length=1,
-        max_length=MAX_EXAMPLES_PER_REQUEST,
-        description="The scored prompts to record.",
-    )
-
-
-class RankRequest(_ScoredBatch):
-    user_id: str = Field(description="Whose routing memory these examples belong to.")
-    workspace_id: uuid.UUID | None = Field(
-        default=None,
-        description=(
-            "Which workspace's routing memory these examples belong to. Omit for the deployment's "
-            "default workspace. Only requests billing to that workspace vote over them."
-        ),
-    )
-
-
-class KeyRankRequest(_ScoredBatch):
-    # Forbidden rather than ignored: a `user_id` copied from the operator route
-    # would otherwise be dropped silently and the examples filed under the key's user.
-    model_config = ConfigDict(extra="forbid")
 
 
 class RecordedPool(BaseModel):
@@ -406,7 +319,7 @@ async def rank_candidates(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> RankResponse:
-    """Record scored examples into ``user_id``'s memory: one routing-memory record each, plus an audit row.
+    """Record scored examples: one routing-memory record each, plus an audit row.
 
     The routing-memory record is written before its audit row for each example,
     because it is the load-bearing one (the router votes over it) and embedding it

@@ -5406,7 +5406,7 @@ export interface paths {
         put?: never;
         /**
          * Rank Candidates
-         * @description Record scored examples into ``user_id``'s memory: one routing-memory record each, plus an audit row.
+         * @description Record scored examples: one routing-memory record each, plus an audit row.
          *
          *     The routing-memory record is written before its audit row for each example,
          *     because it is the load-bearing one (the router votes over it) and embedding it
