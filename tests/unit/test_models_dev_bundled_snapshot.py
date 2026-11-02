@@ -79,7 +79,8 @@ def test_the_bundled_snapshot_prices_well_known_models() -> None:
 
 def test_the_bundled_snapshot_stays_small_and_carries_only_price_fields() -> None:
     raw = resources.files("gateway").joinpath("data", "models_dev_pricing.json").read_text("utf-8")
-    assert len(raw.encode()) < 1_500_000
+    # About 1.7 MB on 2026-11-02, for 9,311 models; a snapshot that kept every field would be 6 MB or more.
+    assert len(raw.encode()) < 2_000_000
     document = json.loads(raw)
     assert document["_meta"]["generated_at"]
     allowed = {"id", "name", "cost", "limit", "canonical_model_id", "status"}
