@@ -1,17 +1,19 @@
 /**
  * The rules the organization's Web search providers page shows, kept apart
- * from the rendering so they can be tested without mounting it: which keys a
- * table lists, and what a workspace without a pin uses.
+ * from the rendering so they can be tested without mounting it: which
+ * providers a new key may name, which keys a table lists, and what a workspace
+ * without a pin uses.
  */
 
-import type { OrgWebSearchKey } from "@/client"
-import type { WebToolKind } from "@/features/webSearch/webTools"
+import type { OrgWebSearchKey, SearchProviderInfo } from "@/client"
+import { servesTheModel, type WebToolKind } from "@/features/webSearch/webTools"
 
 export const KIND_COPY: Readonly<
   Record<
     WebToolKind,
     {
       title: string
+      noun: string
       serves: string
       empty: string
       useForEveryWorkspace: string
@@ -20,6 +22,7 @@ export const KIND_COPY: Readonly<
 > = {
   search: {
     title: "Search providers",
+    noun: "search provider",
     serves: "What the model's web searches and the search API run on.",
     empty: "No search keys. Workspaces search with this deployment's own tool.",
     useForEveryWorkspace:
@@ -27,12 +30,24 @@ export const KIND_COPY: Readonly<
   },
   fetch: {
     title: "Fetch providers",
+    noun: "fetch provider",
     serves:
       "What the model's fetches run on, and the pages a search reads for its results.",
     empty: "No fetch keys. Workspaces fetch with this deployment's own tool.",
     useForEveryWorkspace:
       "With no workspace default, workspaces fetch with this deployment's own tool, unless their admins pin a key.",
   },
+}
+
+/**
+ * The providers a new key may name: the catalog's, less those no library
+ * serves. The catalog lists `searxng` with no tier, and the gateway refuses a
+ * key on it.
+ */
+export function offeredProviders(
+  catalog: readonly SearchProviderInfo[],
+): SearchProviderInfo[] {
+  return catalog.filter(servesTheModel)
 }
 
 /** One kind's keys, archived ones only when they are shown. */

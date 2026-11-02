@@ -5,7 +5,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 
-import type { OrgWebSearchKey, OrgWebSearchKeys } from "@/client"
+import type {
+  CreateOrgWebSearchKeyRequest,
+  OrgWebSearchKey,
+  OrgWebSearchKeys,
+  UpdateOrgWebSearchKeyRequest,
+} from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import {
   ORGANIZATION_WEB_SEARCH_KEYS,
@@ -50,6 +55,36 @@ function invalidateKeys(queryClient: QueryClient): void {
 
 function keyPath(keyId: string, action = ""): string {
   return `/organizations/me/web-search-keys/${encodeURIComponent(keyId)}${action}`
+}
+
+export function useCreateOrgWebSearchKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrgWebSearchKeyRequest) =>
+      apiFetch<OrgWebSearchKey>("/organizations/me/web-search-keys", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateKeys(queryClient),
+  })
+}
+
+export function useUpdateOrgWebSearchKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      keyId,
+      body,
+    }: {
+      keyId: string
+      body: UpdateOrgWebSearchKeyRequest
+    }) =>
+      apiFetch<OrgWebSearchKey>(keyPath(keyId), {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateKeys(queryClient),
+  })
 }
 
 /** A `POST` or `DELETE` on one key's action route, answered with the key. */

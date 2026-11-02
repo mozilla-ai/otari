@@ -122,8 +122,13 @@ The organization view contains tenant-wide administration:
   in the deployment view, or in `config.yml`.
 
   Web search is the organization's own search and fetch keys, in one table per
-  kind. The star on a key sets it as the workspace default, the key every
-  workspace uses unless it pins another, and clicking a filled star unsets it. A
+  kind. Adding a key asks for its provider first, from the providers the
+  search and fetch libraries serve, and then for what that provider needs: a
+  name, the API key, and under More settings an endpoint of its own and the
+  provider's options. Editing a key never shows its secret; moving it to
+  another endpoint needs the API key entered again. The star on a key sets it
+  as the workspace default, the key every workspace uses unless it pins
+  another, and clicking a filled star unsets it. A
   workspace uses the key its owners or admins pinned, otherwise the starred
   key, otherwise the deployment's own search or fetch tool, so a key added and
   not starred changes nothing until a workspace pins it. Archiving a key takes
