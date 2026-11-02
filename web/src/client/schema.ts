@@ -12923,7 +12923,7 @@ export interface components {
             object: "tool";
             /**
              * Reason
-             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: the deployment has not enabled or configured it, which only its operator can change. `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
+             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
              */
             reason?: ("not_configured" | "workspace_disabled") | null;
         };

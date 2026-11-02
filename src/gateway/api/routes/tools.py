@@ -31,9 +31,8 @@ from gateway.api.deps import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
-from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError
 from gateway.models.api_keys import APIKey
-from gateway.services.sandbox_backend import SERVED_TOOL_NAMES, code_execution_tool_definition
+from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.tools import (
     Tool,
     code_execution_declaration_forms,
@@ -75,9 +74,10 @@ class ManagedTool(BaseModel):
         default=None,
         description=(
             "Why the tool is unavailable, `null` when it is available. `not_configured`: "
-            "the deployment has not enabled or configured it, which only its operator can "
-            "change. `workspace_disabled`: the API key's workspace does not allow it, which "
-            "a workspace admin changes under Tools in the dashboard."
+            "nothing is set up to run it (for web search, neither the deployment nor the API "
+            "key's organization has a search provider). `workspace_disabled`: the API key's "
+            "workspace does not allow it, which a workspace admin changes under Tools in the "
+            "dashboard."
         ),
     )
     accepted_types: list[str] = Field(
@@ -107,6 +107,8 @@ class _WorkspaceSwitches:
 
     web: bool = True
     code_execution: bool = True
+    # Whether an organization search key serves the workspace's searches where the deployment has none.
+    search_key: bool = False
 
 
 async def _workspace_switches(
@@ -117,17 +119,12 @@ async def _workspace_switches(
     """The switches the request path applies to ``api_key``'s workspace, all on without a key."""
     if api_key is None:
         return _WorkspaceSwitches()
-    try:
-        web_policy = await web_policies.resolve(api_key.workspace_id, ())
-        web = web_policy is None or web_policy.enabled
-    except WebSearchPolicyResolutionFailedError:
-        # The request path refuses every web declaration of a workspace whose stored row is invalid.
-        web = False
-    code_policy = await code_execution_policies.for_request(api_key.workspace_id)
-    code_execution = code_policy is None or (
-        code_policy.enabled and (code_policy.tools is None or bool(code_policy.tools & set(SERVED_TOOL_NAMES)))
+    web, search_key = await web_policies.access(api_key.workspace_id)
+    return _WorkspaceSwitches(
+        web=web,
+        code_execution=await code_execution_policies.allows_sandbox(api_key.workspace_id),
+        search_key=search_key,
     )
-    return _WorkspaceSwitches(web=web, code_execution=code_execution)
 
 
 def _reason(configured: bool, workspace_allows: bool) -> ToolUnavailableReason | None:
@@ -144,7 +141,7 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
     # provider needs no URL, so deriving this from sandbox_url would publish
     # "unavailable" for a deployment that runs code perfectly well.
     sandbox_configured = config.sandbox_configured()
-    can_web_search = web_search_configured(config)
+    can_web_search = web_search_configured(config) or switches.search_key
     return [
         ManagedTool(
             id=Tool.WEB_FETCH,

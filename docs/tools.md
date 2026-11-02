@@ -21,8 +21,9 @@ curl http://localhost:8000/api/v1/tools \
 ```
 
 Unavailable but recognized tools remain in the response with
-`"available": false` and a `reason`: `not_configured` when the deployment has
-not set the tool up, or `workspace_disabled` when the API key's workspace does
+`"available": false` and a `reason`: `not_configured` when nothing is set up
+to run the tool (for web search, an organization search key counts for an API
+key on that organization), or `workspace_disabled` when the API key's workspace does
 not allow it (a workspace admin turns it on under Tools in the dashboard). A
 master key or a dashboard session belongs to no single workspace, so its
 answer reflects the deployment alone.

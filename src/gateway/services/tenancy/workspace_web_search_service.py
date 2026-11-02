@@ -324,6 +324,19 @@ class WorkspaceWebSearchPolicies:
             return policy
         return replace(policy or _NO_NARROWING, credential=keys.search, fetch_credential=keys.fetch)
 
+    async def access(self, workspace_id: uuid.UUID) -> tuple[bool, bool]:
+        """Whether the workspace's requests may declare the web tools, and whether its own key serves a search.
+
+        As ``(allowed, has_search_key)``, read as :meth:`resolve` and admission read them. A stored row
+        that is invalid refuses every web declaration, so it reads as not allowed.
+        """
+        try:
+            policy = await resolve_workspace_web_search_config(self._db, workspace_id)
+        except InvalidStoredWebSearchDomainError:
+            return False, False
+        allowed = policy.enabled if policy is not None else self._on_without_policy
+        return allowed, await self._search_keys.has_search_key(workspace_id)
+
     async def executors(self, workspace_id: uuid.UUID) -> tuple[CodeExecutor | None, CodeExecutor | None]:
         """Who the workspace pinned to run a provider's own search and fetch keywords, ``None`` where it did not.
 

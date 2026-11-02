@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.services.secret_box import generate_secret_key
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
@@ -119,3 +120,56 @@ def test_an_unconfigured_tool_says_so_whatever_the_workspace_allows(
     monkeypatch.delenv("OTARI_SANDBOX_URL")
 
     assert _status(_tools(client, api_key_header))["otari_code_execution"] == (False, "not_configured")
+
+
+def _add_org_search_key(client: TestClient, master_key_header: dict[str, str]) -> None:
+    created = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys",
+        json={"provider": "tavily", "name": "ours", "api_key": "tvly-org-secret"},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+
+
+def test_an_organization_search_key_serves_where_the_deployment_has_no_search(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The request path searches on the organization's key, so the key's answer counts it; the master key's does not."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    assert _status(_tools(client, api_key_header))["otari_web_search"] == (False, "not_configured")
+
+    _add_org_search_key(client, master_key_header)
+
+    assert _status(_tools(client, api_key_header))["otari_web_search"] == (True, None)
+    assert _status(_tools(client, master_key_header))["otari_web_search"] == (False, "not_configured")
+
+
+def test_an_organization_search_key_does_not_override_the_workspace_switch(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _add_org_search_key(client, master_key_header)
+    _put(client, master_key_header, "web-search", {"enabled": False})
+
+    assert _status(_tools(client, api_key_header))["otari_web_search"] == (False, "workspace_disabled")
+
+
+def test_a_policy_whose_tool_list_leaves_nothing_to_run_reads_as_disabled(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admission refuses a policy whose stored ``tools`` the sandbox no longer serves, so the catalog does too."""
+    _put(client, master_key_header, "code-execution-policy", {"enabled": True, "tools": ["code_execution"]})
+    monkeypatch.setattr("gateway.services.tools._code_execution_policy.SERVED_TOOL_NAMES", ("something_else",))
+
+    assert _status(_tools(client, api_key_header))["otari_code_execution"] == (False, "workspace_disabled")
