@@ -34,6 +34,7 @@ from gateway.services.health_checks._alerts import (
 from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome, probe_all
 from gateway.services.health_checks._summary import FailureStreak, failure_streaks, summarize
 from gateway.services.mail import Mailer
+from gateway.services.upstream_redaction import redact_upstream_message
 
 # Results are kept this long, which is what the page's history shows.
 RETENTION = timedelta(hours=48)
@@ -45,6 +46,8 @@ ABANDONED_AFTER = timedelta(hours=1)
 # Where an alert links to, the dashboard route of the Health page.
 HEALTH_PAGE = "/#/health-checks"
 HOSTED_PROVIDERS_PAGE = "/#/admin/hosted-providers"
+# A provider's refusal is mailed to the alert list, so capped like a health check's error.
+_REFUSAL_LIMIT = 300
 
 
 ListOfferings = Callable[[], Awaitable[Sequence[HealthCheckOffering]]]
@@ -56,6 +59,12 @@ class HostedRoster(Protocol):
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]: ...
 
     async def switch_off_models(self, models: Mapping[str, Collection[str]]) -> int: ...
+
+    async def switch_off_unavailable(self, provider: str, model: str) -> bool: ...
+
+
+def _capped(refusal: str) -> str:
+    return refusal if len(refusal) <= _REFUSAL_LIMIT else refusal[: _REFUSAL_LIMIT - 1] + "…"
 
 
 def _model_of(result: HealthCheckResult) -> str:
@@ -283,11 +292,24 @@ class HealthCheckService:
         await self._alert(run_id, outcomes, {offering.selector for offering in offerings}, finished)
         return public
 
-    async def alert_unavailable(self, selector: str, refusal: str) -> None:
-        """Email the alert list that ``selector`` was switched off, with the provider's refusal.
+    async def switch_off_unavailable(self, provider: str, model: str, refusal: str) -> bool:
+        """Switch ``provider:model`` off because its provider refused to serve it, and email the alert list.
 
-        ``refusal`` is mailed as given, so it is redacted before it gets here.
+        Called only for a refusal met on the deployment's own credential: what an
+        organization's key may reach says nothing about the deployment's. The
+        alert goes out once, from the call that switched the model off, with the
+        provider's ``refusal`` redacted and capped. Returns whether this call
+        switched it off.
         """
+        if not await self._hosted.switch_off_unavailable(provider, model):
+            return False
+        selector = f"{provider}:{model}"
+        # codeql[py/clear-text-logging-sensitive-data]
+        logger.warning("Switched off hosted model %s: its provider refused to serve it", selector)
+        await self._alert_unavailable(selector, _capped(redact_upstream_message(refusal)))
+        return True
+
+    async def _alert_unavailable(self, selector: str, refusal: str) -> None:
         async with self._uow:
             recipients = list((await self._settings.get_or_create()).alert_emails)
         if not recipients:
