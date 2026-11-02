@@ -22,6 +22,7 @@ import {
   useResetWorkspaceWebSearchKeys,
   useWorkspaceWebSearchKeys,
 } from "@/shared/api/webSearchKeys"
+import { formatNumber } from "@/shared/helpers/format"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
 // Which of its organization's search and fetch keys a workspace uses. The
@@ -193,7 +194,7 @@ export function WorkspaceWebSearchKeyChoice({
     <>
       {count > data.length ? (
         <p className="px-4 pt-3 text-caption text-subtle">
-          {`These lists show the first ${data.length.toLocaleString("en-US")} of your organization's ${count.toLocaleString("en-US")} keys.`}
+          {`These lists show the first ${formatNumber(data.length)} of your organization's ${formatNumber(count)} keys.`}
         </p>
       ) : null}
       {KINDS.map((kind) => (
