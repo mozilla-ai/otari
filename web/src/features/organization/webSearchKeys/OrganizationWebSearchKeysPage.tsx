@@ -37,7 +37,7 @@ import {
   useUnsetOrgWebSearchKeyDefault,
 } from "@/shared/api/webSearchKeys"
 import { docsSourceHref } from "@/shared/helpers/docs"
-import { formatRelative } from "@/shared/helpers/format"
+import { formatNumber, formatRelative } from "@/shared/helpers/format"
 
 import { WebSearchKeyDialog } from "./WebSearchKeyDialog"
 import { KIND_COPY, keyForEveryWorkspace, keysOfKind } from "./webSearchKeys"
@@ -330,7 +330,7 @@ export function OrganizationWebSearchKeysPage() {
 
       {keys.data && keys.data.count > keys.data.data.length ? (
         <InfoBanner>
-          {`This page lists the first ${KEY_PAGE_LIMIT.toLocaleString("en-US")} of this organization's ${keys.data.count.toLocaleString("en-US")} keys.`}
+          {`This page lists the first ${formatNumber(KEY_PAGE_LIMIT)} of this organization's ${formatNumber(keys.data.count)} keys.`}
         </InfoBanner>
       ) : null}
 
