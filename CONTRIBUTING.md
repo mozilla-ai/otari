@@ -155,11 +155,13 @@ because CI and the Docker image both install from it with `--frozen`. Two mechan
 keep it current, and they cover different things:
 
 - **Dependabot** (`.github/dependabot.yml`) opens weekly version-update PRs for the
-  `uv` and `github-actions` ecosystems. Security updates are separate, need no
-  config, and already cover every supported ecosystem here. The dashboard is not
-  covered by either, because `web/` uses a pnpm newer than Dependabot supports;
-  see #1001.
-- **`.github/workflows/otari-dashboard-audit.yml`** stands in for Dependabot's
+  `uv`, `github-actions`, `docker` and dashboard (`npm`, which covers pnpm)
+  ecosystems. Security updates are separate, need no config, and cover every
+  ecosystem here but the dashboard: they follow alerts, and the dependency graph
+  reads only the first of the two YAML documents pnpm 11+ writes to
+  `web/pnpm-lock.yaml`, the one pinning pnpm itself, so it raises none for the
+  dashboard's packages.
+- **`.github/workflows/otari-dashboard-audit.yml`** stands in for those
   security alerts on the dashboard. It runs `pnpm audit` against `web/pnpm-lock.yaml`
   on every PR that changes the dashboard's dependencies and weekly, failing on a
   high or critical advisory, and keeps a tracking issue open while one remains.
