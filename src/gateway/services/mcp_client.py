@@ -29,7 +29,7 @@ from mcp.client.streamable_http import streamable_http_client
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
 from gateway.services.mcp_stateless import failure_class
-from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
 from gateway.services.traces import RequestTrace
 
 if TYPE_CHECKING:
@@ -305,7 +305,7 @@ class MCPClientPool:
             self._tally.record_failure(name)
             return MCPToolCallOutcome(
                 content=TOOL_BUDGET_EXCEEDED_TEXT,
-                activity_content=TOOL_BUDGET_EXCEEDED_TEXT.removeprefix("[tool error] "),
+                activity_content=TOOL_BUDGET_EXCEEDED_TEXT.removeprefix(f"{TOOL_ERROR_SENTINEL} "),
                 is_error=True,
             )
         try:
