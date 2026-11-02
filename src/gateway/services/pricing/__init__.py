@@ -21,6 +21,7 @@ from gateway.services.pricing._usage_pricing import (
 )
 from gateway.services.pricing.bundled import (
     BUNDLED_SNAPSHOT_NAME,
+    bundled_catalog,
     bundled_generation,
     load_bundled_index,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "active_timeline",
     "add_accepted_generation",
     "billed_search_units",
+    "bundled_catalog",
     "bundled_generation",
     "can_price",
     "charge_tool_calls",

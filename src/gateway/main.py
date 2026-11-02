@@ -103,6 +103,7 @@ from gateway.services.policy_store import (
     reset_policy_cache,
     run_policy_refresher,
 )
+from gateway.services.pricing import load_bundled_index
 from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     initialize_tool_prices_from_config,
@@ -931,6 +932,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # Persisted dashboard overrides win over config/env; apply them
             # before pricing init so default-pricing behavior is consistent.
             await apply_overrides_from_db(config, session)
+            # The bundled catalog is several MB of JSON: read it here, off the
+            # event loop, so no request waits on it.
+            await asyncio.to_thread(load_bundled_index)
             # After the overrides, so it sees the copy setting this process serves.
             _validate_provider_account_pepper(config)
             await load_persisted_price_snapshot(session)
