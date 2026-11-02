@@ -8,9 +8,9 @@ from gateway.services.model_catalog_service import (
     background_catalog_enabled,
     cached_models_dev_catalog,
     load_models_dev_catalog,
-    models_dev_provider_id,
     parse_entry,
 )
+from gateway.types.models_dev import models_dev_provider_id
 
 # Gemini's listing names a model ``models/<id>``, where models.dev keys the bare id.
 _LISTING_PREFIX = "models/"
