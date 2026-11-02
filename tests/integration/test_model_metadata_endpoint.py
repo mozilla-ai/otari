@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services import model_catalog_service as mcs
+from gateway.types.models_dev import parse_catalog
 
 from .conftest import build_test_client
 
@@ -60,7 +61,7 @@ def test_metadata_enriches_configured_models(postgres_url: str, master_header: d
     client_gen = _make_client(_config(postgres_url))
     client = next(client_gen)
     try:
-        with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+        with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
             resp = client.get(f"{API_ROOT}/models/metadata", headers=master_header)
         assert resp.status_code == 200
         body = resp.json()
@@ -94,7 +95,7 @@ def test_metadata_disabled_makes_no_fetch(postgres_url: str, master_header: dict
     client_gen = _make_client(_config(postgres_url, models_dev_metadata=False))
     client = next(client_gen)
     try:
-        fetch_mock = AsyncMock(return_value=CATALOG)
+        fetch_mock = AsyncMock(return_value=parse_catalog(CATALOG))
         with patch.object(mcs, "_fetch", new=fetch_mock):
             resp = client.get(f"{API_ROOT}/models/metadata", headers=master_header)
         assert resp.status_code == 200
