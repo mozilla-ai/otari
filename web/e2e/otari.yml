@@ -10,3 +10,8 @@ require_pricing: false
 # Lets a member give their own key a federation rule, which the workload
 # identity spec does through the dashboard.
 federation_member_rules: true
+# The GitHub star invitation waits for 25 successes on two days, and the parity
+# fixture spreads its rows over the last 20 hours, so whether it appears would
+# depend on the hour the suite runs. Off, so the Overview the specs and the
+# screenshots read is the same at any hour; its unit tests cover it.
+star_prompt_enabled: false

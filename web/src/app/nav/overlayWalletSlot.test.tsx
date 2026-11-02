@@ -59,6 +59,7 @@ describe("a build that replaces the wallet-slot module", () => {
       "Playground",
       "Documentation",
       "Community",
+      "GitHub",
       "$12.34",
     ])
   })

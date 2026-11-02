@@ -87,6 +87,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting. See [Product feedback](#product-feedback). |
+| `star_prompt_enabled` | Invite organization owners and admins to star Otari on GitHub, once. Defaults to `true`; startup setting. See [GitHub star prompt](#github-star-prompt). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
@@ -1607,6 +1608,25 @@ cannot be changed there at runtime.
 
 Each signed-in person (and the master key) can send five messages every ten
 minutes; past that the gateway answers `429` with `Retry-After`.
+
+## GitHub star prompt
+
+Once this gateway has served 25 successful requests on two or more days, the
+Overview page shows organization owners and admins one line under its status
+strip: _Otari is open source. A star helps other developers find it._ with a
+**Star Otari on GitHub** link and a close control. Either control dismisses it
+for good in that browser. It never appears while the setup guide, the
+getting-started strip, an error, or an amber or red status is on the page, and
+it is not shown to members or viewers.
+
+The dashboard decides this from usage it already reads. Showing the line makes
+no request to GitHub or to anyone else, and the base dashboard records nothing
+about it.
+
+It is on by default. To turn it off, for example on a gateway whose users did
+not choose Otari themselves, set `star_prompt_enabled: false` in YAML or
+`OTARI_STAR_PROMPT_ENABLED=false`, then restart. The **GitHub** link in the top
+bar is not affected.
 
 Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
 10 seconds for the receiver and does not retry automatically. An unconfirmed

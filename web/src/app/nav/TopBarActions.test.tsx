@@ -84,7 +84,7 @@ describe("TopBarActions", () => {
     // none, so the seam is mounted and empty. Asserting the cluster's whole
     // membership rather than the absence of one chip is what would catch a
     // placeholder growing here later.
-    expect((await settledCluster())?.children).toHaveLength(3)
+    expect((await settledCluster())?.children).toHaveLength(4)
   })
 
   it("renders the slot module's own empty default", () => {
@@ -101,6 +101,27 @@ describe("TopBarActions", () => {
     const link = await screen.findByRole("link", { name: "Community" })
     expect(link).toHaveAttribute("href", "https://discord.gg/TqvzGH9mwz")
     expect(link).toHaveAttribute("target", "_blank")
+  })
+
+  it("names the repository plainly, after Community, in a new tab", async () => {
+    await renderActions()
+
+    const link = await screen.findByRole("link", { name: "GitHub" })
+    expect(link).toHaveAttribute("href", "https://github.com/mozilla-ai/otari")
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(
+      screen.getByRole("link", { name: "Community" }).nextElementSibling,
+    ).toBe(link)
+  })
+
+  it("keeps the GitHub link where the operator withdrew the star invitation", async () => {
+    // The setting withdraws an ask. A destination beside Documentation and
+    // Community is not one, so it stays.
+    await renderActions({ star_prompt_enabled: false })
+
+    expect(
+      await screen.findByRole("link", { name: "GitHub" }),
+    ).toBeInTheDocument()
   })
 
   it("points Documentation at docs.otari.ai when no docs site is configured", async () => {

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { AllocationHealth, OverviewSummary, UsageSummary } from "@/client"
 import { localDayKey, OverviewIndex } from "@/features/overview/OverviewPage"
+import { STAR_PROMPT_STORE_KEY } from "@/features/overview/starPrompt"
 import { API_ROOT, defaultQueryRetry } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -16,6 +17,7 @@ import {
   organizationMember,
   pendingOrganizationInvitation,
   SURFACES,
+  seriesPoint,
   usageTotals,
   workspaceActivation,
 } from "@/tests/fixtures"
@@ -119,6 +121,11 @@ interface Bodies {
   models?: string[]
   /** Answers the catalog with a server error instead of a list. */
   modelsFail?: boolean
+  /**
+   * What the star invitation reads: successes only, by day. Unset, a window
+   * with none, which is what keeps the invitation out of every other test.
+   */
+  successes?: UsageSummary
 }
 
 /** The catalog shape `${API_ROOT}/models` answers, which is the setup guide's gate. */
@@ -162,6 +169,10 @@ function mockApi(b: Bodies) {
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     if (url.includes(`${API_ROOT}/usage/summary`)) {
+      // The star invitation's read is the one that filters to successes.
+      if (url.includes("status=success")) {
+        return jsonResponse(b.successes ?? summary({}))
+      }
       return jsonResponse(summary(b.today ?? {}, b.series))
     }
     if (url.includes(`${API_ROOT}/overview`)) {
@@ -738,6 +749,10 @@ function mockScopedApi(b: Bodies): string[] {
       return jsonResponse({ data: [member], total: 1 })
     }
     if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
+      // The star invitation's read is the one that filters to successes.
+      if (url.includes("status=success")) {
+        return jsonResponse(b.successes ?? summary({}))
+      }
       return jsonResponse(summary(b.today ?? {}, b.series))
     }
     if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
@@ -1221,5 +1236,155 @@ describe("OverviewIndex for an identity with no organization", () => {
         String(input).endsWith(`${API_ROOT}/organizations/me`),
       )
     expect(contextReads).toHaveLength(1)
+  })
+})
+
+describe("the invitation to star Otari on the Overview", () => {
+  // 25 successes over two days: the bar the invitation waits for.
+  const EARNED = summary({ request_count: 25 }, [
+    seriesPoint({ bucket_start: "2026-10-30T00:00:00Z", requests: 20 }),
+    seriesPoint({ bucket_start: "2026-11-01T00:00:00Z", requests: 5 }),
+  ])
+  const LINK = { name: "Star Otari on GitHub" }
+  const HEALTHY = { providers: [], healthy: 3, total: 3, checked_at: null }
+
+  afterEach(() => {
+    window.localStorage.removeItem(STAR_PROMPT_STORE_KEY)
+    vi.restoreAllMocks()
+  })
+
+  it("asks the operator last, below a strip with nothing to report", async () => {
+    mockApi({ health: HEALTHY, successes: EARNED })
+    renderPage(<OverviewIndex />)
+
+    const link = await screen.findByRole("link", LINK)
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    // Above the tabs, with the other status bands, rather than inside a view.
+    const tabs = screen.getByRole("navigation", { name: "Overview views" })
+    expect(
+      link.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it("holds back while something needs attention", async () => {
+    mockApi({
+      health: { providers: [], healthy: 2, total: 3, checked_at: null },
+      successes: EARNED,
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(
+      await screen.findByText("1 provider unreachable"),
+    ).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("link", LINK)).not.toBeInTheDocument()
+  })
+
+  it("holds back when a status source fails rather than reading it as quiet", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
+        return jsonResponse(organizationContext())
+      }
+      if (url.includes(`${API_ROOT}/providers/health`)) {
+        return jsonResponse({ detail: "unavailable" }, 500)
+      }
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
+        return jsonResponse(
+          url.includes("status=success") ? EARNED : summary({}),
+        )
+      }
+      if (url.includes(`${API_ROOT}/overview`)) {
+        return jsonResponse(overviewSummary())
+      }
+      if (url.includes(`${API_ROOT}/providers`)) {
+        return jsonResponse({ providers: [{ provider: "openai" }] })
+      }
+      return jsonResponse([])
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(
+      await screen.findByText("Some status data could not be loaded."),
+    ).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("link", LINK)).not.toBeInTheDocument()
+  })
+
+  it("waits for the setup guide, which imported usage does not retire", async () => {
+    // Imported agent telemetry is usage without a request to this gateway, so a
+    // workspace can hold 25 successes with its first-request guide on offer.
+    const fetchMock = mockApi({
+      context: TWO_WORKSPACES,
+      health: HEALTHY,
+      successes: EARNED,
+      activation: workspaceActivation({ experience_eligible: true }),
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("/activation"),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    // By text rather than role: the guide's sheet is modal, and a line behind
+    // it would be out of the accessibility tree while still on the page.
+    expect(
+      screen.queryByText(/A star helps other developers find it/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("asks once the workspace's guide is behind it", async () => {
+    mockApi({
+      context: TWO_WORKSPACES,
+      health: HEALTHY,
+      successes: EARNED,
+      activation: workspaceActivation({
+        status: "activated",
+        experience_eligible: false,
+      }),
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(await screen.findByRole("link", LINK)).toBeInTheDocument()
+  })
+
+  it("asks an organization's owner, who chose the gateway", async () => {
+    const requested = mockScopedApi({
+      context: { role: "owner" },
+      successes: EARNED,
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(await screen.findByRole("link", LINK)).toBeInTheDocument()
+    // Through the organization's own usage route, like every other read here.
+    expect(
+      requested.some(
+        (url) =>
+          url.includes("/organizations/me/usage/summary") &&
+          url.includes("status=success"),
+      ),
+    ).toBe(true)
+  })
+
+  it("does not ask a member, who did not, and reads nothing to decide it", async () => {
+    const requested = mockScopedApi({
+      context: { role: "member" },
+      successes: EARNED,
+    })
+    renderPage(<OverviewIndex />)
+
+    await screen.findByRole("navigation", { name: "Overview views" })
+    await waitFor(() =>
+      expect(
+        requested.some((url) => url.includes("/organizations/me/usage")),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("link", LINK)).not.toBeInTheDocument()
+    expect(requested.some((url) => url.includes("status=success"))).toBe(false)
   })
 })

@@ -3,7 +3,7 @@ import { Link, type LinkProps } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import type { IconType } from "react-icons"
-import { FaDiscord } from "react-icons/fa"
+import { FaDiscord, FaGithub } from "react-icons/fa"
 import {
   FiBookOpen,
   FiChevronDown,
@@ -28,7 +28,10 @@ import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useSessionCaller } from "@/shared/api/auth"
-import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
+import {
+  OTARI_COMMUNITY_URL,
+  OTARI_GITHUB_URL,
+} from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTheme } from "@/shared/hooks/useTheme"
@@ -497,6 +500,12 @@ export function AccountMenu({
             label="Community"
             icon={FaDiscord}
             href={OTARI_COMMUNITY_URL}
+            className="md:hidden"
+          />
+          <MenuExternalLink
+            label="GitHub"
+            icon={FaGithub}
+            href={OTARI_GITHUB_URL}
             className="md:hidden"
           />
           {terms_url ? (

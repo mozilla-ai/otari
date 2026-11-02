@@ -90,6 +90,7 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "passkeys_ready": False,
         "oauth_providers": [],
         "feedback_enabled": True,
+        "star_prompt_enabled": True,
         "federation_member_rules": False,
         "mail_ready": False,
         "public_catalog": False,
@@ -270,6 +271,20 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 
     with TestClient(create_app(ready)) as client:
         assert client.get(f"{API_ROOT}/bootstrap").json()["open_signup"] is True
+
+
+def test_an_operator_can_withdraw_the_star_prompt(tmp_path: Path) -> None:
+    """The invitation to star the repository is the operator's to switch off.
+
+    On by default, because the person who installed Otari is the one it asks.
+    Off is for a gateway whose users did not choose it, where an invitation to
+    star a vendor's repository reads as an advertisement.
+    """
+    withdrawn = _gateway_config(tmp_path)
+    withdrawn.star_prompt_enabled = False
+
+    with TestClient(create_app(withdrawn)) as client:
+        assert client.get(f"{API_ROOT}/bootstrap").json()["star_prompt_enabled"] is False
 
 
 # A surface names its router's ``/api/v1/`` prefix, so the prefix is derived from the

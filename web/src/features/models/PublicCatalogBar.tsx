@@ -6,11 +6,12 @@ import {
   publicCatalogHref,
   siteHomeHref,
 } from "@/features/models/publicCatalog"
-import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
+import {
+  OTARI_COMMUNITY_URL,
+  OTARI_GITHUB_URL,
+} from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-
-const GITHUB_URL = "https://github.com/mozilla-ai/otari"
 
 // Desktop only, and no display of its own: an `inline-flex` here is emitted
 // after `hidden` and would show these at phone width, where the menu has them.
@@ -73,7 +74,7 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
           </a>
         ) : null}
         <a
-          href={GITHUB_URL}
+          href={OTARI_GITHUB_URL}
           target="_blank"
           rel="noopener noreferrer"
           aria-label="GitHub"
@@ -133,7 +134,7 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
                     Documentation
                   </a>
                   <a
-                    href={GITHUB_URL}
+                    href={OTARI_GITHUB_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     className={DRAWER_LINK}

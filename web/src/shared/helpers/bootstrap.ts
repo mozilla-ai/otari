@@ -57,6 +57,9 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     passkeys_ready: wire.passkeys_ready ?? false,
     mail_ready: wire.mail_ready ?? false,
     feedback_enabled: wire.feedback_enabled ?? false,
+    // Off: a gateway too old to publish the setting had no way for its operator
+    // to withdraw the invitation, so asking anyway would ask on their behalf.
+    star_prompt_enabled: wire.star_prompt_enabled ?? false,
     federation_member_rules: wire.federation_member_rules ?? false,
     // Closed by default: a gateway old enough to omit this served no catalog to
     // a visitor, and guessing open would render pages that then 401.

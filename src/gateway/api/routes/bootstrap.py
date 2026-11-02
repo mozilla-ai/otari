@@ -208,6 +208,14 @@ class DeploymentBootstrap(BaseModel):
         )
     )
     feedback_enabled: bool = Field(description="Whether this deployment accepts deliberate feedback submissions.")
+    star_prompt_enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether the dashboard may invite an organization's owners and admins to star Otari on "
+            "GitHub (the star_prompt_enabled setting). The dashboard decides when, from usage it "
+            "already reads, and contacts nothing outside this deployment to do it."
+        ),
+    )
     federation_member_rules: bool = Field(
         description=(
             "Whether an organization's owners and admins may give their own API keys federation rules (the "
@@ -257,6 +265,7 @@ async def get_bootstrap(
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
+        star_prompt_enabled=config.star_prompt_enabled,
         federation_member_rules=config.federation_member_rules,
         mail_ready=config.mail_ready,
         # Gated on mail as well as on the setting, and not only because the

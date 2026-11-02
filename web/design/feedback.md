@@ -40,7 +40,8 @@ Is the product waiting on something to arrive?
 ## Signatures
 
 ```ts
-InfoBanner: { tone = "info" | "warning", children }
+InfoBanner: { tone = "info" | "warning", onDismiss?, dismissLabel = "Dismiss",
+  children }
 ErrorBanner: { error: unknown }
 EmptyState: { title, description?, actionLabel?, onAction?, isActionDisabled?,
   children? }
@@ -92,6 +93,21 @@ Mark, then what happened, then what the system did, then the one control.
 `errorMessage()`. **Never render a provider's own message, a stack trace, or a raw
 `detail` field.** The API boundary sanitizes; the banner explains. That is a
 security property, not a style choice.
+
+## A banner the reader may put away
+
+`InfoBanner` takes `onDismiss` for one kind of line only: one that is **not** a
+fact about the deployment, so putting it away hides nothing that is still true.
+A ceiling, a mode or a warning never takes it, because hiding a standing
+condition does not lift it. The close control sits at the row's far end with
+Dialog's close geometry, and the caller owns what dismissal means, including
+remembering it.
+
+Today that is the Overview's invitation to star Otari on GitHub, and it is the
+only one. It is shown once, to owners and admins, never beside anything that
+needs attention, and the operator can withdraw it (`star_prompt_enabled`).
+The dashboard is an operator tool, not a marketing surface, so a second line of
+this kind needs the same case made for it, not this paragraph as precedent.
 
 ## EmptyState
 

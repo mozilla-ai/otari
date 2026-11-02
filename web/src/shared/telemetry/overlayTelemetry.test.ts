@@ -119,10 +119,11 @@ describe("the base build's dependencies", () => {
 })
 
 describe("the event catalog", () => {
-  it("carries the fourteen names the platform already records under", () => {
+  it("carries the fourteen names the platform already records under, and the star invitation's three", () => {
     // Pinned as strings, not just as keys: a superset build reports into the
     // analytics workspace otari-ai already reports into, so renaming one here
-    // splits its funnel in two rather than failing anything.
+    // splits its funnel in two rather than failing anything. The last three
+    // are new here rather than mirrored, and the platform adds them as written.
     expect(TELEMETRY_EVENTS).toEqual({
       SIGNUP_STARTED: "Signup Started",
       SIGNUP_SUCCESS: "Signup Success",
@@ -138,6 +139,9 @@ describe("the event catalog", () => {
       ACTIVATION_GUIDE_SHOWN: "Activation Guide Shown",
       ACTIVATION_GUIDE_DISMISSED: "Activation Guide Dismissed",
       CHECKOUT_CANCELLED: "Checkout Cancelled",
+      STAR_PROMPT_SHOWN: "Star Prompt Shown",
+      STAR_PROMPT_CLICKED: "Star Prompt Clicked",
+      STAR_PROMPT_DISMISSED: "Star Prompt Dismissed",
     })
   })
 })
