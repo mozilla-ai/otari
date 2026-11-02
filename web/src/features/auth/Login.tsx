@@ -187,7 +187,11 @@ function LabelRow({
         <span
           id={errorId}
           role="alert"
-          className={`flex min-w-0 items-center gap-1 text-caption text-danger ${messageOnOwnLine ? "basis-full" : ""}`}
+          className={
+            messageOnOwnLine
+              ? "flex min-w-0 basis-full items-center gap-1 text-caption text-danger"
+              : "flex min-w-0 items-center gap-1 text-caption text-danger"
+          }
         >
           <AlertIcon />
           <span title={message}>{message}</span>
