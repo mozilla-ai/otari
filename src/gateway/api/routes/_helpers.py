@@ -20,7 +20,12 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
+from gateway.services.guardrails import (
+    GuardrailResult,
+    GuardrailsNotReachableError,
+    InProcessGuardrail,
+    run_input_guardrails,
+)
 from gateway.services.inference import is_retry_futile, request_country_gate
 from gateway.services.routing import RoutingSignal
 from gateway.services.traces import RequestTrace, TraceService, TraceWriter
@@ -391,8 +396,25 @@ async def apply_input_guardrails(
         # Non-blocking: surface the verdict for observability (monitor mode, or
         # a passing block-mode check). Header value is kept compact and free of
         # the freeform `explanation` to avoid oversized / non-ASCII headers.
-        summary = [{"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score} for r in verdict.results]
-        response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(summary, separators=(",", ":"))
+        # `status` and `reason` are fixed words, so a `valid: null` still says
+        # whether the check ran.
+        response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(
+            [_guardrail_summary(r) for r in verdict.results], separators=(",", ":")
+        )
+
+
+def _guardrail_summary(result: GuardrailResult) -> dict[str, object]:
+    """One guardrail's entry in the :data:`GUARDRAILS_RESULT_HEADER` value."""
+    summary: dict[str, object] = {
+        "profile": result.profile,
+        "mode": result.mode,
+        "valid": result.valid,
+        "score": result.score,
+        "status": result.status,
+    }
+    if result.unavailable is not None:
+        summary["reason"] = result.unavailable
+    return summary
 
 
 async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID | None) -> uuid.UUID:
