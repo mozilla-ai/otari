@@ -84,6 +84,20 @@ describe("ShareCard", () => {
     expect(container.querySelector("img")).toBeNull()
   })
 
+  it("shows the reflected seal after the otari.ai label", () => {
+    const { container } = renderCard()
+    const mark = [...container.querySelectorAll("svg[viewBox]")].find(
+      (svg) => svg.getAttribute("viewBox") === "0 0 273 250",
+    )
+    // The reflected artwork starts at x=107; the old right-facing one at x=164.
+    expect(mark?.querySelector("path")?.getAttribute("d")).toMatch(
+      /^M107\.045 /,
+    )
+    const footer = screen.getByText("otari.ai")
+    expect(footer.firstChild?.nodeType).toBe(Node.TEXT_NODE)
+    expect(footer.lastElementChild).toBe(mark)
+  })
+
   it("names the scope, so the denominator behind the claim is never ambiguous", () => {
     renderCard({ scope: "Aug 1 – Aug 7, 2026 · user: ana" })
     expect(

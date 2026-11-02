@@ -1,6 +1,7 @@
 import { type ReactNode, useRef } from "react"
 import { FiMoon, FiSun } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
+import { ProductLockup } from "@/design-system/ProductMark"
 import { AuthShellSlot } from "@/features/auth/overlayAuthShellSlot"
 import { siteHomeHref } from "@/features/models/publicCatalog"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -11,28 +12,17 @@ import savedBackground from "./background/login-background.json"
 
 function BrandMark() {
   const href = siteHomeHref(useDeployment())
-  const mark = (
-    <>
-      <img
-        src={`${import.meta.env.BASE_URL}favicon.svg`}
-        alt=""
-        width={273}
-        height={250}
-        className="h-6 w-[1.638rem]"
-      />
-      <span className="text-title transition-colors group-hover:text-muted motion-reduce:transition-none">
-        Otari
-      </span>
-    </>
+  const lockup = (
+    <ProductLockup className="h-9 w-auto text-accent transition-opacity group-hover:opacity-75 motion-reduce:transition-none" />
   )
-  if (!href) return <div className="flex items-center gap-3">{mark}</div>
+  if (!href) return <div className="flex items-center">{lockup}</div>
   return (
     <a
       href={href}
       aria-label="Otari home"
-      className="group -mx-1 flex min-h-11 items-center gap-3 px-1"
+      className="group -mx-1 flex min-h-11 items-center px-1"
     >
-      {mark}
+      {lockup}
     </a>
   )
 }

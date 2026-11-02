@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
-import { ProductMark } from "./ProductMark"
+import { ProductLockup, ProductMark } from "./ProductMark"
 
 /**
  * The product mark.
@@ -44,4 +44,15 @@ export const Sizes: Story = {
 export const Dark: Story = {
   render: () => <ProductMark className="h-8" />,
   globals: { theme: "dark" },
+}
+
+/** The lockup, at the heights the sign-in header and the public catalog bar use. */
+export const Lockup: Story = {
+  render: () => (
+    <div className="flex items-end gap-6 text-accent">
+      <ProductLockup className="h-8 w-auto" />
+      <ProductLockup className="h-9 w-auto" />
+      <ProductLockup className="h-16 w-auto" />
+    </div>
+  ),
 }
