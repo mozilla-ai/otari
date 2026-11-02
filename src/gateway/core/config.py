@@ -1151,11 +1151,11 @@ class GatewayConfig(
         default=86400,
         ge=0,
         description=(
-            "TTL in seconds for the cached models.dev catalog, and the interval at which a "
-            "background task refetches it (floored at 5 minutes). Above 0, the model listing, the "
-            "catalog and GET /api/v1/models/metadata answer from the cache instead of waiting on the "
-            "fetch; a failed fetch is held for one minute rather than the refresh interval. 0 "
-            "disables caching, so every read fetches."
+            "How often, in seconds, one worker downloads the models.dev catalog and stores it for "
+            "every worker to serve (floored at 5 minutes). Above 0, the model listing, the catalog "
+            "and GET /api/v1/models/metadata answer from the stored catalog instead of waiting on "
+            "the download; a failed download is tried again after one minute. 0 disables caching, "
+            "so every read fetches."
         ),
     )
     public_catalog: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(

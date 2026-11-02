@@ -223,15 +223,16 @@ def _no_models_dev_fetch(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     the next one's.
     """
     from gateway.services import model_catalog_service
+    from gateway.services.pricing_refresh_service import reset_catalog_refresh_state
 
     async def _unreachable() -> None:
         return None
 
-    model_catalog_service.clear_catalog_cache()
+    reset_catalog_refresh_state()
     monkeypatch.setattr(model_catalog_service, "_fetch", _unreachable)
     monkeypatch.setattr(model_catalog_service, "_fallback", lambda: None)
     yield
-    model_catalog_service.clear_catalog_cache()
+    reset_catalog_refresh_state()
 
 
 @pytest.fixture(autouse=True)

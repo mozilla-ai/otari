@@ -15,7 +15,7 @@ ranked, and the organization's view alone puts its key first.
 import asyncio
 from collections.abc import Awaitable, Callable, Generator
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -162,7 +162,7 @@ def _offer_own_key(client: TestClient, provider: str, model: str) -> None:
 
 def _refresh_index(client: TestClient, catalog_id: str, deployment: str, own: str) -> None:
     """Rebuild the index and check it holds the deployment's offering, and the organization's key in its view."""
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(_MODELS_DEV))):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(_MODELS_DEV)):
         rebuilt = client.post(f"{API_ROOT}/catalog/selectors/refresh", headers=_MASTER)
     assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text
     index = selectors.current_selector_index()
