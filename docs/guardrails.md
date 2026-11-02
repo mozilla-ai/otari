@@ -227,6 +227,11 @@ the dashboard falls back to naming a profile by hand. The same fallback covers
 an entry that points at an endpoint of its own: only `guardrails_url` is read
 here, because a URL taken from an entry would be one a caller chose.
 
+Any API key and any signed-in user can read this list, because a profile name
+is what a caller puts in a request. Each gateway worker keeps the answer for
+30 seconds, so many reads cause at most one request to the guardrails service
+in that time. A changed `guardrails_url` is read at once.
+
 ### Which guardrails Otari can run itself
 
 `GET /api/v1/tool-settings/guardrails/catalog` lists the guardrails Otari can
@@ -248,13 +253,12 @@ guardrail's parameters, so a saved configuration has no field in which to ask
 for it and Otari would load the weights instead.
 
 The catalog reaches no service, so unlike the profiles read it has no
-unavailable state. It is also the one of the two a tenant reads: the form that
-defines a guardrail belongs to an organization, and an owner or admin fills it
-without operator standing, so any signed-in user reaches this read and so does
-any API key. What it answers is a property of the installed library, identical
-on every deployment of the same build, and a parameter's environment variable
-is named without saying whether it is set. The profiles read keeps the stricter
-gate, because that one dials the deployment's own guardrails service.
+unavailable state. A tenant reads it too: the form that defines a guardrail
+belongs to an organization, and an owner or admin fills it without operator
+standing, so any signed-in user reaches this read and so does any API key. What
+it answers is a property of the installed library, identical on every
+deployment of the same build, and a parameter's environment variable is named
+without saying whether it is set.
 
 ### Defining a guardrail on an organization
 
