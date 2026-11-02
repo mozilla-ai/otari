@@ -599,10 +599,34 @@ describe("ModelDetailPage", () => {
   })
 
   it("renders a metered rate alone when it differs from the provider's list price", async () => {
-    // The fixture's rates are not the providers' published ones, which is
-    // what gives the absence assertions below their meaning.
+    // Both offerings' metered rates are far from the price models.dev lists
+    // for them, well outside the 2% tolerance the list note used to apply, so
+    // the absences below are about a real disagreement rather than a missing
+    // one.
     mockApi()
-    GLM_DETAIL.offerings[0] = offering({ price_source: "organization" })
+    GLM_DETAIL.offerings[0] = offering({
+      price_source: "organization",
+      metadata_input_price_per_million: 1,
+      metadata_output_price_per_million: 4,
+    })
+    GLM_DETAIL.offerings[1] = offering({
+      selector: "fireworks:accounts/fireworks/models/glm-5p3",
+      short_selector: "fireworks:z-ai/glm-5.3",
+      provider: "fireworks",
+      provider_type: "fireworks",
+      pricing: {
+        input_price_per_million: 0.075,
+        output_price_per_million: 2.5,
+        cache_read_price_per_million: null,
+        cache_write_price_per_million: null,
+        pricing_tiers: [],
+        unit: "tokens",
+      },
+      price_source: "defaults",
+      price_reference: "fireworks:glm-5p3",
+      metadata_input_price_per_million: 0.2,
+      metadata_output_price_per_million: 3,
+    })
 
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
@@ -621,10 +645,13 @@ describe("ModelDetailPage", () => {
       within(rows[1] as HTMLElement).getByRole("gridcell", { name: /\$0\.50/ }),
     ).toBeInTheDocument()
 
-    // A rate stands alone: no second figure beside it and no banner
-    // explaining one.
-    expect(within(grid).queryByText(/list price/i)).toBeNull()
-    expect(screen.queryByText(/published price/i)).toBeNull()
+    // A rate stands alone: no list price beside it, and no banner explaining
+    // the two.
+    expect(within(grid).queryByText(/list \$/i)).toBeNull()
+    expect(within(grid).queryByText(/^list$/i)).toBeNull()
+    expect(
+      screen.queryByText(/differs from the price the provider publishes/i),
+    ).toBeNull()
 
     // Where the rate came from stays named.
     expect(
