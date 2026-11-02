@@ -1,0 +1,699 @@
+{
+  "openai": {
+    "id": "openai",
+    "name": "OpenAI",
+    "doc": "https://platform.openai.com/docs/models",
+    "env": [
+      "OPENAI_API_KEY"
+    ],
+    "models": {
+      "gpt-4o": {
+        "id": "gpt-4o",
+        "type": "chat",
+        "name": "GPT-4o",
+        "description": "Omni-era GPT for multimodal chat, practical coding, and general assistants",
+        "family": "gpt",
+        "open_weights": false,
+        "knowledge": "2023-09",
+        "release_date": "2024-05-13",
+        "last_updated": "2024-08-06",
+        "modalities": {
+          "input": [
+            "text",
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp",
+            "application/pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "capabilities": {
+          "tools": {
+            "supported": true
+          },
+          "reasoning": {
+            "supported": false
+          },
+          "cache": {
+            "implicit": {
+              "min_tokens": 1024
+            }
+          },
+          "structured_output": true,
+          "temperature": true,
+          "system_updates": true,
+          "effort_updates": false,
+          "store": true,
+          "prompt_cache_key": true,
+          "service_tier": [
+            "priority"
+          ]
+        },
+        "limit": {
+          "context": 128000,
+          "output": 16384
+        },
+        "cost": {
+          "text": {
+            "input": {
+              "price": 2.5,
+              "cache": {
+                "read": 1.25
+              }
+            },
+            "output": {
+              "price": 10
+            }
+          },
+          "web_search": {
+            "price": 10
+          },
+          "multipliers": [
+            {
+              "when": {
+                "service_tier": {
+                  "equals": "priority"
+                }
+              },
+              "factor": {
+                "text": 1.7
+              }
+            }
+          ]
+        },
+        "api": {
+          "responses": {
+            "base_url": "https://api.openai.com/v1",
+            "sdk": {
+              "aisdk": "@ai-sdk/openai",
+              "opencodeai": "@opencode/ai/providers/openai/responses"
+            },
+            "capabilities": {
+              "tools": {
+                "strict": true,
+                "choice": [
+                  "auto",
+                  "none",
+                  "required",
+                  "tool"
+                ],
+                "updates": true
+              }
+            }
+          },
+          "chat-completions": {
+            "base_url": "https://api.openai.com/v1",
+            "sdk": {
+              "aisdk": "@ai-sdk/openai",
+              "opencodeai": "@opencode/ai/providers/openai/chat"
+            },
+            "capabilities": {
+              "tools": {
+                "strict": true,
+                "choice": [
+                  "auto",
+                  "none",
+                  "required",
+                  "tool"
+                ],
+                "updates": false
+              }
+            }
+          }
+        },
+        "experimental": {
+          "modes": {
+            "fast": {
+              "service_tier": "priority",
+              "body": {
+                "service_tier": "priority"
+              }
+            }
+          }
+        }
+      },
+      "gpt-4": {
+        "id": "gpt-4",
+        "type": "chat",
+        "name": "GPT-4",
+        "description": "GPT model for general reasoning, writing, coding, and tool-assisted tasks",
+        "family": "gpt",
+        "open_weights": false,
+        "knowledge": "2023-11",
+        "release_date": "2023-11-06",
+        "last_updated": "2024-04-09",
+        "status": "deprecated",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "capabilities": {
+          "tools": {
+            "supported": true
+          },
+          "reasoning": {
+            "supported": false
+          },
+          "cache": false,
+          "structured_output": false,
+          "temperature": true,
+          "system_updates": true,
+          "effort_updates": false,
+          "store": true
+        },
+        "limit": {
+          "context": 8192,
+          "output": 8192
+        },
+        "cost": {
+          "text": {
+            "input": {
+              "price": 30
+            },
+            "output": {
+              "price": 60
+            }
+          }
+        },
+        "api": {
+          "responses": {
+            "base_url": "https://api.openai.com/v1",
+            "sdk": {
+              "aisdk": "@ai-sdk/openai",
+              "opencodeai": "@opencode/ai/providers/openai/responses"
+            },
+            "capabilities": {
+              "tools": {
+                "updates": false
+              }
+            }
+          },
+          "chat-completions": {
+            "base_url": "https://api.openai.com/v1",
+            "sdk": {
+              "aisdk": "@ai-sdk/openai",
+              "opencodeai": "@opencode/ai/providers/openai/chat"
+            },
+            "capabilities": {
+              "tools": {
+                "updates": false
+              }
+            }
+          }
+        }
+      },
+      "gpt-image-1-mini": {
+        "id": "gpt-image-1-mini",
+        "type": "image",
+        "name": "gpt-image-1-mini",
+        "description": "Image model for prompt-driven generation, editing, and visual design workflows",
+        "family": "gpt-image",
+        "open_weights": false,
+        "release_date": "2025-09-26",
+        "last_updated": "2025-09-26",
+        "status": "deprecated",
+        "modalities": {
+          "input": [
+            "text",
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "output": [
+            "text",
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "capabilities": {
+          "tools": {
+            "supported": false
+          },
+          "reasoning": {
+            "supported": false
+          },
+          "temperature": false,
+          "system_updates": false,
+          "effort_updates": false
+        },
+        "limit": {
+          "context": 0,
+          "input": 0,
+          "output": 0
+        },
+        "api": {
+          "images": {
+            "base_url": "https://api.openai.com/v1",
+            "sdk": {
+              "aisdk": "@ai-sdk/openai",
+              "opencodeai": "@opencode/ai/providers/openai/images"
+            }
+          }
+        }
+      }
+    }
+  },
+  "anthropic": {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "doc": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "env": [
+      "ANTHROPIC_API_KEY"
+    ],
+    "models": {
+      "claude-sonnet-4-5": {
+        "id": "claude-sonnet-4-5",
+        "canonical_id": "anthropic/claude-sonnet-4-5",
+        "type": "chat",
+        "name": "Claude Sonnet 4.5 (latest)",
+        "description": "Balanced Claude model for coding, analysis, agent workflows, and cost control",
+        "family": "claude-sonnet",
+        "open_weights": false,
+        "knowledge": "2025-07-31",
+        "release_date": "2025-09-29",
+        "last_updated": "2025-09-29",
+        "modalities": {
+          "input": [
+            "text",
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp",
+            "application/pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "capabilities": {
+          "tools": {
+            "supported": true
+          },
+          "reasoning": {
+            "supported": true,
+            "budget": {
+              "min": 1024
+            }
+          },
+          "cache": {
+            "explicit": {
+              "ttl": [
+                "5m",
+                "1h"
+              ],
+              "max_breakpoints": 4,
+              "targets": [
+                "tools",
+                "system",
+                "messages"
+              ],
+              "min_tokens": 1024
+            }
+          },
+          "structured_output": true,
+          "temperature": true,
+          "top_p": true,
+          "top_k": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
+        "limit": {
+          "context": 200000,
+          "output": 64000
+        },
+        "cost": {
+          "text": {
+            "input": {
+              "price": 3,
+              "cache": {
+                "read": 0.3,
+                "write": {
+                  "5m": 3.75,
+                  "1h": 6
+                }
+              }
+            },
+            "output": {
+              "price": 15
+            }
+          },
+          "web_search": {
+            "price": 10
+          }
+        },
+        "api": {
+          "messages": {
+            "base_url": "https://api.anthropic.com/v1",
+            "sdk": {
+              "aisdk": "@ai-sdk/anthropic",
+              "opencodeai": "@opencode/ai/providers/anthropic"
+            },
+            "capabilities": {
+              "tools": {
+                "strict": true,
+                "choice": [
+                  "auto",
+                  "none",
+                  "required",
+                  "tool"
+                ],
+                "search": true,
+                "updates": false
+              }
+            }
+          },
+          "chat-completions": {
+            "base_url": "https://api.anthropic.com/v1",
+            "sdk": {
+              "aisdk": "@ai-sdk/openai-compatible",
+              "opencodeai": "@opencode/ai/providers/openai-compatible"
+            },
+            "capabilities": {
+              "tools": {
+                "choice": [
+                  "auto",
+                  "none",
+                  "required",
+                  "tool"
+                ],
+                "updates": false
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "google": {
+    "id": "google",
+    "name": "Google",
+    "doc": "https://ai.google.dev/gemini-api/docs/models",
+    "env": [
+      "GOOGLE_API_KEY",
+      "GOOGLE_GENERATIVE_AI_API_KEY",
+      "GEMINI_API_KEY"
+    ],
+    "models": {
+      "gemini-2.5-pro": {
+        "id": "gemini-2.5-pro",
+        "canonical_id": "google/gemini-2.5-pro",
+        "type": "chat",
+        "name": "Gemini 2.5 Pro",
+        "description": "Google's proven reasoning model for coding, math, and multimodal analysis",
+        "family": "gemini-pro",
+        "open_weights": false,
+        "knowledge": "2025-01",
+        "release_date": "2025-06-17",
+        "last_updated": "2025-06-17",
+        "modalities": {
+          "input": [
+            "text",
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif",
+            "audio/wav",
+            "audio/mp3",
+            "audio/aiff",
+            "audio/aac",
+            "audio/ogg",
+            "audio/flac",
+            "audio/mpeg",
+            "audio/m4a",
+            "audio/l16",
+            "audio/opus",
+            "audio/alaw",
+            "audio/mulaw",
+            "audio/webm",
+            "video/mp4",
+            "video/mpeg",
+            "video/mov",
+            "video/avi",
+            "video/x-flv",
+            "video/mpg",
+            "video/webm",
+            "video/wmv",
+            "video/3gpp",
+            "application/pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "capabilities": {
+          "tools": {
+            "supported": true
+          },
+          "reasoning": {
+            "supported": true,
+            "budget": {
+              "min": 128,
+              "max": 32768
+            }
+          },
+          "cache": {
+            "implicit": {
+              "min_tokens": 2048
+            },
+            "explicit": true
+          },
+          "structured_output": true,
+          "temperature": true,
+          "top_p": true,
+          "top_k": true,
+          "system_updates": false,
+          "effort_updates": false,
+          "service_tier": [
+            "flex",
+            "priority"
+          ]
+        },
+        "limit": {
+          "context": 1048576,
+          "output": 65536
+        },
+        "cost": {
+          "text": {
+            "input": {
+              "price": 1.25,
+              "cache": {
+                "read": 0.125,
+                "storage": 4.5
+              },
+              "overrides": [
+                {
+                  "when": {
+                    "context": {
+                      "gt": 200000
+                    }
+                  },
+                  "price": 2.5,
+                  "cache": {
+                    "read": 0.25
+                  }
+                }
+              ]
+            },
+            "output": {
+              "price": 10,
+              "overrides": [
+                {
+                  "when": {
+                    "context": {
+                      "gt": 200000
+                    }
+                  },
+                  "price": 15
+                }
+              ]
+            }
+          },
+          "web_search": {
+            "price": 35
+          },
+          "multipliers": [
+            {
+              "when": {
+                "service_tier": {
+                  "equals": "priority"
+                }
+              },
+              "factor": {
+                "text": 1.8
+              }
+            },
+            {
+              "when": {
+                "service_tier": {
+                  "equals": "flex"
+                }
+              },
+              "factor": {
+                "text": {
+                  "input": {
+                    "price": 0.5
+                  },
+                  "output": {
+                    "price": 0.5
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "api": {
+          "generate-content": {
+            "base_url": "https://generativelanguage.googleapis.com/v1beta",
+            "sdk": {
+              "aisdk": "@ai-sdk/google",
+              "opencodeai": "@opencode/ai/providers/google"
+            },
+            "capabilities": {
+              "tools": {
+                "strict": true,
+                "choice": [
+                  "auto",
+                  "none",
+                  "required",
+                  "tool"
+                ],
+                "updates": false
+              }
+            }
+          },
+          "chat-completions": {
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "sdk": {
+              "aisdk": "@ai-sdk/openai-compatible",
+              "opencodeai": "@opencode/ai/providers/openai-compatible"
+            },
+            "capabilities": {
+              "tools": {
+                "strict": true,
+                "choice": [
+                  "auto",
+                  "none",
+                  "required",
+                  "tool"
+                ],
+                "updates": false
+              }
+            }
+          },
+          "interactions": {
+            "base_url": "https://generativelanguage.googleapis.com/v1beta",
+            "sdk": {
+              "aisdk": "@ai-sdk/google",
+              "opencodeai": "@opencode/ai/providers/google/interactions"
+            },
+            "capabilities": {
+              "tools": {
+                "strict": true,
+                "choice": [
+                  "auto",
+                  "none",
+                  "required",
+                  "tool"
+                ],
+                "updates": false
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "openrouter": {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "doc": "https://openrouter.ai/models",
+    "env": [
+      "OPENROUTER_API_KEY"
+    ],
+    "models": {
+      "qwen/qwen-image-3-pro": {
+        "id": "qwen/qwen-image-3-pro",
+        "canonical_id": "alibaba/qwen-image-3.0-pro",
+        "type": "image",
+        "name": "Qwen Image 3 Pro",
+        "description": "Higher-quality Qwen-Image-3.0 for complex layouts, small text and photographic detail",
+        "family": "qwen",
+        "open_weights": false,
+        "release_date": "2026-08-05",
+        "last_updated": "2026-08-05",
+        "modalities": {
+          "input": [
+            "text",
+            "image/jpeg",
+            "image/png",
+            "image/bmp",
+            "image/tiff",
+            "image/webp",
+            "image/gif"
+          ],
+          "output": [
+            "image/png"
+          ]
+        },
+        "capabilities": {
+          "tools": {
+            "supported": false
+          },
+          "reasoning": {
+            "supported": false
+          },
+          "temperature": false,
+          "top_p": false,
+          "top_k": false,
+          "system_updates": false,
+          "effort_updates": false
+        },
+        "limit": {
+          "context": 0,
+          "input": 4500,
+          "output": 0
+        },
+        "cost": {
+          "image": {
+            "input": {
+              "unit": "image",
+              "price": 0.003
+            },
+            "output": {
+              "unit": "image",
+              "price": 0.04,
+              "overrides": [
+                {
+                  "when": {
+                    "resolution": {
+                      "equals": "2K"
+                    }
+                  },
+                  "price": 0.075
+                }
+              ]
+            }
+          }
+        },
+        "api": {
+          "images": {
+            "base_url": "https://openrouter.ai/api/v1",
+            "sdk": {
+              "aisdk": "@openrouter/ai-sdk-provider",
+              "opencodeai": "@opencode/ai/providers/openrouter/images"
+            }
+          }
+        }
+      }
+    }
+  }
+}
