@@ -6071,10 +6071,8 @@ export interface paths {
          *     every deployment of the same build, and a parameter's environment variable is
          *     a name, never whether that name is set.
          *
-         *     The profiles read next door keeps the stricter gate, and the difference is
-         *     reach rather than audience. That one dials ``guardrails_url``, so admitting a
-         *     key there would let a workspace credential probe the deployment's own
-         *     service. This one dials nothing.
+         *     The profiles read next door takes the same gate. It differs in reach: that
+         *     one dials ``guardrails_url``, from a short cache, and this one dials nothing.
          */
         get: operations["tool-settings-list_builtin_guardrails"];
         put?: never;
@@ -6113,10 +6111,10 @@ export interface paths {
          *     caller-supplied and fetching it here would make this a way to have the
          *     gateway request an address of the caller's choosing.
          *
-         *     Not on ``verify_catalog_reader``, despite being a catalog read: that gate
-         *     admits any API key to the deployment-describing reads, and admitting a key
-         *     here would let any workspace credential dial the deployment's guardrails
-         *     service. This is a management read, so it takes the router's own gate.
+         *     On ``verify_catalog_reader``, so any API key reads it: a caller who may send
+         *     a profile name may learn which ones exist (otari#2690). The answer is cached
+         *     for 30 seconds per worker, so however many reads arrive, a worker sends the
+         *     deployment's guardrails service at most one request in that time.
          */
         get: operations["tool-settings-list_guardrail_profiles"];
         put?: never;

@@ -801,20 +801,25 @@ async def verify_catalog_reader(
     The narrow exception to the rule above, for the catalog reads that describe
     the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``,
     ``GET /api/v1/tools``, ``GET /api/v1/providers/catalog`` (with their by-id
-    variants), ``GET /api/v1/tool-settings/guardrails/catalog`` and
+    variants), ``GET /api/v1/tool-settings/guardrails/catalog``,
+    ``GET /api/v1/tool-settings/guardrails/profiles`` and
     ``GET /api/v1/search-tools/providers``. The
     dashboard's Models and Pricing pages are built on these, so a session has to
     reach them; they call no provider, write nothing, and bill nothing, so
     reaching them deployment-wide costs a signed-in caller's own organization
-    nothing.
+    nothing. The guardrail profiles read is the one that reaches a service, the
+    deployment's own guardrails service, and it answers from a 30 second
+    per-worker cache, so a worker sends that service at most one request in
+    that time.
 
-    The three catalogs are the reads a *tenant* rather than an operator needs. One
+    The four catalogs are the reads a *tenant* rather than an operator needs. One
     names the providers any-llm knows, which the organization provider-key form
     offers as the BYO choices; one names the guardrails any-guardrail reaches
     over a hosted API, which the organization guardrail form offers the same
-    way; and one names the providers any-search and any-fetch serve, for the
-    organization's own search keys. An owner or admin who reaches no operator
-    route still has to read all three.
+    way; one names the guardrail profiles the deployment serves, which any
+    caller may put in a request; and one names the providers any-search and
+    any-fetch serve, for the organization's own search keys. An owner or admin
+    who reaches no operator route still has to read all four.
 
     Split out rather than left as a branch inside the other dependency so that
     adding a route to this plane defaults to refusing the cookie. The six
