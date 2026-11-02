@@ -4,9 +4,11 @@ help:
 	@printf "Available targets:\n"
 	@printf "  dev  Run Otari with uvicorn --reload using .env\n"
 	@printf "  dashboard Build the admin dashboard into src/gateway/static/dashboard\n"
-	@printf "  test Run full test suite (unit + integration)\n"
-	@printf "  test-unit Run unit tests\n"
-	@printf "  test-integration Run integration tests\n"
+	@printf "  test Run full test suite (unit + integration), across PYTEST_WORKERS workers\n"
+	@printf "  test-unit Run unit tests, across PYTEST_WORKERS workers\n"
+	@printf "  test-integration Run integration tests, across PYTEST_WORKERS workers\n"
+	@printf "       PYTEST_WORKERS defaults to $(PYTEST_WORKERS). One PostgreSQL server serves them all,\n"
+	@printf "       so run only one of these three at a time.\n"
 	@printf "  test-libs Run the any-search and any-fetch tests\n"
 	@printf "  test-frameworks Run the agent-framework packages and docs pages against a real Otari\n"
 	@printf "  lint Run every linter, fixing what it can (lint-python + lint-web)\n"
@@ -49,14 +51,24 @@ web/node_modules/.install-stamp: web/pnpm-lock.yaml web/package.json web/pnpm-wo
 	pnpm --dir web install --frozen-lockfile
 	@touch $@
 
+# Parallel here rather than in pytest.ini, so running one test stays serial and
+# pays no worker startup. Each worker creates a PostgreSQL database of its own
+# and drops it, so two of these targets must not run at once against one server.
+#
+# NOTE: A fixed count rather than `auto`. One server serves every worker, and at
+# twelve the teardown that drops a database exceeds pytest's 120s timeout, which
+# fails a test that passed. Four is measured clean on the whole suite. Raise it
+# with `make test PYTEST_WORKERS=8` where the server can take it.
+PYTEST_WORKERS ?= 4
+
 test:
-	uv run pytest -v tests/unit tests/integration
+	uv run pytest -v -n $(PYTEST_WORKERS) tests/unit tests/integration
 
 test-unit:
-	uv run pytest -v tests/unit
+	uv run pytest -v -n $(PYTEST_WORKERS) tests/unit
 
 test-integration:
-	uv run pytest -v tests/integration
+	uv run pytest -v -n $(PYTEST_WORKERS) tests/integration
 
 # One run per library: both have test files of the same names, and the
 # repository's pytest imports a test module by its file name (the default
