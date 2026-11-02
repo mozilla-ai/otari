@@ -14,12 +14,15 @@ from typing import Any
 import pytest
 
 from gateway.services.pricing import (
+    ModelsDevPriceIndex,
     active_generations,
+    bundled_catalog,
     bundled_generation,
     load_bundled_index,
     reset_generations,
     set_accepted_generations,
 )
+from gateway.types.models_dev import CATALOG_FORMAT, read_catalog_document, snapshot_document
 
 
 def _rates(input_: float, output: float, cache_read: float, cache_write: float) -> dict[str, Any]:
@@ -55,17 +58,19 @@ ANTHROPIC_PUBLISHED_COSTS: dict[str, dict[str, Any]] = {
 }
 
 
+def _bundled_text() -> str:
+    return resources.files("gateway").joinpath("data", "models_dev_catalog.json").read_text("utf-8")
+
+
 @cache
-def _bundled_document() -> dict[str, Any]:
-    document: dict[str, Any] = json.loads(
-        resources.files("gateway").joinpath("data", "models_dev_pricing.json").read_text("utf-8")
-    )
-    return document
+def _bundled_prices() -> dict[str, Any]:
+    """The bundled catalog as the price snapshot a refresh would store."""
+    return snapshot_document(bundled_catalog())
 
 
 @pytest.mark.parametrize("model", ANTHROPIC_PUBLISHED_COSTS)
 def test_the_bundled_snapshot_carries_anthropics_published_rates(model: str) -> None:
-    assert _bundled_document()["anthropic"]["models"][model]["cost"] == ANTHROPIC_PUBLISHED_COSTS[model]
+    assert _bundled_prices()["anthropic"]["models"][model]["cost"] == ANTHROPIC_PUBLISHED_COSTS[model]
 
 
 def test_the_bundled_snapshot_prices_well_known_models() -> None:
@@ -77,16 +82,24 @@ def test_the_bundled_snapshot_prices_well_known_models() -> None:
     assert bundled_generation().index is index
 
 
-def test_the_bundled_snapshot_stays_small_and_carries_only_price_fields() -> None:
-    raw = resources.files("gateway").joinpath("data", "models_dev_pricing.json").read_text("utf-8")
-    # About 1.7 MB on 2026-11-02, for 9,311 models; a snapshot that kept every field would be 6 MB or more.
-    assert len(raw.encode()) < 2_000_000
+def test_the_bundled_snapshot_is_the_whole_catalog_and_stays_bounded() -> None:
+    raw = _bundled_text()
+    # About 7.5 MB on 2026-11-02, for 9,311 models (0.7 MB gzipped, as in the wheel).
+    assert len(raw.encode()) < 10_000_000
     document = json.loads(raw)
+    assert document["_meta"]["format"] == CATALOG_FORMAT
     assert document["_meta"]["generated_at"]
-    allowed = {"id", "name", "cost", "limit", "canonical_model_id", "status"}
-    for key, provider in document.items():
-        if key != "_meta":
-            assert all(set(model) <= allowed for model in provider["models"].values())
+    model = bundled_catalog().model_for("anthropic", "claude-sonnet-4-5")
+    assert model is not None
+    assert model.description and "image" in model.input_modalities and model.tool_call and model.max_output_tokens
+
+
+def test_the_bundled_prices_are_those_a_stored_price_snapshot_of_it_gives() -> None:
+    stored = ModelsDevPriceIndex.from_document(json.loads(json.dumps(_bundled_prices())))
+
+    assert sorted(load_bundled_index().entries(), key=lambda entry: entry.reference) == sorted(
+        stored.entries(), key=lambda entry: entry.reference
+    )
 
 
 def test_the_generation_list_falls_back_to_the_bundled_snapshot() -> None:
@@ -118,8 +131,9 @@ def _cut(document: object, tmp_path: Path, *flags: str) -> subprocess.CompletedP
 
 
 def _snapshot(tmp_path: Path) -> dict[str, Any]:
+    """The cut's ``_meta``, and each model's price fields as a stored price snapshot keeps them."""
     document: dict[str, Any] = json.loads((tmp_path / "out.json").read_text("utf-8"))
-    return document
+    return {"_meta": document["_meta"], **snapshot_document(read_catalog_document(document))}
 
 
 def test_the_release_script_cuts_a_snapshot_from_v2_and_names_a_damaged_model(tmp_path: Path) -> None:

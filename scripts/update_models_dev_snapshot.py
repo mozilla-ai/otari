@@ -1,11 +1,11 @@
-"""Regenerate the bundled models.dev price snapshot.
+"""Regenerate the bundled models.dev catalog: the offline prices and model facts.
 
 Run at release: ``python scripts/update_models_dev_snapshot.py`` fetches the
 models.dev v2 ``api.json``, or the v1 one when v2 fails, and ``--input FILE``
-trims a saved copy (``--input-version v1`` for a v1 one). Standard library
-only; the catalog's typed document lives in the gateway so a stored snapshot
-and the bundled one are cut the same way, and a document the gateway would
-refuse is refused here too.
+reads a saved copy (``--input-version v1`` for a v1 one). Standard library
+only; the catalog's typed document lives in the gateway so the bundled catalog
+is written as the gateway stores a downloaded one, and a document the gateway
+would refuse is refused here too.
 """
 
 import argparse
@@ -23,7 +23,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCUMENT_MODULE = ROOT / "src" / "gateway" / "types" / "models_dev.py"
-OUTPUT = ROOT / "src" / "gateway" / "data" / "models_dev_pricing.json"
+OUTPUT = ROOT / "src" / "gateway" / "data" / "models_dev_catalog.json"
 
 
 def _load_document_module() -> ModuleType:
@@ -80,9 +80,9 @@ def main() -> int:
     else:
         return 1
 
-    document = {"_meta": {"source": source.url, "generated_at": args.date or datetime.now(UTC).date().isoformat()}}
-    document.update(module.snapshot_document(catalog))
-    models = sum(len(provider["models"]) for key, provider in document.items() if key != "_meta")
+    generated_at = args.date or datetime.now(UTC).date().isoformat()
+    document = module.catalog_document(catalog, source=source.url, generated_at=generated_at)
+    models = sum(1 for _ in catalog.models())
     args.output.write_text(json.dumps(document, separators=(",", ":"), ensure_ascii=False) + "\n", "utf-8")
     print(f"wrote {args.output} ({args.output.stat().st_size} bytes, {models} models)")
     return 0

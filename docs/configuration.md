@@ -1089,10 +1089,11 @@ instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldes
 one for a time before the first. History therefore starts at the first accepted
 snapshot; models.dev publishes no dated price changes of its own.
 
-To refresh the bundled snapshot, as a maintainer does at release, run
+The bundled snapshot is the whole models.dev catalog, so it also carries the
+model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
 saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
-`src/gateway/data/models_dev_pricing.json`.
+`src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
