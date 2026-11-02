@@ -319,13 +319,13 @@ the final answer.
 
 Responses and Messages can expose native server-tool result blocks when their
 wire format expects them. Chat Completions has no such blocks, so Otari reports
-its web searches and fetches in a field of its own, `otari_tool_calls`, at the
-top level of the response and of each streamed chunk: a search with its query
-and the sources it found, a fetch with the URL it read, and a failure with what
-may be shown about it. See [Web tool calls on Chat
-Completions](api-reference.md#web-tool-calls-on-chat-completions). Code execution
-and MCP calls are not reported there, so Chat Completions returns only the final
-assistant message for them. Calls for tools the client must execute are preserved.
+the calls it ran in a field of its own, `otari_tool_calls`, at the top level of
+the response and of each streamed chunk: a search with its query and the sources
+it found, a fetch with the URL it read, a code execution with its code, output
+and exit status, an MCP call with its server, tool and the text it returned, and
+a failure with what may be shown about it. See [Gateway tool calls on Chat
+Completions](api-reference.md#gateway-tool-calls-on-chat-completions). Calls for
+tools the client must execute are preserved.
 The dashboard Playground's own completion route is the one exception: its stream
 also reports every gateway-run call and its result in an `otari_tool_activity`
 field, on a chunk of its own before and after each call, so the page can show
