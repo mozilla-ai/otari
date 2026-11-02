@@ -13,7 +13,8 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.log_config import logger
-from gateway.services.inference import is_model_unavailable_error, upstream_error_message
+from gateway.services.health_checks import refusal_switches_off
+from gateway.services.inference import upstream_error_message
 
 # Switch-offs under way, one per model, held so one outliving its request is not garbage collected half done.
 _PENDING: dict[tuple[str, str], asyncio.Task[None]] = {}
@@ -28,7 +29,7 @@ def note_unavailable_model(
     have been, and the switch-off happens beside it.
     """
     key = (instance, model)
-    if not deployment_paid or key in _PENDING or not is_model_unavailable_error(exc):
+    if key in _PENDING or not refusal_switches_off(exc, deployment_paid=deployment_paid):
         return
     refusal = upstream_error_message(exc) or type(exc).__name__
     task = asyncio.create_task(_switch_off(config, instance, model, refusal))

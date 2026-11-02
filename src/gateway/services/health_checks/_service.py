@@ -33,6 +33,7 @@ from gateway.services.health_checks._alerts import (
 )
 from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome, probe_all
 from gateway.services.health_checks._summary import FailureStreak, failure_streaks, summarize
+from gateway.services.inference import is_model_unavailable_error
 from gateway.services.mail import Mailer
 from gateway.services.upstream_redaction import redact_upstream_message
 
@@ -61,6 +62,15 @@ class HostedRoster(Protocol):
     async def switch_off_models(self, models: Mapping[str, Collection[str]]) -> int: ...
 
     async def switch_off_unavailable(self, provider: str, model: str) -> bool: ...
+
+
+def refusal_switches_off(exc: BaseException, *, deployment_paid: bool) -> bool:
+    """Whether ``exc`` should switch its model off: its provider refusing the model on the deployment's own credential.
+
+    An organization's own key never switches anything: what its account may
+    reach says nothing about the deployment's.
+    """
+    return deployment_paid and is_model_unavailable_error(exc)
 
 
 def _capped(refusal: str) -> str:
@@ -295,8 +305,7 @@ class HealthCheckService:
     async def switch_off_unavailable(self, provider: str, model: str, refusal: str) -> bool:
         """Switch ``provider:model`` off because its provider refused to serve it, and email the alert list.
 
-        Called only for a refusal met on the deployment's own credential: what an
-        organization's key may reach says nothing about the deployment's. The
+        Called only for a refusal :func:`refusal_switches_off` accepts. The
         alert goes out once, from the call that switched the model off, with the
         provider's ``refusal`` redacted and capped. Returns whether this call
         switched it off.
