@@ -19,9 +19,12 @@ from typing import Any
 
 __all__ = [
     "LISTING_PREFIX",
+    "MAX_ISSUE_EXAMPLES",
     "RATE_FIELDS",
+    "REFUSE_DAMAGED_SHARE",
     "ModelsDevCatalog",
     "ModelsDevCost",
+    "ModelsDevIssues",
     "ModelsDevModel",
     "ModelsDevProvider",
     "ModelsDevRates",
@@ -33,6 +36,17 @@ __all__ = [
 
 # Gemini's listing names a model ``models/<id>``, where models.dev keys the bare id.
 LISTING_PREFIX = "models/"
+
+# How many issue paths a catalog keeps to name in a log line; the count is kept in full.
+MAX_ISSUE_EXAMPLES = 5
+
+# A document is refused when more than this share of its models are damaged. On
+# 2026-11-02 the largest provider held about 7% of the catalog's models, so one
+# broken provider stays under it, while a format change upstream damages most.
+REFUSE_DAMAGED_SHARE = 0.25
+
+# A key longer than this is cut and quoted in an issue path.
+_MAX_SEGMENT = 64
 
 # The rate fields of a ``cost`` block and of each tier in it, USD per million tokens.
 RATE_FIELDS = ("input", "output", "cache_read", "cache_write")
@@ -133,10 +147,50 @@ class ModelsDevProvider:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelsDevIssues:
+    """What :func:`parse_catalog` could not read.
+
+    ``count`` is every value of the wrong type or shape, and ``examples`` the
+    first few as ``path: expected <type>``. A path names keys and types only,
+    never a value, because the document is fetched data. ``models`` counts the
+    model entries the document lists, and ``damaged_models`` those left out or
+    read with a field missing.
+    """
+
+    count: int = 0
+    examples: tuple[str, ...] = ()
+    models: int = 0
+    damaged_models: int = 0
+
+    def describe(self) -> str:
+        """The issues for a log line: how many, in how many models, and the first few paths."""
+        return "; ".join(
+            (f"{self.count} unreadable values in {self.damaged_models} of {self.models} models", *self.examples)
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ModelsDevCatalog:
-    """One ``api.json`` document: its providers, keyed as the document keys them."""
+    """One ``api.json`` document: its providers, keyed as the document keys them, and what could not be read."""
 
     providers: Mapping[str, ModelsDevProvider]
+    issues: ModelsDevIssues = ModelsDevIssues()
+
+    def refusal(self) -> str | None:
+        """Why the document is not fit to serve, or ``None`` when it is.
+
+        A document that lists no models, or one with more than
+        ``REFUSE_DAMAGED_SHARE`` of its models damaged, has a shape the gateway
+        cannot read; serving it would drop most models or most facts.
+        """
+        issues = self.issues
+        if issues.models == 0:
+            reason = "the document lists no models"
+        elif issues.damaged_models > issues.models * REFUSE_DAMAGED_SHARE:
+            reason = f"{issues.damaged_models} of {issues.models} models are damaged"
+        else:
+            return None
+        return "; ".join((reason, *issues.examples))
 
     def models(self) -> Iterator[tuple[ModelsDevProvider, ModelsDevModel]]:
         """Every model with its provider, in document order."""
@@ -158,116 +212,181 @@ class ModelsDevCatalog:
         return model
 
 
-def _str(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
 def _number(value: object) -> float | None:
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-def _limit(value: object) -> int | None:
-    """A token limit, or ``None`` for anything but a positive integer.
-
-    models.dev writes 0 for a limit it does not know, and a client would read
-    0 as no tokens at all.
-    """
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
-
-
 def _tier_size(value: object) -> int | None:
     number = _number(value)
-    if number is None or not math.isfinite(number) or number <= 0:
+    if number is None or number <= 0:
         return None
-    return int(number) if int(number) == number else None
+    if isinstance(number, int):
+        # Checked before ``math.isfinite``, which raises on an int past float range.
+        return number
+    return int(number) if math.isfinite(number) and int(number) == number else None
 
 
-def _str_tuple(value: object) -> tuple[str, ...]:
-    return tuple(item for item in value if isinstance(item, str)) if isinstance(value, list) else ()
+class _Reader:
+    """Reads one document and notes each value it cannot read, by path and the type it expected."""
 
+    def __init__(self) -> None:
+        self.count = 0
+        self.examples: list[str] = []
 
-def _rates(raw: object) -> ModelsDevRates:
-    if not isinstance(raw, dict):
-        return ModelsDevRates()
-    values = {name: raw.get(name) for name in RATE_FIELDS}
-    return ModelsDevRates(
-        **{name: _number(value) for name, value in values.items()},
-        malformed=tuple(name for name, value in values.items() if value is not None and _number(value) is None),
-    )
+    def note(self, path: str, expected: str) -> None:
+        self.count += 1
+        if len(self.examples) < MAX_ISSUE_EXAMPLES:
+            self.examples.append(f"{path}: expected {expected}")
 
-
-def _tier(raw: dict[str, Any]) -> ModelsDevTier:
-    kind = raw.get("tier")
-    kind = kind if isinstance(kind, dict) else {}
-    return ModelsDevTier(kind=_str(kind.get("type")), size=_tier_size(kind.get("size")), rates=_rates(raw))
-
-
-def _cost(raw: object) -> ModelsDevCost | None:
-    if not isinstance(raw, dict):
+    def mapping(self, raw: dict[str, Any], name: str, path: str) -> dict[str, Any] | None:
+        value = raw.get(name)
+        if value is None or isinstance(value, dict):
+            return value
+        self.note(f"{path}.{name}", "an object")
         return None
-    raw_tiers = raw.get("tiers")
-    tiers = tuple(_tier(tier) for tier in (raw_tiers if isinstance(raw_tiers, list) else ()) if isinstance(tier, dict))
-    over = raw.get("context_over_200k")
-    return ModelsDevCost(
-        rates=_rates(raw), tiers=tiers, context_over_200k=_rates(over) if isinstance(over, dict) else None
-    )
+
+    def text(self, raw: dict[str, Any], name: str, path: str) -> str | None:
+        value = raw.get(name)
+        if value is None or isinstance(value, str):
+            return value or None
+        self.note(f"{path}.{name}", "a string")
+        return None
+
+    def flag(self, raw: dict[str, Any], name: str, path: str) -> bool:
+        value = raw.get(name)
+        if value is None or isinstance(value, bool):
+            return value is True
+        self.note(f"{path}.{name}", "a boolean")
+        return False
+
+    def texts(self, raw: dict[str, Any], name: str, path: str) -> tuple[str, ...]:
+        value = raw.get(name)
+        if value is None:
+            return ()
+        items = tuple(item for item in value if isinstance(item, str)) if isinstance(value, list) else ()
+        if not isinstance(value, list) or len(items) != len(value):
+            self.note(f"{path}.{name}", "a list of strings")
+        return items
+
+    def limit(self, raw: dict[str, Any], name: str, path: str) -> int | None:
+        """A token limit; models.dev writes 0 for one it does not know, which a client would read as no tokens."""
+        value = raw.get(name)
+        if value is None:
+            return None
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value or None
+        self.note(f"{path}.{name}", "a non-negative integer")
+        return None
+
+    def rates(self, raw: dict[str, Any], path: str) -> ModelsDevRates:
+        values = {name: raw.get(name) for name in RATE_FIELDS}
+        malformed = tuple(name for name, value in values.items() if value is not None and _number(value) is None)
+        for name in malformed:
+            self.note(f"{path}.{name}", "a number")
+        return ModelsDevRates(**{name: _number(value) for name, value in values.items()}, malformed=malformed)
+
+    def tier(self, raw: object, path: str) -> ModelsDevTier | None:
+        if not isinstance(raw, dict):
+            self.note(path, "an object")
+            return None
+        kind = self.mapping(raw, "tier", path) or {}
+        size = kind.get("size")
+        if size is not None and _tier_size(size) is None:
+            self.note(f"{path}.tier.size", "a positive integer")
+        return ModelsDevTier(
+            kind=self.text(kind, "type", f"{path}.tier"), size=_tier_size(size), rates=self.rates(raw, path)
+        )
+
+    def cost(self, raw: dict[str, Any], path: str) -> ModelsDevCost | None:
+        cost = self.mapping(raw, "cost", path)
+        if cost is None:
+            return None
+        path = f"{path}.cost"
+        raw_tiers = cost.get("tiers")
+        if raw_tiers is not None and not isinstance(raw_tiers, list):
+            self.note(f"{path}.tiers", "a list")
+            raw_tiers = None
+        tiers = [self.tier(tier, f"{path}.tiers[{n}]") for n, tier in enumerate(raw_tiers or ())]
+        over = self.mapping(cost, "context_over_200k", path)
+        return ModelsDevCost(
+            rates=self.rates(cost, path),
+            tiers=tuple(tier for tier in tiers if tier is not None),
+            context_over_200k=self.rates(over, f"{path}.context_over_200k") if over is not None else None,
+        )
+
+    def model(self, key: str, raw: dict[str, Any], path: str) -> ModelsDevModel:
+        modalities = self.mapping(raw, "modalities", path) or {}
+        limit = self.mapping(raw, "limit", path) or {}
+        return ModelsDevModel(
+            id=self.text(raw, "id", path) or key,
+            name=self.text(raw, "name", path),
+            description=self.text(raw, "description", path),
+            family=self.text(raw, "family", path),
+            canonical_model_id=self.text(raw, "canonical_model_id", path),
+            status=self.text(raw, "status", path),
+            input_modalities=self.texts(modalities, "input", f"{path}.modalities"),
+            output_modalities=self.texts(modalities, "output", f"{path}.modalities"),
+            reasoning=self.flag(raw, "reasoning", path),
+            tool_call=self.flag(raw, "tool_call", path),
+            structured_output=self.flag(raw, "structured_output", path),
+            attachment=self.flag(raw, "attachment", path),
+            temperature=self.flag(raw, "temperature", path),
+            open_weights=self.flag(raw, "open_weights", path),
+            context_window=self.limit(limit, "context", f"{path}.limit"),
+            max_output_tokens=self.limit(limit, "output", f"{path}.limit"),
+            knowledge=self.text(raw, "knowledge", path),
+            release_date=self.text(raw, "release_date", path),
+            last_updated=self.text(raw, "last_updated", path),
+            cost=self.cost(raw, path),
+        )
 
 
-def _model(key: str, raw: dict[str, Any]) -> ModelsDevModel:
-    modalities = raw.get("modalities")
-    modalities = modalities if isinstance(modalities, dict) else {}
-    limit = raw.get("limit")
-    limit = limit if isinstance(limit, dict) else {}
-    return ModelsDevModel(
-        id=_str(raw.get("id")) or key,
-        name=_str(raw.get("name")),
-        description=_str(raw.get("description")),
-        family=_str(raw.get("family")),
-        canonical_model_id=_str(raw.get("canonical_model_id")),
-        status=_str(raw.get("status")),
-        input_modalities=_str_tuple(modalities.get("input")),
-        output_modalities=_str_tuple(modalities.get("output")),
-        reasoning=bool(raw.get("reasoning")),
-        tool_call=bool(raw.get("tool_call")),
-        structured_output=bool(raw.get("structured_output")),
-        attachment=bool(raw.get("attachment")),
-        temperature=bool(raw.get("temperature")),
-        open_weights=bool(raw.get("open_weights")),
-        context_window=_limit(limit.get("context")),
-        max_output_tokens=_limit(limit.get("output")),
-        knowledge=_str(raw.get("knowledge")),
-        release_date=_str(raw.get("release_date")),
-        last_updated=_str(raw.get("last_updated")),
-        cost=_cost(raw.get("cost")),
-    )
+def _segment(key: object) -> str:
+    """A document key as a path segment. Keys are fetched data and paths are logged, so an odd one is quoted."""
+    text = str(key)
+    return text if text.isprintable() and len(text) <= _MAX_SEGMENT else repr(text[:_MAX_SEGMENT])
 
 
 def parse_catalog(raw: object) -> ModelsDevCatalog:
-    """Read a parsed ``api.json``.
+    """Read a parsed ``api.json``, noting in ``issues`` what it could not read.
 
     A provider without a ``models`` object, and a model that is not an object,
-    are left out: the document is fetched JSON, so a shape it was not expected
-    to have describes nothing rather than raising. A document that is not an
-    object raises ``TypeError``.
+    are left out, and a field of the wrong type is read as absent, so one bad
+    entry costs only itself. Whether the document as a whole is fit to serve is
+    :meth:`ModelsDevCatalog.refusal`. A document that is not an object raises
+    ``TypeError``.
     """
     if not isinstance(raw, Mapping):
         raise TypeError("models.dev catalog is not a JSON object")
+    reader = _Reader()
+    seen = damaged = 0
     providers: dict[str, ModelsDevProvider] = {}
     for key, provider in raw.items():
-        if not isinstance(provider, dict) or not isinstance(provider.get("models"), dict):
+        path = _segment(key)
+        if not isinstance(provider, dict):
+            reader.note(path, "an object")
             continue
-        models = {
-            str(model_key): _model(str(model_key), model)
-            for model_key, model in provider["models"].items()
-            if isinstance(model, dict)
-        }
+        if not isinstance(provider.get("models"), dict):
+            reader.note(f"{path}.models", "an object")
+            continue
+        models: dict[str, ModelsDevModel] = {}
+        for model_key, model in provider["models"].items():
+            seen += 1
+            before = reader.count
+            model_path = f"{path}.models.{_segment(model_key)}"
+            if isinstance(model, dict):
+                models[str(model_key)] = reader.model(str(model_key), model, model_path)
+            else:
+                reader.note(model_path, "an object")
+            damaged += reader.count > before
         providers[str(key)] = ModelsDevProvider(
-            id=_str(provider.get("id")) or str(key),
-            name=_str(provider.get("name")),
-            doc=_str(provider.get("doc")),
+            id=reader.text(provider, "id", path) or str(key),
+            name=reader.text(provider, "name", path),
+            doc=reader.text(provider, "doc", path),
             models=MappingProxyType(models),
         )
-    return ModelsDevCatalog(providers=MappingProxyType(providers))
+    issues = ModelsDevIssues(count=reader.count, examples=tuple(reader.examples), models=seen, damaged_models=damaged)
+    return ModelsDevCatalog(providers=MappingProxyType(providers), issues=issues)
 
 
 def _rates_document(rates: ModelsDevRates) -> dict[str, Any]:
