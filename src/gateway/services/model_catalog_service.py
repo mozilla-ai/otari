@@ -5,12 +5,12 @@ what pricing needs: input/output modalities, reasoning and
 tool-calling flags, structured-output and attachment support, knowledge cutoff,
 release date, and open-weights status. This module fetches its ``api.json`` once,
 reads it into the typed catalog of ``gateway.types.models_dev``, caches that
-in-memory with a long TTL, and degrades to "no metadata" on any failure so an
+in-memory with a long TTL, and keeps the last good copy through a failure, so an
 offline or unreachable models.dev never breaks the dashboard.
 
 The outbound call is gated by ``GatewayConfig.models_dev_metadata``; when that is
-false, or when the fetch fails, callers simply get an empty map and the UI shows
-the model without that enrichment. Prices and context windows come from the
+false, or when no fetch has succeeded yet, callers simply get an empty map and
+the UI shows the model without that enrichment. Prices and context windows come from the
 bundled or accepted snapshot (``services/pricing``), not from this fetch.
 """
 
@@ -28,13 +28,13 @@ from gateway.types.models_dev import ModelsDevCatalog, ModelsDevModel, parse_cat
 MODELS_DEV_URL = "https://models.dev/api.json"
 
 # The catalog is a few MB; a short read timeout keeps a slow models.dev from
-# stalling a dashboard load, and a failure just means "no enrichment this time".
+# stalling a dashboard load, and a failure just means "the last good copy this time".
 _FETCH_TIMEOUT_SECONDS = 15.0
 
 # Read the body incrementally and stop if it exceeds this, so a misbehaving or
 # compromised models.dev cannot force the gateway to buffer an unbounded response
-# into memory. Generous relative to the few-MB real catalog; overflow degrades to
-# "no enrichment", the same as any other fetch failure.
+# into memory. Generous relative to the few-MB real catalog; overflow is a failed
+# fetch like any other.
 _MAX_CATALOG_BYTES = 64 * 1024 * 1024
 
 # A failed fetch is cached briefly so an offline gateway does not re-attempt (and
@@ -99,7 +99,12 @@ class ModelCatalogEntry:
 
 @dataclass
 class _CatalogCache:
-    """Single-blob TTL cache for the whole models.dev catalog."""
+    """Single-blob TTL cache for the whole models.dev catalog.
+
+    ``data`` is the last catalog fetched, kept through a failed fetch so an
+    outage does not take the facts away; ``ok`` says whether the last attempt
+    succeeded, and so which TTL governs the next one.
+    """
 
     data: ModelsDevCatalog | None = None
     ok: bool = False
@@ -118,7 +123,7 @@ def cached_models_dev_catalog(config: GatewayConfig) -> ModelsDevCatalog | None:
     lock to its own loop: it answers from whatever a page load or the catalog
     refresher last put here, and ``None`` until something has.
     """
-    if not config.models_dev_metadata or not _cache.ok:
+    if not config.models_dev_metadata:
         return None
     return _cache.data
 
@@ -231,7 +236,8 @@ async def load_models_dev_catalog(
 ) -> ModelsDevCatalog | None:
     """Return the cached models.dev catalog, fetching it if stale.
 
-    Returns ``None`` when metadata enrichment is disabled or the fetch failed.
+    Returns ``None`` when metadata enrichment is disabled or no fetch has
+    succeeded yet; a failed fetch returns the last good catalog.
     ``serve_stale`` answers from the cache at any age so a dashboard read never
     waits on models.dev; ``force`` is the background refresher's fetch, which
     still skips the download when a copy newer than ``reuse_within`` seconds is
@@ -255,10 +261,11 @@ async def load_models_dev_catalog(
             return reused
 
         data = await _fetch()
-        _cache.data = data
+        if data is not None:
+            _cache.data = data
         _cache.ok = data is not None
         _cache.at = time.monotonic()
-        return data
+        return _cache.data
 
 
 # Floor on the refresh cadence, for the same reason as the discovery refresher's:
@@ -284,7 +291,7 @@ async def run_catalog_refresher(config: GatewayConfig, interval: float | None = 
     """Keep the models.dev catalog warm so no read waits on the 15s fetch.
 
     Primes once immediately, then refetches on the interval. Errors are already
-    swallowed inside ``_fetch`` (a failure degrades to "no enrichment"), so the
+    swallowed inside ``_fetch`` (a failure keeps the last good copy), so the
     guard here only covers an unexpected one taking the refresher down.
 
     Re-checks ``background_catalog_enabled`` every tick rather than being started
