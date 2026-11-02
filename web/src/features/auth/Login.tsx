@@ -11,6 +11,10 @@ import {
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { useAuth } from "@/features/auth/AuthContext"
+import {
+  LOGIN_REFUSAL_HINT_ID,
+  LoginRefusalHint,
+} from "@/features/auth/overlayLoginRefusalHint"
 import type { SignInCredential } from "@/shared/api/client"
 import {
   ApiError,
@@ -83,6 +87,13 @@ const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
  * refusal, so typing clears the resend link together with the message.
  */
 class EmailUnverifiedRefusal extends Error {}
+
+/**
+ * The gateway's 401 to a password sign-in: it will not say whether the address
+ * or the password was wrong, so a contributed hint under the field may add
+ * what this build can say about where the account might be.
+ */
+class CredentialRefusal extends Error {}
 
 const ERROR_IDS: Record<CredentialField, string> = {
   email: "login-email-error",
@@ -476,7 +487,9 @@ export function Login() {
         setError(
           usesPassword && result.status === 403
             ? new EmailUnverifiedRefusal(message)
-            : new Error(message),
+            : usesPassword && result.status === 401
+              ? new CredentialRefusal(message)
+              : new Error(message),
         )
       }
     } catch (caught) {
@@ -785,7 +798,14 @@ export function Login() {
                       autoComplete="current-password"
                       aria-describedby={
                         errorField === "password"
-                          ? ERROR_IDS.password
+                          ? [
+                              ERROR_IDS.password,
+                              error instanceof CredentialRefusal
+                                ? LOGIN_REFUSAL_HINT_ID
+                                : undefined,
+                            ]
+                              .filter(Boolean)
+                              .join(" ")
                           : undefined
                       }
                       className="col-span-2 h-10 text-base"
@@ -801,6 +821,10 @@ export function Login() {
                         </PublicAuthLink>
                       </div>
                     ) : null}
+                    <LoginRefusalHint
+                      email={email.trim()}
+                      refused={error instanceof CredentialRefusal}
+                    />
                   </TextField>
                   {offersResendVerification ? (
                     <PublicAuthLink
