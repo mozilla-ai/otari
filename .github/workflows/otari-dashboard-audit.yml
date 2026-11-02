@@ -2,13 +2,14 @@ name: Otari Dashboard Audit
 
 # Checks web/pnpm-lock.yaml against the npm advisory database with `pnpm audit`.
 #
-# GitHub's own coverage of the dashboard is gone, not just thin: Dependabot
-# documents pnpm support only through v10, web/ requires a newer pnpm, and the
-# dependency graph no longer reads the lockfile at all. It lists pnpm's own
-# binaries and none of the ~600 packages the dashboard installs. So no alert is
-# raised for a vulnerable dashboard dependency, and one raised earlier is closed
-# as "fixed" once the graph loses sight of the package, which is how a high
-# js-yaml advisory sat unpatched for weeks behind a resolved alert (#1001).
+# GitHub raises no security alerts for the dashboard. pnpm 11+ writes
+# web/pnpm-lock.yaml as two YAML documents, one pinning pnpm itself and then the
+# real lockfile, and the dependency graph reads only the first: it lists pnpm's
+# own binaries and none of the ~600 packages the dashboard installs. So no alert
+# is raised for a vulnerable dashboard dependency, Dependabot opens no security
+# PR for one (its version updates do run, from .github/dependabot.yml), and an
+# alert raised earlier is closed as "fixed" once the graph loses sight of the
+# package, which is how a high js-yaml advisory sat unpatched for weeks (#1001).
 #
 # Two triggers, for the two ways a lockfile becomes vulnerable:
 #   - a PR that changes the dashboard's dependencies fails here if it leaves a
@@ -104,7 +105,7 @@ jobs:
         if [ "$BLOCKING" -gt 0 ]; then
           {
             echo "\`pnpm audit\` found $BLOCKING high or critical advisories in \`web/pnpm-lock.yaml\`."
-            echo 'Dependabot does not cover the dashboard (#1001), so nothing else will open a PR for these.'
+            echo 'GitHub raises no alerts for the dashboard, so Dependabot opens no security PR for these; its weekly version updates may, if a patched release is in range.'
             echo
             echo 'Most are fixed inside the existing ranges: `pnpm --dir web update <package>`, then rerun `pnpm --dir web audit`.'
             echo 'A package still flagged after that is pinned exactly by its parent, so update the parent instead.'
