@@ -39,7 +39,8 @@ print(llm.invoke("Say hello in one sentence.").content)
 ```
 
 Without `OTARI_BASE_URL`, requests go to otari.ai's gateway,
-`https://api.otari.ai/api/v1`. `base_url` and `api_key` arguments override both
+`https://api.otari.ai/api/v1`. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use. Set `OTARI_BASE_URL` to the EU host in that case.
+`base_url` and `api_key` arguments override both
 variables. `ChatOtari` never falls back to `OPENAI_API_KEY`, so an OpenAI key in
 your environment is not sent to the gateway by mistake, and it asks Otari for
 token usage on streams too.

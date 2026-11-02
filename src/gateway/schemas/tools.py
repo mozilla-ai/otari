@@ -552,14 +552,14 @@ class OtariToolCallError(pydantic.BaseModel):
 
 
 class OtariToolCall(pydantic.BaseModel):
-    """One web search or fetch the gateway ran, as a Chat Completions response reports it in ``otari_tool_calls``.
+    """One tool call the gateway ran, as a Chat Completions response reports it in ``otari_tool_calls``.
 
     A stream sends the entry when the call starts and again when it ends, both with
     the same ``id``. Fields not set are left out of the wire entry.
     """
 
     id: str
-    type: Literal["web_search", "web_fetch"]
+    type: Literal["web_search", "web_fetch", "code_execution", "mcp"]
     status: Literal["in_progress", "completed", "failed"]
     query: str | None = pydantic.Field(default=None, description="A search's query.")
     url: str | None = pydantic.Field(
@@ -567,6 +567,19 @@ class OtariToolCall(pydantic.BaseModel):
     )
     sources: list[OtariToolCallSource] | None = pydantic.Field(
         default=None, description="A completed search's results; empty when it found none."
+    )
+    code: str | None = pydantic.Field(default=None, description="The code a code execution ran.")
+    stdout: str | None = pydantic.Field(default=None, description="What an ended code execution printed.")
+    stderr: str | None = pydantic.Field(default=None, description="What an ended code execution wrote to stderr.")
+    exit_code: int | None = pydantic.Field(default=None, description="An ended code execution's exit status.")
+    file_ids: list[str] | None = pydantic.Field(
+        default=None, description="The /v1/files IDs of the files a code execution produced."
+    )
+    server: str | None = pydantic.Field(default=None, description="The MCP server that ran the call.")
+    name: str | None = pydantic.Field(default=None, description="The MCP tool called.")
+    output: str | None = pydantic.Field(default=None, description="The text an ended MCP call gave the model.")
+    truncated: bool | None = pydantic.Field(
+        default=None, description="Whether stdout, stderr or output was cut to the report's limit."
     )
     error: OtariToolCallError | None = pydantic.Field(default=None, description="Why a failed call failed, when known.")
 

@@ -38,8 +38,18 @@ import operator
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Coroutine, Iterable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, AsyncExitStack
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+    Iterable,
+    Mapping,
+    Sequence,
+)
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -204,6 +214,7 @@ from gateway.services.budgets import (
     estimate_cost,
     estimate_tokens,
     get_budget_state,
+    hold_tool_call,
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
@@ -405,11 +416,10 @@ from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.session_principal import SessionPrincipal
-from gateway.types.tool_charges import describe_rate_key
+from gateway.types.tool_charges import LabelCalls, RateKey, describe_rate_key
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
-BackendT = TypeVar("BackendT")
 _P = ParamSpec("_P")
 
 TOKENS = PrometheusCounter(
@@ -1278,6 +1288,10 @@ class RequestContext:
         # which is what keeps ``users.spend`` matching the row: ``refund_reservation``
         # releases the hold *without* writing spend.
         self.tool_charge: Decimal = Decimal(0)
+        # USD the reservation grew by to hold gateway-run tool calls before they ran.
+        # A fallover's top-up holds it on top of the next candidate's estimate, since
+        # those calls are billed whichever attempt wins.
+        self.tool_hold: Decimal = Decimal(0)
         # Set once a deployment-paid request passes its funding gate, and ``None``
         # on every other request: settlement charges the organization through it.
         self.deployment_charge: DeploymentCharge | None = None
@@ -2364,7 +2378,7 @@ async def _grow_reservation(
         await increase_reservation(
             ctx.db,
             ctx.reservation,
-            estimate=repriced,
+            estimate=repriced + ctx.tool_hold,
             model=f"{instance}:{model}",
             model_is_free=is_free_pricing(pricing),
             strategy=ctx.config.budget_strategy,
@@ -2374,6 +2388,56 @@ async def _grow_reservation(
         if refused_detail is None:
             raise
         raise HTTPException(status_code=exc.status_code, detail=refused_detail, headers=exc.headers) from exc
+
+
+class ReservationToolGate:
+    """Grows the request's reservation by each gateway-run tool call's price before the call runs.
+
+    Settlement prices tool calls only after they ran, so the hold taken at admission
+    covers the model alone and one request could otherwise search its way past a
+    spend ceiling. A call that does not fit is refused to the model, which carries on.
+    A call whose provider reports its own cost and has no rate holds nothing, since
+    its price is not known until it returns.
+    """
+
+    def __init__(self, ctx: RequestContext) -> None:
+        self._ctx = ctx
+        self._unit_costs: dict[tuple[str, str | None, tuple[RateKey, ...] | None, bool | None], Decimal] = {}
+
+    async def admit(self, call: LabelCalls) -> bool:
+        ctx, handle = self._ctx, self._ctx.reservation
+        if handle is None or not handle.counts_toward_budget or handle.reservation_id is None:
+            return True
+        try:
+            unit = await self._unit_cost(call)
+            if unit <= ZERO:
+                return True
+            # Ends whatever the request left pending, so a failed hold rolls back only the hold.
+            await release_session(ctx.db)
+            held = await hold_tool_call(ctx.db, handle, unit, strategy=ctx.config.budget_strategy)
+        except DATABASE_ERRORS as exc:
+            logger.error(
+                "Could not hold gateway tool call %s on the budget; not running it: %s",
+                call.tool,
+                describe_database_error(exc),
+            )
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await ctx.db.rollback()
+            return False
+        if not held:
+            logger.info("Gateway tool call %s refused: its price does not fit the request's budget", call.tool)
+            return False
+        ctx.tool_hold += unit
+        return True
+
+    async def _unit_cost(self, call: LabelCalls) -> Decimal:
+        key = (call.tool, call.label, call.rate_keys, call.deployment_paid)
+        if key not in self._unit_costs:
+            charges = await price_tool_calls(self._ctx.db, [call], organization_id=self._ctx.organization_id)
+            self._unit_costs[key] = charges.total
+            # The lookup's connection must not be held across the next provider call either.
+            await release_session(self._ctx.db)
+        return self._unit_costs[key]
 
 
 BUDGETS_UNAVAILABLE_DETAIL = "Budgets could not be checked for a fallback, so it was not sent."
@@ -3985,6 +4049,7 @@ async def prepare_gateway_tools(
         use_budget=ToolUseBudget(caps) if caps else None,
         web_call_cap=WebToolCallCap(effective_web_search_max_calls(ctx.config)),
     )
+    shared.tally.spend_gate = ReservationToolGate(ctx)
 
     def _tool_context(answer: _AdmittedTools) -> ToolContext:
         code, web, web_access = answer.code, answer.web, answer.web_access
@@ -5508,34 +5573,31 @@ async def _close_tool_backend(closing: Awaitable[object], kind: _ToolBackendKind
         logger.warning("The %s tool backend failed to close: %s", kind, failure_class(exc))
 
 
-@contextlib.asynccontextmanager
-async def _held_tool_backend(
-    backend: AbstractAsyncContextManager[BackendT], kind: _ToolBackendKind
-) -> AsyncIterator[BackendT]:
-    """Enter ``backend`` for the block, and close it through :func:`_close_tool_backend`."""
-    entered = await backend.__aenter__()
+async def _enter_tool_backends(
+    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext, stack: AsyncExitStack
+) -> _OpenedTools:
+    """:func:`_open_tool_backends`, closing whatever it entered on ``stack`` when it raises."""
     try:
-        yield entered
+        # May raise SandboxNotReachableError, WebSearchNotReachableError or a refusal.
+        return await _open_tool_backends(adapter, tool_ctx, stack)
     except BaseException as exc:
-        await _close_tool_backend(backend.__aexit__(type(exc), exc, exc.__traceback__), kind)
+        await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(tool_ctx))
         raise
-    await _close_tool_backend(backend.__aexit__(None, None, None), kind)
 
 
-async def _lazy_mcp_stream(
+async def _opening_backend_stream(
     adapter: FormatAdapter[Any, ChunkT],
     kwargs: dict[str, Any],
-    configs: list[McpServerConfig],
     tool_ctx: ToolContext,
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncIterator[ChunkT]:
-    # The MCP pool is entered lazily inside the generator: a dial failure
-    # surfaces once the client starts pulling events. Sandbox / web_search use
-    # the eager-open path below for a pre-200 HTTP error instead.
-    async with _held_tool_backend(
-        MCPClientPool(configs, tally=tool_ctx.tally, trace=tool_ctx.trace), _ToolBackendKind.MCP
-    ) as pool:
-        hinted = adapter.inject_hints(kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
-        async for event in adapter.open_tool_loop_stream(hinted, pool, tool_ctx.max_tool_iterations):
+    """The tool loop's stream, opening its backends on the first read."""
+    stack = AsyncExitStack()
+    opened = await _enter_tool_backends(adapter, tool_ctx, stack)
+    async with contextlib.aclosing(
+        _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx, on_first_response)
+    ) as stream:
+        async for event in stream:
             yield event
 
 
@@ -5546,8 +5608,8 @@ async def _eager_backend_stream(
     stack: AsyncExitStack,
     tool_ctx: ToolContext,
     on_first_response: Callable[[], None] | None = None,
-) -> AsyncIterator[ChunkT]:
-    # The backends on ``stack`` were entered in ``open_stream``; this generator
+) -> AsyncGenerator[ChunkT]:
+    # The backends on ``stack`` were entered by the caller; this generator
     # closes them once the stream finishes or errors, and hands them the error
     # so a backend can abandon work nobody will read.
     kind = _ToolBackendKind.of(tool_ctx)
@@ -5579,37 +5641,30 @@ async def open_stream(
 ) -> AsyncIterator[ChunkT]:
     """Open the upstream stream for a single-attempt streaming request.
 
-    A provider stream, and a tool loop with eagerly opened backends, is held for
-    its first chunk (:func:`hold_for_first_chunk`), so a provider failure before
-    any output raises here, where a routing walk can still fall over. A tool loop
-    calls ``on_first_response`` once its first provider round has ended, since the
+    A provider stream, and a tool loop, is held for its first chunk
+    (:func:`hold_for_first_chunk`), so a provider failure before any output raises
+    here, where a routing walk can still fall over. A tool loop calls
+    ``on_first_response`` once its first provider round has ended, since the
     gateway's tools may run before anything reaches the hold.
 
-    The sandbox and web_search backends are opened eagerly (their
-    ``__aenter__`` runs before this function returns) so a backend-unreachable
-    error surfaces as an HTTP 502 rather than landing in the SSE channel after
-    the response has already committed to 200 OK. An MCP pool declared alone is
-    entered lazily inside the returned iterator; one declared beside the others
-    opens with them, so a refusal of its tool names is an HTTP error too.
+    The tool backends open before the response commits, so a backend-unreachable
+    error or a refused MCP tool name surfaces as an HTTP error rather than landing
+    in the SSE channel after a 200 OK. With a hold, opening counts toward its
+    window, so a slow MCP server cannot keep the headers waiting past it; a backend
+    slower than that still opens, and its failure arrives as an error event.
     """
     kwargs = adapter.prepare_stream_kwargs(call_kwargs)
 
     if not tool_ctx.use_tool_loop:
         return await hold_for_first_chunk(await adapter.open_provider_stream(kwargs), tool_ctx.config)
 
-    if tool_ctx.mcp_server_configs and not tool_ctx.reserved_tool_names:
-        return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)
-
+    if tool_ctx.config.streaming_first_chunk_hold_ms > 0:
+        return await hold_for_first_chunk(
+            _opening_backend_stream(adapter, kwargs, tool_ctx, on_first_response), tool_ctx.config
+        )
     stack = AsyncExitStack()
-    try:
-        # May raise SandboxNotReachableError, WebSearchNotReachableError or a refusal.
-        opened = await _open_tool_backends(adapter, tool_ctx, stack)
-    except BaseException as exc:
-        await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(tool_ctx))
-        raise
-    return await hold_for_first_chunk(
-        _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx, on_first_response), tool_ctx.config
-    )
+    opened = await _enter_tool_backends(adapter, tool_ctx, stack)
+    return _eager_backend_stream(adapter, kwargs, opened, stack, tool_ctx, on_first_response)
 
 
 # ---------------------------------------------------------------------------

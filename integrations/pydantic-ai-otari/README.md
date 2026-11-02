@@ -23,7 +23,8 @@ print(agent.run_sync("Say hello in one sentence.").output)
   model's capabilities in Pydantic AI, so a Claude model is treated as one.
 - `OtariProvider(base_url=..., api_key=...)` configures the gateway in code;
   pass it as `OtariModel(..., provider=...)`. Without `OTARI_BASE_URL`, requests
-  go to otari.ai's gateway, `https://api.otari.ai/api/v1`.
+  go to otari.ai's gateway, `https://api.otari.ai/api/v1`. Accounts in otari.ai's
+  EU region set `OTARI_BASE_URL=https://eu.api.otari.ai/api/v1`.
 - `OPENAI_API_KEY` is never used as a fallback, so an OpenAI key is not sent to
   the gateway by mistake.
 

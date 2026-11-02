@@ -17,6 +17,8 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
+Accounts in otari.ai's EU region set `ANTHROPIC_BASE_URL="https://eu.api.otari.ai/api"` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use.
+
 Claude Code puts a telemetry value in `metadata.user_id`; the next section
 says how a key accepts it.
 

@@ -836,6 +836,7 @@ describe("RoutingPage for an organization admin", () => {
               selector: "bedrock:anthropic.claude-sonnet-5-5",
               provider: "bedrock",
               provider_type: "bedrock",
+              input_price: 3,
               own_tools: [],
               otari_tools: ["web_search"],
             },
@@ -843,6 +844,7 @@ describe("RoutingPage for an organization admin", () => {
               selector: "anthropic:claude-sonnet-5-5",
               provider: "anthropic",
               provider_type: "anthropic",
+              input_price: 3,
               own_tools: ["web_search"],
               otari_tools: [],
             },
@@ -851,12 +853,15 @@ describe("RoutingPage for an organization admin", () => {
           fell_back: 2,
           pinned: 0,
           pinned_provider: null,
+          pinned_keys: [],
         },
       ],
     })
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("Claude Sonnet 5.5")).closest("tr")!
+    const row = (
+      await screen.findByText("anthropic/claude-sonnet-5.5")
+    ).closest("tr")!
     // The server's order, not the catalog's: Bedrock is tried first here.
     const bedrock = within(row).getByText("Bedrock")
     const anthropic = within(row).getByText("Anthropic")

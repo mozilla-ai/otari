@@ -24,7 +24,8 @@ print(llm.invoke("Say hello in one sentence.").content)
 - `model` is any model your gateway routes: `provider:model`, or the name of a
   routing policy or alias.
 - `base_url` and `api_key` override the environment. Without `OTARI_BASE_URL`,
-  requests go to otari.ai's gateway, `https://api.otari.ai/api/v1`.
+  requests go to otari.ai's gateway, `https://api.otari.ai/api/v1`. Accounts in
+  otari.ai's EU region set `OTARI_BASE_URL=https://eu.api.otari.ai/api/v1`.
 - `OPENAI_API_KEY` is never used as a fallback, so an OpenAI key is not sent to
   the gateway by mistake. Token usage is requested on streams too.
 

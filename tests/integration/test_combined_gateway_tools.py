@@ -62,6 +62,7 @@ from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
     MAX_USES_EXCEEDED_ERROR,
+    OTARI_TOOL_CALLS_FIELD,
     SERVER_TOOL_USE_ID_PREFIX,
     WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
@@ -685,6 +686,49 @@ def test_chat_stream_runs_all_four_in_one_loop(
     deltas = [p["choices"][0]["delta"] for p in _sse_payloads(response.text) if p.get("choices")]
     assert not any(delta.get("tool_calls") for delta in deltas), "a gateway-run call leaked to the client"
     assert "".join(delta.get("content") or "" for delta in deltas) == "done"
+    ended = [
+        e
+        for p in _sse_payloads(response.text)
+        for e in p.get(OTARI_TOOL_CALLS_FIELD, [])
+        if e["status"] != "in_progress"
+    ]
+    assert {e["type"] for e in ended} == {"web_search", "web_fetch", "code_execution", "mcp"}
+
+
+def test_a_chat_answer_reports_what_the_sandbox_printed_and_what_mcp_returned(
+    client: TestClient, api_key_header: dict[str, str], backends: _Backends
+) -> None:
+    names = ["code_execution", _MCP_TOOL]
+    with _scripted("gateway.services.mcp_loop.acompletion", [_completion(names), _completion(None)]):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "compute and look up"}],
+                "tools": [_CODE],
+                "mcp_servers": [_MCP_SERVER],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    code, mcp = response.json()[OTARI_TOOL_CALLS_FIELD]
+    assert (code["type"], code["status"], code["code"], code["stdout"], code["exit_code"]) == (
+        "code_execution",
+        "completed",
+        "print(6 * 7)",
+        "42\n",
+        0,
+    )
+    assert len(code["file_ids"]) == 1
+    assert mcp == {
+        "id": mcp["id"],
+        "type": "mcp",
+        "status": "completed",
+        "server": "docs",
+        "name": _MCP_TOOL,
+        "output": "mcp result",
+    }
 
 
 def _default_workspace_id(client: TestClient, master_key_header: dict[str, str]) -> str:

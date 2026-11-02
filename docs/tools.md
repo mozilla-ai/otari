@@ -168,6 +168,17 @@ refusal names the tool's `otari:` row, which prices it on any instance. A failed
 tool invocation is recorded but not charged. Charges settle on the final usage
 row alongside model tokens.
 
+Each call is also held against the caller's budgets and spend ceilings at its
+rate before it runs, on top of the hold the model call took. A call that would
+take the request past a limit is not run: the model is told it was refused
+(`[tool error] budget_exceeded`, with the tag `budget_exceeded` in Chat
+Completions' `otari_tool_calls`), it is recorded as a failed call and not
+charged, and the request goes on. A call priced only by the cost its provider
+reports, with no rate, holds nothing, since that cost is known only once it
+returns. A request on a free model whose budgets and ceilings cap only dollars
+holds nothing for its model call, and its tool calls are not held either: they
+are charged at settlement, and that request can still end past the cap.
+
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what
 served the calls:
@@ -308,13 +319,13 @@ the final answer.
 
 Responses and Messages can expose native server-tool result blocks when their
 wire format expects them. Chat Completions has no such blocks, so Otari reports
-its web searches and fetches in a field of its own, `otari_tool_calls`, at the
-top level of the response and of each streamed chunk: a search with its query
-and the sources it found, a fetch with the URL it read, and a failure with what
-may be shown about it. See [Web tool calls on Chat
-Completions](api-reference.md#web-tool-calls-on-chat-completions). Code execution
-and MCP calls are not reported there, so Chat Completions returns only the final
-assistant message for them. Calls for tools the client must execute are preserved.
+the calls it ran in a field of its own, `otari_tool_calls`, at the top level of
+the response and of each streamed chunk: a search with its query and the sources
+it found, a fetch with the URL it read, a code execution with its code, output
+and exit status, an MCP call with its server, tool and the text it returned, and
+a failure with what may be shown about it. See [Gateway tool calls on Chat
+Completions](api-reference.md#gateway-tool-calls-on-chat-completions). Calls for
+tools the client must execute are preserved.
 The dashboard Playground's own completion route is the one exception: its stream
 also reports every gateway-run call and its result in an `otari_tool_activity`
 field, on a chunk of its own before and after each call, so the page can show

@@ -1350,12 +1350,10 @@ function UsagePageContent({
 
       {/* Window + filter row: presets anchor the rolling window (dragging on the
           chart below selects an explicit sub-window), the Add filter toggle and
-          its chips share the same line. Inside the Overview the filter bar owns the
-          entity pickers, so only the presets remain. */}
+          its chips share the same line. Inside the Overview the filter bar owns
+          the window and the entity pickers, so only Refresh remains. */}
       {embedded ? (
-        // One row: the window's presets, then what it resolved to and Refresh.
         <div className="otari-toolbar flex flex-wrap items-center gap-3 pb-3">
-          {presetTabs}
           <div className="ml-auto">{introAction}</div>
         </div>
       ) : (

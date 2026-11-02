@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from math import ceil
@@ -1304,3 +1304,42 @@ async def increase_reservation(
             await db.commit()
             handle.estimate -= delta.estimate
             handle.token_estimate -= delta.token_estimate
+
+
+async def hold_tool_call(db: AsyncSession, handle: ReservationHandle, amount: Decimal, *, strategy: str) -> bool:
+    """Grow every leg of ``handle`` by ``amount`` before a gateway-run tool call runs, and commit.
+
+    All or nothing: ``False`` where a budget or a ceiling has no room, with the
+    ceilings that had room given their growth back, so a refused call holds
+    nothing and the ledger still matches the counters. The commit ends the
+    transaction either way, so no budget row stays locked across the next
+    provider call. Work pending on ``db`` lands in that commit too.
+
+    Raises:
+        DATABASE_ERRORS: with ``handle`` restored to what it held before; the
+            caller rolls ``db`` back.
+    """
+    before = replace(handle)
+    try:
+        try:
+            await increase_reservation(
+                db,
+                handle,
+                estimate=max(handle.estimate, handle.scoped_estimate) + max(to_usd(amount), ZERO),
+                model_is_free=False,
+                strategy=strategy,
+            )
+        except HTTPException:
+            # The ceilings are grown before the per-user leg, so a refusal there leaves them grown.
+            await release_scoped(
+                db, handle.scoped_budget_ids, handle.scoped_estimate - before.scoped_estimate, commit=False
+            )
+            handle.scoped_estimate = before.scoped_estimate
+            await db.commit()
+            return False
+        await db.commit()
+    except DATABASE_ERRORS:
+        for item in fields(handle):
+            setattr(handle, item.name, getattr(before, item.name))
+        raise
+    return True

@@ -479,6 +479,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
           ) : null}
           <ActivityTimeline
             presets={SESSION_PRESETS}
+            hidePresets={embedded}
             extentKey={
               custom ? CUSTOM_KEY : (extent?.key ?? ACTIVITY_DEFAULT_KEY)
             }

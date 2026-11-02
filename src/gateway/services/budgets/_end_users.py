@@ -46,10 +46,16 @@ class _EndUsers:
     def __init__(self, repositories: BudgetRepositories) -> None:
         self._repositories = repositories
 
-    async def require_assignable_budgets(self, budget_ids: list[str]) -> None:
-        """Refuse an end-user budget that does not exist or that a tenant owns."""
+    async def require_assignable_budgets(self, budget_ids: list[str], organization_id: uuid.UUID | None) -> None:
+        """Refuse an end-user budget that does not exist or that someone else owns.
+
+        ``organization_id`` names the organization whose own service key is being written, which may list only that
+        organization's budgets; ``None`` is an operator's key, which may list only the deployment's.
+        """
         for budget_id in budget_ids:
-            await self._assignable_budget(budget_id)
+            budget = await self._repositories.budgets.get(budget_id)
+            if budget is None or budget.organization_id != organization_id:
+                raise EndUserBudgetNotFoundError(budget_id)
 
     async def resolve(self, api_key: APIKey, external_id: str, requested_budget_id: str | None) -> ResolvedEndUser:
         """The end user that ``external_id`` names under this key's owner.
@@ -227,17 +233,18 @@ class _EndUsers:
             raise EndUserOwnerUnavailableError()
         return owner_user_id
 
-    async def _assignable_budget(self, budget_id: str) -> Budget:
-        budget = await self._repositories.budgets.get(budget_id)
-        if budget is None or budget.organization_id is not None:
-            raise EndUserBudgetNotFoundError(budget_id)
-        return budget
-
     async def _listed_budget(self, api_key: APIKey, budget_id: str) -> Budget:
-        """``budget_id``, refused unless it is on the key's list of end-user budgets."""
+        """``budget_id``, refused unless it is on the key's list of end-user budgets.
+
+        The list was checked against the key's organization when it was written, and neither a key nor a budget
+        changes organization, so only the kind of owner is checked again here.
+        """
         if budget_id not in api_key.assignable_end_user_budgets():
             raise EndUserBudgetNotAllowedError(budget_id)
-        return await self._assignable_budget(budget_id)
+        budget = await self._repositories.budgets.get(budget_id)
+        if budget is None or (budget.organization_id is not None) != api_key.is_organization_service_key():
+            raise EndUserBudgetNotFoundError(budget_id)
+        return budget
 
     async def delete(self, api_key: APIKey, user_ids: list[str]) -> int:
         """Soft-delete these end users of the key's owner, and return how many were deleted.

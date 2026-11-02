@@ -140,20 +140,29 @@ runs Otari's. `provider` always forwards the provider's own tool and never uses
 Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
 use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
 
-### Web tool calls on Chat Completions
+### Gateway tool calls on Chat Completions
 
 Chat Completions has no shape for a tool the server runs, so a chat completion
-reports Otari's own web searches and fetches in `otari_tool_calls`, at the top
-level of the response, beside `choices`. Each entry is one call:
+reports the calls Otari ran itself (web searches and fetches, code execution and
+MCP tool calls) in `otari_tool_calls`, at the top level of the response, beside
+`choices`. A caller can read there what a tool really returned rather than rely
+on the model's account of it. Each entry is one call, and a field that does not
+apply to its type is left out:
 
 | Field | Value |
 |---|---|
-| `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch. |
-| `type` | `web_search` or `web_fetch`. |
-| `status` | `in_progress`, `completed` or `failed`. |
+| `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch, `otari_ci_…` for code execution, `otari_mcp_…` for an MCP call. |
+| `type` | `web_search`, `web_fetch`, `code_execution` or `mcp`. |
+| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, and an MCP call that returned a tool error, are `failed`. |
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (an ISO date, or date and time, for a search on a search instance; the provider's own date string on the legacy search settings; or `null`); empty when it found none. Never page text. |
+| `code` | The code a code execution ran. |
+| `stdout`, `stderr`, `exit_code` | What an ended code execution printed and its exit status, absent when the run never reached the sandbox. |
+| `file_ids` | The [Files API](files.md) IDs of the files a code execution produced. |
+| `server`, `name` | The MCP server and the tool the model called on it. |
+| `output` | The text an ended MCP call gave the model. A failed call's is Otari's own `[tool error] …` text, never the server's exception. |
+| `truncated` | `true` when `stdout`, `stderr` or `output` was cut to 64 KiB. The model read it whole. |
 | `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider. Absent when Otari can say no more than that the call failed. |
 
 A response that is not streamed carries the ended entry of every call, across
@@ -197,7 +206,7 @@ behavior](routing.md#failure-behavior)).
 
 A client may keep the entries on the assistant message it sends back: Otari
 removes `otari_tool_calls` from every assistant message before calling the
-provider. Code execution and MCP tool calls are not reported in the field.
+provider.
 
 ### Provider-specific fields
 
@@ -573,6 +582,9 @@ and any other failure returns 502.
 
 Routing-policy management lives under `/api/v1/routing/policies`; learned-routing
 examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`.
+A subagent model recommendation is asked at `POST /api/v1/routing/recommend`, and the
+operator manages the subagent routers that answer it under `/api/v1/routing/recommenders`
+(see [Agent model recommendations](routing.md#agent-model-recommendations)).
 See [Routing policies](routing.md) for configuration and behavior, and OpenAPI for
 the request schemas.
 
@@ -723,12 +735,13 @@ would get unstreamed: a `400` for a parameter the provider does not accept, a
 `502` for a provider outage. Otari holds the response until the provider's first
 chunk to make that possible. The gateway holds it for at most
 `streaming_first_chunk_hold_ms` (15 seconds by default; `0` turns the hold off
-and commits the `200` as soon as the stream opens), and does not hold a stream
-whose only gateway tools are MCP servers. A stream running the gateway's other
-tools (sandbox, web search) locks onto its candidate once the first round of
-that loop ends instead, which can happen before anything is sent: a failure
-past that point cannot fall over either, even though no output has reached
-the client yet. A provider slower than that to start still streams, and a
+and commits the `200` as soon as the stream opens). For a stream running the
+gateway's tools, opening their backends (connecting to MCP servers, leasing a
+sandbox) counts toward that window too. A stream running the
+gateway's tools (MCP servers, sandbox, web search) locks onto its candidate
+once the first round of that loop ends instead, which can happen before
+anything is sent: a failure past that point cannot fall over either, even
+though no output has reached the client yet. A provider slower than that to start still streams, and a
 failure after that point is reported as below.
 
 A failure after a stream has started arrives as an error event, which carries

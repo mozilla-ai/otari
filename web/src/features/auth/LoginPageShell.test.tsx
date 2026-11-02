@@ -106,7 +106,9 @@ describe("the header's logo", () => {
   it("stays unlinked with neither a website nor a catalog", () => {
     renderShell(undefined, { site_url: null, public_catalog: false })
     expect(screen.queryByRole("link")).not.toBeInTheDocument()
-    expect(screen.getByText("Otari")).toBeInTheDocument()
+    expect(
+      screen.getByRole("img", { name: "Otari by Mozilla AI" }),
+    ).toBeInTheDocument()
   })
 })
 

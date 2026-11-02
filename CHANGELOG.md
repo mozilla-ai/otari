@@ -4,6 +4,40 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.35.0](https://github.com/mozilla-ai/otari/releases/tag/v0.35.0) - 2026-10-31
+
+
+
+### Bug Fixes
+
+- **models:** Omit unknown fields from the model responses in [#2674](https://github.com/mozilla-ai/otari/pull/2674) by [@peteski22](https://github.com/peteski22) ([`28448d5`](https://github.com/mozilla-ai/otari/commit/28448d575f99488c2e95ccf089110ebf7d722fb7))
+- **routing:** Hold the tool-loop stream for its first chunk too in [#2686](https://github.com/mozilla-ai/otari/pull/2686) by [@Sharlie89](https://github.com/Sharlie89) ([`51442c4`](https://github.com/mozilla-ai/otari/commit/51442c4979405b7705c55c0948896e05b7eb2ed5))
+- **routing:** Read spend ceilings in budget conditions in [#2715](https://github.com/mozilla-ai/otari/pull/2715) by [@daavoo](https://github.com/daavoo) ([`495aa81`](https://github.com/mozilla-ai/otari/commit/495aa811cc246ae6c2cdc42327a7256ce44e6c13))
+- **budgets:** Hold each gateway-run tool call before it runs in [#2718](https://github.com/mozilla-ai/otari/pull/2718) by [@daavoo](https://github.com/daavoo) ([`cbce849`](https://github.com/mozilla-ai/otari/commit/cbce8491d5d526bf8d223cfa3683b037ed52bd97))
+- **dashboard:** Open a request by its Otari-Request-ID in [#2734](https://github.com/mozilla-ai/otari/pull/2734) by [@daavoo](https://github.com/daavoo) ([`127e0d2`](https://github.com/mozilla-ai/otari/commit/127e0d259e21da355730ee5465a61c1c0edae189))
+- **routing:** Hold an MCP-only tool-loop stream for its first chunk too in [#2732](https://github.com/mozilla-ai/otari/pull/2732) by [@daavoo](https://github.com/daavoo) ([`4361df5`](https://github.com/mozilla-ai/otari/commit/4361df5ef557718775f71c210bf519767a58ce23))
+
+
+### Features
+
+- **routing:** Store subagent routers with their token prices in [#2679](https://github.com/mozilla-ai/otari/pull/2679) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`c458118`](https://github.com/mozilla-ai/otari/commit/c4581187ca440bfdb66b05f94c2b0b94d8b8d9b1))
+- **routing:** Recommend with the stored subagent router in [#2680](https://github.com/mozilla-ai/otari/pull/2680) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`61d08d2`](https://github.com/mozilla-ai/otari/commit/61d08d266007d24e001e3f08d31e113ce1cb53d2))
+- **api:** Manage subagent routers at /routing/recommenders by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`4f1c197`](https://github.com/mozilla-ai/otari/commit/4f1c1978c33862415a83c1196a22a758c2879311))
+- **web:** Add the subagent router page by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`28d139a`](https://github.com/mozilla-ai/otari/commit/28d139a91be0580305d61e9bd30c65862a5b61fc))
+- **routing:** Allow a subagent router with both prices at zero by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`193e40e`](https://github.com/mozilla-ai/otari/commit/193e40e07d31f03d833bb156092e5b0d53956a78))
+- **web:** Allow a free subagent router in the router form by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`19ebefe`](https://github.com/mozilla-ai/otari/commit/19ebefee5212135b2d70863f191b90dc573c7690))
+- **web:** Stop offering the config.yml model on the subagent router page by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`f6f8858`](https://github.com/mozilla-ai/otari/commit/f6f8858e8810d281c67db575c06c5cca13e940f7))
+- **BREAKING:** **routing:** Set the subagent router only in the dashboard by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`08e836e`](https://github.com/mozilla-ai/otari/commit/08e836ee533d993242af47f20a5aa97c1d9911ca))
+- **feedback:** Let a person share their email so the team can reply in [#2716](https://github.com/mozilla-ai/otari/pull/2716) by [@jigjigjig](https://github.com/jigjigjig) ([`8b4bb06`](https://github.com/mozilla-ai/otari/commit/8b4bb06d4fcedac1644a5182228052e547724527))
+- **keys:** Let an organization create its own service keys in [#2735](https://github.com/mozilla-ai/otari/pull/2735) by [@daavoo](https://github.com/daavoo) ([`51dd9de`](https://github.com/mozilla-ai/otari/commit/51dd9de80877ad02abde76c70d96d6ada61af6da))
+
+
+
+### New Contributors
+
+- [@mukeshkbj](https://github.com/mukeshkbj) made their first contribution in [#2720](https://github.com/mozilla-ai/otari/pull/2720)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.34.0...v0.35.0
 ## [0.34.0](https://github.com/mozilla-ai/otari/releases/tag/v0.34.0) - 2026-10-29
 
 

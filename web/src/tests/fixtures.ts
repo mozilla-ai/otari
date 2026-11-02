@@ -497,6 +497,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     exclude_from_budget: false,
     reject_user_mismatch: null,
     is_service_key: false,
+    is_organization_service_key: false,
     end_user_budget_id: null,
     end_user_budget_ids: [],
     metadata: {},

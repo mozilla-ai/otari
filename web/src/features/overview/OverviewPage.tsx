@@ -18,9 +18,7 @@ import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
-import { tabClassName } from "@/design-system/navigation/TabRow"
 import { ObserveFilterBar } from "@/features/observe/ObserveFilterBar"
-import { ObserveScopeCaption } from "@/features/observe/ObserveScope"
 import {
   carrySearch,
   OBSERVE_PATHS,
@@ -98,9 +96,9 @@ function useLocalMidnight(): string {
  *
  * The strip is about what the caller is responsible for: a manager answers for
  * the organization (or deployment), so it reads everyone's requests; a member
- * answers for their own. Neither follows the Mine | Everyone switch, and a
- * member whose usage identity is unknown is asked nothing rather than judged
- * on the workspace.
+ * answers for their own. Neither follows the page's filters, and a member
+ * whose usage identity is unknown is asked nothing rather than judged on the
+ * workspace.
  */
 function useTodayErrors(managesSpend: boolean) {
   const since = useLocalMidnight()
@@ -125,7 +123,7 @@ function useTodayErrors(managesSpend: boolean) {
   const search: DashboardSearch = {
     status: "error",
     start_date: since,
-    scope: managesSpend ? "everyone" : "mine",
+    ...(managesSpend ? {} : { user_id: [owner.ownerId] }),
   }
   return { query, search }
 }
@@ -299,11 +297,7 @@ function OverviewLayout({ status }: { status: ReactNode }) {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Overview">
-        What needs attention, then spend, requests and agent sessions over one
-        window and one set of filters. Click a bar or a row to narrow it; the
-        filters follow you between tabs.
-      </PageIntro>
+      <PageIntro title="Overview" />
       <div inert={isCovered}>
         {/* Each band rules its own top; the last one closes the group, so the
             controls below sit under one rule. */}
@@ -312,22 +306,24 @@ function OverviewLayout({ status }: { status: ReactNode }) {
         </div>
         {isServed ? (
           <>
-            <ObserveScopeCaption />
             {tabs.length > 1 ? (
               <nav aria-label="Overview views" className="pb-5">
-                <div className="inline-flex max-w-full items-center gap-1 overflow-x-auto">
+                <div className="flex max-w-full items-center gap-6 overflow-x-auto border-b border-border">
                   {tabs.map((tab) => {
                     const isActive = tab.view === current
                     return (
-                      // A link wearing the `Tab` classes: each view is a
-                      // destination with its own URL, not a switch inside one
-                      // page.
+                      // A link: each view is a destination with its own URL,
+                      // not a switch inside one page.
                       <Link
                         key={tab.view}
                         to={OBSERVE_PATHS[tab.view]}
                         search={carrySearch(current, tab.view, search)}
                         aria-current={isActive ? "page" : undefined}
-                        className={tabClassName(isActive)}
+                        className={`-mb-px shrink-0 border-b-2 pb-2 text-title whitespace-nowrap transition-colors motion-reduce:transition-none ${
+                          isActive
+                            ? "border-foreground text-foreground"
+                            : "border-transparent text-muted hover:text-foreground"
+                        }`}
                       >
                         {tab.label}
                       </Link>

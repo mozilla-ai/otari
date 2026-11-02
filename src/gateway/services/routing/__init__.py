@@ -30,7 +30,6 @@ from gateway.services.routing._agent_recommender_price import HOLD_INPUT_TOKENS,
 from gateway.services.routing._agent_recommender_rules import check_recommender
 from gateway.services.routing._agent_recommender_service import AgentRecommenderService
 from gateway.services.routing._agent_recommenders import (
-    REFRESH_SECONDS,
     StoredRecommender,
     active_agent_recommender,
     apply_agent_recommenders,
@@ -40,7 +39,13 @@ from gateway.services.routing._agent_recommenders import (
     run_agent_recommender_refresher,
 )
 from gateway.services.routing._automatic import AutomaticObservation, AutomaticRouter, preferred_region
-from gateway.services.routing._service import FALLBACK_WINDOW, AutomaticFallback, FallbackOffering, RoutingService
+from gateway.services.routing._service import (
+    FALLBACK_WINDOW,
+    AutomaticFallback,
+    FallbackOffering,
+    PinnedTraffic,
+    RoutingService,
+)
 from gateway.services.routing.backends import (
     KNN_BACKEND,
     NOOP_BACKEND,
@@ -89,7 +94,6 @@ __all__ = [
     "KNN_BACKEND",
     "NOOP_BACKEND",
     "PRIORITY_BACKEND",
-    "REFRESH_SECONDS",
     "ROUTER_LABEL",
     "ROUTER_LABEL_MODEL",
     "ROUTER_LABEL_PROVIDER",
@@ -102,6 +106,7 @@ __all__ = [
     "FallbackOffering",
     "KnnRoutingMemory",
     "NoEligibleCandidatesError",
+    "PinnedTraffic",
     "RecommenderPrice",
     "RouterBackend",
     "RouterOrdering",

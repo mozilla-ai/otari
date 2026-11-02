@@ -44,6 +44,10 @@ HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 # working example body keyed by (METHOD, path). Everything else stays derived
 # from the schema. Models use the provider-prefixed form Otari expects.
 EXAMPLE_BODY_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
+    # A plain key: the schema-derived bodies carry the service-key fields beside
+    # ``is_service_key: false``, which the routes refuse.
+    ("POST", "/api/v1/organizations/me/keys"): {"key_name": "my-key"},
+    ("PATCH", "/api/v1/organizations/me/keys/{key_id}"): {"key_name": "my-key"},
     ("POST", "/v1/chat/completions"): {
         "model": "openai:gpt-4o-mini",
         "messages": [{"role": "user", "content": "Hello from Otari!"}],

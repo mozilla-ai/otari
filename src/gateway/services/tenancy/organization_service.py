@@ -412,6 +412,11 @@ class OrganizationService:
         self._enforce_management_role(membership)
         return membership
 
+    async def manages_organization(self, *, user: User, organization: Organization) -> bool:
+        """Whether the caller is an active owner or admin of the organization."""
+        membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
+        return membership is not None and membership.role in MANAGEMENT_ROLES
+
     async def hold_workspace_write_access(
         self,
         *,
