@@ -1,11 +1,7 @@
-"""Data access for an organization's web search and fetch keys and its workspaces' overrides.
-
-:func:`resolve_web_search_key` decides which key of a kind a workspace uses. It is a pure
-function over rows the repository already loaded, so it is tested without a database.
-"""
+"""Data access for an organization's web search and fetch keys and its workspaces' overrides."""
 
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import Select, func, select, update
@@ -28,28 +24,6 @@ class WebSearchKeyConflict(Exception):
 
 # One live key and this workspace's override of it, ``None`` where the workspace inherits.
 SearchKeyCandidate = tuple[OrgWebSearchKey, WorkspaceWebSearchKeyOverride | None]
-
-
-def resolve_web_search_key(
-    candidates: Sequence[SearchKeyCandidate], usable: Callable[[OrgWebSearchKey], bool]
-) -> OrgWebSearchKey | None:
-    """The key of one kind a workspace uses, or ``None`` where it uses the deployment's instance.
-
-    A request names no provider, so one key is chosen across all of them, among
-    ``candidates`` of a single kind:
-
-    1. The key the workspace pinned.
-    2. Otherwise the organization's default.
-    3. Otherwise none, and the workspace uses the deployment's instance: a key serves
-       a workspace only once the organization makes it the default or the workspace pins it.
-
-    A key the workspace turned off, or one this deployment cannot decrypt, is passed over.
-    ``usable`` is asked of keys in that order and only until one passes.
-    """
-    live = [(key, override) for key, override in candidates if override is None or not override.disabled]
-    pinned = [key for key, override in live if override is not None and override.is_default]
-    defaults = [key for key, _ in live if key.is_org_default]
-    return next((key for key in (*pinned, *defaults) if usable(key)), None)
 
 
 class OrgWebSearchKeyRepository(

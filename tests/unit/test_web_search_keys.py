@@ -28,10 +28,10 @@ from gateway.models.tools import (
     WebToolCredentialSource,
     WorkspaceWebSearchKeyOverride,
 )
-from gateway.repositories.tools import resolve_web_search_key
 from gateway.services import search_backend
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tools import SearchQuery, _web_search_keys, apply_web_access_policy, resolve_search
+from gateway.services.tools._web_search_keys import resolve_web_search_key
 from gateway.services.web_search_providers import WebSearchProviderError
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)

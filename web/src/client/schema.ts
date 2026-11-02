@@ -4348,7 +4348,7 @@ export interface paths {
          * @description Add a search or fetch key to the caller's organization. Organization owners and admins only.
          *
          *     A new key serves no workspace until the organization makes it its default for the key's kind, or a
-         *     workspace pins it. Until then each workspace keeps using the deployment's instance.
+         *     workspace pins it. Until then each workspace keeps the key it uses, or the deployment's instance.
          */
         post: operations["web-search-keys-create_org_web_search_key"];
         delete?: never;
@@ -19801,7 +19801,7 @@ export interface components {
             is_effective: boolean;
             /**
              * Is Org Default
-             * @description The organization's default of its kind, which a workspace that pinned no key uses.
+             * @description The organization's default of its kind, which a workspace that pinned no key uses unless it turned the key off or this deployment cannot decrypt it; the deployment's instance serves it then.
              * @default false
              */
             is_org_default: boolean;
