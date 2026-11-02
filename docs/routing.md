@@ -205,8 +205,25 @@ default target serves.
 
 Teach the router through `POST /api/v1/routing/preferences/rank`. Each example
 contains a prompt and a score from 0 to 1 for each candidate. Read pool status
-through `GET /api/v1/routing/status`. `scripts/seed_routing_demo.py` provides a
-runnable example.
+through `GET /api/v1/routing/status`. Both are operator routes that name the
+user (and optionally the workspace) to teach. `scripts/seed_routing_demo.py`
+provides a runnable example.
+
+An API key teaches its own memory instead, through
+`POST /api/v1/routing/me/preferences/rank` and `GET /api/v1/routing/me/status`.
+The body is the same list of `examples` with no `user_id` or `workspace_id`:
+the memory is the key's user's in the key's workspace, the pool that key's
+requests vote over, so a key cannot teach or read another user's or workspace's
+pool. A service key teaches its own user's pool, not its end users'. Each call
+counts against the user's request rate limit, and is refused with 403 where the
+router's embedding provider does not serve the caller's country, because
+embedding an example sends its prompt there.
+
+```bash
+curl -X POST "$OTARI_URL/api/v1/routing/me/preferences/rank" \
+  -H "Authorization: Bearer $OTARI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"examples": [{"prompt": "Is this claim supported?", "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}}]}'
+```
 
 Learned memory is scoped by user and workspace. Optional task IDs create separate
 pools. It is not learned automatically from live traffic.

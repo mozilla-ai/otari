@@ -11276,6 +11276,26 @@
         "title": "KeyInfo",
         "type": "object"
       },
+      "KeyRankRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "examples": {
+            "description": "The scored prompts to record.",
+            "items": {
+              "$ref": "#/components/schemas/ScoredExample"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Examples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "examples"
+        ],
+        "title": "KeyRankRequest",
+        "type": "object"
+      },
       "KnownProviderSchema": {
         "description": "A selected provider's autofill hints for the add-provider form.",
         "properties": {
@@ -18013,7 +18033,6 @@
         "type": "object"
       },
       "RankRequest": {
-        "description": "Record how well each candidate did, for one or many prompts.\n\nA batch because of the arithmetic: a pool routes nothing until it holds\n``router_seed_count`` examples (20 by default) and the vote reads the ``k``\nnearest (5 by default), so a useful first teaching pass is dozens of examples\nacross the kinds of prompt you care about.",
         "properties": {
           "examples": {
             "description": "The scored prompts to record.",
@@ -18045,8 +18064,8 @@
           }
         },
         "required": [
-          "user_id",
-          "examples"
+          "examples",
+          "user_id"
         ],
         "title": "RankRequest",
         "type": "object"
@@ -44827,6 +44846,86 @@
         ]
       }
     },
+    "/api/v1/routing/me/preferences/rank": {
+      "post": {
+        "description": "Record scored examples into the calling key's own routing memory.\n\nThe memory is the key's user's in the key's workspace, the pool that key's\nrequests vote over; nothing in the body can name another. Validation, storage\nand the response are those of ``POST /api/v1/routing/preferences/rank``.\n\nEach call counts against the user's request rate limit, and is refused (403)\nwhen the router's embedding provider does not serve the caller's country,\nbecause embedding an example sends its prompt there.",
+        "operationId": "routing-rank_own_candidates",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyRankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RankResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Rank Own Candidates",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/routing/me/status": {
+      "get": {
+        "description": "Report how warm the calling key's own routing memory is, per pool.\n\nThe same report as ``GET /api/v1/routing/status``, for the key's user in the\nkey's workspace.",
+        "operationId": "routing-own_routing_memory_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Own Routing Memory Status",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
     "/api/v1/routing/policies": {
       "get": {
         "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
@@ -45073,7 +45172,7 @@
     },
     "/api/v1/routing/preferences/rank": {
       "post": {
-        "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
+        "description": "Record scored examples into ``user_id``'s memory: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
         "operationId": "routing-rank_candidates",
         "requestBody": {
           "content": {

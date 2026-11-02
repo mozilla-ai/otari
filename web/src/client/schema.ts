@@ -5265,6 +5265,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing/me/preferences/rank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rank Own Candidates
+         * @description Record scored examples into the calling key's own routing memory.
+         *
+         *     The memory is the key's user's in the key's workspace, the pool that key's
+         *     requests vote over; nothing in the body can name another. Validation, storage
+         *     and the response are those of ``POST /api/v1/routing/preferences/rank``.
+         *
+         *     Each call counts against the user's request rate limit, and is refused (403)
+         *     when the router's embedding provider does not serve the caller's country,
+         *     because embedding an example sends its prompt there.
+         */
+        post: operations["routing-rank_own_candidates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/routing/me/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Own Routing Memory Status
+         * @description Report how warm the calling key's own routing memory is, per pool.
+         *
+         *     The same report as ``GET /api/v1/routing/status``, for the key's user in the
+         *     key's workspace.
+         */
+        get: operations["routing-own_routing_memory_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routing/policies": {
         parameters: {
             query?: never;
@@ -5355,7 +5406,7 @@ export interface paths {
         put?: never;
         /**
          * Rank Candidates
-         * @description Record scored examples: one routing-memory record each, plus an audit row.
+         * @description Record scored examples into ``user_id``'s memory: one routing-memory record each, plus an audit row.
          *
          *     The routing-memory record is written before its audit row for each example,
          *     because it is the load-bearing one (the router votes over it) and embedding it
@@ -12638,6 +12689,14 @@ export interface components {
              */
             workspace_id: string;
         };
+        /** KeyRankRequest */
+        KeyRankRequest: {
+            /**
+             * Examples
+             * @description The scored prompts to record.
+             */
+            examples: components["schemas"]["ScoredExample"][];
+        };
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.
@@ -16017,15 +16076,7 @@ export interface components {
             /** Providers */
             providers: components["schemas"]["ProviderInfoSchema"][];
         };
-        /**
-         * RankRequest
-         * @description Record how well each candidate did, for one or many prompts.
-         *
-         *     A batch because of the arithmetic: a pool routes nothing until it holds
-         *     ``router_seed_count`` examples (20 by default) and the vote reads the ``k``
-         *     nearest (5 by default), so a useful first teaching pass is dozens of examples
-         *     across the kinds of prompt you care about.
-         */
+        /** RankRequest */
         RankRequest: {
             /**
              * Examples
@@ -28765,6 +28816,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "routing-rank_own_candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyRankRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RankResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "routing-own_routing_memory_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouterStatus"];
                 };
             };
         };

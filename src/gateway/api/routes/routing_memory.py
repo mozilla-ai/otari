@@ -10,6 +10,10 @@ gateway which candidate is good enough for which kind of prompt. Two routes:
 * ``GET /api/v1/routing/status`` reports how warm each pool is, so an operator can see
   when the router will start routing and which policies depend on it.
 
+Both have a ``/api/v1/routing/me/...`` twin for an API key, which teaches and reads
+only the memory of the key's own user in the key's workspace: the pool its
+requests vote over.
+
 There is deliberately no endpoint that fans a prompt out to the candidates for
 you. Seeing what each candidate answers is what ``POST /api/v1/chat/completions``
 already does, one call per candidate, and going through that path means the calls
@@ -17,9 +21,10 @@ are budget-checked and land in the usage log like all other provider spend. A
 convenience endpoint that skipped both would be the only unmetered way to spend
 money through this gateway.
 
-Operator-gated, like ``/api/v1/routing/policies``, with ``user_id`` naming whose
-memory is being taught rather than taking it from the calling key: which model
-serves a caller is an operator decision, exactly as a policy's targets are.
+The operator routes are gated like ``/api/v1/routing/policies`` and name whose
+memory they teach with ``user_id``. The key routes take no ``user_id`` or
+``workspace_id`` at all, so a key cannot reach another user's or another
+workspace's pool. A service key teaches its own user's pool, not its end users'.
 
 Routing memory is **per user and per workspace**, even for a workspace-wide
 policy: the records hold the prompts a user sends, so sharing them across users
@@ -42,27 +47,39 @@ import uuid
 from typing import Annotated
 
 from any_llm.exceptions import AnyLLMError
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.api.routes._helpers import database_error, resolve_managed_workspace_id
+from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key
+from gateway.api.routes._helpers import (
+    country_gate_for,
+    country_not_supported,
+    database_error,
+    resolve_managed_workspace_id,
+)
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
+from gateway.models.api_keys import APIKey
 from gateway.models.routing import RouterPreference, RoutingMemory
+from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing import KNN_BACKEND, KnnRoutingMemory, backend_pool_is_teachable, get_router_backend
 
-router = APIRouter(
+operator_router = APIRouter(
     prefix="/routing",
     tags=["routing"],
     dependencies=[Depends(require_deployment_operator)],
+)
+key_router = APIRouter(
+    prefix="/routing/me",
+    tags=["routing"],
+    dependencies=[Depends(verify_api_key)],
 )
 
 # One request may not teach more than this. Each example costs an embedding call,
@@ -121,7 +138,7 @@ class ScoredExample(BaseModel):
     label_source: str = Field(default="human", description="Provenance of the scores: 'human' or 'judge'.")
 
 
-class RankRequest(BaseModel):
+class _ScoredBatch(BaseModel):
     """Record how well each candidate did, for one or many prompts.
 
     A batch because of the arithmetic: a pool routes nothing until it holds
@@ -130,6 +147,14 @@ class RankRequest(BaseModel):
     across the kinds of prompt you care about.
     """
 
+    examples: list[ScoredExample] = Field(
+        min_length=1,
+        max_length=MAX_EXAMPLES_PER_REQUEST,
+        description="The scored prompts to record.",
+    )
+
+
+class RankRequest(_ScoredBatch):
     user_id: str = Field(description="Whose routing memory these examples belong to.")
     workspace_id: uuid.UUID | None = Field(
         default=None,
@@ -138,11 +163,12 @@ class RankRequest(BaseModel):
             "default workspace. Only requests billing to that workspace vote over them."
         ),
     )
-    examples: list[ScoredExample] = Field(
-        min_length=1,
-        max_length=MAX_EXAMPLES_PER_REQUEST,
-        description="The scored prompts to record.",
-    )
+
+
+class KeyRankRequest(_ScoredBatch):
+    # Forbidden rather than ignored: a `user_id` copied from the operator route
+    # would otherwise be dropped silently and the examples filed under the key's user.
+    model_config = ConfigDict(extra="forbid")
 
 
 class RecordedPool(BaseModel):
@@ -374,13 +400,13 @@ async def _pool_counts(
     return total, [(str(task_id), int(count)) for task_id, count in rows]
 
 
-@router.post("/preferences/rank")
+@operator_router.post("/preferences/rank")
 async def rank_candidates(
     request: RankRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> RankResponse:
-    """Record scored examples: one routing-memory record each, plus an audit row.
+    """Record scored examples into ``user_id``'s memory: one routing-memory record each, plus an audit row.
 
     The routing-memory record is written before its audit row for each example,
     because it is the load-bearing one (the router votes over it) and embedding it
@@ -396,9 +422,19 @@ async def rank_candidates(
     candidates to, so how a policy spells a candidate cannot decide whether it
     matches.
     """
-    backend = _knn(config)
     await _require_user(db, request.user_id)
     workspace_id = await resolve_managed_workspace_id(db, request.workspace_id)
+    return await _record_examples(db, config, request.user_id, workspace_id, request.examples)
+
+
+async def _record_examples(
+    db: AsyncSession,
+    config: GatewayConfig,
+    user_id: str,
+    workspace_id: uuid.UUID,
+    examples: list[ScoredExample],
+) -> RankResponse:
+    backend = _knn(config)
     # Committed before the loop, because `record_preference` writes its
     # routing-memory row in a session of its own. On a deployment that has never
     # provisioned tenancy, resolving the default workspace *creates* it, and an
@@ -413,15 +449,15 @@ async def rank_candidates(
     except DATABASE_ERRORS as exc:
         await db.rollback()
         raise database_error("commit the workspace before recording router examples", exc) from None
-    normalized = _validated_scores(config, request.user_id, request.examples, workspace_id)
+    normalized = _validated_scores(config, user_id, examples, workspace_id)
 
     recorded = 0
     touched: set[str | None] = set()
-    for example in request.examples:
+    for example in examples:
         scores = {normalized[selector]: score for selector, score in example.scores.items()}
         try:
             written = await backend.record_preference(
-                user_id=request.user_id,
+                user_id=user_id,
                 workspace_id=workspace_id,
                 prompt=example.prompt,
                 scores=scores,
@@ -455,7 +491,7 @@ async def rank_candidates(
         try:
             db.add(
                 RouterPreference(
-                    user_id=request.user_id,
+                    user_id=user_id,
                     workspace_id=workspace_id,
                     prompt=example.prompt,
                     task_id=example.task_id,
@@ -470,7 +506,7 @@ async def rank_candidates(
 
     # Warmth of every pool this batch wrote into: each named partition, plus the
     # default pool when any example carried no task label.
-    total, per_task = await _pool_counts(db, backend, request.user_id, workspace_id)
+    total, per_task = await _pool_counts(db, backend, user_id, workspace_id)
     counts = dict(per_task)
     pools = [
         RecordedPool(
@@ -483,7 +519,7 @@ async def rank_candidates(
     return RankResponse(recorded=recorded, seed_count=backend.seed_count, pools=pools)
 
 
-@router.get("/status")
+@operator_router.get("/status")
 async def routing_memory_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -502,14 +538,18 @@ async def routing_memory_status(
     instead of being required, because a single-workspace deployment has one
     answer.
     """
-    backend = _knn(config)
     await _require_user(db, user_id)
     target_workspace_id = await resolve_managed_workspace_id(db, workspace_id)
-    total, per_task = await _pool_counts(db, backend, user_id, target_workspace_id)
+    return await _status(db, config, user_id, target_workspace_id)
+
+
+async def _status(db: AsyncSession, config: GatewayConfig, user_id: str, workspace_id: uuid.UUID) -> RouterStatus:
+    backend = _knn(config)
+    total, per_task = await _pool_counts(db, backend, user_id, workspace_id)
     seed = backend.seed_count
     return RouterStatus(
         user_id=user_id,
-        workspace_id=target_workspace_id,
+        workspace_id=workspace_id,
         embedding_model=backend.embedding_model,
         seed_count=seed,
         granularity=backend.granularity,
@@ -518,8 +558,68 @@ async def routing_memory_status(
         confidence_floor=backend.confidence_floor,
         default_pool=PoolStatus(records=total, warm=total >= seed),
         tasks=[TaskPool(task_id=task_id, records=count, warm=count >= seed) for task_id, count in per_task],
-        policies=_learned_policies(config, user_id, target_workspace_id),
+        policies=_learned_policies(config, user_id, workspace_id),
     )
 
 
-__all__ = ["router"]
+def _key_user(api_key: APIKey) -> str:
+    """The user whose memory a key reaches: its own, never one it names."""
+    if api_key.user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This API key has no user, so it has no routing memory.",
+        )
+    return api_key.user_id
+
+
+@key_router.post("/preferences/rank")
+async def rank_own_candidates(
+    raw_request: Request,
+    request: KeyRankRequest,
+    api_key: Annotated[APIKey, Depends(verify_api_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> RankResponse:
+    """Record scored examples into the calling key's own routing memory.
+
+    The memory is the key's user's in the key's workspace, the pool that key's
+    requests vote over; nothing in the body can name another. Validation, storage
+    and the response are those of ``POST /api/v1/routing/preferences/rank``.
+
+    Each call counts against the user's request rate limit, and is refused (403)
+    when the router's embedding provider does not serve the caller's country,
+    because embedding an example sends its prompt there.
+    """
+    user_id = _key_user(api_key)
+    await check_rate_limit(raw_request, user_id)
+    _ensure_embedding_country(config, raw_request)
+    return await _record_examples(db, config, user_id, api_key.workspace_id, request.examples)
+
+
+@key_router.get("/status")
+async def own_routing_memory_status(
+    api_key: Annotated[APIKey, Depends(verify_api_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> RouterStatus:
+    """Report how warm the calling key's own routing memory is, per pool.
+
+    The same report as ``GET /api/v1/routing/status``, for the key's user in the
+    key's workspace.
+    """
+    return await _status(db, config, _key_user(api_key), api_key.workspace_id)
+
+
+def _ensure_embedding_country(config: GatewayConfig, raw_request: Request) -> None:
+    """Refuse an example whose prompt the embedding provider may not receive from this caller's country."""
+    try:
+        resolved = resolve_provider_selector(config, config.router_embedding_model)
+    except (ValueError, AnyLLMError):
+        # Unresolvable: recording fails with its own 502 naming the model.
+        return
+    gate = country_gate_for(config, raw_request)
+    if gate.refuses(config, resolved.instance):
+        raise country_not_supported(gate, config.router_embedding_model, noun="Router embedding model")
+
+
+__all__ = ["key_router", "operator_router"]
