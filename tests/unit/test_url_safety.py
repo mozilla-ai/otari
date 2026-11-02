@@ -110,7 +110,15 @@ async def test_bracketed_ipv6_literal_accepted() -> None:
     await validate_mcp_url("http://[2400:8901::1]:8787/mcp", has_authorization_token=False)
 
 
-@pytest.mark.parametrize("url", ["https://example.com:bad/mcp", "https://example.com:99999/mcp"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com:bad/mcp",
+        "https://example.com:99999/mcp",
+        # The host is written correctly, so only the port is wrong.
+        "https://[2400:8901::1]:bad/mcp",
+    ],
+)
 @pytest.mark.asyncio
 async def test_port_that_is_not_a_number_rejected(url: str) -> None:
     with pytest.raises(UnsafeURLError, match="port must be a number"):

@@ -130,9 +130,10 @@ def _parse_safe_url(url: str, *, label: str) -> ParseResult:
         # NOTE: The port is validated only when it is read.
         _ = parsed.port
     except ValueError:
-        # A well-formed authority holds one colon outside brackets at most, so
-        # anything beyond that is an IPv6 address written without them.
-        if parsed.netloc.rpartition("@")[2].count(":") > 1:
+        host_and_port = parsed.netloc.rpartition("@")[2]
+        # A well-formed unbracketed authority holds one colon at most, so
+        # anything beyond that is an IPv6 address written without brackets.
+        if "[" not in host_and_port and host_and_port.count(":") > 1:
             raise UnsafeURLError(_authority_detail(label)) from None
         raise UnsafeURLError(f"{label} URL port must be a number from 0 to 65535") from None
 
