@@ -2,7 +2,7 @@
 
 from gateway.core.config import GatewayConfig
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, code_execution_tool_definition
-from gateway.services.tools import _code_execution_messages, _code_execution_responses
+from gateway.services.tools import _code_execution_chat, _code_execution_messages, _code_execution_responses
 from gateway.services.tools._builtin_tool import BuiltinTool
 from gateway.services.tools._code_execution_declarations import provider_runs_code_natively
 from gateway.services.tools._native import Dialect
@@ -13,6 +13,7 @@ TOOL = BuiltinTool(
     configured=GatewayConfig.sandbox_configured,
     runs_natively=provider_runs_code_natively,
     native={
+        Dialect.CHAT: _code_execution_chat.RENDERING,
         Dialect.MESSAGES: _code_execution_messages.RENDERING,
         Dialect.RESPONSES: _code_execution_responses.RENDERING,
     },

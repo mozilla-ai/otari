@@ -374,16 +374,12 @@ export function RoutingPage() {
   )
 }
 
-/**
- * The models callers used in the last 30 days, with the offerings their catalog
- * ID tries and who runs the built-in tools on each, as the gateway reports them.
- */
+/** The models callers used in the last 30 days, as the gateway reports them. */
 function AutomaticFallbacksSection() {
   const fallbacks = useAutomaticFallbacks()
   return (
     <AutomaticFallbacks
       fallbacks={fallbacks.data?.models ?? []}
-      toolsNote="Tools shown for callers that declare them in the provider's own words and leave the choice to Otari: a provider's own where it runs them, Otari's where it does not."
       isLoading={fallbacks.isLoading}
       error={fallbacks.error}
     />

@@ -36,7 +36,17 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.tools import OTARI_TOOL_CALLS_FIELD, WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME, ToolUseBudget
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
+from gateway.services.tools import (
+    OTARI_TOOL_CALLS_FIELD,
+    WEB_FETCH_TOOL_NAME,
+    WEB_SEARCH_TOOL_NAME,
+    NativeCall,
+    ToolUseBudget,
+)
+from gateway.services.tools._chat_tool_calls import REPORTED_TEXT_MAX_BYTES
+from gateway.services.tools._code_execution_chat import RENDERING as CHAT_CODE_EXECUTION
+from gateway.types.code_execution import CodeExecutionResult, ResultBlock
 
 
 def _use_budget(max_uses: int) -> ToolUseBudget:
@@ -1834,3 +1844,180 @@ async def test_stream_loop_echoes_tool_call_extra_content_back_to_the_provider(
         pass
 
     assert captured_messages[1][-2]["tool_calls"][0]["extra_content"] == _GOOGLE_SIGNATURE
+
+
+# ---------- otari_tool_calls: code execution and MCP calls ----------
+
+
+class _FakeMcpPool(_FakePool):
+    """A pool whose tools an MCP server supplied, as ``server_name_for_tool`` says."""
+
+    def __init__(self, *, result: str = "the wiki says so", fail: bool = False) -> None:
+        super().__init__(tool_names=["ask_question"], results={"ask_question": result})
+        self._fail = fail
+
+    def server_name_for_tool(self, name: str) -> str | None:
+        return "deepwiki" if name == "ask_question" else None
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        if self._fail:
+            raise RuntimeError("https://mcp.internal/?token=secret refused")
+        return await super().call_tool(name, arguments)
+
+
+class _FakeSandboxPool(_FakePool):
+    """A pool that runs code and keeps each execution, like the sandbox backend."""
+
+    def __init__(self, *, stdout: str = "332833500\n", return_code: int | None = 0) -> None:
+        super().__init__(tool_names=[CODE_EXECUTION_TOOL_NAME])
+        self._stdout = stdout
+        self._return_code = return_code
+        self._executions: list[CodeExecution] = []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        result = CodeExecutionResult(stdout=self._stdout, stderr="", return_code=self._return_code)
+        block = ResultBlock(type="code_execution_result", content=result)
+        self._executions.append(CodeExecution(code=arguments["code"], result=block, file_ids={"plot.png": "file-1"}))
+        return self._stdout
+
+    def take_executions(self) -> list[CodeExecution]:
+        executions, self._executions = self._executions, []
+        return executions
+
+
+def _mcp_call(call_id: str) -> tuple[str, str, str]:
+    return (call_id, "ask_question", json.dumps({"question": "what is any-llm?"}))
+
+
+def _code_call(call_id: str) -> tuple[str, str, str]:
+    return (call_id, CODE_EXECUTION_TOOL_NAME, json.dumps({"code": "print(sum(i * i for i in range(1000)))"}))
+
+
+async def _answer(
+    monkeypatch: pytest.MonkeyPatch, pool: Any, call: tuple[str, str, str], **kwargs: Any
+) -> ChatCompletion:
+    responses = iter([_completion(finish="tool_calls", tool_calls=[call]), _completion(finish="stop", content="done")])
+
+    async def fake_acompletion(**_kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    return await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_answer_reports_an_mcp_call_with_the_text_it_returned(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = await _answer(monkeypatch, _FakeMcpPool(), _mcp_call("c1"))
+
+    [entry] = _reported(result)
+    assert entry == {
+        "id": entry["id"],
+        "type": "mcp",
+        "status": "completed",
+        "server": "deepwiki",
+        "name": "ask_question",
+        "output": "the wiki says so",
+    }
+    assert entry["id"].startswith("otari_mcp_")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_mcp_call_is_reported_without_its_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = await _answer(monkeypatch, _FakeMcpPool(fail=True), _mcp_call("c1"))
+
+    [entry] = _reported(result)
+    assert entry["status"] == "failed"
+    assert "secret" not in json.dumps(entry)
+    assert entry["output"].startswith("[tool error]")
+
+
+@pytest.mark.asyncio
+async def test_a_long_mcp_result_is_cut_in_the_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    long = "x" * (REPORTED_TEXT_MAX_BYTES + 1)
+    result = await _answer(monkeypatch, _FakeMcpPool(result=long), _mcp_call("c1"))
+
+    [entry] = _reported(result)
+    assert entry["output"] == long[:REPORTED_TEXT_MAX_BYTES]
+    assert entry["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_long_mcp_result_is_cut_by_its_bytes_at_a_character_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    long = "€" * REPORTED_TEXT_MAX_BYTES
+    result = await _answer(monkeypatch, _FakeMcpPool(result=long), _mcp_call("c1"))
+
+    [entry] = _reported(result)
+    assert len(entry["output"].encode()) <= REPORTED_TEXT_MAX_BYTES
+    assert entry["output"] == "€" * (REPORTED_TEXT_MAX_BYTES // 3)
+    assert entry["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_stream_reports_an_mcp_call_as_it_starts_and_ends(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        mcp_loop_module,
+        "acompletion",
+        _streamed(
+            [_chunk(tool_calls=[(0, "c1", "ask_question", "{}")]), _chunk(finish="tool_calls")],
+            [_chunk(content="done"), _chunk(finish="stop")],
+        ),
+    )
+    stream = mcp_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, _FakeMcpPool()),
+        max_iterations=5,
+    )
+
+    entries = [entry for chunk in [c async for c in stream] for entry in _reported(chunk)]
+
+    assert [(entry["status"], entry.get("output")) for entry in entries] == [
+        ("in_progress", None),
+        ("completed", "the wiki says so"),
+    ]
+    assert entries[0]["id"] == entries[1]["id"]
+
+
+@pytest.mark.asyncio
+async def test_an_answer_reports_what_a_code_execution_printed(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = await _answer(
+        monkeypatch, _FakeSandboxPool(), _code_call("c1"), native_tools=frozenset({CODE_EXECUTION_TOOL_NAME})
+    )
+
+    [entry] = _reported(result)
+    assert entry == {
+        "id": entry["id"],
+        "type": "code_execution",
+        "status": "completed",
+        "code": "print(sum(i * i for i in range(1000)))",
+        "stdout": "332833500\n",
+        "stderr": "",
+        "exit_code": 0,
+        "file_ids": ["file-1"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_code_execution_that_exits_non_zero_is_reported_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = await _answer(
+        monkeypatch,
+        _FakeSandboxPool(return_code=1),
+        _code_call("c1"),
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
+    )
+
+    [entry] = _reported(result)
+    assert (entry["status"], entry["exit_code"]) == ("failed", 1)
+
+
+def test_a_code_execution_the_backend_kept_nothing_for_is_reported_failed() -> None:
+    call = NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {"code": "print(1)"})
+
+    [entry] = CHAT_CODE_EXECUTION.ran(call, cast(Any, _FakeSandboxPool()))
+
+    assert entry["status"] == "failed"
+    assert "stdout" not in entry
