@@ -62,7 +62,6 @@ from gateway.repositories.tools import (
     SearchKeyCandidate,
     WebSearchKeyConflict,
     WorkspaceWebSearchKeyOverrideRepository,
-    resolve_web_search_key,
 )
 from gateway.schemas.tools import (
     OrgWebSearchKeyCreateRequest,
@@ -159,6 +158,30 @@ class WorkspaceSearchKeys:
     async def has_search_key(self, workspace_id: uuid.UUID) -> bool:
         """Whether the workspace searches with a key of its organization's."""
         return (await self.keys_for(workspace_id, search=True, fetch=False)).search is not None
+
+
+def resolve_web_search_key(
+    candidates: Sequence[SearchKeyCandidate], usable: Callable[[OrgWebSearchKey], bool]
+) -> OrgWebSearchKey | None:
+    """The key of one kind a workspace uses, or ``None`` where it uses the deployment's instance.
+
+    A pure function over rows the repository already loaded, so it is tested without a database.
+
+    A request names no provider, so one key is chosen across all of them, among
+    ``candidates`` of a single kind:
+
+    1. The key the workspace pinned.
+    2. Otherwise the organization's default.
+    3. Otherwise none, and the workspace uses the deployment's instance: a key serves
+       a workspace only once the organization makes it the default or the workspace pins it.
+
+    A key the workspace turned off, or one this deployment cannot decrypt, is passed over.
+    ``usable`` is asked of keys in that order and only until one passes.
+    """
+    live = [(key, override) for key, override in candidates if override is None or not override.disabled]
+    pinned = [key for key, override in live if override is not None and override.is_default]
+    defaults = [key for key, _ in live if key.is_org_default]
+    return next((key for key in (*pinned, *defaults) if usable(key)), None)
 
 
 async def _choose_keys(

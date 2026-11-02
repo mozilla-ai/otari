@@ -1,24 +1,19 @@
-"""Keep every workspace on the organization web search key it uses, under the new order.
+"""Set organization web search defaults and pins so each workspace keeps the key it uses.
 
-A workspace used the key of a kind it pinned, else its organization's default,
-else the organization's oldest key, passing over keys it turned off. It now
-uses the pin, else the default, else the deployment's own tool, so an
-organization's key serves a workspace only once the organization makes it the
-default or the workspace pins it.
+A workspace's key of a kind is the one it pinned, else its organization's default,
+else none, and then the deployment's own tool serves it. Data only:
 
-This revision changes no schema. Where an organization has live keys of a kind
-and no default, it makes the oldest one the default, which every workspace
-without a pin or a turned-off key was already using. Where a workspace turned
-the default off and pinned no live key, it pins the oldest live key the
-workspace kept on, which is the one it searched with. A pin it left on an
-archived key of the kind is cleared first, as a new pin clears one. Whether a
-key can be decrypted is not something a migration can see, so where the key a
-workspace relies on after it (its pin, or the default, including an oldest key
-made the default here) cannot be decrypted, a workspace that searched with the
-next key now uses the deployment's tool.
+- An organization with live keys of a kind and no default gets its oldest live key
+  as the default: the key its workspaces without a pin or a turned-off key use.
+- A workspace that turned the default off and pinned no live key gets the oldest
+  live key it kept on pinned, the one it searches with. A pin it left on an
+  archived key of that kind is cleared first.
+- Whether a key decrypts is not visible here. Where the key a workspace relies on
+  (its pin, or the default, including an oldest key made the default here) cannot
+  be decrypted, a workspace that searched with the next key uses the deployment's
+  tool.
 
-The downgrade changes nothing: the defaults and pins added here are read the
-same way by the previous order, so each workspace keeps the key it had.
+The downgrade leaves the defaults and pins in place: they are valid rows either way.
 
 Revision ID: 90b7e153c41f
 Revises: a3d5f7b9c1e4
@@ -58,7 +53,7 @@ _overrides = sa.table(
 
 
 def _keys_by_organization_and_kind(bind: sa.Connection) -> dict[tuple[uuid.UUID, str], list[sa.Row]]:
-    """Every key, grouped by organization and kind, oldest first, the order the previous choice read them in."""
+    """Every key, grouped by organization and kind, oldest first."""
     groups: dict[tuple[uuid.UUID, str], list[sa.Row]] = defaultdict(list)
     for row in bind.execute(
         sa.select(
@@ -105,7 +100,7 @@ def _pin(
 
 
 def _keep_the_workspaces_keys(bind: sa.Connection, organization_id: uuid.UUID, keys: list[sa.Row]) -> None:
-    """Star and pin what one organization's workspaces used of one kind, so the new order picks the same keys."""
+    """Set the default and the pins that keep one organization's workspaces on the keys of one kind they use."""
     live = [row.id for row in keys if row.archived_at is None]
     if not live:
         return
@@ -128,12 +123,10 @@ def _keep_the_workspaces_keys(bind: sa.Connection, organization_id: uuid.UUID, k
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
     bind = op.get_bind()
     for (organization_id, _kind), keys in _keys_by_organization_and_kind(bind).items():
         _keep_the_workspaces_keys(bind, organization_id, keys)
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
-    # Nothing to undo: the upgrade only adds defaults and pins, which stay valid rows.
+    pass

@@ -53,7 +53,7 @@ async def create_org_web_search_key(
     """Add a search or fetch key to the caller's organization. Organization owners and admins only.
 
     A new key serves no workspace until the organization makes it its default for the key's kind, or a
-    workspace pins it. Until then each workspace keeps using the deployment's instance.
+    workspace pins it. Until then each workspace keeps the key it uses, or the deployment's instance.
     """
     return await service.create_key(user=current_identity, request=body)
 

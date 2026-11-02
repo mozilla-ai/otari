@@ -144,7 +144,10 @@ class WorkspaceWebSearchKeyPublic(SQLModel):
     is_default: bool = Field(description="The workspace pinned this key as its own for its kind.")
     is_org_default: bool = Field(
         default=False,
-        description="The organization's default of its kind, which a workspace that pinned no key uses.",
+        description=(
+            "The organization's default of its kind, which a workspace that pinned no key uses unless it turned the "
+            "key off or this deployment cannot decrypt it; the deployment's instance serves it then."
+        ),
     )
     disabled: bool = Field(description="The workspace turned this key off.")
     is_effective: bool = Field(description="This is the key the workspace's calls of its kind use.")
