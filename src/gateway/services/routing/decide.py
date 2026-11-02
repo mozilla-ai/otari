@@ -84,8 +84,11 @@ class RoutingSignal:
 
 
 def _embedding_refused(config: GatewayConfig, backend_name: str, gate: CountryGate) -> bool:
-    if backend_name.strip().lower() != KNN_BACKEND:
-        return False
+    return backend_name.strip().lower() == KNN_BACKEND and embedding_refused(config, gate)
+
+
+def embedding_refused(config: GatewayConfig, gate: CountryGate) -> bool:
+    """Whether the router's embedding provider is closed to ``gate``'s country, so a prompt may not be embedded."""
     try:
         resolved = resolve_provider_selector(config, config.router_embedding_model)
     except (ValueError, AnyLLMError):

@@ -70,7 +70,13 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.schemas.routing import KeyRankRequest, RankRequest, ScoredExample
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.routing import KNN_BACKEND, KnnRoutingMemory, backend_pool_is_teachable, get_router_backend
+from gateway.services.routing import (
+    KNN_BACKEND,
+    KnnRoutingMemory,
+    backend_pool_is_teachable,
+    embedding_refused,
+    get_router_backend,
+)
 
 operator_router = APIRouter(
     prefix="/routing",
@@ -505,7 +511,9 @@ async def rank_own_candidates(
     """
     user_id = _key_user(api_key)
     await check_rate_limit(raw_request, user_id)
-    _ensure_embedding_country(config, raw_request)
+    gate = country_gate_for(config, raw_request)
+    if embedding_refused(config, gate):
+        raise country_not_supported(gate, config.router_embedding_model, noun="Router embedding model")
     return await _record_examples(db, config, user_id, api_key.workspace_id, request.examples)
 
 
@@ -521,18 +529,6 @@ async def own_routing_memory_status(
     key's workspace.
     """
     return await _status(db, config, _key_user(api_key), api_key.workspace_id)
-
-
-def _ensure_embedding_country(config: GatewayConfig, raw_request: Request) -> None:
-    """Refuse an example whose prompt the embedding provider may not receive from this caller's country."""
-    try:
-        resolved = resolve_provider_selector(config, config.router_embedding_model)
-    except (ValueError, AnyLLMError):
-        # Unresolvable: recording fails with its own 502 naming the model.
-        return
-    gate = country_gate_for(config, raw_request)
-    if gate.refuses(config, resolved.instance):
-        raise country_not_supported(gate, config.router_embedding_model, noun="Router embedding model")
 
 
 __all__ = ["key_router", "operator_router"]

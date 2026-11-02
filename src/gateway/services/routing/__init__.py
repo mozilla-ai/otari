@@ -72,7 +72,7 @@ from gateway.services.routing.compiler import (
     needs_budget_state,
     selection_consults_router,
 )
-from gateway.services.routing.decide import RoutingSignal, decide_ordering, explain_router_ordering
+from gateway.services.routing.decide import RoutingSignal, decide_ordering, embedding_refused, explain_router_ordering
 from gateway.services.routing.knn import KnnRoutingMemory, unpriced_router_candidates
 from gateway.services.routing.recommend import (
     ROUTER_LABEL,
@@ -129,6 +129,7 @@ __all__ = [
     "compile_catalog_plan",
     "compile_policy",
     "decide_ordering",
+    "embedding_refused",
     "explain_router_ordering",
     "get_router_backend",
     "known_backends",
