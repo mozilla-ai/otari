@@ -62,8 +62,10 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
             values["operator_disabled"] = True
         await self.db.execute(statement.values(**values))
 
-    async def names_by_id(self, key_ids: Collection[str]) -> dict[str, str | None]:
-        """Each of these keys that still exists, to its name.
+    async def names_by_id(
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID]
+    ) -> dict[str, str | None]:
+        """Each of these keys that still exists in these workspaces, to its name.
 
         Read in batches, so the ids never exceed a driver's bound-parameter limit.
         """
@@ -71,7 +73,9 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         names: dict[str, str | None] = {}
         for start in range(0, len(ids), _NAMES_BATCH):
             result = await self.db.execute(
-                select(APIKey.id, APIKey.key_name).where(APIKey.id.in_(ids[start : start + _NAMES_BATCH]))
+                select(APIKey.id, APIKey.key_name).where(
+                    APIKey.id.in_(ids[start : start + _NAMES_BATCH]), APIKey.workspace_id.in_(sorted(workspace_ids))
+                )
             )
             names.update({key_id: name for key_id, name in result.all()})
         return names

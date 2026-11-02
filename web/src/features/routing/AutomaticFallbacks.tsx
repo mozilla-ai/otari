@@ -64,11 +64,18 @@ function Order({ offerings }: { offerings: FallbackOffering[] }) {
   )
 }
 
+/** A gateway older than the dashboard sends no `pinned_keys`, which reads as none. */
+function pinnedKeysOf(
+  row: AutomaticFallback,
+): AutomaticFallback["pinned_keys"] {
+  return row.pinned_keys ?? []
+}
+
 function PinnedKeys({ row }: { row: AutomaticFallback }) {
   return (
     <table className="mx-4 my-2 text-sm">
       <tbody>
-        {row.pinned_keys.map((entry) => (
+        {pinnedKeysOf(row).map((entry) => (
           <tr key={`${entry.api_key_id ?? ""}:${entry.provider}`}>
             <td className="py-1 pr-6 text-foreground">
               {entry.key_name ?? entry.api_key_id ?? "No key"}
@@ -155,7 +162,7 @@ export function AutomaticFallbacks({
               )}
               {/* A slot on every row, so the shares line up. */}
               <span className="inline-flex w-4">
-                {row.pinned_keys.length > 0 ? (
+                {pinnedKeysOf(row).length > 0 ? (
                   <RowAction
                     icon={isOpen ? FiChevronDown : FiChevronRight}
                     label={

@@ -55,10 +55,12 @@ class ApiKeyService:
         """Return the IDs of the keys in these workspaces, in no particular order."""
         return await self._keys.get_key_ids_in_workspaces(workspace_ids)
 
-    async def key_names(self, key_ids: Collection[str]) -> dict[str, str | None]:
-        """Each of these keys that still exists, to its name, read in a block of its own."""
+    async def key_names(
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID]
+    ) -> dict[str, str | None]:
+        """Each of these keys that still exists in these workspaces, to its name, read in a block of its own."""
         async with self._uow:
-            return await self._keys.names_by_id(key_ids)
+            return await self._keys.names_by_id(key_ids, workspace_ids=workspace_ids)
 
     async def keys_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name the keys that start a new end user on this budget when a request names none."""

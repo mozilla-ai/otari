@@ -117,7 +117,7 @@ class RoutingService:
                 tally.pinned_keys[(row.api_key_id, provider)] += row.requests
 
         key_ids = {key_id for tally in tallies.values() for key_id, _provider in tally.pinned_keys if key_id}
-        key_names = await self._keys.key_names(key_ids)
+        key_names = await self._keys.key_names(key_ids, workspace_ids=workspace_ids)
 
         tools: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
 

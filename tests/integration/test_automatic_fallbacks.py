@@ -145,6 +145,7 @@ def world(
             [
                 APIKey(id="key-zed", key_hash="hash-zed", key_name="Zed", workspace_id=alpha_one.id),
                 APIKey(id="key-unnamed", key_hash="hash-unnamed", workspace_id=alpha_one.id),
+                APIKey(id="key-beta", key_hash="hash-beta", key_name="Beta's key", workspace_id=beta_one.id),
             ]
         )
         session.commit()
@@ -163,6 +164,8 @@ def world(
                 _row(alpha_one.id, _BEDROCK, sent=None, key="key-zed"),
                 _row(alpha_one.id, _BEDROCK, sent=None),
                 _row(alpha_one.id, _ANTHROPIC, sent=None, key="key-unnamed"),
+                # A row naming another organization's key: its name stays with that organization.
+                _row(alpha_one.id, _FIREWORKS, sent=None, key="key-beta"),
                 # Outside the window, and imported usage: neither counts.
                 _row(alpha_one.id, _ANTHROPIC, sent=_CLAUDE, age=timedelta(days=40)),
                 _row(alpha_one.id, _ANTHROPIC, sent=None, source="claude_code"),
@@ -227,14 +230,15 @@ def test_an_owner_reads_their_organizations_fallbacks_in_its_own_order(
     assert [offering["provider"] for offering in claude["offerings"]] == ["fireworks", "anthropic", "bedrock"]
     # Each at the rate the order ranked by: Alpha's own key at its own price.
     assert [offering["input_price"] for offering in claude["offerings"]] == [4.0, 3.0, 2.0]
-    assert (claude["requests"], claude["fell_back"], claude["pinned"]) == (7, 1, 4)
+    assert (claude["requests"], claude["fell_back"], claude["pinned"]) == (8, 1, 5)
     assert claude["pinned_provider"] == "bedrock"
     assert [(entry["key_name"], entry["provider"], entry["requests"]) for entry in claude["pinned_keys"]] == [
         ("Zed", "bedrock", 2),
         (None, "anthropic", 1),
         (None, "bedrock", 1),
+        (None, "fireworks", 1),
     ]
-    assert [entry["api_key_id"] for entry in claude["pinned_keys"]] == ["key-zed", "key-unnamed", None]
+    assert [entry["api_key_id"] for entry in claude["pinned_keys"]] == ["key-zed", "key-unnamed", None, "key-beta"]
     tools = {offering["provider"]: offering["own_tools"] for offering in claude["offerings"]}
     assert "web_search" in tools["anthropic"]
     assert tools["bedrock"] == []

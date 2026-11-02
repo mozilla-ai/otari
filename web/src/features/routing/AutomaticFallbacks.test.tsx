@@ -184,6 +184,19 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).getAllByText(/\$/)).toHaveLength(1)
   })
 
+  it("renders a row from a gateway that sends no pinned_keys", async () => {
+    const { pinned_keys: _omitted, ...older } = PINNED
+    await renderWithRouter(
+      <AutomaticFallbacks fallbacks={[older as AutomaticFallback]} />,
+    )
+
+    const row = await rowOf(PINNED.id)
+    expect(within(row).getByText("12%")).toBeInTheDocument()
+    expect(within(row).queryByRole("button")).toHaveAccessibleName(
+      "Copy catalog ID",
+    )
+  })
+
   it("says when nothing was sent in the window", async () => {
     await renderWithRouter(<AutomaticFallbacks fallbacks={[]} />)
     expect(
