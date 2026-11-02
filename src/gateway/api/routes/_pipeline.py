@@ -5891,6 +5891,7 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
+        note_unavailable_model(config, provider, model, exc, deployment_paid=deployment_paid)
         if isinstance(exc, IncompleteStreamError):
             # codeql[py/clear-text-logging-sensitive-data]
             logger.warning(

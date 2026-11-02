@@ -225,6 +225,7 @@ async def run_passthrough(
     enforce_require_pricing: bool = False,
     billing: PassthroughBilling,
     map_provider_error: Callable[[Exception], HTTPException | None] | None = None,
+    refuse_model: Callable[[ResolvedProvider], HTTPException | None] | None = None,
     request_params: Collection[str] = (),
     reserve_before_resolve: bool = False,
     relabel: bool = True,
@@ -276,6 +277,10 @@ async def run_passthrough(
         map_provider_error: Route-specific provider-exception mapping checked
             before the shared classification (the error log and refund happen
             either way).
+        refuse_model: Route-specific refusal of the model a request resolved
+            to, checked after every gate and before the provider is called.
+            The refusal is recorded and the reservation refunded, as for a
+            gate's own.
         request_params: The names of the request fields the caller set. A
             provider SDK refusing one of them as an unexpected keyword answers
             400 naming it; any other unexpected keyword stays a 502.
@@ -701,6 +706,12 @@ async def run_passthrough(
                     raise await _refuse(
                         reservation, resolved, exc.status_code, str(exc.detail), **(exc.headers or {})
                     ) from exc
+
+    refused_model = refuse_model(resolved) if refuse_model is not None else None
+    if refused_model is not None:
+        raise await _refuse(
+            reservation, resolved, refused_model.status_code, str(refused_model.detail), **(refused_model.headers or {})
+        )
 
     # Already resolved above (needed there for organization-scoped provider
     # credentials); reused here rather than re-derived, since it is fixed for

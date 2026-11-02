@@ -308,7 +308,9 @@ class HealthCheckService:
             asset_root=mailer.asset_root,
         )
         for recipient in recipients:
-            await mailer.send(to=recipient, message=message)
+            delivery = await mailer.send(to=recipient, message=message)
+            if not delivery.delivered:
+                logger.warning("Unavailable model alert for %s not delivered via %s", selector, delivery.transport)
 
     async def _forget_run(self, run_id: uuid.UUID) -> None:
         async with self._uow:

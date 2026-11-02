@@ -139,6 +139,10 @@ def test_a_model_its_provider_refuses_is_switched_off_and_the_operators_are_told
         first = _chat(client, hosted, "openai:gpt-4o", refusal)
         row = _until_switched_off(client, hosted, "gpt-4o")
         second = _chat(client, hosted, "openai:gpt-4o", refusal)
+        # The alert follows the switch-off, so it is awaited while the outbox still catches it.
+        deadline = time.monotonic() + 10
+        while not outbox.sent and time.monotonic() < deadline:
+            time.sleep(0.05)
 
     # The request that met the refusal is answered as before.
     assert first.status_code == 400
@@ -212,7 +216,7 @@ def test_a_chat_request_for_an_embedding_model_is_refused_before_the_provider_is
     assert response.json()["detail"] == (
         "'openai:embedder' is an embedding model, which cannot serve a chat request. Send it to /api/v1/embeddings."
     )
-    provider_call.assert_not_awaited()
+    provider_call.assert_not_called()
 
 
 def test_an_embeddings_request_for_a_listed_chat_model_is_refused(
@@ -229,7 +233,10 @@ def test_an_embeddings_request_for_a_listed_chat_model_is_refused(
     assert response.status_code == 400
     assert response.headers["Otari-Error-Code"] == "wrong_model_type"
     assert response.json()["detail"] == "'openai:gpt-4o' is a chat model, which cannot create embeddings."
-    provider_call.assert_not_awaited()
+    provider_call.assert_not_called()
+    # Recorded as a gateway refusal, as a chat request for an embedding model is.
+    errors = client.get(f"{API_ROOT}/usage", params={"status": "error"}, headers=hosted).json()
+    assert [(row["endpoint"], row["status_code"]) for row in errors] == [("/v1/embeddings", 400)]
 
 
 def test_the_model_list_says_what_kind_each_model_is(

@@ -81,10 +81,13 @@ async def create_embedding(
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
-    async def call_provider(resolved: ResolvedProvider) -> CreateEmbeddingResponse:
+    def refuse_model(resolved: ResolvedProvider) -> HTTPException | None:
         wrong_type = not_embedding_detail(resolved.instance, resolved.model, request.model)
-        if wrong_type is not None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=wrong_type, headers=error_headers(WRONG_MODEL_TYPE))
+        if wrong_type is None:
+            return None
+        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=wrong_type, headers=error_headers(WRONG_MODEL_TYPE))
+
+    async def call_provider(resolved: ResolvedProvider) -> CreateEmbeddingResponse:
         embedding_kwargs: dict[str, Any] = {
             "model": resolved.model,
             "inputs": request.input,
@@ -113,6 +116,7 @@ async def create_embedding(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        refuse_model=refuse_model,
         request_params=request.model_fields_set,
         estimate=estimate,
         enforce_require_pricing=True,
