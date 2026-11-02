@@ -3,8 +3,9 @@
 models.dev (https://models.dev, MIT licensed) publishes per-model metadata beyond
 what pricing needs: input/output modalities, reasoning and
 tool-calling flags, structured-output and attachment support, knowledge cutoff,
-release date, and open-weights status. This module fetches its ``api.json`` once,
-reads it into the typed catalog of ``gateway.types.models_dev``, caches that
+release date, and open-weights status. This module fetches its ``api.json`` (the
+v2 document, or v1 when v2 fails) once, reads it into the typed catalog of
+``gateway.types.models_dev``, caches that
 in-memory with a long TTL, and keeps the last good copy through a failure, so an
 offline or unreachable models.dev never breaks the dashboard.
 
@@ -23,9 +24,7 @@ import httpx
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.types.models_dev import ModelsDevCatalog, ModelsDevModel, parse_catalog
-
-MODELS_DEV_URL = "https://models.dev/api.json"
+from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, ModelsDevModel, ModelsDevSource
 
 # The catalog is a few MB; a short read timeout keeps a slow models.dev from
 # stalling a dashboard load, and a failure just means "the last good copy this time".
@@ -173,15 +172,33 @@ class ModelsDevRefusedError(ModelsDevFetchError):
 
 
 async def _download() -> ModelsDevCatalog:
-    """One bounded download of ``api.json``, read into a catalog; every failure is a ``ModelsDevFetchError``.
+    """The first models.dev document that downloads and reads, v2 then v1; raises the last one's failure.
+
+    Each document that fails is logged once, with the one tried next.
+    """
+    failure: ModelsDevFetchError | None = None
+    for source in MODELS_DEV_SOURCES:
+        if failure is not None:
+            logger.warning("%s; reading the models.dev %s catalog instead", failure, source.name)
+        try:
+            return await _download_from(source)
+        except ModelsDevFetchError as exc:
+            failure = exc
+    assert failure is not None
+    raise failure
+
+
+async def _download_from(source: ModelsDevSource) -> ModelsDevCatalog:
+    """One bounded download of one document, read into a catalog; every failure is a ``ModelsDevFetchError``.
 
     A document whose shape the gateway cannot read is refused. One it reads
     with a few damaged models is kept, with one warning naming them.
     """
+    name = f"models.dev {source.name} catalog"
     try:
         async with (
             httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
-            client.stream("GET", MODELS_DEV_URL, headers={"User-Agent": "otari-gateway"}) as resp,
+            client.stream("GET", source.url, headers={"User-Agent": "otari-gateway"}) as resp,
         ):
             resp.raise_for_status()
             chunks: list[bytes] = []
@@ -189,20 +206,20 @@ async def _download() -> ModelsDevCatalog:
             async for chunk in resp.aiter_bytes():
                 total += len(chunk)
                 if total > _MAX_CATALOG_BYTES:
-                    raise ModelsDevFetchError(f"models.dev catalog exceeded {_MAX_CATALOG_BYTES} bytes")
+                    raise ModelsDevFetchError(f"{name} exceeded {_MAX_CATALOG_BYTES} bytes")
                 chunks.append(chunk)
         data = json.loads(b"".join(chunks))
     except ModelsDevFetchError:
         raise
     except Exception as exc:
-        raise ModelsDevFetchError(f"models.dev catalog fetch failed: {exc}") from exc
+        raise ModelsDevFetchError(f"{name} fetch failed: {exc}") from exc
     if not isinstance(data, dict):
-        raise ModelsDevRefusedError("models.dev catalog refused: it is not a JSON object")
-    catalog = parse_catalog(data)
+        raise ModelsDevRefusedError(f"{name} refused: it is not a JSON object")
+    catalog = source.parse(data)
     if (reason := catalog.refusal()) is not None:
-        raise ModelsDevRefusedError(f"models.dev catalog refused: {reason}")
+        raise ModelsDevRefusedError(f"{name} refused: {reason}")
     if catalog.issues.count:
-        logger.warning("models.dev catalog read with %s", catalog.issues.describe())
+        logger.warning("%s read with %s", name, catalog.issues.describe())
     return catalog
 
 
