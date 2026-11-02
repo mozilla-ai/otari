@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from gateway.core.config import GatewayConfig
 from gateway.services.catalog._metadata import metadata_entry
+from gateway.services.catalog._model_type import model_type
 from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.pricing_service import model_context_window
 
@@ -105,6 +106,7 @@ def apply_model_metadata(
     limits = model_limits(config, models_dev, selector)
     obj.context_window = limits.context_window
     obj.max_output_tokens = limits.max_output_tokens
+    obj.type = model_type(config, models_dev, selector)
     capabilities = model_capabilities(config, models_dev, selector)
     if capabilities is None:
         obj.name = obj.supported_parameters = obj.architecture = None

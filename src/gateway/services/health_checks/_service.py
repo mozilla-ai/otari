@@ -29,6 +29,7 @@ from gateway.services.health_checks._alerts import (
     deployment_name,
     diff_alerts,
     render_health_alert,
+    render_unavailable_alert,
 )
 from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome, probe_all
 from gateway.services.health_checks._summary import FailureStreak, failure_streaks, summarize
@@ -43,6 +44,7 @@ RECOVERY_RETENTION = timedelta(days=90)
 ABANDONED_AFTER = timedelta(hours=1)
 # Where an alert links to, the dashboard route of the Health page.
 HEALTH_PAGE = "/#/health-checks"
+HOSTED_PROVIDERS_PAGE = "/#/admin/hosted-providers"
 
 
 ListOfferings = Callable[[], Awaitable[Sequence[HealthCheckOffering]]]
@@ -280,6 +282,33 @@ class HealthCheckService:
 
         await self._alert(run_id, outcomes, {offering.selector for offering in offerings}, finished)
         return public
+
+    async def alert_unavailable(self, selector: str, refusal: str) -> None:
+        """Email the alert list that ``selector`` was switched off, with the provider's refusal.
+
+        ``refusal`` is mailed as given, so it is redacted before it gets here.
+        """
+        async with self._uow:
+            recipients = list((await self._settings.get_or_create()).alert_emails)
+        if not recipients:
+            return
+        mailer = Mailer(self._config)
+        if not mailer.can_send_links:
+            logger.warning(
+                "Unavailable model alert not sent: this deployment cannot send mail (missing %s)",
+                ", ".join(mailer.missing_settings),
+            )
+            return
+        message = render_unavailable_alert(
+            selector,
+            refusal,
+            deployment=deployment_name(self._config.effective_ui_base_url),
+            providers_link=mailer.link(HOSTED_PROVIDERS_PAGE),
+            health_link=mailer.link(HEALTH_PAGE),
+            asset_root=mailer.asset_root,
+        )
+        for recipient in recipients:
+            await mailer.send(to=recipient, message=message)
 
     async def _forget_run(self, run_id: uuid.UUID) -> None:
         async with self._uow:

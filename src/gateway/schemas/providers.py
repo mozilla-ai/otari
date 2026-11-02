@@ -23,7 +23,7 @@ from gateway.core.settings.inference import country_codes
 from gateway.models.money import as_float
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
-from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderEndpoint
+from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -746,7 +746,9 @@ class HostedModelPublic(SQLModel):
     supplies it, and None when nothing prices the model yet. ``unit`` says what
     the rates are per, so a per-request rate is not read as a per-token one.
     ``enabled`` is the serving switch; a model offered without a discoverable
-    price starts off.
+    price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
+    while it waits for a rate, ``operator`` when an operator switched it off,
+    ``unavailable`` when its provider refused to serve it.
     """
 
     id: uuid.UUID
@@ -759,6 +761,7 @@ class HostedModelPublic(SQLModel):
     unit: str | None = None
     price_source: PriceSource | None = None
     enabled: bool
+    disabled_reason: HostedModelDisabledReason | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -776,6 +779,7 @@ class HostedModelPublic(SQLModel):
             unit=rates.unit if rates else None,
             price_source=rates.source if rates else None,
             enabled=row.enabled,
+            disabled_reason=row.disabled_reason,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

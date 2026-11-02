@@ -92,6 +92,10 @@ class _CacheEntry:
     result: ProviderDiscovery
     cached_at: float  # time.monotonic(), for TTL math (immune to wall-clock jumps)
     checked_at: datetime  # wall-clock time the result was produced, for "last checked" display
+    by_id: dict[str, Model] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.by_id = {model.id: model for model in self.result.models}
 
 
 @dataclass
@@ -130,6 +134,15 @@ class ModelCache:
             cached_at=time.monotonic(),
             checked_at=datetime.now(UTC),
         )
+
+    def listed_model(self, provider: str, model_id: str) -> Model | None:
+        """The model as ``provider``'s last successful listing described it, at any age, or ``None``.
+
+        Never dials. What a listing says about one model (its kind, say) does not
+        go stale the way the list of models does, so no TTL bounds this read.
+        """
+        entry = self._store.get(provider)
+        return entry.by_id.get(model_id) if entry is not None else None
 
     def checked_at(self, provider: str) -> datetime | None:
         """Wall-clock time this provider's cached result was produced, or ``None``.

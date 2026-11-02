@@ -48,6 +48,17 @@ _BILLING_MESSAGE_PROBES: tuple[str, ...] = (
     "insufficient credits",  # openrouter, together
 )
 
+# Lowercase substrings that identify a provider refusing the model itself, for
+# every caller and every request, rather than anything a request carried. As
+# narrow as the billing probes, and for a stronger reason: a match switches the
+# model off for the whole deployment. "Does not exist" is deliberately absent,
+# because some providers answer a chat request to an embedding model with it.
+_UNAVAILABLE_MODEL_PROBES: tuple[str, ...] = (
+    "non-serverless model",  # together: the model now needs a dedicated endpoint
+    "has been decommissioned",  # groq
+)
+_UNAVAILABLE_MODEL_STATUS_CODES = {400, 404}
+
 # Exceptions that only a bug or a mismatch in the code making the call raises,
 # never an upstream: the request fails the same way however often it is resent.
 _LOCAL_FAULTS: tuple[type[BaseException], ...] = (LookupError, AttributeError, TypeError)
@@ -417,6 +428,20 @@ def upstream_retry_after(exc: BaseException) -> str | None:
             if seconds is not None:
                 return seconds
     return None
+
+
+def is_model_unavailable_error(exc: BaseException) -> bool:
+    """True when the provider refused the model itself, as no longer served on this account.
+
+    A request cannot cause it and a retry cannot cure it, so the model is one an
+    operator should stop offering. Recognized by the provider's wording alone;
+    a refusal worded otherwise is not one.
+    """
+    _kind, status_code = upstream_exception_shape(exc)
+    if status_code not in _UNAVAILABLE_MODEL_STATUS_CODES:
+        return False
+    message = upstream_error_message(exc).lower()
+    return any(probe in message for probe in _UNAVAILABLE_MODEL_PROBES)
 
 
 def is_provider_billing_error(exc: BaseException) -> bool:

@@ -11998,7 +11998,9 @@ export interface components {
          *     supplies it, and None when nothing prices the model yet. ``unit`` says what
          *     the rates are per, so a per-request rate is not read as a per-token one.
          *     ``enabled`` is the serving switch; a model offered without a discoverable
-         *     price starts off.
+         *     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
+         *     while it waits for a rate, ``operator`` when an operator switched it off,
+         *     ``unavailable`` when its provider refused to serve it.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -12010,6 +12012,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Disabled Reason */
+            disabled_reason?: ("unpriced" | "operator" | "unavailable") | null;
             /** Enabled */
             enabled: boolean;
             /**
@@ -13298,6 +13302,8 @@ export interface components {
             pricing_source: string;
             /** Supported Parameters */
             supported_parameters?: string[] | null;
+            /** Type */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "other") | null;
         };
         /**
          * ModelPricingInfo
