@@ -168,8 +168,8 @@ export function buildAgentPrompt({
 }
 
 /**
- * Where a snippet should send its request: the origin the dashboard's own API
- * requests reach.
+ * Where a snippet should send its request: the request policy's public origin
+ * when it names one, otherwise the origin the dashboard's own API requests reach.
  *
  * That is the browser's own origin, which is more trustworthy than anything the
  * server could say about itself from behind a proxy, unless the request policy
@@ -183,7 +183,8 @@ export function resolveSnippetBaseUrl(origin: string = apiOrigin()): string {
 }
 
 function apiOrigin(): string {
-  const { origin } = requestPolicy()
+  const { origin, publicOrigin } = requestPolicy()
+  if (publicOrigin) return publicOrigin
   if (origin) return origin
   return typeof window === "undefined" ? "" : window.location.origin
 }
