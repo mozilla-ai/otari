@@ -9,6 +9,7 @@ import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
+import { ExecutorRow } from "@/features/tools/ExecutorRow"
 import {
   ceilingParser,
   type Parse,
@@ -26,8 +27,9 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
 // The stored row has three states (allowed, blocked, none) and can also narrow
-// results and domains. The card shows the switch with the narrowing under
-// Advanced; the purpose hint and provider options are set through the API.
+// results and domains, and pin who runs a provider's own search and fetch. The
+// card shows the switch and the pins, with the narrowing under Advanced; the
+// purpose hint and provider options are set through the API.
 //
 // What "none" means is the deployment's `default_enabled`. Switching to that
 // value deletes a row that narrows nothing else, and any other change writes.
@@ -76,6 +78,8 @@ function narrowsAnything(config: WorkspaceWebSearchConfig): boolean {
     config.allowed_domains,
     config.blocked_domains,
     config.provider_options,
+    config.search_executor,
+    config.fetch_executor,
   ].some((value) => value != null)
 }
 
@@ -120,6 +124,8 @@ export function WorkspaceWebSearchCard({
       allowed_domains: stored.allowed_domains,
       blocked_domains: stored.blocked_domains,
       provider_options: stored.provider_options,
+      search_executor: stored.search_executor,
+      fetch_executor: stored.fetch_executor,
     }),
     put: (body: UpdateWorkspaceWebSearchConfigRequest) =>
       setConfig.mutateAsync({
@@ -213,6 +219,25 @@ export function WorkspaceWebSearchCard({
             isDisabled={isUnreadable || !available || save.isSaving}
           />
         }
+      />
+
+      <ExecutorRow
+        label="Who runs provider web search"
+        help="For a provider's own search tool (Anthropic and OpenAI web_search)."
+        value={config?.search_executor}
+        onChange={(search_executor) =>
+          void save.run(() => commitField({ search_executor }))
+        }
+        disabled={narrowingDisabled || save.isSaving}
+      />
+      <ExecutorRow
+        label="Who runs provider web fetch"
+        help="For a provider's own fetch tool (Anthropic web_fetch)."
+        value={config?.fetch_executor}
+        onChange={(fetch_executor) =>
+          void save.run(() => commitField({ fetch_executor }))
+        }
+        disabled={narrowingDisabled || save.isSaving}
       />
 
       <AdvancedRows>

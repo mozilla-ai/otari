@@ -26732,6 +26732,16 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "fetch_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "max_results": {
             "anyOf": [
               {
@@ -26766,6 +26776,16 @@
             ],
             "title": "Purpose Hint"
           },
+          "search_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -26798,6 +26818,8 @@
           "allowed_domains",
           "blocked_domains",
           "provider_options",
+          "search_executor",
+          "fetch_executor",
           "created_at",
           "updated_at"
         ],
@@ -26842,6 +26864,17 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "fetch_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who runs a provider-native web-fetch declaration (Anthropic's web_fetch_<date>) for this workspace, in search_executor's vocabulary. Pins over the request's Otari-Web-Fetch header; null leaves the header in charge"
+          },
           "max_results": {
             "anyOf": [
               {
@@ -26881,6 +26914,17 @@
             ],
             "description": "Search only: hint used when a request declares otari_web_search without one of its own",
             "title": "Purpose Hint"
+          },
+          "search_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who runs a provider-native web-search declaration (Anthropic's web_search_<date>, OpenAI's web_search) for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's search), 'otari' or 'provider'. Pins over the request's Otari-Web-Search header; null leaves the header in charge. The deployment's web_search_intercept still claims every search"
           }
         },
         "required": [

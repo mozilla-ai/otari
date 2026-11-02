@@ -172,6 +172,7 @@ from gateway.exceptions.tools_exceptions import (
     WebSearchOptionRefusedError,
     WebSearchPolicyResolutionFailedError,
     WebToolDeclarationError,
+    WebToolExecutorPinnedError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceWebSearchDomainsExcludedError,
 )
@@ -360,6 +361,7 @@ from gateway.services.tools import (
     WebSearchBackend,
     WebToolCallCap,
     WorkspaceCodeExecutionPolicies,
+    WorkspaceWebExecutors,
     admit_mcp_servers,
     admit_web_access,
     admitted_tools,
@@ -3948,7 +3950,7 @@ async def prepare_gateway_tools(
     web_policy = _RequestWebPolicy(backends.ports.web_search_policy, ctx.workspace_id)
     unpriced_tool: str | None = None
     try:
-        web_candidates = _admit_web_declarations(adapter, ctx, declared)
+        web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         code = await _declare_code_execution(adapter, ctx, declared, backends)
@@ -4301,6 +4303,14 @@ class _RequestWebPolicy:
             raise self._failure
         return self._policy
 
+    async def executors(self) -> WorkspaceWebExecutors:
+        """Who the workspace pinned to run a provider's own search and fetch keywords.
+
+        Raises:
+            WebSearchPolicyResolutionFailedError: the policy could not be resolved.
+        """
+        return await self._policies.executors(self._workspace_id)
+
 
 async def _admit_guardrails(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, response: Response, declared: DeclaredTools
@@ -4338,32 +4348,38 @@ async def _admit_mcp_servers(
         raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
 
-def _web_declarations(ctx: RequestContext, declared: DeclaredTools) -> list[ProviderToolDeclaration]:
-    """The provider web keywords the request declared, and who it asked to run each.
+async def _web_declarations(
+    ctx: RequestContext, declared: DeclaredTools, web_policy: _RequestWebPolicy
+) -> list[ProviderToolDeclaration]:
+    """The provider web keywords the request declared, and who its workspace or it asked to run each.
 
     Raises:
         WebToolDeclarationError: a header cannot be read.
         WebSearchInterceptedError: the header hands the provider a search this deployment runs itself.
+        WebToolExecutorPinnedError: the header asks for other than what the workspace pinned.
+        WebSearchPolicyResolutionFailedError: the workspace's pins could not be read.
     """
-    return read_web_declarations(
+    return await read_web_declarations(
         declared.tools,
         web_search_header=declared.web_search_header,
         web_fetch_header=declared.web_fetch_header,
         config=ctx.config,
         uniform=False,
+        resolve_executors=web_policy.executors,
     )
 
 
-def _admit_web_declarations(
-    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools
+async def _admit_web_declarations(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, web_policy: _RequestWebPolicy
 ) -> list[CandidateTools]:
     """Who runs the request's provider web keywords on each candidate, head first.
 
-    A declaration ambiguous whatever a candidate claims is refused here, before any
-    network or database work; one ambiguous for only some candidates refuses them alone.
+    A declaration ambiguous whatever a candidate claims is refused here, before any network
+    work and before any database read but the workspace's pins; one ambiguous for only some
+    candidates refuses them alone.
     """
     try:
-        candidates = _decide_for_candidates(adapter, ctx, _web_declarations(ctx, declared))
+        candidates = _decide_for_candidates(adapter, ctx, await _web_declarations(ctx, declared, web_policy))
         distinct = dict.fromkeys(
             WebClaims(search=WEB_SEARCH_TOOL_NAME in candidate.claimed, fetch=WEB_FETCH_TOOL_NAME in candidate.claimed)
             for candidate in candidates
@@ -4376,8 +4392,10 @@ def _admit_web_declarations(
                 refusals.append(exc)
         if refusals and len(refusals) == len(distinct):
             raise refusals[0]
-    except (WebToolDeclarationError, WebSearchInterceptedError) as exc:
+    except (WebToolDeclarationError, WebSearchInterceptedError, WebToolExecutorPinnedError) as exc:
         raise domain_error(adapter, exc) from exc
+    except WebSearchPolicyResolutionFailedError as exc:
+        raise adapter.error(status.HTTP_503_SERVICE_UNAVAILABLE, exc.message, ErrorKind.API) from exc
     return candidates
 
 
