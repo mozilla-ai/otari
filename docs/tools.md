@@ -914,7 +914,8 @@ than the deployment's. Each key has a kind, fixed when it is added:
 
 Organization owners and admins manage the keys under
 `/api/v1/organizations/me/web-search-keys`: add, rename or replace a key,
-archive it, and make one key of each kind the organization's default. Only the
+archive it, and make one key of each kind the organization's default or stop it
+being the default (`POST` or `DELETE` on `/{key_id}/default`). Only the
 last four characters of a key are ever shown. A key carries an API key when its
 provider needs one, and may carry its own `api_base` and provider `options`,
 which are checked against the provider when the key is written. An `api_base`
@@ -936,11 +937,12 @@ Each workspace uses one key of each kind:
 
 1. the key of that kind the workspace pinned as its own, if any;
 2. otherwise the organization's default of that kind;
-3. otherwise the organization's oldest key of that kind.
+3. otherwise none: the workspace uses the deployment's instance exactly as
+   before.
 
-A key the workspace turned off, an archived key, or one this deployment cannot
-decrypt is passed over. A workspace with no usable key of a kind uses the
-deployment's instance exactly as before. A workspace's owners and admins pin or
+So a key the organization adds serves no workspace until the organization makes
+it the default or a workspace pins it. A key the workspace turned off, an
+archived key, or one this deployment cannot decrypt is passed over. A workspace's owners and admins pin or
 turn off keys under `/api/v1/workspaces/{workspace_id}/web-search-keys`, which
 any member of the workspace can read to see which keys it uses and, as
 `search_provider` and `fetch_provider`, the providers its searches and fetches
@@ -968,6 +970,17 @@ pinned a key nor turned the Brave default off, gets the Brave key pinned, so it
 keeps searching with Brave. One case changes: where this deployment cannot
 decrypt the Tavily default, the workspaces that searched with the Brave default
 in its place now search with the organization's oldest usable key. Check the
+keys' `usable` field before upgrading.
+
+**Upgrading from 0.35.** A workspace with no pin and no usable default used to
+fall to the organization's oldest key, and now uses the deployment's instance.
+The upgrade keeps every workspace on the key it used: where an organization has
+keys of a kind and no default, its oldest key becomes the default, and a
+workspace that turned the default off gets the key it used pinned. One case
+changes, since the upgrade cannot see whether a key decrypts: where the key a
+workspace relies on after it (its pin, or its organization's default, including
+an oldest key the upgrade makes the default) cannot be decrypted here, a
+workspace that used the next key now uses the deployment's instance. Check the
 keys' `usable` field before upgrading.
 
 ## Direct search
