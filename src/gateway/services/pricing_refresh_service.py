@@ -26,9 +26,9 @@ from gateway.services.pricing import (
     invalid_rate_count,
     reset_generations,
     set_accepted_generations,
-    trim_catalog,
 )
 from gateway.services.pricing_service import normalize_effective_at
+from gateway.types.models_dev import parse_catalog, snapshot_document
 
 _PREVIEW_CHANGE_LIMIT = 100
 # A candidate that loses more than this share of the active priced models, or
@@ -54,7 +54,7 @@ _applied_updated_at: datetime | None = None
 def _parse_snapshot(raw_snapshot: str) -> ModelsDevPriceIndex:
     """Index a stored snapshot, refusing one that carries no models."""
     try:
-        index = ModelsDevPriceIndex.from_catalog(json.loads(raw_snapshot))
+        index = ModelsDevPriceIndex.from_document(json.loads(raw_snapshot))
     except Exception as exc:
         raise ValueError("Invalid models.dev snapshot") from exc
     if len(index) == 0:
@@ -173,10 +173,10 @@ def _build_preview(
 
 
 def _prepare_document(document: dict[str, object]) -> _PendingSnapshot:
-    trimmed = trim_catalog(document)
-    if (invalid := invalid_rate_count(trimmed)) > 0:
+    catalog = parse_catalog(document)
+    if (invalid := invalid_rate_count(catalog)) > 0:
         raise PricingRefreshError(f"The models.dev data carries {invalid} implausible rates")
-    raw_snapshot = json.dumps(trimmed, separators=(",", ":"), ensure_ascii=False)
+    raw_snapshot = json.dumps(snapshot_document(catalog), separators=(",", ":"), ensure_ascii=False)
     index = _parse_snapshot(raw_snapshot)
     if not any(entry.priced for entry in index.entries()):
         raise PricingRefreshError("The models.dev data prices no models")

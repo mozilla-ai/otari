@@ -1,4 +1,4 @@
-"""The packaged models.dev snapshot and the rules that cut it."""
+"""The packaged models.dev snapshot."""
 
 import json
 from dataclasses import replace
@@ -14,7 +14,6 @@ from gateway.services.pricing import (
     load_bundled_index,
     reset_generations,
     set_accepted_generations,
-    trim_catalog,
 )
 
 
@@ -82,40 +81,6 @@ def test_the_bundled_snapshot_stays_small_and_carries_only_price_fields() -> Non
     for key, provider in document.items():
         if key != "_meta":
             assert all(set(model) <= allowed for model in provider["models"].values())
-
-
-def test_trim_keeps_prices_and_drops_the_rest() -> None:
-    trimmed = trim_catalog(
-        {
-            "p": {
-                "id": "p",
-                "name": "P",
-                "env": ["KEY"],
-                "models": {
-                    "m": {
-                        "id": "m",
-                        "name": "M",
-                        "description": "x",
-                        "cost": {"input": 1, "reasoning": 5, "tiers": []},
-                        "limit": {"context": 10, "output": 5},
-                        "status": "beta",
-                    },
-                    "bad": "not a model",
-                },
-            },
-            "junk": 3,
-        }
-    )
-
-    assert trimmed == {
-        "p": {
-            "id": "p",
-            "name": "P",
-            "models": {
-                "m": {"name": "M", "cost": {"input": 1, "tiers": []}, "limit": {"context": 10}, "status": "beta"}
-            },
-        }
-    }
 
 
 def test_the_generation_list_falls_back_to_the_bundled_snapshot() -> None:
