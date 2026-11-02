@@ -3031,7 +3031,7 @@ async def resolve_request_context(
         if gate_instance is not None
         else []
     )
-    wrong_type = not_chat_detail(config, cached_models_dev_catalog(config), candidates, model)
+    wrong_type = not_chat_detail(config, cached_models_dev_catalog(), candidates, model)
     if wrong_type is not None:
         await log_gateway_rejection(
             db=db,

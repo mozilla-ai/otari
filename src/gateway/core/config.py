@@ -1141,11 +1141,10 @@ class GatewayConfig(
     models_dev_metadata: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
         default=True,
         description=(
-            "Enrich the model listing and the dashboard's model detail with metadata "
-            "(token limits, modalities, capabilities, knowledge cutoff) fetched from "
-            "the public models.dev catalog. Set false to disable the outbound call; "
-            "the gateway then reads the context window from the bundled or accepted "
-            "models.dev snapshot and lists no output limit. Pricing does not depend on it."
+            "Fetch the public models.dev catalog for the metadata the model listing and the "
+            "dashboard's model detail show (token limits, modalities, capabilities, knowledge "
+            "cutoff). Set false to disable the outbound call; the gateway then shows the "
+            "metadata of the models.dev catalog bundled with it. Pricing does not depend on it."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(

@@ -9,9 +9,9 @@ v2 document, or v1 when v2 fails) once, reads it into the typed catalog of
 in-memory with a long TTL, and keeps the last good copy through a failure, so an
 offline or unreachable models.dev never breaks the dashboard.
 
-The outbound call is gated by ``GatewayConfig.models_dev_metadata``; when that is
-false, or when no fetch has succeeded yet, callers simply get an empty map and
-the UI shows the model without that enrichment. Prices and context windows come from the
+Until a worker has downloaded a catalog, it serves the one bundled with the
+gateway. ``GatewayConfig.models_dev_metadata`` gates the outbound call only:
+when it is false, the bundled catalog is what callers get. Prices come from the
 bundled or accepted snapshot (``services/pricing``), not from this fetch.
 """
 
@@ -24,6 +24,7 @@ import httpx
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.services.pricing import bundled_catalog
 from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, ModelsDevModel, ModelsDevSource
 
 # The catalog is a few MB; a short read timeout keeps a slow models.dev from
@@ -115,16 +116,23 @@ _lock = asyncio.Lock()
 _MISS = object()
 
 
-def cached_models_dev_catalog(config: GatewayConfig) -> ModelsDevCatalog | None:
-    """The catalog as last fetched, at any age, without fetching or locking.
+def _fallback() -> ModelsDevCatalog | None:
+    """The catalog a worker serves before it has downloaded one: the bundled one."""
+    return bundled_catalog()
+
+
+def _served() -> ModelsDevCatalog | None:
+    return _cache.data if _cache.data is not None else _fallback()
+
+
+def cached_models_dev_catalog() -> ModelsDevCatalog | None:
+    """The catalog as last fetched, at any age, else the bundled one, without fetching or locking.
 
     For a reader that runs off the request path and must not bind the fetch
     lock to its own loop: it answers from whatever a page load or the catalog
-    refresher last put here, and ``None`` until something has.
+    refresher last put here.
     """
-    if not config.models_dev_metadata:
-        return None
-    return _cache.data
+    return _served()
 
 
 def clear_catalog_cache() -> None:
@@ -269,27 +277,25 @@ async def load_models_dev_catalog(
 ) -> ModelsDevCatalog | None:
     """Return the cached models.dev catalog, fetching it if stale.
 
-    Returns ``None`` when metadata enrichment is disabled or no fetch has
-    succeeded yet; a failed fetch returns the last good catalog.
-    ``serve_stale`` answers from the cache at any age so a dashboard read never
+    Without ``models_dev_metadata``, nothing is fetched. Until a fetch has
+    succeeded, the bundled catalog is returned; a failed fetch returns the last
+    good catalog. ``serve_stale`` answers from the cache at any age so a dashboard read never
     waits on models.dev; ``force`` is the background refresher's fetch, which
     still skips the download when a copy newer than ``reuse_within`` seconds is
     cached (the price refresh may have just fetched it).
     """
     if not config.models_dev_metadata:
-        return None
+        return _served()
 
     ttl = config.models_dev_cache_ttl_seconds
-    cached = _read_cache(ttl, serve_stale=serve_stale, force=force)
-    if cached is not _MISS:
-        return cached  # type: ignore[return-value]
+    if _read_cache(ttl, serve_stale=serve_stale, force=force) is not _MISS:
+        return _served()
 
     async with _lock:
         # Double-check under the lock so a burst of dashboard loads triggers one
         # fetch, not one per request.
-        cached = _read_cache(ttl, serve_stale=serve_stale, force=force)
-        if cached is not _MISS:
-            return cached  # type: ignore[return-value]
+        if _read_cache(ttl, serve_stale=serve_stale, force=force) is not _MISS:
+            return _served()
         if (reused := _fresh_cached(reuse_within)) is not None:
             return reused
 
@@ -298,7 +304,7 @@ async def load_models_dev_catalog(
             _cache.data = data
         _cache.ok = data is not None
         _cache.at = time.monotonic()
-        return _cache.data
+        return _served()
 
 
 # Floor on the refresh cadence, for the same reason as the discovery refresher's:

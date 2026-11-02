@@ -153,14 +153,15 @@ prices it.
 
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 so a client does not have to guess them. Both come from models.dev's entry for
-the model under the provider serving it. Where that entry has no context window,
+the model under the provider serving it. Until the gateway has fetched models.dev,
+and always with `models_dev_metadata: false`, that entry is the one in the
+models.dev catalog bundled with the gateway. Where the entry has no context window,
 the bundled or accepted models.dev pricing snapshot supplies one; the snapshot
-keeps no output limit, so a model the live catalog does not describe reports no
+keeps no output limit, so a model the catalog does not describe reports no
 `max_output_tokens`. The same is true of any limit neither source knows. An alias reports its target's
 limits, and the grouped catalog reports the same values for each offering. An
 instance declared `openai-compatible` is looked up under OpenAI, so a model it
-serves under another name usually has no models.dev entry. With
-`models_dev_metadata: false`, the context window comes from the pricing snapshot alone.
+serves under another name usually has no models.dev entry.
 
 Each model also says what it accepts, in the fields OpenRouter's model listing
 uses, so a client built for that shape reads them unchanged. `name` is models.dev's

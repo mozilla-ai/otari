@@ -91,15 +91,21 @@ def test_metadata_unavailable_when_fetch_fails(postgres_url: str, master_header:
         client_gen.close()
 
 
-def test_metadata_disabled_makes_no_fetch(postgres_url: str, master_header: dict[str, str]) -> None:
+def test_metadata_disabled_makes_no_fetch_and_serves_the_bundled_catalog(
+    postgres_url: str, master_header: dict[str, str]
+) -> None:
     client_gen = _make_client(_config(postgres_url, models_dev_metadata=False))
     client = next(client_gen)
     try:
-        fetch_mock = AsyncMock(return_value=parse_catalog(CATALOG))
-        with patch.object(mcs, "_fetch", new=fetch_mock):
+        fetch_mock = AsyncMock(return_value=parse_catalog({}))
+        with (
+            patch.object(mcs, "_fetch", new=fetch_mock),
+            patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)),
+        ):
             resp = client.get(f"{API_ROOT}/models/metadata", headers=master_header)
         assert resp.status_code == 200
-        assert resp.json()["available"] is False
+        assert resp.json()["available"] is True
+        assert resp.json()["models"]["openai:gpt-4o"]["context_window"] == 128000
         # The outbound call is never made when enrichment is disabled.
         fetch_mock.assert_not_awaited()
     finally:

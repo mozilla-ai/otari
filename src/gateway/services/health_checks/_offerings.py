@@ -27,7 +27,7 @@ async def list_hosted_offerings(hosted: HostedProviderService, config: GatewayCo
     The deployment's own view, so a provider restricted to one organization is
     checked too. Opens its own units of work, so call it before any probe.
     """
-    catalog = cached_models_dev_catalog(config)
+    catalog = cached_models_dev_catalog()
     offerings: list[HealthCheckOffering] = []
     for name, models in sorted((await hosted.serveable_models(organization_id=None)).items()):
         credential = await hosted.resolve(name, organization_id=None)
