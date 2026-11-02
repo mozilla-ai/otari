@@ -2132,7 +2132,7 @@ def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Dep
     return RoutingService(
         config,
         UsageService(uow, UsageLogRepository(uow)),
-        ApiKeyService(uow, ApiKeyRepositories.on(uow), users=get_user_access(uow)),
+        get_api_key_service(uow),
     )
 
 

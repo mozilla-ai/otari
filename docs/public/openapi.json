@@ -2210,7 +2210,7 @@
             "type": "integer"
           },
           "pinned_keys": {
-            "description": "`pinned` by API key and provider, most first.",
+            "description": "`pinned` by API key and the provider that served it, most first. Includes requests that named a policy, which may have fallen back within it.",
             "items": {
               "$ref": "#/components/schemas/PinnedTrafficPublic"
             },
@@ -16144,7 +16144,7 @@
         "type": "object"
       },
       "PinnedTrafficPublic": {
-        "description": "The requests one API key sent to one provider by naming it, and so with no automatic fallback.",
+        "description": "The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached.",
         "properties": {
           "api_key_id": {
             "anyOf": [
@@ -35149,7 +35149,7 @@
     },
     "/api/v1/organizations/me/automatic-fallbacks": {
       "get": {
-        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them, each with its input price for this organization and\nwho runs the built-in tools on it, beside its traffic: how many requests a\nbackup served, and how many named one offering and so had no fallback, by API\nkey and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
+        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them, each with its input price for this organization and\nwho runs the built-in tools on it, beside its traffic: how many requests a\nbackup served, and how many named one offering or a policy instead, by API\nkey and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
         "operationId": "routing-list_automatic_fallbacks",
         "responses": {
           "200": {

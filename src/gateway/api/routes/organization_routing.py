@@ -456,7 +456,7 @@ async def list_automatic_fallbacks(
     when one fails, with no policy. Each model lists its offerings in the order
     such a request tries them, each with its input price for this organization and
     who runs the built-in tools on it, beside its traffic: how many requests a
-    backup served, and how many named one offering and so had no fallback, by API
+    backup served, and how many named one offering or a policy instead, by API
     key and provider. The traffic is the
     workspaces the caller may see in their active organization, by the rule the
     organization's usage reads use.

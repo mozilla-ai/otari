@@ -34,7 +34,7 @@ class FallbackOffering:
 
 @dataclass(frozen=True)
 class PinnedTraffic:
-    """The requests one API key sent to one provider by naming it, so with no automatic fallback."""
+    """The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached."""
 
     api_key_id: str | None
     """None for requests made without a key or whose key was deleted."""

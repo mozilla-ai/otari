@@ -89,7 +89,7 @@ function PinnedKeys({ row }: { row: AutomaticFallback }) {
 /**
  * The models used in the last 30 days, the providers their catalog ID tries,
  * and how much of their traffic sent that ID. A row whose traffic named a
- * provider opens on the keys that did.
+ * provider or a policy opens on the keys that did.
  */
 export function AutomaticFallbacks({
   fallbacks,
@@ -155,10 +155,14 @@ export function AutomaticFallbacks({
               )}
               {/* A slot on every row, so the shares line up. */}
               <span className="inline-flex w-4">
-                {hasBackup && row.pinned_keys.length > 0 ? (
+                {row.pinned_keys.length > 0 ? (
                   <RowAction
                     icon={isOpen ? FiChevronDown : FiChevronRight}
-                    label={isOpen ? "Hide keys" : "Keys that named a provider"}
+                    label={
+                      isOpen
+                        ? "Hide keys"
+                        : "Keys that named a provider or policy"
+                    }
                     onPress={() => setExpanded(isOpen ? null : row.id)}
                   />
                 ) : null}
@@ -169,7 +173,7 @@ export function AutomaticFallbacks({
       },
       {
         id: "order",
-        header: "Order",
+        header: "Order (input $/M tokens)",
         cell: (row) => <Order offerings={row.offerings} />,
       },
     ],

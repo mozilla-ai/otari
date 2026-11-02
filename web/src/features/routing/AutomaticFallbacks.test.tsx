@@ -73,7 +73,7 @@ describe("AutomaticFallbacks", () => {
     ).toBeTruthy()
     expect(
       within(row).queryByRole("button", {
-        name: "Keys that named a provider",
+        name: "Keys that named a provider or policy",
       }),
     ).not.toBeInTheDocument()
   })
@@ -110,7 +110,9 @@ describe("AutomaticFallbacks", () => {
     await renderWithRouter(<AutomaticFallbacks fallbacks={[PINNED]} />)
 
     await user.click(
-      await screen.findByRole("button", { name: "Keys that named a provider" }),
+      await screen.findByRole("button", {
+        name: "Keys that named a provider or policy",
+      }),
     )
     expect(await screen.findByText("Zed")).toBeInTheDocument()
     expect(screen.getByText("800")).toBeInTheDocument()
@@ -133,6 +135,35 @@ describe("AutomaticFallbacks", () => {
     expect(within(row).getByText("—")).toBeInTheDocument()
     expect(within(row).queryByText(/%$/)).not.toBeInTheDocument()
     expect(within(row).queryByLabelText("then")).not.toBeInTheDocument()
+  })
+
+  it("still opens a single-provider row on the keys that named its provider", async () => {
+    const user = userEvent.setup()
+    const single: AutomaticFallback = {
+      ...PINNED,
+      offerings: [
+        offering("together:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.3),
+      ],
+    }
+    await renderWithRouter(<AutomaticFallbacks fallbacks={[single]} />)
+
+    const row = await rowOf(single.id)
+    expect(within(row).getByText("—")).toBeInTheDocument()
+    await user.click(
+      within(row).getByRole("button", {
+        name: "Keys that named a provider or policy",
+      }),
+    )
+    expect(await screen.findByText("Zed")).toBeInTheDocument()
+  })
+
+  it("labels the order's prices with their unit", async () => {
+    await renderWithRouter(<AutomaticFallbacks fallbacks={[FLASH]} />)
+    expect(
+      await screen.findByRole("columnheader", {
+        name: "Order (input $/M tokens)",
+      }),
+    ).toBeInTheDocument()
   })
 
   it("names each provider once, Bedrock without Amazon, and leaves an unpriced one unpriced", async () => {

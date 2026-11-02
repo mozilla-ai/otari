@@ -398,11 +398,12 @@ catalog id. Each row shows its requests (an absorbed attempt is not one), the
 share of them that sent the catalog id and so could fall back, and its providers
 in the order such a request tries them for your organization, each at the input
 price that order ranks by. The share is a dash for a model one provider serves,
-and is flagged below half. A row with requests that named a provider opens on
-the API keys that sent them, with the provider each reached. The order is the
+and is flagged below half. A row with requests that named a provider or a
+routing policy opens on the API keys that sent them, with the provider each
+reached; a policy's own fallback still applied to the ones that named a policy. The order is the
 catalog's, before a key's allow-list or a missing credential leaves an offering
 out of a request's plan. Requests from before a deployment recorded the catalog
-id they sent count as having named a provider. An owner or admin reads every
+id they sent count as having named one. An owner or admin reads every
 workspace in the organization, anyone else the workspaces they belong to. The
 response also says who runs the built-in tools on each offering (`own_tools`,
 `otari_tools`), for a caller that declares them in the provider's own words and

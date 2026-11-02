@@ -129,7 +129,7 @@ class FallbackOfferingPublic(BaseModel):
 
 
 class PinnedTrafficPublic(BaseModel):
-    """The requests one API key sent to one provider by naming it, and so with no automatic fallback."""
+    """The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -158,7 +158,10 @@ class AutomaticFallbackPublic(BaseModel):
         "and so got no automatic fallback."
     )
     pinned_provider: str | None = Field(description="The instance most pinned requests reached.")
-    pinned_keys: list[PinnedTrafficPublic] = Field(description="`pinned` by API key and provider, most first.")
+    pinned_keys: list[PinnedTrafficPublic] = Field(
+        description="`pinned` by API key and the provider that served it, most first. "
+        "Includes requests that named a policy, which may have fallen back within it."
+    )
 
 
 class AutomaticFallbacksResponse(BaseModel):

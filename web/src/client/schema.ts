@@ -2719,7 +2719,7 @@ export interface paths {
          *     when one fails, with no policy. Each model lists its offerings in the order
          *     such a request tries them, each with its input price for this organization and
          *     who runs the built-in tools on it, beside its traffic: how many requests a
-         *     backup served, and how many named one offering and so had no fallback, by API
+         *     backup served, and how many named one offering or a policy instead, by API
          *     key and provider. The traffic is the
          *     workspaces the caller may see in their active organization, by the rule the
          *     organization's usage reads use.
@@ -8460,7 +8460,7 @@ export interface components {
             pinned: number;
             /**
              * Pinned Keys
-             * @description `pinned` by API key and provider, most first.
+             * @description `pinned` by API key and the provider that served it, most first. Includes requests that named a policy, which may have fallen back within it.
              */
             pinned_keys: components["schemas"]["PinnedTrafficPublic"][];
             /**
@@ -15109,7 +15109,7 @@ export interface components {
         };
         /**
          * PinnedTrafficPublic
-         * @description The requests one API key sent to one provider by naming it, and so with no automatic fallback.
+         * @description The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached.
          */
         PinnedTrafficPublic: {
             /**

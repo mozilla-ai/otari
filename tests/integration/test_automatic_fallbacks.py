@@ -20,6 +20,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.usage import UsageLog
+from gateway.repositories.api_keys import api_key_repository
 from gateway.services import catalog as selectors
 from gateway.services import selector_index_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -212,8 +213,10 @@ def _read(client: TestClient, world: _World, who: str) -> dict[str, dict[str, An
 
 
 def test_an_owner_reads_their_organizations_fallbacks_in_its_own_order(
-    fallbacks_client: TestClient, world: _World
+    fallbacks_client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # One key per read, so the names come back across batches.
+    monkeypatch.setattr(api_key_repository, "_NAMES_BATCH", 1)
     models = _read(fallbacks_client, world, "alpha_owner")
 
     assert list(models) == [_CLAUDE, _GEMINI]
