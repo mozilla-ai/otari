@@ -68,6 +68,7 @@ class _Maps:
     models: dict[str, str]
     offerings: dict[str, tuple[str, ...]]
     model_selectors: dict[str, str]
+    rates: dict[str, float | None]
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,9 @@ class OrganizationSelectors:
     models: dict[str, str] = field(default_factory=dict)
     offerings: dict[str, tuple[str, ...]] = field(default_factory=dict)
     model_selectors: dict[str, str] = field(default_factory=dict)
+
+    rates: dict[str, float | None] = field(default_factory=dict)
+    """Full selector to the input rate per million tokens the organization pays, None where unpriced."""
 
     undated: dict[str, str] = field(default_factory=dict)
     """``instance:<name>`` to the one dated build of it the organization serves, matched case-sensitively."""
@@ -113,6 +117,9 @@ class SelectorIndex:
 
     model_selectors: dict[str, str] = field(default_factory=dict)
     """Full selector to the pinned spelling the catalog shows for it, where it is the offering that spelling reaches."""
+
+    rates: dict[str, float | None] = field(default_factory=dict)
+    """Full selector to its input rate per million tokens, None where unpriced."""
 
     names: dict[str, str] = field(default_factory=dict)
     """Catalog ID, lowercased, to the model's display name."""
@@ -276,6 +283,14 @@ def _names_an_offering(index: SelectorIndex, view: OrganizationSelectors | None,
     return _names_verbatim(index, view, model_selector) or _legacy_offering(index, view, model_selector) is not None
 
 
+def offering_input_rate(full_selector: str, *, organization_id: uuid.UUID | None = None) -> float | None:
+    """The input rate per million tokens an offering costs this organization, None where it is unpriced."""
+    view = _organization_view(_index, None, organization_id)
+    if view is not None and full_selector in view.rates:
+        return view.rates[full_selector]
+    return _index.rates.get(full_selector)
+
+
 def short_selector_for(full_selector: str, *, organization_id: uuid.UUID | None = None) -> str | None:
     """The spelling the catalog shows for an offering, when it has one."""
     view = _organization_view(_index, None, organization_id)
@@ -341,6 +356,7 @@ def _build_maps(
         models={slug: ranked_selectors[0] for slug, ranked_selectors in ranked.items()},
         offerings=ranked,
         model_selectors=model_selectors,
+        rates=rates,
     )
 
 
@@ -370,6 +386,7 @@ def build_selector_index(
         models=maps.models,
         offerings=maps.offerings,
         model_selectors=maps.model_selectors,
+        rates=maps.rates,
         names={slug: name for slug, name in (names or {}).items() if slug in maps.offerings},
         organizations=dict(organizations or {}),
         workspace_organization=dict(workspace_organization or {}),
@@ -405,6 +422,7 @@ def build_organization_selectors(
         model_selectors={
             selector: spelling for selector, spelling in maps.model_selectors.items() if selector in touched_selectors
         },
+        rates={selector: rate for selector, rate in maps.rates.items() if selector in touched_selectors},
         undated=undated_spellings(own),
         names={slug: name for slug, name in (names or {}).items() if slug in touched},
     )

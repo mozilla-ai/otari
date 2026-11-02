@@ -19,7 +19,7 @@ _REQUEST_STATUSES = ("success", "error")
 
 @dataclass(frozen=True)
 class ServedTraffic:
-    """The requests this gateway served for one name sent and one offering reached.
+    """The requests this gateway served for one name sent, one offering reached and one API key.
 
     ``model`` is the provider's own id, or a whole selector on a row written before
     ``provider`` was recorded. ``fell_back`` counts the successful requests a
@@ -29,6 +29,7 @@ class ServedTraffic:
     provider: str | None
     model: str
     policy_name: str | None
+    api_key_id: str | None
     requests: int
     fell_back: int
 
@@ -40,7 +41,7 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
         super().__init__(uow, UsageLog)
 
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
-        """The requests served here since ``since`` in these workspaces, grouped by name sent and offering reached.
+        """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key.
 
         One grouped read. Imported usage is left out, because it was never served here.
         """
@@ -52,6 +53,7 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
                 UsageLog.provider,
                 UsageLog.model,
                 UsageLog.policy_name,
+                UsageLog.api_key_id,
                 func.count().label("requests"),
                 func.coalesce(fell_back, 0).label("fell_back"),
             )
@@ -61,13 +63,14 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
                 UsageLog.status.in_(_REQUEST_STATUSES),
                 UsageLog.timestamp >= since,
             )
-            .group_by(UsageLog.provider, UsageLog.model, UsageLog.policy_name)
+            .group_by(UsageLog.provider, UsageLog.model, UsageLog.policy_name, UsageLog.api_key_id)
         )
         return [
             ServedTraffic(
                 provider=row.provider,
                 model=row.model,
                 policy_name=row.policy_name,
+                api_key_id=row.api_key_id,
                 requests=int(row.requests),
                 fell_back=int(row.fell_back),
             )
