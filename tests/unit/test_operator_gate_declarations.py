@@ -28,6 +28,7 @@ import gateway.api.routes
 from gateway.api.deps import (
     require_deployment_operator,
     require_deployment_operator_or_absent,
+    verify_api_key,
     verify_api_key_or_master_key,
     verify_catalog_reader,
     verify_catalog_reader_or_public,
@@ -78,7 +79,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("pricing", pricing.operator_router),
     ("providers", providers.router),
     ("routing", routing.router),
-    ("routing_memory", routing_memory.router),
+    ("routing_memory", routing_memory.operator_router),
     ("scoped_budgets", scoped_budgets.router),
     ("search_tools", search_tools.router),
     ("settings", settings.router),
@@ -109,6 +110,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
     ("usage.key", usage.key_router, verify_api_key_or_master_key),
+    ("routing_memory.key", routing_memory.key_router, verify_api_key),
     ("hooks", hooks.router, hooks.verify_hook_caller),
     ("hook_guardrails", hook_guardrails.router, verify_api_key_or_master_key),
     # Operator-only, with the 404 the admin surface answers rather than the 403:
@@ -166,6 +168,7 @@ _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
     {
         hooks.verify_hook_caller,
         require_deployment_operator,
+        verify_api_key,
         verify_api_key_or_master_key,
         verify_catalog_reader,
         verify_catalog_reader_or_public,

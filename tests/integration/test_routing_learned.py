@@ -903,3 +903,122 @@ def test_a_static_policy_is_unaffected_by_the_router_step(client: TestClient) ->
 
     assert resp.status_code == 200, resp.text
     assert calls == [STRONG]
+
+
+# -- teaching with an API key ------------------------------------------------
+
+
+def _key(client: TestClient, user_id: str = USER, **body: Any) -> dict[str, str]:
+    created = client.post(f"{API_ROOT}/keys", json={"key_name": "k", "user_id": user_id, **body}, headers=HEADERS)
+    assert created.status_code == 200, created.text
+    return {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+
+def _rank_own(client: TestClient, key: dict[str, str], prompt: str, scores: dict[str, float]) -> Any:
+    example = {"prompt": prompt, "scores": scores}
+    return client.post(f"{API_ROOT}/routing/me/preferences/rank", json={"examples": [example]}, headers=key)
+
+
+def _teach_own(client: TestClient, key: dict[str, str]) -> None:
+    for prompt in ("what is 2 plus 2", "add 3 and 4"):
+        assert _rank_own(client, key, prompt, {CHEAP: 1.0, STRONG: 1.0}).status_code == 200
+    for prompt in ("prove why the sky appears blue", "explain why entropy increases"):
+        assert _rank_own(client, key, prompt, {CHEAP: 0.0, STRONG: 1.0}).status_code == 200
+
+
+def _chat_with_key(client: TestClient, key: dict[str, str], prompt: str) -> list[str]:
+    calls: list[str] = []
+
+    async def mock_acompletion(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        return _completion(kwargs["model"])
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "smart", "messages": [{"role": "user", "content": prompt}]},
+            headers=key,
+        )
+    assert resp.status_code == 200, resp.text
+    return calls
+
+
+def test_a_key_teaches_the_pool_its_own_requests_vote_over(client: TestClient) -> None:
+    key = _key(client)
+    assert _chat_with_key(client, key, "what is the capital of France") == [STRONG]
+
+    _teach_own(client, key)
+
+    own = client.get(f"{API_ROOT}/routing/me/status", headers=key)
+    assert own.status_code == 200, own.text
+    assert own.json()["user_id"] == USER
+    assert own.json()["default_pool"] == {"records": 4, "warm": True}
+    assert _status(client)["default_pool"] == {"records": 4, "warm": True}
+    assert _chat_with_key(client, key, "what is the capital of France") == [CHEAP]
+
+
+def test_a_key_cannot_teach_or_read_another_users_pool(client: TestClient) -> None:
+    _create_user(client, "other")
+    mine, theirs = _key(client), _key(client, "other")
+
+    named = client.post(
+        f"{API_ROOT}/routing/me/preferences/rank",
+        json={"user_id": "other", "examples": [{"prompt": "add 3 and 4", "scores": {CHEAP: 1.0}}]},
+        headers=mine,
+    )
+    assert named.status_code == 422, named.text
+
+    _teach_own(client, mine)
+
+    assert client.get(f"{API_ROOT}/routing/me/status", headers=theirs).json()["default_pool"]["records"] == 0
+    assert _chat_with_key(client, theirs, "what is the capital of France") == [STRONG]
+
+
+def test_a_keys_pool_is_its_own_workspaces(client: TestClient) -> None:
+    created = client.post(f"{API_ROOT}/workspaces", json={"name": "Platform"}, headers=HEADERS)
+    assert created.status_code == 201, created.text
+    elsewhere = _key(client, workspace_id=created.json()["id"])
+
+    _teach_own(client, _key(client))
+
+    status = client.get(f"{API_ROOT}/routing/me/status", headers=elsewhere).json()
+    assert status["workspace_id"] == created.json()["id"]
+    assert status["default_pool"]["records"] == 0
+
+
+def test_the_key_routes_refuse_the_master_key(client: TestClient) -> None:
+    assert client.get(f"{API_ROOT}/routing/me/status", headers=HEADERS).status_code == 401
+
+
+def test_a_key_score_for_a_model_no_policy_routes_to_is_refused(client: TestClient) -> None:
+    resp = _rank_own(client, _key(client), "add 3 and 4", {OTHER: 1.0})
+
+    assert resp.status_code == 400, resp.text
+    assert _status(client)["default_pool"]["records"] == 0
+
+
+def test_a_key_example_is_refused_where_the_embedding_provider_does_not_serve_the_country(
+    learned_config: GatewayConfig,
+) -> None:
+    config = learned_config.model_copy(
+        update={"provider_supported_countries": {"openai": ["US"]}, "client_country_header": "CF-IPCountry"}
+    )
+    with patch("gateway.services.routing.knn.aembedding", new=_fake_aembedding):
+        client_gen = build_test_client(config)
+        client = next(client_gen)
+        try:
+            _create_user(client)
+            key = _key(client)
+            example = {"examples": [{"prompt": "add 3 and 4", "scores": {CHEAP: 1.0}}]}
+
+            refused = client.post(
+                f"{API_ROOT}/routing/me/preferences/rank", json=example, headers={**key, "CF-IPCountry": "FR"}
+            )
+            served = client.post(
+                f"{API_ROOT}/routing/me/preferences/rank", json=example, headers={**key, "CF-IPCountry": "US"}
+            )
+        finally:
+            client_gen.close()
+
+    assert refused.status_code == 403, refused.text
+    assert served.status_code == 200, served.text
