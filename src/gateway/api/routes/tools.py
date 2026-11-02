@@ -8,21 +8,32 @@ deployment has a backend wired up for it.
 Each entry reports the declaration forms this deployment actually honors right
 now, so the answer changes with configuration: interception adds the
 provider-named web-search keywords, and a tool with no backend URL is listed as
-unavailable rather than hidden (a client seeing ``available: false`` learns the
-tool exists and the operator has not configured it, which is the actionable
-distinction).
+unavailable rather than hidden, with a ``reason`` saying who can change that.
 
+An API key's answer also takes in its workspace's web search and code execution
+switches, read the way the request path reads them, so a tool the workspace has
+turned off (or never turned on, where the deployment makes it opt-in) is not
+advertised to a key whose requests would be refused. A master key or a dashboard
+session belongs to no single workspace and gets the deployment's answer.
 """
 
-from typing import Annotated, Any, Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from gateway.api.deps import get_config, verify_catalog_reader
+from gateway.api.deps import (
+    WorkspaceCodeExecutionPoliciesDep,
+    WorkspaceWebSearchPoliciesDep,
+    get_config,
+    verify_catalog_reader,
+)
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
-from gateway.services.sandbox_backend import code_execution_tool_definition
+from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError
+from gateway.models.api_keys import APIKey
+from gateway.services.sandbox_backend import SERVED_TOOL_NAMES, code_execution_tool_definition
 from gateway.services.tools import (
     Tool,
     code_execution_declaration_forms,
@@ -32,12 +43,18 @@ from gateway.services.tools import (
     web_search_tool_definition,
 )
 
+if TYPE_CHECKING:
+    from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
+    from gateway.services.tools import WorkspaceCodeExecutionPolicies
+
 router = APIRouter(
     tags=["tools"],
     dependencies=[Depends(verify_catalog_reader)],
 )
 
 SURFACE = Surface("tools")
+
+ToolUnavailableReason = Literal["not_configured", "workspace_disabled"]
 
 
 class ManagedTool(BaseModel):
@@ -48,9 +65,20 @@ class ManagedTool(BaseModel):
     description: str = Field(description="What the tool does, as the model is told.")
     available: bool = Field(
         description=(
-            "Whether this deployment has enabled and configured the tool. A request "
-            "declaring an unavailable tool is rejected with 400."
+            "Whether a request from this caller may declare the tool: the deployment has "
+            "enabled and configured it and, for an API key, the key's workspace allows it. "
+            "A master key or a dashboard session gets the deployment's answer alone. A "
+            "request declaring an unavailable tool is refused."
         )
+    )
+    reason: ToolUnavailableReason | None = Field(
+        default=None,
+        description=(
+            "Why the tool is unavailable, `null` when it is available. `not_configured`: "
+            "the deployment has not enabled or configured it, which only its operator can "
+            "change. `workspace_disabled`: the API key's workspace does not allow it, which "
+            "a workspace admin changes under Tools in the dashboard."
+        ),
     )
     accepted_types: list[str] = Field(
         description=(
@@ -73,7 +101,42 @@ class ToolsResponse(BaseModel):
     data: list[ManagedTool]
 
 
-def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
+@dataclass(frozen=True)
+class _WorkspaceSwitches:
+    """Whether the caller's workspace allows the web tools and code execution."""
+
+    web: bool = True
+    code_execution: bool = True
+
+
+async def _workspace_switches(
+    api_key: APIKey | None,
+    web_policies: "WorkspaceWebSearchPolicies",
+    code_execution_policies: "WorkspaceCodeExecutionPolicies",
+) -> _WorkspaceSwitches:
+    """The switches the request path applies to ``api_key``'s workspace, all on without a key."""
+    if api_key is None:
+        return _WorkspaceSwitches()
+    try:
+        web_policy = await web_policies.resolve(api_key.workspace_id, ())
+        web = web_policy is None or web_policy.enabled
+    except WebSearchPolicyResolutionFailedError:
+        # The request path refuses every web declaration of a workspace whose stored row is invalid.
+        web = False
+    code_policy = await code_execution_policies.for_request(api_key.workspace_id)
+    code_execution = code_policy is None or (
+        code_policy.enabled and (code_policy.tools is None or bool(code_policy.tools & set(SERVED_TOOL_NAMES)))
+    )
+    return _WorkspaceSwitches(web=web, code_execution=code_execution)
+
+
+def _reason(configured: bool, workspace_allows: bool) -> ToolUnavailableReason | None:
+    if not configured:
+        return "not_configured"
+    return None if workspace_allows else "workspace_disabled"
+
+
+def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[ManagedTool]:
     web_search = web_search_tool_definition()["function"]
     web_fetch = web_fetch_tool_definition()["function"]
     code_execution = code_execution_tool_definition()["function"]
@@ -86,7 +149,8 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
         ManagedTool(
             id=Tool.WEB_FETCH,
             description=web_fetch["description"],
-            available=config.web_fetch_enabled,
+            available=config.web_fetch_enabled and switches.web,
+            reason=_reason(config.web_fetch_enabled, switches.web),
             accepted_types=[str(Tool.WEB_FETCH)],
             input_schema=web_fetch["parameters"],
             example={"type": Tool.WEB_FETCH},
@@ -94,7 +158,8 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
         ManagedTool(
             id=Tool.WEB_SEARCH,
             description=web_search["description"],
-            available=can_web_search,
+            available=can_web_search and switches.web,
+            reason=_reason(can_web_search, switches.web),
             accepted_types=web_search_declaration_forms(config),
             input_schema=web_search["parameters"],
             example={"type": Tool.WEB_SEARCH},
@@ -102,7 +167,8 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
         ManagedTool(
             id=Tool.CODE_EXECUTION,
             description=code_execution["description"],
-            available=sandbox_configured,
+            available=sandbox_configured and switches.code_execution,
+            reason=_reason(sandbox_configured, switches.code_execution),
             accepted_types=(
                 code_execution_declaration_forms(config) if sandbox_configured else [str(Tool.CODE_EXECUTION)]
             ),
@@ -113,10 +179,18 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
 
 
 @router.get("/tools")
-async def list_tools(config: Annotated[GatewayConfig, Depends(get_config)]) -> ToolsResponse:
+async def list_tools(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    web_policies: WorkspaceWebSearchPoliciesDep,
+    code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+) -> ToolsResponse:
     """List the tools Otari runs itself, with the declaration forms it accepts.
 
-    Every other `tools[]` entry, including provider-native keywords not listed
-    here, is forwarded to the upstream provider untouched.
+    Called with an API key, a tool its workspace does not allow is listed as
+    unavailable. Every other `tools[]` entry, including provider-native keywords
+    not listed here, is forwarded to the upstream provider untouched.
     """
-    return ToolsResponse(data=_managed_tools(config))
+    api_key, _ = auth
+    switches = await _workspace_switches(api_key, web_policies, code_execution_policies)
+    return ToolsResponse(data=_managed_tools(config, switches))

@@ -6253,8 +6253,9 @@ export interface paths {
          * List Tools
          * @description List the tools Otari runs itself, with the declaration forms it accepts.
          *
-         *     Every other `tools[]` entry, including provider-native keywords not listed
-         *     here, is forwarded to the upstream provider untouched.
+         *     Called with an API key, a tool its workspace does not allow is listed as
+         *     unavailable. Every other `tools[]` entry, including provider-native keywords
+         *     not listed here, is forwarded to the upstream provider untouched.
          */
         get: operations["tools-list_tools"];
         put?: never;
@@ -12887,7 +12888,7 @@ export interface components {
             accepted_types: string[];
             /**
              * Available
-             * @description Whether this deployment has enabled and configured the tool. A request declaring an unavailable tool is rejected with 400.
+             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
              */
             available: boolean;
             /**
@@ -12920,6 +12921,11 @@ export interface components {
              * @constant
              */
             object: "tool";
+            /**
+             * Reason
+             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: the deployment has not enabled or configured it, which only its operator can change. `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
+             */
+            reason?: ("not_configured" | "workspace_disabled") | null;
         };
         /**
          * McpErrorBody
