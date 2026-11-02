@@ -599,10 +599,8 @@ describe("ModelDetailPage", () => {
   })
 
   it("renders a metered rate alone when it differs from the provider's list price", async () => {
-    // Neither offering is priced at the provider's published rate: one on the
-    // organization's own rate, one on a models.dev default. That is the case
-    // the page used to annotate with the list price, plus a banner explaining
-    // the two differed. Each cell now shows the metered rate and nothing else.
+    // The fixture's rates are not the providers' published ones, which is
+    // what gives the absence assertions below their meaning.
     mockApi()
     GLM_DETAIL.offerings[0] = offering({ price_source: "organization" })
 
@@ -623,12 +621,12 @@ describe("ModelDetailPage", () => {
       within(rows[1] as HTMLElement).getByRole("gridcell", { name: /\$0\.50/ }),
     ).toBeInTheDocument()
 
-    // No list price is shown beside a rate, and no banner explains the
-    // difference from one.
+    // A rate stands alone: no second figure beside it and no banner
+    // explaining one.
     expect(within(grid).queryByText(/list price/i)).toBeNull()
     expect(screen.queryByText(/published price/i)).toBeNull()
 
-    // Where the rate came from is the comparison the page keeps.
+    // Where the rate came from stays named.
     expect(
       within(grid).getByRole("columnheader", { name: "Price from" }),
     ).toBeInTheDocument()
