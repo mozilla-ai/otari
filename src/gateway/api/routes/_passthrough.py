@@ -74,6 +74,7 @@ from gateway.api.routes._pipeline import (
     rate_limit_headers,
     throttle_early_rejection,
 )
+from gateway.api.routes._unavailable_models import note_unavailable_model
 from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
 from gateway.core.error_codes import (
@@ -661,8 +662,11 @@ async def run_passthrough(
 
     # The last rung of the credential ladder, past every gate on the name the caller wrote.
     deployment_charge: DeploymentCharge | None = None
+    # The roster's name for a hosted model, which dispatch replaces with the upstream's.
+    hosted_instance: str | None = None
     hosted = await _serve_hosted(resolved, reservation, country_gate)
     if hosted is not None:
+        hosted_instance = resolved.instance
         resolved, deployment_charge = hosted
         if lookup_pricing:
             # Settled at the rate a deployment-paid request settles at, which no
@@ -829,6 +833,10 @@ async def run_passthrough(
         await refund_reservation(db, reservation)
         raise
     except Exception as e:
+        if hosted_instance is not None:
+            note_unavailable_model(
+                config, hosted_instance, resolved.model, e, deployment_paid=deployment_charge is not None
+            )
         caller_params = frozenset(request_params) - SENSITIVE_PARAM_FIELDS
         failed_row = _usage_row(
             "error",
