@@ -461,6 +461,7 @@ function CreateKeyDialog({
   const organizationContext = useOrganizationContext()
   const offersServiceKey =
     isDeploymentWide || canManage(organizationContext.data)
+  const serviceKeyScope = isDeploymentWide ? "deployment" : "organization"
   const [rejectUserMismatch, setRejectUserMismatch] =
     useState<UserMismatchChoice>("inherit")
   const [scopeValid, setScopeValid] = useState(true)
@@ -500,10 +501,7 @@ function CreateKeyDialog({
   // caller belongs to that default, which is the answer this form surfaces
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
-  const serviceKeyReady = useServiceKeyReady(
-    serviceKey,
-    isDeploymentWide ? "deployment" : "organization",
-  )
+  const serviceKeyReady = useServiceKeyReady(serviceKey, serviceKeyScope)
   const budgetIncomplete =
     !excludeFromBudget && keyBudgetIncomplete(budgetDraft)
   const isBlocked =
@@ -781,7 +779,7 @@ function CreateKeyDialog({
             <ServiceKeyFields
               value={serviceKey}
               onChange={setServiceKey}
-              scope={isDeploymentWide ? "deployment" : "organization"}
+              scope={serviceKeyScope}
             />
           ) : null}
           <UserMismatchPicker
