@@ -357,11 +357,8 @@ export function OrganizationWebSearchKeysPage() {
             ? "One key can't be decrypted on this deployment, so every call passes over it."
             : `${unreadableCount} keys can't be decrypted on this deployment, so every call passes over them.`}{" "}
           This happens when <code>OTARI_SECRET_KEY</code> changed since they
-          were stored. Store each one&rsquo;s API key again, with{" "}
-          <code>
-            PATCH /api/v1/organizations/me/web-search-keys/&#123;key_id&#125;
-          </code>{" "}
-          and an <code>api_key</code>, to encrypt it under the current one.
+          were stored. Edit each one and enter its API key again to encrypt it
+          under the current one.
         </InfoBanner>
       ) : null}
 
