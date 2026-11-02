@@ -5368,7 +5368,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"examples\": [\n    {\n      \"prompt\": \"string\",\n      \"scores\": {}\n    }\n  ]\n}"
+              "raw": "{\n  \"examples\": [\n    {\n      \"prompt\": \"What is 2 plus 2?\",\n      \"scores\": {\n        \"openai:gpt-5-nano\": 1.0,\n        \"openai:gpt-5\": 1.0\n      }\n    }\n  ]\n}"
             },
             "description": "Record scored examples into the calling key's own routing memory.\n\nThe memory is the key's user's in the key's workspace, the pool that key's\nrequests vote over; nothing in the body can name another. Validation, storage\nand the response are those of ``POST /api/v1/routing/preferences/rank``.\n\nEach call counts against the user's request rate limit, and is refused (403)\nwhen the router's embedding provider does not serve the caller's country,\nbecause embedding an example sends its prompt there.",
             "header": [
@@ -5564,7 +5564,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"examples\": [\n    {\n      \"prompt\": \"string\",\n      \"scores\": {}\n    }\n  ],\n  \"user_id\": \"string\"\n}"
+              "raw": "{\n  \"user_id\": \"my-user\",\n  \"examples\": [\n    {\n      \"prompt\": \"What is 2 plus 2?\",\n      \"scores\": {\n        \"openai:gpt-5-nano\": 1.0,\n        \"openai:gpt-5\": 1.0\n      }\n    }\n  ]\n}"
             },
             "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
             "header": [

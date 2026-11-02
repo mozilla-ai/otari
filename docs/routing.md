@@ -214,10 +214,10 @@ An API key teaches its own memory instead, through
 The body is the same list of `examples` with no `user_id` or `workspace_id`:
 the memory is the key's user's in the key's workspace, the pool that key's
 requests vote over, so a key cannot teach or read another user's or workspace's
-pool. A service key teaches its own user's pool, not its end users'. Each call
-counts against the user's request rate limit, and is refused with 403 where the
-router's embedding provider does not serve the caller's country, because
-embedding an example sends its prompt there.
+pool. A service key teaches its own user's pool, not its end users'. Each rank
+call counts against the user's request rate limit, and is refused with 403 where
+the router's embedding provider does not serve the caller's country, because
+embedding an example sends its prompt there; the status read does neither.
 
 ```bash
 curl -X POST "$OTARI_URL/api/v1/routing/me/preferences/rank" \

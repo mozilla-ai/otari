@@ -71,6 +71,15 @@ EXAMPLE_BODY_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
     # prices and so answers 409. Without one, the update refreshes the model
     # lists; the digest is a line the operator copies from the preview.
     ("POST", "/api/v1/hosted-providers/catalog-update"): {"cleanup": False},
+    # A derived ``scores`` is ``{}``, which the routes refuse: score at least one
+    # candidate of a learned policy.
+    ("POST", "/api/v1/routing/preferences/rank"): {
+        "user_id": "my-user",
+        "examples": [{"prompt": "What is 2 plus 2?", "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}}],
+    },
+    ("POST", "/api/v1/routing/me/preferences/rank"): {
+        "examples": [{"prompt": "What is 2 plus 2?", "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}}],
+    },
 }
 
 
