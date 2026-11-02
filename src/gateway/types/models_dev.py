@@ -5,6 +5,10 @@ model's modalities, flags, limits, prices and dates. The gateway reads it in thr
 places, the metadata a listing shows, the price index and the stored price snapshot,
 and all three read it through this module, so a change upstream is one change here.
 
+models.dev publishes two documents. v2 is the full one, and v1 is a reduced copy
+made from it. Both read into the same types: the v2 reader fills every field the
+v1 reader fills, the way models.dev derives v1, and adds what only v2 carries.
+
 It lives here, not in the catalog or the pricing service package, because both domains
 read it and neither imports the other. It is standard library only:
 ``scripts/update_models_dev_snapshot.py`` loads this file by path, so the bundled
@@ -12,7 +16,7 @@ snapshot is cut with the same rules as every snapshot the gateway stores.
 """
 
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
@@ -20,17 +24,28 @@ from typing import Any
 __all__ = [
     "LISTING_PREFIX",
     "MAX_ISSUE_EXAMPLES",
+    "MODELS_DEV_SOURCES",
     "RATE_FIELDS",
     "REFUSE_DAMAGED_SHARE",
+    "ModelsDevApi",
+    "ModelsDevCachePrices",
     "ModelsDevCatalog",
     "ModelsDevCost",
     "ModelsDevIssues",
+    "ModelsDevModalityCost",
     "ModelsDevModel",
+    "ModelsDevMultiplier",
+    "ModelsDevOverride",
+    "ModelsDevPricing",
     "ModelsDevProvider",
     "ModelsDevRates",
+    "ModelsDevSource",
     "ModelsDevTier",
+    "ModelsDevUnitPrice",
     "models_dev_provider_id",
+    "models_dev_provider_ids",
     "parse_catalog",
+    "parse_catalog_v2",
     "snapshot_document",
 ]
 
@@ -69,9 +84,22 @@ _MODELS_DEV_PROVIDER_IDS: dict[str, str] = {
 }
 
 
+# A provider whose models models.dev moved under another one. v2 lists Vertex's
+# Claude models under ``google-vertex``, where v1 and the snapshots cut from it
+# keep ``google-vertex-anthropic``.
+_MODELS_DEV_MOVED_PROVIDERS: dict[str, str] = {"google-vertex-anthropic": "google-vertex"}
+
+
 def models_dev_provider_id(provider_type: str) -> str:
     """The models.dev provider id for an any-llm implementation."""
     return _MODELS_DEV_PROVIDER_IDS.get(provider_type, provider_type)
+
+
+def models_dev_provider_ids(provider_type: str) -> tuple[str, ...]:
+    """Every models.dev provider id an any-llm implementation's models may be under, in the order to try them."""
+    first = models_dev_provider_id(provider_type)
+    moved = _MODELS_DEV_MOVED_PROVIDERS.get(first)
+    return (first,) if moved is None else (first, moved)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +138,99 @@ class ModelsDevCost:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelsDevCachePrices:
+    """The cache prices of a v2 input price, in its unit.
+
+    ``write`` is the one price v1 shows: the document's single price, or the
+    first TTL it lists, which is the host's default. ``write_ttls`` keeps every
+    TTL in document order.
+    """
+
+    read: float | None = None
+    write: float | None = None
+    write_ttls: tuple[tuple[str, float], ...] = ()
+    storage: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelsDevOverride:
+    """One entry of a v2 price's ``overrides``: the prices that replace the base ones ``when`` it holds.
+
+    ``when`` is the condition tree as the document writes it, read only. The
+    other fields are those of :class:`ModelsDevUnitPrice`.
+    """
+
+    when: Mapping[str, object]
+    price: float | None = None
+    reasoning: float | None = None
+    cache: ModelsDevCachePrices | None = None
+    explicit_cache: ModelsDevCachePrices | None = None
+    malformed: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ModelsDevUnitPrice:
+    """One v2 price: an input, an output or ``web_search``.
+
+    ``unit`` is ``None`` where the document gives none, which models.dev reads
+    as ``token``. A ``token`` or ``character`` price is per million, and every
+    other unit is per one. ``explicit_cache`` is the document's
+    ``cache.explicit``: the prices of explicit caching where a host prices it
+    apart from implicit caching. ``malformed`` names each field present but not
+    a number, by its path (``price``, ``cache.read``, ``cache.explicit.write``).
+    """
+
+    price: float | None
+    unit: str | None = None
+    reasoning: float | None = None
+    cache: ModelsDevCachePrices | None = None
+    explicit_cache: ModelsDevCachePrices | None = None
+    overrides: tuple[ModelsDevOverride, ...] = ()
+    malformed: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ModelsDevModalityCost:
+    """The input and output prices of one modality of a v2 ``cost`` block."""
+
+    input: ModelsDevUnitPrice | None = None
+    output: ModelsDevUnitPrice | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelsDevMultiplier:
+    """One entry of a v2 ``cost.multipliers``.
+
+    A number ``factor`` scales every price; an object scales only the prices it
+    names, and is kept as the document writes it, read only.
+    """
+
+    when: Mapping[str, object]
+    factor: float | Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ModelsDevPricing:
+    """A model's full v2 ``cost`` block: each modality's prices, ``web_search`` and the multipliers."""
+
+    modalities: Mapping[str, ModelsDevModalityCost]
+    web_search: ModelsDevUnitPrice | None = None
+    multipliers: tuple[ModelsDevMultiplier, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ModelsDevApi:
+    """One entry of a v2 model's ``api`` block: a protocol the host takes, and where.
+
+    ``path`` is set only where the host does not use the protocol's usual path.
+    """
+
+    protocol: str
+    base_url: str | None = None
+    path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ModelsDevModel:
     """One model as a provider serves it. ``id`` is the document's, or its key where the document gives none."""
 
@@ -134,6 +255,13 @@ class ModelsDevModel:
     release_date: str | None = None
     last_updated: str | None = None
     cost: ModelsDevCost | None = None
+    """The per-token text prices, as v1 shows them."""
+    type: str = "chat"
+    """What the model does (``chat``, ``image``, ``embedding``...); a document that gives none means ``chat``."""
+    api: tuple[ModelsDevApi, ...] = ()
+    """The protocols the host takes, in its order of preference. v2 only."""
+    pricing: ModelsDevPricing | None = None
+    """Every price the document gives, in its unit. v2 only."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,17 +327,17 @@ class ModelsDevCatalog:
 
     def provider_for(self, provider_type: str) -> ModelsDevProvider | None:
         """The provider an any-llm implementation name is listed under."""
-        return self.providers.get(models_dev_provider_id(provider_type))
+        ids = models_dev_provider_ids(provider_type)
+        return next((self.providers[key] for key in ids if key in self.providers), None)
 
     def model_for(self, provider_type: str, model_id: str) -> ModelsDevModel | None:
         """The model ``model_id`` names under an any-llm implementation, by its listing id or its bare one."""
-        provider = self.provider_for(provider_type)
-        if provider is None:
-            return None
-        model = provider.models.get(model_id)
-        if model is None and model_id.startswith(LISTING_PREFIX):
-            model = provider.models.get(model_id.removeprefix(LISTING_PREFIX))
-        return model
+        names = (model_id, model_id.removeprefix(LISTING_PREFIX))
+        for key in models_dev_provider_ids(provider_type):
+            models = self.providers[key].models if key in self.providers else {}
+            if (model := next((models[name] for name in names if name in models), None)) is not None:
+                return model
+        return None
 
 
 def _number(value: object) -> float | None:
@@ -338,7 +466,305 @@ class _Reader:
             release_date=self.text(raw, "release_date", path),
             last_updated=self.text(raw, "last_updated", path),
             cost=self.cost(raw, path),
+            type=self.text(raw, "type", path) or "chat",
         )
+
+    def model_v2(self, key: str, raw: dict[str, Any], path: str) -> ModelsDevModel:
+        modalities = self.mapping(raw, "modalities", path) or {}
+        limit = self.mapping(raw, "limit", path) or {}
+        capabilities = self.mapping(raw, "capabilities", path) or {}
+        at = f"{path}.capabilities"
+        inputs = self.modalities(modalities, "input", f"{path}.modalities")
+        pricing = self.pricing(raw, path)
+        return ModelsDevModel(
+            id=self.text(raw, "id", path) or key,
+            name=self.text(raw, "name", path),
+            description=self.text(raw, "description", path),
+            family=self.text(raw, "family", path),
+            canonical_model_id=self.text(raw, "canonical_id", path),
+            status=self.text(raw, "status", path),
+            input_modalities=inputs,
+            output_modalities=self.modalities(modalities, "output", f"{path}.modalities"),
+            reasoning=self.flag(self.mapping(capabilities, "reasoning", at) or {}, "supported", f"{at}.reasoning"),
+            tool_call=self.flag(self.mapping(capabilities, "tools", at) or {}, "supported", f"{at}.tools"),
+            structured_output=self.flag(capabilities, "structured_output", at),
+            attachment=any(modality != "text" for modality in inputs),
+            temperature=self.flag(capabilities, "temperature", at),
+            open_weights=self.flag(raw, "open_weights", path),
+            context_window=self.limit(limit, "context", f"{path}.limit"),
+            max_output_tokens=self.limit(limit, "output", f"{path}.limit"),
+            knowledge=self.text(raw, "knowledge", path),
+            release_date=self.text(raw, "release_date", path),
+            last_updated=self.text(raw, "last_updated", path),
+            cost=None if pricing is None else _token_cost(pricing),
+            type=self.text(raw, "type", path) or "chat",
+            api=self.api(raw, path),
+            pricing=pricing,
+        )
+
+    def modalities(self, raw: dict[str, Any], name: str, path: str) -> tuple[str, ...]:
+        """v2 lists media types (``image/png``); the gateway reads the v1 word for each, once."""
+        found: list[str] = []
+        for media_type in self.texts(raw, name, path):
+            modality = _v1_modality(media_type)
+            if modality is None:
+                self.note(f"{path}.{name}", "a known media type")
+            elif modality not in found:
+                found.append(modality)
+        return tuple(found)
+
+    def price(self, raw: dict[str, Any], name: str, path: str, malformed: list[str], field: str = "") -> float | None:
+        value = raw.get(name)
+        if value is None:
+            return None
+        if (number := _number(value)) is None:
+            self.note(f"{path}.{name}", "a number")
+            malformed.append(field or name)
+        return number
+
+    def condition(self, raw: dict[str, Any], path: str) -> Mapping[str, object] | None:
+        value = raw.get("when")
+        if isinstance(value, dict):
+            return _frozen_mapping(value)
+        self.note(f"{path}.when", "an object")
+        return None
+
+    def objects(self, raw: dict[str, Any], name: str, path: str) -> Iterator[tuple[str, dict[str, Any]]]:
+        """Each object of a list field, with its path."""
+        value = raw.get(name)
+        if value is None:
+            return
+        if not isinstance(value, list):
+            self.note(f"{path}.{name}", "a list")
+            return
+        for n, item in enumerate(value):
+            if isinstance(item, dict):
+                yield f"{path}.{name}[{n}]", item
+            else:
+                self.note(f"{path}.{name}[{n}]", "an object")
+
+    def cache(
+        self, raw: dict[str, Any], path: str, malformed: list[str]
+    ) -> tuple[ModelsDevCachePrices | None, ModelsDevCachePrices | None]:
+        """A ``cache`` block and the ``explicit`` block in it; a bad field joins ``malformed`` by its path."""
+        cache = self.mapping(raw, "cache", path)
+        if cache is None:
+            return None, None
+        path = f"{path}.cache"
+        explicit = self.mapping(cache, "explicit", path)
+        return (
+            self.cache_prices(cache, path, malformed, "cache"),
+            None if explicit is None else self.cache_prices(explicit, f"{path}.explicit", malformed, "cache.explicit"),
+        )
+
+    def cache_prices(self, cache: dict[str, Any], path: str, malformed: list[str], field: str) -> ModelsDevCachePrices:
+        write = cache.get("write")
+        first: float | None = None
+        ttls: list[tuple[str, float]] = []
+        if isinstance(write, dict):
+            for n, (ttl, price) in enumerate(write.items()):
+                if (number := _number(price)) is None:
+                    self.note(f"{path}.write.{_segment(ttl)}", "a number")
+                    malformed.append(f"{field}.write")
+                else:
+                    ttls.append((str(ttl), number))
+                first = number if n == 0 else first
+        else:
+            first = self.price(cache, "write", path, malformed, f"{field}.write")
+        return ModelsDevCachePrices(
+            read=self.price(cache, "read", path, malformed, f"{field}.read"),
+            write=first,
+            write_ttls=tuple(ttls),
+            storage=self.price(cache, "storage", path, malformed, f"{field}.storage"),
+        )
+
+    def override(self, raw: dict[str, Any], path: str) -> ModelsDevOverride | None:
+        when = self.condition(raw, path)
+        malformed: list[str] = []
+        price = self.price(raw, "price", path, malformed)
+        reasoning = self.price(raw, "reasoning", path, malformed)
+        cache, explicit = self.cache(raw, path, malformed)
+        if when is None:
+            return None
+        return ModelsDevOverride(
+            when=when,
+            price=price,
+            reasoning=reasoning,
+            cache=cache,
+            explicit_cache=explicit,
+            malformed=tuple(malformed),
+        )
+
+    def unit_price(self, raw: dict[str, Any], name: str, path: str) -> ModelsDevUnitPrice | None:
+        entry = self.mapping(raw, name, path)
+        if entry is None:
+            return None
+        path = f"{path}.{name}"
+        malformed: list[str] = []
+        price = self.price(entry, "price", path, malformed)
+        reasoning = self.price(entry, "reasoning", path, malformed)
+        cache, explicit = self.cache(entry, path, malformed)
+        overrides = [self.override(item, at) for at, item in self.objects(entry, "overrides", path)]
+        return ModelsDevUnitPrice(
+            price=price,
+            unit=self.text(entry, "unit", path),
+            reasoning=reasoning,
+            cache=cache,
+            explicit_cache=explicit,
+            overrides=tuple(override for override in overrides if override is not None),
+            malformed=tuple(malformed),
+        )
+
+    def multiplier(self, raw: dict[str, Any], path: str) -> ModelsDevMultiplier | None:
+        when = self.condition(raw, path)
+        value = raw.get("factor")
+        factor: float | Mapping[str, object] | None = (
+            _frozen_mapping(value) if isinstance(value, dict) else _number(value)
+        )
+        if factor is None:
+            self.note(f"{path}.factor", "a number or an object")
+        return None if when is None or factor is None else ModelsDevMultiplier(when=when, factor=factor)
+
+    def pricing(self, raw: dict[str, Any], path: str) -> ModelsDevPricing | None:
+        cost = self.mapping(raw, "cost", path)
+        if cost is None:
+            return None
+        path = f"{path}.cost"
+        modalities: dict[str, ModelsDevModalityCost] = {}
+        for key, value in cost.items():
+            if key in ("web_search", "multipliers"):
+                continue
+            at = f"{path}.{_segment(key)}"
+            if isinstance(value, dict):
+                modalities[str(key)] = ModelsDevModalityCost(
+                    input=self.unit_price(value, "input", at), output=self.unit_price(value, "output", at)
+                )
+            else:
+                self.note(at, "an object")
+        multipliers = [self.multiplier(item, at) for at, item in self.objects(cost, "multipliers", path)]
+        return ModelsDevPricing(
+            modalities=MappingProxyType(modalities),
+            web_search=self.unit_price(cost, "web_search", path),
+            multipliers=tuple(multiplier for multiplier in multipliers if multiplier is not None),
+        )
+
+    def api(self, raw: dict[str, Any], path: str) -> tuple[ModelsDevApi, ...]:
+        api = self.mapping(raw, "api", path)
+        if api is None:
+            return ()
+        entries: list[ModelsDevApi] = []
+        for protocol, entry in api.items():
+            at = f"{path}.api.{_segment(protocol)}"
+            if isinstance(entry, dict):
+                base_url, url_path = self.text(entry, "base_url", at), self.text(entry, "path", at)
+                entries.append(ModelsDevApi(protocol=str(protocol), base_url=base_url, path=url_path))
+            else:
+                self.note(at, "an object")
+        return tuple(entries)
+
+
+def _frozen(value: object) -> object:
+    if isinstance(value, dict):
+        return _frozen_mapping(value)
+    if isinstance(value, list):
+        return tuple(_frozen(item) for item in value)
+    return value
+
+
+def _frozen_mapping(value: dict[Any, Any]) -> Mapping[str, object]:
+    """A read-only copy of a JSON object, nested objects and lists included."""
+    return MappingProxyType({str(key): _frozen(item) for key, item in value.items()})
+
+
+def _v1_modality(media_type: str) -> str | None:
+    """The v1 word for a v2 modality, as models.dev derives v1 (``toV1Modality``); ``None`` where v1 has none."""
+    if media_type == "application/pdf":
+        return "pdf"
+    if media_type in ("decision", "embedding", "reranking"):
+        return "text"
+    base = media_type.partition("/")[0]
+    return base if base in ("text", "image", "audio", "video") else None
+
+
+def _context_size(when: Mapping[str, object]) -> int | None:
+    """Where a v1 tier starts, for a condition on context alone; ``gt`` and ``gte`` both give its size."""
+    context = when.get("context")
+    if set(when) != {"context"} or not isinstance(context, Mapping):
+        return None
+    bound = context.get("gt")
+    return _tier_size(context.get("gte") if bound is None else bound)
+
+
+def _cache_write(price: ModelsDevUnitPrice | ModelsDevOverride) -> float | None:
+    """v1's one cache write price: the default TTL's, else the explicit cache's."""
+    for cache in (price.cache, price.explicit_cache):
+        if cache is not None and cache.write is not None:
+            return cache.write
+    return None
+
+
+def _rates_malformed(given: tuple[str, ...], made: tuple[str, ...]) -> tuple[str, ...]:
+    """The v1 rate names of the v2 price fields that are present but not numbers."""
+    found = {
+        "input": "price" in given,
+        "output": "price" in made,
+        "cache_read": "cache.read" in given,
+        "cache_write": "cache.write" in given or "cache.explicit.write" in given,
+    }
+    return tuple(name for name, bad in found.items() if bad)
+
+
+def _token_cost(pricing: ModelsDevPricing) -> ModelsDevCost | None:
+    """The per-token text prices v1 shows for a v2 ``cost`` block, the way models.dev derives them (``costV2ToV1``).
+
+    v1 has a price only where text input and output are both per token. Its
+    tiers are the overrides on context alone, each starting from the base
+    input and output prices and taking what the override replaces.
+    """
+    text = pricing.modalities.get("text")
+    if text is None or text.input is None or text.output is None:
+        return None
+    given, made = text.input, text.output
+    if given.unit not in (None, "token") or made.unit not in (None, "token"):
+        return None
+    tiers: dict[int, dict[str, float | None]] = {}
+    bad: dict[int, tuple[list[str], list[str]]] = {}
+
+    def tier(override: ModelsDevOverride, *, output: bool) -> dict[str, float | None] | None:
+        size = _context_size(override.when)
+        if size is None:
+            return None
+        bad.setdefault(size, ([], []))[output].extend(override.malformed)
+        return tiers.setdefault(size, {"input": given.price, "output": made.price})
+
+    for override in given.overrides:
+        if (entry := tier(override, output=False)) is not None:
+            replaced = (
+                ("input", override.price),
+                ("cache_read", None if override.cache is None else override.cache.read),
+                ("cache_write", _cache_write(override)),
+            )
+            entry.update((name, value) for name, value in replaced if value is not None)
+    for override in made.overrides:
+        if (entry := tier(override, output=True)) is not None and override.price is not None:
+            entry["output"] = override.price
+    return ModelsDevCost(
+        rates=ModelsDevRates(
+            input=given.price,
+            output=made.price,
+            cache_read=None if given.cache is None else given.cache.read,
+            cache_write=_cache_write(given),
+            malformed=_rates_malformed(given.malformed, made.malformed),
+        ),
+        tiers=tuple(
+            ModelsDevTier(
+                kind="context",
+                size=size,
+                rates=ModelsDevRates(**fields, malformed=_rates_malformed(*map(tuple, bad[size]))),
+            )
+            for size, fields in tiers.items()
+        ),
+    )
 
 
 def _segment(key: object) -> str:
@@ -348,7 +774,7 @@ def _segment(key: object) -> str:
 
 
 def parse_catalog(raw: object) -> ModelsDevCatalog:
-    """Read a parsed ``api.json``, noting in ``issues`` what it could not read.
+    """Read a parsed v1 ``api.json``, noting in ``issues`` what it could not read.
 
     A provider without a ``models`` object, and a model that is not an object,
     are left out, and a field of the wrong type is read as absent, so one bad
@@ -356,6 +782,15 @@ def parse_catalog(raw: object) -> ModelsDevCatalog:
     :meth:`ModelsDevCatalog.refusal`. A document that is not an object raises
     ``TypeError``.
     """
+    return _parse(raw, _Reader.model)
+
+
+def parse_catalog_v2(raw: object) -> ModelsDevCatalog:
+    """Read a parsed v2 ``api.json`` into the same catalog, by the same rules as :func:`parse_catalog`."""
+    return _parse(raw, _Reader.model_v2)
+
+
+def _parse(raw: object, read_model: Callable[[_Reader, str, dict[str, Any], str], ModelsDevModel]) -> ModelsDevCatalog:
     if not isinstance(raw, Mapping):
         raise TypeError("models.dev catalog is not a JSON object")
     reader = _Reader()
@@ -375,7 +810,7 @@ def parse_catalog(raw: object) -> ModelsDevCatalog:
             before = reader.count
             model_path = f"{path}.models.{_segment(model_key)}"
             if isinstance(model, dict):
-                models[str(model_key)] = reader.model(str(model_key), model, model_path)
+                models[str(model_key)] = read_model(reader, str(model_key), model, model_path)
             else:
                 reader.note(model_path, "an object")
             damaged += reader.count > before
@@ -387,6 +822,24 @@ def parse_catalog(raw: object) -> ModelsDevCatalog:
         )
     issues = ModelsDevIssues(count=reader.count, examples=tuple(reader.examples), models=seen, damaged_models=damaged)
     return ModelsDevCatalog(providers=MappingProxyType(providers), issues=issues)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelsDevSource:
+    """One document models.dev publishes, where it lives and the reader for it."""
+
+    name: str
+    url: str
+    parse: Callable[[object], ModelsDevCatalog]
+
+
+# The documents in the order the gateway tries them: v2, then v1 when v2 fails.
+# v2 still lives under ``/experimental/``; when it moves, its URL here is the one
+# change. Without ``?type=all``, models.dev leaves out the decision models.
+MODELS_DEV_SOURCES = (
+    ModelsDevSource("v2", "https://models.dev/experimental/v2.0/api.json?type=all", parse_catalog_v2),
+    ModelsDevSource("v1", "https://models.dev/api.json", parse_catalog),
+)
 
 
 def _rates_document(rates: ModelsDevRates) -> dict[str, Any]:

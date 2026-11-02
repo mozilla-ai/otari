@@ -1,5 +1,7 @@
 """The packaged models.dev snapshot."""
 
+import http.client
+import importlib.util
 import json
 import subprocess
 import sys
@@ -77,7 +79,8 @@ def test_the_bundled_snapshot_prices_well_known_models() -> None:
 
 def test_the_bundled_snapshot_stays_small_and_carries_only_price_fields() -> None:
     raw = resources.files("gateway").joinpath("data", "models_dev_pricing.json").read_text("utf-8")
-    assert len(raw.encode()) < 1_500_000
+    # About 1.7 MB on 2026-11-02, for 9,311 models; a snapshot that kept every field would be 6 MB or more.
+    assert len(raw.encode()) < 2_000_000
     document = json.loads(raw)
     assert document["_meta"]["generated_at"]
     allowed = {"id", "name", "cost", "limit", "canonical_model_id", "status"}
@@ -103,29 +106,65 @@ def test_the_generation_list_falls_back_to_the_bundled_snapshot() -> None:
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "update_models_dev_snapshot.py"
 
 
-def _cut(document: object, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+def _cut(document: object, tmp_path: Path, *flags: str) -> subprocess.CompletedProcess[str]:
     source = tmp_path / "api.json"
     source.write_text(json.dumps(document), "utf-8")
     return subprocess.run(
-        [sys.executable, "-I", str(SCRIPT), "--input", str(source), "--output", str(tmp_path / "out.json")],
+        [sys.executable, "-I", str(SCRIPT), "--input", str(source), "--output", str(tmp_path / "out.json"), *flags],
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def test_the_release_script_cuts_a_snapshot_and_names_a_damaged_model(tmp_path: Path) -> None:
-    models = {f"m{n}": {"cost": {"input": 1, "output": 2}} for n in range(4)} | {"bad": {"cost": {"input": "1"}}}
+def _snapshot(tmp_path: Path) -> dict[str, Any]:
+    document: dict[str, Any] = json.loads((tmp_path / "out.json").read_text("utf-8"))
+    return document
+
+
+def test_the_release_script_cuts_a_snapshot_from_v2_and_names_a_damaged_model(tmp_path: Path) -> None:
+    def cost(price: object) -> dict[str, Any]:
+        return {"text": {"input": {"price": price}, "output": {"price": 2}}}
+
+    models = {f"m{n}": {"cost": cost(1)} for n in range(4)} | {"bad": {"cost": cost("1")}}
     result = _cut({"p": {"models": models}}, tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert "p.models.bad.cost.input: expected a number" in result.stderr
-    assert set(json.loads((tmp_path / "out.json").read_text("utf-8"))["p"]["models"]) == {*models}
+    assert "models.dev v2 catalog read with" in result.stderr
+    assert "p.models.bad.cost.text.input.price: expected a number" in result.stderr
+    snapshot = _snapshot(tmp_path)
+    assert snapshot["_meta"]["source"] == "https://models.dev/experimental/v2.0/api.json?type=all"
+    assert set(snapshot["p"]["models"]) == {*models}
+    assert snapshot["p"]["models"]["m0"]["cost"] == {"input": 1, "output": 2}
+
+
+def test_the_release_script_reads_a_saved_v1_document(tmp_path: Path) -> None:
+    result = _cut({"p": {"models": {"m": {"cost": {"input": 1, "output": 2}}}}}, tmp_path, "--input-version", "v1")
+
+    assert result.returncode == 0, result.stderr
+    snapshot = _snapshot(tmp_path)
+    assert snapshot["_meta"]["source"] == "https://models.dev/api.json"
+    assert snapshot["p"]["models"]["m"]["cost"] == {"input": 1, "output": 2}
+
+
+def test_a_cut_off_download_is_a_failure_the_release_script_moves_past(capsys: pytest.CaptureFixture[str]) -> None:
+    """A truncated body raises ``IncompleteRead``, which is no ``OSError``; the script must still try v1."""
+    spec = importlib.util.spec_from_file_location("update_models_dev_snapshot", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    v2, _v1 = script._load_document_module().MODELS_DEV_SOURCES
+
+    def cut_off() -> object:
+        raise http.client.IncompleteRead(b"{")
+
+    assert script._read(v2, cut_off) is None
+    assert "models.dev v2 catalog fetch failed: IncompleteRead" in capsys.readouterr().err
 
 
 def test_the_release_script_refuses_a_document_it_cannot_read(tmp_path: Path) -> None:
     result = _cut({"p": {"models": ["m"]}}, tmp_path)
 
     assert result.returncode == 1
-    assert "refused: the document lists no models" in result.stderr
+    assert "models.dev v2 catalog refused: the document lists no models" in result.stderr
     assert not (tmp_path / "out.json").exists()

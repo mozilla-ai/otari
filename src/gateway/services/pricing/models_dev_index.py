@@ -24,6 +24,7 @@ from gateway.types.models_dev import (
     ModelsDevProvider,
     ModelsDevRates,
     models_dev_provider_id,
+    models_dev_provider_ids,
     parse_catalog,
 )
 
@@ -261,7 +262,7 @@ class ModelsDevPriceIndex:
 
     def provider_entry(self, provider_id: str) -> ModelsDevPrice | None:
         """Any one entry of ``provider_id``, which carries the provider's name and doc link."""
-        for candidate in dict.fromkeys((models_dev_provider_id(provider_id), provider_id)):
+        for candidate in dict.fromkeys((*models_dev_provider_ids(provider_id), provider_id)):
             if models := self._by_provider.get(candidate):
                 return next(iter(models.values()))
         return None
@@ -283,7 +284,7 @@ class ModelsDevPriceIndex:
                 if (found := self.get(provider_id, base)) is not None:
                     return found
         for name in scoped:
-            for provider_id in dict.fromkeys((models_dev_provider_id(name), name)):
+            for provider_id in dict.fromkeys((*models_dev_provider_ids(name), name)):
                 if (found := self._scoped(provider_id, model)) is not None:
                     return found
         if (found := self._agnostic(model)) is not None:

@@ -10,6 +10,7 @@ from gateway.core.config import GatewayConfig
 from gateway.services.catalog import model_type, not_chat_detail, not_embedding_detail
 from gateway.services.catalog._model_type import type_from_listing
 from gateway.services.model_discovery_service import get_model_cache
+from gateway.types.models_dev import parse_catalog
 
 
 @pytest.fixture(autouse=True)
@@ -58,23 +59,27 @@ def test_a_listing_entry_names_the_kind_in_its_providers_own_field(
 
 def test_the_providers_listing_wins_over_models_dev() -> None:
     _listed("together", "BAAI/bge-x", type="embedding")
-    models_dev = {"togetherai": {"models": {"BAAI/bge-x": {"modalities": {"input": ["text"], "output": ["text"]}}}}}
+    models_dev = parse_catalog(
+        {"togetherai": {"models": {"BAAI/bge-x": {"modalities": {"input": ["text"], "output": ["text"]}}}}}
+    )
 
     assert model_type(GatewayConfig(), models_dev, "together:BAAI/bge-x") == "embedding"
 
 
 def test_models_dev_names_an_embedding_model_by_its_family_not_its_text_output() -> None:
-    models_dev = {
-        "openai": {
-            "models": {
-                "text-embedding-3-small": {
-                    "family": "text-embedding",
-                    "modalities": {"input": ["text"], "output": ["text"]},
-                },
-                "gpt-4o": {"family": "gpt", "modalities": {"input": ["text", "image"], "output": ["text"]}},
+    models_dev = parse_catalog(
+        {
+            "openai": {
+                "models": {
+                    "text-embedding-3-small": {
+                        "family": "text-embedding",
+                        "modalities": {"input": ["text"], "output": ["text"]},
+                    },
+                    "gpt-4o": {"family": "gpt", "modalities": {"input": ["text", "image"], "output": ["text"]}},
+                }
             }
         }
-    }
+    )
 
     assert model_type(GatewayConfig(), models_dev, "openai:text-embedding-3-small") == "embedding"
     assert model_type(GatewayConfig(), models_dev, "openai:gpt-4o") == "chat"

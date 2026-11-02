@@ -16,6 +16,7 @@ from typing import Any, Literal
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.catalog._metadata import metadata_entry
 from gateway.services.model_catalog_service import ModelCatalogEntry
+from gateway.types.models_dev import ModelsDevCatalog
 
 ModelType = Literal["chat", "embedding", "image", "speech", "transcription", "rerank", "moderation", "video", "other"]
 
@@ -122,7 +123,7 @@ def listed_model_type(instance: str, model_id: str) -> ModelType | None:
     return type_from_listing(listed.model_extra or {})
 
 
-def model_type(config: GatewayConfig, models_dev: dict[str, Any] | None, selector: str) -> ModelType | None:
+def model_type(config: GatewayConfig, models_dev: ModelsDevCatalog | None, selector: str) -> ModelType | None:
     """The kind of the ``provider:model`` ``selector``: its listing's word for it, then models.dev's."""
     instance, separator, model_id = selector.partition(":")
     if not separator:
@@ -139,7 +140,7 @@ def _a(kind: ModelType) -> str:
 
 
 def not_chat_detail(
-    config: GatewayConfig, models_dev: dict[str, Any] | None, candidates: Iterable[str], selector: str
+    config: GatewayConfig, models_dev: ModelsDevCatalog | None, candidates: Iterable[str], selector: str
 ) -> str | None:
     """Why a chat request for ``selector`` is refused, or ``None`` when one of its candidates may serve it.
 

@@ -432,3 +432,20 @@ def test_rates_inside_the_bounds_parse() -> None:
     assert parse_rate(0) == Decimal(0)
     assert parse_rate(0.3) == Decimal("0.3")
     assert parse_rate(1_000_000) == Decimal(1_000_000)
+
+
+def test_vertex_claude_is_priced_where_v2_lists_it_and_where_v1_does() -> None:
+    """v2 moved Vertex's Claude models under ``google-vertex``; v1 and older snapshots keep them apart."""
+    claude = "claude-sonnet-4-5@20250929"
+
+    def price(provider: str) -> Decimal | None:
+        # The same id at another price elsewhere, so only the scoped lookup can answer.
+        document = {
+            provider: {"models": {claude: {"cost": {"input": 3, "output": 15}}}},
+            "other": {"models": {claude: {"cost": {"input": 9, "output": 15}}}},
+        }
+        found = ModelsDevPriceIndex.from_document(document).resolve("vertexaianthropic", claude)
+        return None if found is None else found.input
+
+    assert price("google-vertex") == Decimal(3)
+    assert price("google-vertex-anthropic") == Decimal(3)

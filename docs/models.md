@@ -187,8 +187,11 @@ rerank or `other` model is refused with `400` `wrong_model_type` before any prov
 called, as is an embeddings request for a model its provider lists as another
 kind.
 
-The live catalog is kept in memory and refetched in the background. When a fetch
-fails, or models.dev answers with a document the gateway cannot read, the last
+The live catalog is kept in memory and refetched in the background. The gateway
+reads models.dev's v2 catalog, and its v1 catalog when v2 cannot be fetched or
+read; it logs one warning when it falls back. v2 is still experimental at
+models.dev, and v1 is the reduced copy models.dev makes from it, so both give the
+same limits, capabilities and prices. When neither can be read, the last
 good copy stays in use and the gateway logs why. A document is refused when it
 lists no models or when more than a quarter of its models are damaged. A few
 damaged models are left out, and one warning names them.

@@ -1079,9 +1079,10 @@ serves, with their history; the cleanup never runs on a schedule.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
-An update refuses models.dev data the gateway cannot read: a document that lists
-no models, or one with more than a quarter of its models damaged. The prices in
-force stay, and the update reports an error.
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
+It refuses models.dev data the gateway cannot read: a document that lists
+no models, or one with more than a quarter of its models damaged. When neither
+catalog can be read, the prices in force stay, and the update reports an error.
 
 Each accepted snapshot is kept, and a request or report priced for a past
 instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldest
@@ -1090,7 +1091,8 @@ snapshot; models.dev publishes no dated price changes of its own.
 
 To refresh the bundled snapshot, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved `api.json`) and commit `src/gateway/data/models_dev_pricing.json`.
+saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+`src/gateway/data/models_dev_pricing.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
