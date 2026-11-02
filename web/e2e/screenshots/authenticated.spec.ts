@@ -215,9 +215,46 @@ test.describe("organization rail", () => {
     await ensureOrgProviderKey(page)
     await gotoRoute(page, "/organization/provider-keys")
     await expect(
-      page.getByRole("heading", { name: /^providers$/i }).first(),
+      page.getByRole("heading", { name: /^inference providers$/i }).first(),
     ).toBeVisible()
     await captureScreenshot(page, "organization-providers")
+  })
+
+  test("organization web search providers", async ({ page }) => {
+    // One search key, set as the workspace default, so the capture shows the
+    // table, its mark and the line under it; the fetch table stays empty. The
+    // key is removed afterwards, so the workspace pages every project captures
+    // show no organization key.
+    await login(page)
+    const keys = `${API_ROOT}/organizations/me/web-search-keys`
+    const created = await page.request.post(keys, {
+      headers: authHeaders,
+      data: {
+        kind: "search",
+        provider: "exa",
+        name: "Screenshot key",
+        api_key: "exa-not-a-real-credential",
+      },
+    })
+    await expectOk(created, "create organization web search key")
+    const { id } = (await created.json()) as { id: string }
+    try {
+      await expectOk(
+        await page.request.post(`${keys}/${id}/default`, {
+          headers: authHeaders,
+        }),
+        "set the organization web search key as workspace default",
+      )
+      await gotoRoute(page, "/organization/web-search-keys")
+      await expect(
+        page.getByRole("heading", { name: /^web search providers$/i }).first(),
+      ).toBeVisible()
+      await captureScreenshot(page, "organization-web-search-providers")
+    } finally {
+      // Archiving also unsets the default, and only an archived key deletes.
+      await page.request.post(`${keys}/${id}/archive`, { headers: authHeaders })
+      await page.request.delete(`${keys}/${id}`, { headers: authHeaders })
+    }
   })
 
   test("organization provider models panel", async ({ page }) => {

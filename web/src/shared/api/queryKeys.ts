@@ -119,6 +119,10 @@ export const ORGANIZATION_GUARDRAIL_DEFINITIONS =
 // reason the two above have one: this is read by one page, and a credential
 // edit has no business refetching the organization context every page reads.
 export const ORGANIZATION_PROVIDER_KEYS = "organization-provider-keys"
+// The organization's own search and fetch keys, for the same reason: one page
+// reads them. A write also moves each workspace's view of them, which sits
+// under WORKSPACES, so the hooks invalidate that view by name.
+export const ORGANIZATION_WEB_SEARCH_KEYS = "organization-web-search-keys"
 // The models an organization offers on one of its provider keys. Its own root
 // key rather than a child of ORGANIZATION_PROVIDER_KEYS: making a key default or
 // archiving one does not move a model row, and nesting would refetch every open

@@ -91,7 +91,7 @@ The workspace view contains day-to-day gateway operations:
   everyone's requests in the workspace; pick yourself in the User filter to see
   only your own. The old `/usage` and `/activity` addresses open the matching tab
   with their filters.
-- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. Automatic fallback lists the models your organization used in the last 30 days by catalog ID, the share of requests that sent that ID and so could fall back, and the providers it tries in their baseline order with their prices (automatic routing can reorder them per request); a row opens on the API keys that named a provider or policy instead. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only.
+- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers > Inference. Routing lists each policy with its main model, its backups in order, and who it applies to. Automatic fallback lists the models your organization used in the last 30 days by catalog ID, the share of requests that sent that ID and so could fall back, and the providers it tries in their baseline order with their prices (automatic routing can reorder them per request); a row opens on the API keys that named a provider or policy instead. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only.
 - Tools
 - API keys and workspace members
 
@@ -101,8 +101,10 @@ The organization view contains tenant-wide administration:
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
 - Spend and budgets
-- General: Providers, followed by Guardrails and Org settings.
-  Providers is the organization's own upstream credentials, the models each one
+- General: Providers, followed by Guardrails and Org settings. Providers
+  groups two pages, Inference and Web search.
+
+  Inference is the organization's own upstream credentials, the models each one
   reaches, and what this organization pays for them: adding a key offers every
   model the provider lists on it, each carrying a switch that decides whether
   the runtime serves it. Each is priced by the first rung that answers, which is
@@ -118,6 +120,16 @@ The organization view contains tenant-wide administration:
   this key" is passed over at every step. The deployment's own provider
   credentials, served to every organization, are managed on Hosted providers
   in the deployment view, or in `config.yml`.
+
+  Web search is the organization's own search and fetch keys, in one table per
+  kind. The star on a key sets it as the workspace default, the key every
+  workspace uses unless it pins another, and clicking a filled star unsets it. A
+  workspace uses the key its owners or admins pinned, otherwise the starred
+  key, otherwise the deployment's own search or fetch tool, so a key added and
+  not starred changes nothing until a workspace pins it. Archiving a key takes
+  it out of use, and an archived key can be restored or deleted. A key this
+  deployment cannot decrypt is marked unreadable. The page sets no prices: the
+  deployment's operator prices an organization's search and fetch calls.
 
 The deployment view, opened from the account menu, holds what belongs to the
 gateway process rather than to any organization on it:

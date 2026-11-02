@@ -569,7 +569,7 @@ export function OrganizationProvidersPage() {
   return (
     <div className="flex flex-col">
       <PageIntro
-        title="Providers"
+        title="Inference providers"
         action={
           canEdit ? (
             <Button

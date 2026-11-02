@@ -912,7 +912,8 @@ than the deployment's. Each key has a kind, fixed when it is added:
 - a `fetch` key serves the fetch tool and the enrichment of search hits. Its
   provider is one `GET /api/v1/search-tools/providers?kind=fetch` lists.
 
-Organization owners and admins manage the keys under
+Organization owners and admins manage the keys on the dashboard's
+organization Providers > Web search page, or under
 `/api/v1/organizations/me/web-search-keys`: add, rename or replace a key,
 archive it, and make one key of each kind the organization's default or stop it
 being the default (`POST` or `DELETE` on `/{key_id}/default`). Only the

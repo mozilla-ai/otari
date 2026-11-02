@@ -133,13 +133,14 @@ test.describe("dashboard core flows", () => {
     await expect(pageHeading(page, "MCP servers")).toBeVisible()
 
     await openOrganization(page)
-    for (const [link, heading] of [
-      ["Providers", "Providers"],
-      ["Spend & budgets", "Budgets"],
-    ]) {
-      await nav(page).getByRole("link", { name: link, exact: true }).click()
-      await expect(pageHeading(page, heading)).toBeVisible()
-    }
+    await openNested(page, "Providers", "Inference")
+    await expect(pageHeading(page, "Inference providers")).toBeVisible()
+    await openNested(page, "Providers", "Web search")
+    await expect(pageHeading(page, "Web search providers")).toBeVisible()
+    await nav(page)
+      .getByRole("link", { name: "Spend & budgets", exact: true })
+      .click()
+    await expect(pageHeading(page, "Budgets")).toBeVisible()
 
     // The retired Model pricing path still answers, because bookmarks and links
     // to it outlive the page. `override` named this organization's own rate for
@@ -147,10 +148,10 @@ test.describe("dashboard core flows", () => {
     // deployment's rate, whose editor went with the price table, so it is
     // dropped rather than left in a URL nothing reads.
     await gotoRoute(page, "/organization/pricing?override=openai:gpt-4o")
-    await expect(pageHeading(page, "Providers")).toBeVisible()
+    await expect(pageHeading(page, "Inference providers")).toBeVisible()
     await expect(page).toHaveURL(/override=openai(%3A|:)gpt-4o/)
     await gotoRoute(page, "/organization/pricing?model=openai:gpt-4o")
-    await expect(pageHeading(page, "Providers")).toBeVisible()
+    await expect(pageHeading(page, "Inference providers")).toBeVisible()
     await expect(page).not.toHaveURL(/model=/)
 
     // The deployment's own rail, which neither loop above reaches: it is entered
