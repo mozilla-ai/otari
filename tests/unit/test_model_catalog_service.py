@@ -18,8 +18,9 @@ from gateway.services.catalog import load_catalog_metadata, metadata_entry
 from gateway.services.model_catalog_service import ModelCatalogEntry, build_metadata_map
 from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, parse_catalog
 
-# The real fetch, before the shared conftest answers every fetch as unreachable.
+# The real fetch and fallback, before the shared conftest turns both off.
 _REAL_FETCH = mcs._fetch
+_REAL_FALLBACK = mcs._fallback
 
 
 @pytest.fixture(autouse=True)
@@ -189,7 +190,7 @@ async def test_a_failed_fetch_keeps_the_last_good_catalog() -> None:
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=None)) as failing:
         assert await mcs.load_models_dev_catalog(config, force=True) is CATALOG
         assert await mcs.load_models_dev_catalog(config, serve_stale=True) is CATALOG
-        assert mcs.cached_models_dev_catalog(config) is CATALOG
+        assert mcs.cached_models_dev_catalog() is CATALOG
         assert failing.await_count == 1
         # The failure still governs the retry: past the negative TTL a read fetches again.
         mcs._cache.at = time.monotonic() - (mcs._NEGATIVE_TTL_SECONDS + 1)
@@ -250,7 +251,35 @@ async def test_catalog_metadata_fetches_only_when_a_read_may() -> None:
         fetch.assert_awaited_once()
 
         assert await load_catalog_metadata(config, cached_only=True) is CATALOG
-    assert await load_catalog_metadata(GatewayConfig(models_dev_metadata=False)) is None
+        # Without models_dev_metadata nothing is fetched, and the catalog already held is still served.
+        assert await load_catalog_metadata(GatewayConfig(models_dev_metadata=False)) is CATALOG
+        fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False], ids=["metadata-on", "metadata-off"])
+async def test_the_bundled_catalog_serves_until_a_download_succeeds(enabled: bool) -> None:
+    config = GatewayConfig(models_dev_metadata=enabled, models_dev_cache_ttl_seconds=60)
+
+    with (
+        patch.object(mcs, "_fallback", return_value=EMPTY),
+        patch.object(mcs, "_fetch", new=AsyncMock(return_value=None)) as fetch,
+    ):
+        assert mcs.cached_models_dev_catalog() is EMPTY
+        assert await load_catalog_metadata(config) is EMPTY
+        assert fetch.await_count == int(enabled)
+
+        fetch.return_value = CATALOG
+        mcs.clear_catalog_cache()
+        assert await load_catalog_metadata(config) is (CATALOG if enabled else EMPTY)
+        assert mcs.cached_models_dev_catalog() is (CATALOG if enabled else EMPTY)
+
+
+def test_the_fallback_is_the_bundled_catalog() -> None:
+    catalog = _REAL_FALLBACK()
+
+    assert catalog is not None
+    assert catalog.model_for("openai", "gpt-4o") is not None
 
 
 V2_URL, V1_URL = (source.url for source in MODELS_DEV_SOURCES)

@@ -1015,9 +1015,9 @@ once to a micro-dollar. Use PostgreSQL for durable accounting.
 exists. Explicit database or config pricing always wins. A snapshot ships inside
 the package, so defaults work offline and a fresh deployment needs no network;
 once an operator accepts a newer one (below), that one serves instead. The
-`models_dev_metadata` setting only controls the descriptions and capabilities
-shown beside a model: prices and context windows come from the snapshot whether
-or not it is on.
+`models_dev_metadata` setting only controls whether the gateway fetches the
+descriptions and capabilities shown beside a model; with it off, they come from
+the bundled snapshot. Prices come from the snapshot whether or not it is on.
 
 A model is matched on its provider and id, including a pinned HuggingFace
 backend and Bedrock geo-prefixed ids. A bare id that providers list at different

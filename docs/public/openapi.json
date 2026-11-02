@@ -12522,7 +12522,7 @@
         "description": "models.dev metadata keyed by ``provider:model``.",
         "properties": {
           "available": {
-            "description": "False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+            "description": "False when no models.dev catalog could be read, not even the one bundled with the gateway.",
             "title": "Available",
             "type": "boolean"
           },
@@ -34661,7 +34661,7 @@
     },
     "/api/v1/models/metadata": {
       "get": {
-        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
+        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. Until models.dev has been\nfetched, and always when ``models_dev_metadata`` is off, it comes from the\ncatalog bundled with the gateway. ``available`` is false only when no catalog\ncould be read; the response is then empty.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
         "operationId": "models-list_model_metadata",
         "responses": {
           "200": {

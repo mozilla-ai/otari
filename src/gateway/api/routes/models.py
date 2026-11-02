@@ -153,7 +153,7 @@ class ModelMetadataResponse(BaseModel):
 
     source: str = "models.dev"
     available: bool = Field(
-        description="False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+        description="False when no models.dev catalog could be read, not even the one bundled with the gateway.",
     )
     models: dict[str, ModelMetadata] = Field(default_factory=dict)
 
@@ -298,9 +298,10 @@ async def list_model_metadata(
     """Per-model metadata for the dashboard's detail view, from models.dev.
 
     Covers every model models.dev lists under a configured provider, keyed by the
-    ``instance:model`` selector the dashboard uses. ``available`` is false when
-    enrichment is disabled (``models_dev_metadata``) or models.dev could not be
-    reached; the response is then empty and the UI falls back to bundled data.
+    ``instance:model`` selector the dashboard uses. Until models.dev has been
+    fetched, and always when ``models_dev_metadata`` is off, it comes from the
+    catalog bundled with the gateway. ``available`` is false only when no catalog
+    could be read; the response is then empty.
     Operator-gated: it describes the gateway's configured providers.
 
     Answers from the cached catalog, kept warm by a background refresher, so the
