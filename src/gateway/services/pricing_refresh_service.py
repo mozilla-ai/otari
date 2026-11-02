@@ -28,7 +28,7 @@ from gateway.services.pricing import (
     set_accepted_generations,
 )
 from gateway.services.pricing_service import normalize_effective_at
-from gateway.types.models_dev import parse_catalog, snapshot_document
+from gateway.types.models_dev import ModelsDevCatalog, snapshot_document
 
 _PREVIEW_CHANGE_LIMIT = 100
 # A candidate that loses more than this share of the active priced models, or
@@ -172,8 +172,7 @@ def _build_preview(
     )
 
 
-def _prepare_document(document: dict[str, object]) -> _PendingSnapshot:
-    catalog = parse_catalog(document)
+def _prepare_document(catalog: ModelsDevCatalog) -> _PendingSnapshot:
     if (invalid := invalid_rate_count(catalog)) > 0:
         raise PricingRefreshError(f"The models.dev data carries {invalid} implausible rates")
     raw_snapshot = json.dumps(snapshot_document(catalog), separators=(",", ":"), ensure_ascii=False)
@@ -186,10 +185,10 @@ def _prepare_document(document: dict[str, object]) -> _PendingSnapshot:
 async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: float) -> _PendingSnapshot:
     """Fetch the upstream catalog and cut it down to the price fields, without activating it."""
 
-    document = await fetch_models_dev_document(
+    catalog = await fetch_models_dev_document(
         reuse_within=reuse_within, fill_cache=config is not None and config.models_dev_metadata
     )
-    return await asyncio.to_thread(_prepare_document, document)
+    return await asyncio.to_thread(_prepare_document, catalog)
 
 
 async def prepare_price_refresh(

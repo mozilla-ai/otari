@@ -28,7 +28,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -87,7 +87,7 @@ from gateway.services.selector_index_service import (
     real_offerings,
     rebuild_selector_index,
 )
-from gateway.types.models_dev import models_dev_provider_id
+from gateway.types.models_dev import ModelsDevCatalog, models_dev_provider_id
 
 # ``verify_catalog_reader_or_public`` rather than ``verify_catalog_reader``: a
 # visitor reads too while ``public_catalog`` is on, and is answered from what
@@ -314,7 +314,7 @@ class _Grouped:
     identities: dict[str, ModelIdentity]
     offerings: dict[str, _Offering]
     """By selector."""
-    catalog: dict[str, Any] | None
+    catalog: ModelsDevCatalog | None
     configured_types: set[str]
     organization_id: uuid.UUID | None
     """Whose overrides priced the offerings; None for a visitor."""
@@ -523,23 +523,15 @@ def _elsewhere(grouped: _Grouped, key: str, offered_types: set[str]) -> list[Cat
     that grouped the offerings, so it cannot name a provider that would then
     land in a different group.
     """
-    if not grouped.catalog:
+    if grouped.catalog is None:
         return []
     found: dict[str, str] = {}
-    for provider_type, provider in grouped.catalog.items():
+    for provider_type, provider in grouped.catalog.providers.items():
         if provider_type in offered_types or provider_type in grouped.configured_types:
             continue
-        if not isinstance(provider, dict):
-            continue
-        models = provider.get("models")
-        if not isinstance(models, dict):
-            continue
-        for model_id, model in models.items():
-            if not isinstance(model, dict) or not isinstance(model_id, str):
-                continue
-            name = model.get("name")
-            if identity_key(provider_type, model_id, name if isinstance(name, str) else None) == key:
-                found[provider_type] = str(provider.get("name") or provider_type)
+        for model_id, model in provider.models.items():
+            if identity_key(provider_type, model_id, model.name) == key:
+                found[provider_type] = provider.name or provider_type
                 break
     return [
         CatalogElsewhere(provider_type=pid, name=name)

@@ -4,8 +4,9 @@ models.dev (https://models.dev, MIT licensed) publishes per-model metadata beyon
 what pricing needs: input/output modalities, reasoning and
 tool-calling flags, structured-output and attachment support, knowledge cutoff,
 release date, and open-weights status. This module fetches its ``api.json`` once,
-caches it in-memory with a long TTL, and degrades to "no metadata" on any failure
-so an offline or unreachable models.dev never breaks the dashboard.
+reads it into the typed catalog of ``gateway.types.models_dev``, caches that
+in-memory with a long TTL, and degrades to "no metadata" on any failure so an
+offline or unreachable models.dev never breaks the dashboard.
 
 The outbound call is gated by ``GatewayConfig.models_dev_metadata``; when that is
 false, or when the fetch fails, callers simply get an empty map and the UI shows
@@ -17,13 +18,12 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 import httpx
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.types.models_dev import models_dev_provider_id
+from gateway.types.models_dev import ModelsDevCatalog, ModelsDevModel, parse_catalog
 
 MODELS_DEV_URL = "https://models.dev/api.json"
 
@@ -69,12 +69,39 @@ class ModelCatalogEntry:
     cost_input: float | None = None
     cost_output: float | None = None
 
+    @classmethod
+    def from_model(cls, model: ModelsDevModel) -> "ModelCatalogEntry":
+        """The metadata view of one catalog model."""
+        rates = model.cost.rates if model.cost is not None else None
+        return cls(
+            name=model.name,
+            description=model.description,
+            family=model.family,
+            canonical_model_id=model.canonical_model_id,
+            input_modalities=list(model.input_modalities),
+            output_modalities=list(model.output_modalities),
+            reasoning=model.reasoning,
+            tool_call=model.tool_call,
+            structured_output=model.structured_output,
+            attachment=model.attachment,
+            temperature=model.temperature,
+            context_window=model.context_window,
+            max_output_tokens=model.max_output_tokens,
+            knowledge_cutoff=model.knowledge,
+            release_date=model.release_date,
+            last_updated=model.last_updated,
+            open_weights=model.open_weights,
+            deprecated=model.status == "deprecated",
+            cost_input=None if rates is None else rates.input,
+            cost_output=None if rates is None else rates.output,
+        )
+
 
 @dataclass
 class _CatalogCache:
     """Single-blob TTL cache for the whole models.dev catalog."""
 
-    data: dict[str, Any] | None = None
+    data: ModelsDevCatalog | None = None
     ok: bool = False
     at: float = 0.0  # time.monotonic() of the last attempt, 0.0 when never tried
 
@@ -84,7 +111,7 @@ _lock = asyncio.Lock()
 _MISS = object()
 
 
-def cached_models_dev_catalog(config: GatewayConfig) -> dict[str, Any] | None:
+def cached_models_dev_catalog(config: GatewayConfig) -> ModelsDevCatalog | None:
     """The catalog as last fetched, at any age, without fetching or locking.
 
     For a reader that runs off the request path and must not bind the fetch
@@ -136,8 +163,8 @@ class ModelsDevFetchError(Exception):
     """The models.dev catalog could not be downloaded or was not a JSON object."""
 
 
-async def _download() -> dict[str, Any]:
-    """One bounded download of ``api.json``; every failure is a ``ModelsDevFetchError``."""
+async def _download() -> ModelsDevCatalog:
+    """One bounded download of ``api.json``, read into a catalog; every failure is a ``ModelsDevFetchError``."""
     try:
         async with (
             httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
@@ -158,10 +185,10 @@ async def _download() -> dict[str, Any]:
         raise ModelsDevFetchError(f"models.dev catalog fetch failed: {exc}") from exc
     if not isinstance(data, dict):
         raise ModelsDevFetchError("models.dev catalog was not a JSON object")
-    return data
+    return parse_catalog(data)
 
 
-async def _fetch() -> dict[str, Any] | None:
+async def _fetch() -> ModelsDevCatalog | None:
     try:
         return await _download()
     except ModelsDevFetchError as exc:
@@ -169,13 +196,13 @@ async def _fetch() -> dict[str, Any] | None:
         return None
 
 
-def _fresh_cached(reuse_within: float) -> dict[str, Any] | None:
+def _fresh_cached(reuse_within: float) -> ModelsDevCatalog | None:
     if reuse_within > 0 and _cache.ok and (time.monotonic() - _cache.at) < reuse_within:
         return _cache.data
     return None
 
 
-async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bool = False) -> dict[str, Any]:
+async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bool = False) -> ModelsDevCatalog:
     """Download ``api.json`` for a caller that needs it now, raising on failure.
 
     The price refresh uses this, so it works whether or not
@@ -201,7 +228,7 @@ async def load_models_dev_catalog(
     serve_stale: bool = False,
     force: bool = False,
     reuse_within: float = 0.0,
-) -> dict[str, Any] | None:
+) -> ModelsDevCatalog | None:
     """Return the cached models.dev catalog, fetching it if stale.
 
     Returns ``None`` when metadata enrichment is disabled or the fetch failed.
@@ -280,67 +307,7 @@ async def run_catalog_refresher(config: GatewayConfig, interval: float | None = 
         await asyncio.sleep(delay)
 
 
-def _as_str(value: Any) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def token_limit(value: Any) -> int | None:
-    """A token limit, or ``None`` for anything but a positive integer.
-
-    models.dev writes 0 for a limit it does not know, and a client would read
-    0 as no tokens at all.
-    """
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
-
-
-def _as_float(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
-    """Build a :class:`ModelCatalogEntry` from a models.dev model object."""
-    modalities = _as_dict(model.get("modalities"))
-    limit = _as_dict(model.get("limit"))
-    cost = _as_dict(model.get("cost"))
-    return ModelCatalogEntry(
-        name=_as_str(model.get("name")),
-        description=_as_str(model.get("description")),
-        family=_as_str(model.get("family")),
-        canonical_model_id=_as_str(model.get("canonical_model_id")),
-        input_modalities=_str_list(modalities.get("input")),
-        output_modalities=_str_list(modalities.get("output")),
-        reasoning=bool(model.get("reasoning")),
-        tool_call=bool(model.get("tool_call")),
-        structured_output=bool(model.get("structured_output")),
-        attachment=bool(model.get("attachment")),
-        temperature=bool(model.get("temperature")),
-        context_window=token_limit(limit.get("context")),
-        max_output_tokens=token_limit(limit.get("output")),
-        knowledge_cutoff=_as_str(model.get("knowledge")),
-        release_date=_as_str(model.get("release_date")),
-        last_updated=_as_str(model.get("last_updated")),
-        open_weights=bool(model.get("open_weights")),
-        deprecated=model.get("status") == "deprecated",
-        cost_input=_as_float(cost.get("input")),
-        cost_output=_as_float(cost.get("output")),
-    )
-
-
-def build_metadata_map(config: GatewayConfig, catalog: dict[str, Any] | None) -> dict[str, ModelCatalogEntry]:
+def build_metadata_map(config: GatewayConfig, catalog: ModelsDevCatalog | None) -> dict[str, ModelCatalogEntry]:
     """Metadata for every model under a configured provider, keyed ``instance:model``.
 
     Keys use the configured instance name (not the provider type), so a named
@@ -348,17 +315,12 @@ def build_metadata_map(config: GatewayConfig, catalog: dict[str, Any] | None) ->
     under that instance. models.dev is looked up by the instance's provider type.
     """
     out: dict[str, ModelCatalogEntry] = {}
-    if not catalog:
+    if catalog is None:
         return out
     for instance in config.providers:
-        provider_type = config.provider_instance_type(instance)
-        provider = catalog.get(models_dev_provider_id(provider_type))
-        if not isinstance(provider, dict):
+        provider = catalog.provider_for(config.provider_instance_type(instance))
+        if provider is None:
             continue
-        models = provider.get("models")
-        if not isinstance(models, dict):
-            continue
-        for model_id, model in models.items():
-            if isinstance(model_id, str) and isinstance(model, dict):
-                out[f"{instance}:{model_id}"] = parse_entry(model)
+        for model_id, model in provider.models.items():
+            out[f"{instance}:{model_id}"] = ModelCatalogEntry.from_model(model)
     return out

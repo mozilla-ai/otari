@@ -24,6 +24,7 @@ from gateway.services.pricing import (
     current_index,
     resolve_as_of,
 )
+from gateway.types.models_dev import ModelsDevCatalog, parse_catalog
 
 
 def _catalog(input_rate: float = 1, *, extra: bool = False) -> dict[str, Any]:
@@ -55,10 +56,9 @@ def upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """The catalog the fetch returns, and the arguments it was called with."""
     state: dict[str, Any] = {"catalog": _catalog(), "calls": []}
 
-    async def fetch(**kwargs: Any) -> dict[str, Any]:
+    async def fetch(**kwargs: Any) -> ModelsDevCatalog:
         state["calls"].append(kwargs)
-        catalog: dict[str, Any] = state["catalog"]
-        return catalog
+        return parse_catalog(state["catalog"])
 
     monkeypatch.setattr(refresh, "fetch_models_dev_document", fetch)
     return state
