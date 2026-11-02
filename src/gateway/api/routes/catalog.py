@@ -67,10 +67,7 @@ from gateway.services.merged_catalog_service import (
     viewer_organization,
     viewer_price,
 )
-from gateway.services.model_catalog_service import (
-    ModelCatalogEntry,
-    models_dev_provider_id,
-)
+from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.model_identity import (
     ModelIdentity,
     OfferingSeed,
@@ -90,6 +87,7 @@ from gateway.services.selector_index_service import (
     real_offerings,
     rebuild_selector_index,
 )
+from gateway.types.models_dev import models_dev_provider_id
 
 # ``verify_catalog_reader_or_public`` rather than ``verify_catalog_reader``: a
 # visitor reads too while ``public_catalog`` is on, and is answered from what

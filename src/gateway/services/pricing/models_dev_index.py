@@ -16,7 +16,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from gateway.core.metered_pricing import TIER_THRESHOLD_FIELD
-from gateway.services.model_catalog_service import models_dev_provider_id
+from gateway.types.models_dev import models_dev_provider_id
 
 REFERENCE_PREFIX = "models.dev:"
 

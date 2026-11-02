@@ -23,6 +23,7 @@ import httpx
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.types.models_dev import models_dev_provider_id
 
 MODELS_DEV_URL = "https://models.dev/api.json"
 
@@ -337,29 +338,6 @@ def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
         cost_input=_as_float(cost.get("input")),
         cost_output=_as_float(cost.get("output")),
     )
-
-
-# models.dev spells a handful of providers differently from any-llm. Looked up
-# by the any-llm implementation name; a provider absent here is spelled the same
-# in both, or is one models.dev does not carry (a local server, a proxy).
-_MODELS_DEV_PROVIDER_IDS: dict[str, str] = {
-    "fireworks": "fireworks-ai",
-    "gemini": "google",
-    "vertexai": "google-vertex",
-    "vertexaianthropic": "google-vertex-anthropic",
-    "bedrock": "amazon-bedrock",
-    "together": "togetherai",
-    "moonshot": "moonshotai",
-    "azureopenai": "azure",
-    "github": "github-copilot",
-    "gmi": "gmicloud",
-    "qiniu": "qiniu-ai",
-}
-
-
-def models_dev_provider_id(provider_type: str) -> str:
-    """The models.dev provider id for an any-llm implementation."""
-    return _MODELS_DEV_PROVIDER_IDS.get(provider_type, provider_type)
 
 
 def build_metadata_map(config: GatewayConfig, catalog: dict[str, Any] | None) -> dict[str, ModelCatalogEntry]:
