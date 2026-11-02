@@ -629,3 +629,26 @@ def test_feedback_rejects_invalid_env(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setenv("OTARI_FEEDBACK_ENABLED", "maybe")
     with pytest.raises(ValueError):
         load_config(str(config_file))
+
+
+def test_automatic_routing_loads_yaml_and_structured_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Structured environment settings override YAML while defaults fill omitted routing options."""
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(
+        "automatic_routing:\n  country_header: Trusted-Country\n  offerings:\n    european: {region: eu, capacity: 4}\n"
+    )
+    config = load_config(str(config_file))
+    assert config.automatic_routing.enabled
+    assert config.automatic_routing.session_ttl_seconds == 3600
+    assert config.automatic_routing.country_header == "Trusted-Country"
+    assert config.automatic_routing.offerings["european"].region == "eu"
+    assert config.automatic_routing.offerings["european"].capacity == 4
+    monkeypatch.setenv(
+        "OTARI_AUTOMATIC_ROUTING", '{"enabled": false, "default_region": "us", "session_ttl_seconds": 120}'
+    )
+    overridden = load_config(str(config_file))
+    assert not overridden.automatic_routing.enabled
+    assert overridden.automatic_routing.default_region == "us"
+    assert overridden.automatic_routing.session_ttl_seconds == 120

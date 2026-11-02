@@ -44,6 +44,7 @@ from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
+    CONVERSATION_HEADER,
     TAGS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
@@ -903,6 +904,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # From the app, not a closure: app.state.config is what get_config hands
         # every request, so startup reads the same object.
         config: GatewayConfig = app.state.config
+        app.state.automatic_router = None
         configure_default_pricing(config.default_pricing)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
@@ -1406,6 +1408,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 API_KEY_HEADER,
                 X_API_KEY_HEADER,
                 TAGS_HEADER,
+                CONVERSATION_HEADER,
+                "Otari-Region",
                 *_SDK_CORS_HEADERS,
             ],
         )

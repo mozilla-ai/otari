@@ -2667,3 +2667,68 @@ async def test_a_completions_row_says_whether_the_deployment_paid(
     (row,) = settlement.logged
     assert row["deployment_paid"] is paid
     assert (row.get("error") is not None) is fails
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+@pytest.mark.parametrize("outcome", ["on_complete", "on_no_usage", "on_error", "on_incomplete"])
+@pytest.mark.asyncio
+async def test_automatic_load_is_released_by_every_stream_terminal_callback(
+    monkeypatch: pytest.MonkeyPatch, adapter: Any, outcome: str
+) -> None:
+    """Every terminal stream callback releases load, but only successful completion establishes affinity."""
+    from gateway.core.settings.routing import AutomaticRouting
+    from gateway.services.routing import AutomaticRouter, CompiledPlan
+    from gateway.types.attempt import Attempt
+
+    _Settlement().install(monkeypatch)
+    router = AutomaticRouter()
+    plan = router.rank(
+        CompiledPlan("model", [Attempt(1, "openai", LLMProvider.OPENAI, "m")]),
+        settings=AutomaticRouting(),
+        costs={"openai:m": Decimal(1)},
+        scope="workspace",
+        anchor="session",
+        region=None,
+        mode="stream",
+    )
+    assert plan.automatic is not None
+    observation = plan.automatic.start(plan.head)
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        """Provide an exhausted stream so terminal callbacks can be exercised independently."""
+        return
+        yield
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        """Capture streaming callbacks for direct settlement and load-release assertions."""
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    build_streaming_response(
+        adapter=adapter,
+        stream=empty(),
+        provider=LLMProvider.OPENAI,
+        model="m",
+        config=GatewayConfig(),
+        db=cast(Any, object()),
+        log_writer=cast(Any, object()),
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+        automatic_observation=observation,
+    )
+    captured["on_first_chunk"]()
+    assert observation.first_at is not None
+    args: list[Any] = []
+    if outcome == "on_complete":
+        args = [CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)]
+    elif outcome == "on_error":
+        args = [TimeoutError()]
+    await captured[outcome](*args)
+    assert observation.finished
+    assert all(health.active == 0 for health in router.health.values())
+
+    assert bool(router.affinities) is (outcome in {"on_complete", "on_no_usage"})

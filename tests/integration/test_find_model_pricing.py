@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.db import ModelPricing
+from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing_service import RequestPrices, configure_default_pricing, find_model_pricing
 
 
@@ -420,7 +421,7 @@ async def test_a_memoized_rate_survives_a_rollback(async_db: AsyncSession) -> No
         )
     )
     await async_db.commit()
-    prices = RequestPrices(None)
+    prices = RequestPrices(None, OrganizationModelPricingRepository(async_db))
 
     resolved = await prices.resolve(async_db, "openai", "memo-model")
     await async_db.rollback()

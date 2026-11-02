@@ -2717,10 +2717,10 @@ export interface paths {
          *
          *     A request that sends a model's catalog ID moves to the model's next offering
          *     when one fails, with no policy. Each model lists its offerings in the order
-         *     such a request tries them, each with its input price for this organization and
-         *     who runs the built-in tools on it, beside its traffic: how many requests a
-         *     backup served, and how many named one offering or a policy instead, by API
-         *     key and provider. The traffic is the
+         *     such a request tries them before automatic selection reorders it, each with
+         *     its input price for this organization and who runs the built-in tools on it,
+         *     beside its traffic: how many requests a backup served, and how many named one
+         *     offering or a policy instead, by API key and provider. The traffic is the
          *     workspaces the caller may see in their active organization, by the rule the
          *     organization's usage reads use.
          */
@@ -8448,7 +8448,7 @@ export interface components {
             name: string;
             /**
              * Offerings
-             * @description What a request sent by catalog ID tries, first first. One entry means no backup.
+             * @description Offerings in baseline catalog order. Automatic selection can reorder them per request using cost, recent health, load, region, latency and cache continuity. One entry means no backup.
              */
             offerings: components["schemas"]["FallbackOfferingPublic"][];
             /**

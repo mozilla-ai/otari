@@ -21,6 +21,7 @@ from gateway.models.pricing import (
     PricingKind,
 )
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
+from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing import (
     PROVIDER_TOOL_LIST_PRICES,
     ModelsDevPrice,
@@ -862,9 +863,60 @@ class RequestPrices:
     is in flight applies from the next request on.
     """
 
-    def __init__(self, organization_id: uuid.UUID | None) -> None:
+    def __init__(self, organization_id: uuid.UUID | None, repository: OrganizationModelPricingRepository) -> None:
+        """Bind the request pricing cache to its organization and injected repository."""
         self.organization_id = organization_id
+        self._repository = repository
         self._resolved: dict[tuple[str | None, str, bool], ResolvedPricing | None] = {}
+
+    async def estimate_candidates(
+        self,
+        candidates: Sequence[tuple[str, str]],
+        estimate: Callable[[ModelPricing], Decimal],
+    ) -> dict[str, Decimal | None]:
+        """Estimate each candidate at this request's rates, retaining unknown prices."""
+        await self.prime(candidates)
+        costs: dict[str, Decimal | None] = {}
+        for provider, model in candidates:
+            resolved = self._resolved[provider, model, False]
+            costs[f"{provider}:{model}"] = estimate(resolved.pricing) if resolved is not None else None
+        return costs
+
+    async def prime(self, candidates: Sequence[tuple[str, str]]) -> None:
+        """Resolve a catalog's locally credentialed candidates in two batched reads.
+
+        Same precedence and provenance as resolve_model_pricing. These entries
+        never populate the separate deployment-paid cache.
+        """
+        pending = [
+            (provider, model) for provider, model in candidates if (provider, model, False) not in self._resolved
+        ]
+        if not pending:
+            return
+        now = normalize_effective_at(None)
+        forms = {(provider, model): pricing_key_forms(f"{provider}:{model}") for provider, model in pending}
+        keys = {key for values in forms.values() for key in values}
+        overrides = (
+            await self._repository.applicable_rows(self.organization_id, keys, now) if self.organization_id else {}
+        )
+        stored = await self._repository.deployment_rows(keys, now)
+        for provider, model in pending:
+            candidates_keys = forms[provider, model]
+            override = next((overrides[key] for key in candidates_keys if key in overrides), None)
+            row = next((stored[key] for key in candidates_keys if key in stored), None)
+            resolved: ResolvedPricing | None = None
+            if override is not None:
+                price = override_as_model_pricing(override)
+                resolved = ResolvedPricing(price, "organization", str(override.id), price.effective_at)
+            elif row is not None:
+                resolved = ResolvedPricing(row, "deployment", row.model_key, normalize_effective_at(row.effective_at))
+            elif default_pricing_enabled():
+                matched = default_pricing_match(provider, model, now)
+                if matched is not None:
+                    resolved = ResolvedPricing(matched[0], "defaults", matched[1])
+            if resolved is not None:
+                _detach(resolved.pricing)
+            self._resolved[provider, model, False] = resolved
 
     async def resolve(
         self, db: AsyncSession, provider: str | None, model: str, *, deployment_paid: bool = False
