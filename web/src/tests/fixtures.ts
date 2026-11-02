@@ -836,6 +836,8 @@ export function workspaceWebSearchConfig(
     allowed_domains: null,
     blocked_domains: null,
     provider_options: null,
+    search_executor: null,
+    fetch_executor: null,
     created_at: null,
     updated_at: null,
     ...overrides,

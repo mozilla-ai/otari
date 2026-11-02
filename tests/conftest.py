@@ -12,9 +12,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest import mock
 
 import anyio
+import dotenv
 import pytest
+from dotenv import find_dotenv
+from dotenv import load_dotenv as read_env_file
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
@@ -52,9 +56,106 @@ def parse_shard(value: str) -> Shard:
     return Shard(index=int(match[1]), count=int(match[2]))
 
 
+# The only OTARI_* variables a test may see. An app starts with provider copies
+# on and refuses to boot without a pepper of its own, so the suite supplies one.
+_TEST_OWNED_ENV = {"OTARI_PROVIDER_ACCOUNT_PEPPER": "test-provider-account-pepper-0000"}
+
+# This repository's own env file, which a developer keeps their settings in. The
+# suite withholds this one path and reads any other, because an env file beside a
+# named config file is a feature of ``load_config`` rather than a leak.
+REPOSITORY_ENV_FILE = ROOT / ".env"
+
+
+def is_hidden_env_name(name: str) -> bool:
+    """Whether ``name`` is one of the variables the suite hides.
+
+    NOTE: Matches whatever case the name is written in, because the settings
+    class reads the environment case-insensitively and an exported
+    ``otari_master_key`` is read as the master key.
+    """
+    return name.upper().startswith(("OTARI_", "OTEL_"))
+
+
+def env_file_named(path: str | os.PathLike[str] | None) -> str:
+    """The env file ``path`` names, searching upward from the working directory for ``None``.
+
+    NOTE: Resolving ``None`` here rather than leaving it to dotenv is what makes
+    the search start from the working directory. Dotenv starts its own from the
+    file of whichever function called it, so a caller inside this repository finds
+    this repository's env file whatever directory the caller is working in.
+    """
+    if path is not None:
+        return str(path)
+    return find_dotenv(usecwd=True)
+
+
+def is_repository_env_file(path: str | os.PathLike[str] | None) -> bool:
+    """Whether ``path`` names this repository's own env file.
+
+    NOTE: Compares the canonical paths. An extra path segment and a symlinked
+    checkout both name the same file by another name, and a lexical comparison
+    reads each of them as some other file. A relative path resolves against the
+    working directory, as it does everywhere else.
+    """
+    named = env_file_named(path)
+    if not named:
+        return False
+    return Path(named).resolve(strict=False) == REPOSITORY_ENV_FILE.resolve(strict=False)
+
+
+def _hide_the_machines_own_configuration() -> None:
+    """Make a test's answer independent of who runs it.
+
+    Three paths carry a developer's settings into a test.
+    One is an exported ``OTARI_*`` or ``OTEL_*`` variable.
+    The second is the env file the settings class names, which a bare
+    ``GatewayConfig()`` reads even where nothing loads a config file.
+    The third is ``load_config``, which reads an env file into the process
+    environment, and of those only this repository's own is withheld.
+
+    NOTE: This runs from ``pytest_configure`` rather than from a fixture, because
+    a session-scoped fixture builds a config before any fixture of a test's own
+    could have cleaned up after the machine.
+
+    NOTE: It holds in this process alone. A test that spawns Otari as a
+    subprocess from a directory holding an env file reads it, because the child
+    gets neither patch. The scrubbed environment does reach a child.
+
+    NOTE: It covers Otari's own prefixes alone. A provider credential a developer
+    exports, such as ``GEMINI_API_KEY``, still reaches a test that reads one.
+
+    NOTE: Both patches stand for the rest of the session. Nothing restores the
+    settings class's env file, because no test should see it set.
+    """
+    for name in [name for name in os.environ if is_hidden_env_name(name)]:
+        del os.environ[name]
+    os.environ.update(_TEST_OWNED_ENV)
+
+    # Imported after the scrub, so nothing it runs at import time reads what the
+    # machine had set.
+    from gateway.core import config as config_module
+
+    config_module.GatewayConfig.model_config["env_file"] = None
+
+    # The path positionally or by keyword, every other option by keyword. Taking
+    # further positional arguments would let one of them land on ``override``,
+    # which is the fourth parameter dotenv declares.
+    def load_dotenv(dotenv_path: str | os.PathLike[str] | None = None, **options: Any) -> bool:
+        named = env_file_named(dotenv_path)
+        if not named or is_repository_env_file(named):
+            return False
+        # Never ``None``, so dotenv cannot search from this file's own directory.
+        return bool(read_env_file(named, **options))
+
+    # The name config resolves is the one dotenv exports, so the patch rebinds
+    # that global rather than the function around it. Dotenv's own attribute is
+    # rebound too, so a module importing the name later gets the guard as well.
+    vars(config_module)["load_dotenv"] = load_dotenv
+    vars(dotenv)["load_dotenv"] = load_dotenv
+
+
 def pytest_configure(config: pytest.Config) -> None:
-    # Apps start with provider copies on, which refuses to boot without a pepper of its own.
-    os.environ["OTARI_PROVIDER_ACCOUNT_PEPPER"] = "test-provider-account-pepper-0000"
+    _hide_the_machines_own_configuration()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -246,11 +347,33 @@ def isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.Temp
     return home
 
 
+@pytest.fixture(autouse=True)
+def _restore_environ() -> Generator[None]:
+    """Undo what a test wrote to ``os.environ`` without going through monkeypatch.
+
+    NOTE: Loading a config reads an env file into the process environment, and
+    monkeypatch reverts only a name the test touched first, so a credential a test
+    loaded would otherwise reach every test after it.
+    """
+    with mock.patch.dict(os.environ, clear=False):
+        yield
+
+
+@pytest.fixture
+def test_owned_env_names() -> frozenset[str]:
+    """The ``OTARI_*`` names the suite sets for itself."""
+    return frozenset(_TEST_OWNED_ENV)
+
+
 @pytest.fixture
 def no_otari_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unset every ``OTARI_*`` and ``OTEL_*`` variable, so the developer's shell cannot switch a mode, put a key in
-    test output, or have `otari hook` report a test's gates to a real server."""
-    for name in [name for name in os.environ if name.startswith(("OTARI_", "OTEL_"))]:
+    """Unset the suite's own ``OTARI_*`` variables too, leaving the prefix empty.
+
+    The suite already hides the machine's own settings, so this is for a test that
+    must see no Otari configuration at all, such as one running `otari hook` and
+    checking it reports a test's gates to no real server.
+    """
+    for name in [name for name in os.environ if is_hidden_env_name(name)]:
         monkeypatch.delenv(name)
 
 

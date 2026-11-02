@@ -171,12 +171,10 @@ export function aliasAsRow(alias: AliasResponse): RoutingRow {
 export const rowKeyOf = (row: RoutingRow): string =>
   JSON.stringify([row.kind, row.user_id, row.name])
 
-/** Whether the dashboard can edit a spec without losing part of it.
+/** Whether the dashboard offers editing for a spec.
  *
- *  An edit rebuilds the spec from its sections, so anything they do not model
- *  (a `user_id`/`key_id` condition, a comparator other than `gte`, an unknown
- *  router) would be dropped on save. Those are shown read-only: refusing to
- *  edit is recoverable, a silent lossy save is not.
+ * Learned routing is read-only. Other unsupported options stay read-only too,
+ * because the form would drop them when rebuilding the spec on save.
  */
 export function isEditableInForm(spec: PolicySpec): boolean {
   // Sections re-emit `select` as tier-downs, then the router, then the
@@ -200,7 +198,7 @@ export function isEditableInForm(spec: PolicySpec): boolean {
     if (entry.router !== undefined) {
       if ((entry.candidates?.length ?? 0) === 0) return false
       const backend = normalizeBackend(entry.router)
-      if (backend === KNN_BACKEND || backend === PRIORITY_BACKEND) return true
+      if (backend === PRIORITY_BACKEND) return true
       // A weighted entry without weights cannot be saved back (the API
       // refuses it), so the form would have to invent a split.
       return (

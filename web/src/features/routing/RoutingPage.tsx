@@ -1,7 +1,7 @@
 import { Button } from "@heroui/react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useMemo, useRef, useState } from "react"
-import { FiEdit2, FiEye, FiList, FiTrash2 } from "react-icons/fi"
+import { FiEdit2, FiEye, FiTrash2 } from "react-icons/fi"
 
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -12,7 +12,6 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
-import { RouterReadiness } from "@/features/routing/RouterReadiness"
 import {
   useAutomaticFallbacks,
   useDeleteAlias,
@@ -27,15 +26,7 @@ import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
 import { BackupsCell, MainModelCell } from "./PolicyCells"
 import type { Intent } from "./policyDraft"
-import {
-  findCandidates,
-  findFallthroughTarget,
-  findRouterBackend,
-  isEditableInForm,
-  KNN_BACKEND,
-  type RoutingRow,
-  rowKeyOf,
-} from "./policyModel"
+import { isEditableInForm, type RoutingRow, rowKeyOf } from "./policyModel"
 import { useRoutingRows } from "./useRoutingRows"
 
 export function RoutingPage() {
@@ -70,8 +61,6 @@ export function RoutingPage() {
   }
   const closeCreate = () => setAdding(false)
   const [pendingDelete, setPendingDelete] = useState<RoutingRow>()
-  // Readiness opens inline under its own row, next to the control that opened it.
-  const [expanded, setExpanded] = useState<string>()
   // `adding` is seeded from ?target= before the membership context settles, so
   // the role is applied here: a member on that link gets the read-only page.
   const isAdding = adding && canEdit
@@ -85,21 +74,6 @@ export function RoutingPage() {
         search: row.user_id ? { user: row.user_id } : {},
       }),
     [navigate],
-  )
-
-  // Stable so DataTable's row cache holds; see its docstring.
-  const renderDetail = useCallback(
-    (row: RoutingRow) => (
-      <RouterReadiness
-        policyName={row.name}
-        candidates={findCandidates(row.spec)}
-        defaultTarget={findFallthroughTarget(row.spec)}
-        backend={findRouterBackend(row.spec) ?? KNN_BACKEND}
-        scopedUserId={row.user_id ?? null}
-        onClose={() => setExpanded(undefined)}
-      />
-    ),
-    [],
   )
 
   const columns = useMemo<DataTableColumn<RoutingRow>[]>(() => {
@@ -133,48 +107,16 @@ export function RoutingPage() {
           ),
       },
     ]
-    // No actions column for a caller who cannot act: every affordance in it is
-    // either a write or the Examples panel, whose read is operator-only.
     if (!canEdit) return base
     base.push({
       id: "actions",
       header: "",
       cell: (policy) => {
-        // Teaching is data, not configuration, so it is offered even for a policy
-        // defined in config.yml: an operator can score examples for a policy they
-        // cannot edit here, and without this that policy could never route.
-        // "Examples" rather than "Router": on a Routing page full of routing
-        // policies, "Router" names the thing rather than what opens, and the count
-        // of scored examples is the one number in there that changes.
-        //
-        // Three outcomes, not two. Operator-only within an actions column an
-        // admin now also gets, because the panel reads `/routing/status`,
-        // which is deployment-wide: an admin sees no readiness at all. Then an
-        // em dash where a policy has no readiness to report, rather than an
-        // empty cell, since a fallback chain has nothing to learn and that
-        // absence is worth stating and is not the same as zero examples. Then
-        // the control, for a backend that learns.
-        const readiness = !isOperator ? null : findRouterBackend(
-            policy.spec,
-          ) !== KNN_BACKEND ? (
-          <span className="text-muted">—</span>
-        ) : (
-          <RowAction
-            icon={FiList}
-            label={expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
-            onPress={() =>
-              setExpanded((current) =>
-                current === rowKeyOf(policy) ? undefined : rowKeyOf(policy),
-              )
-            }
-          />
-        )
         const isConfig = policy.source === "config"
         // A policy this dashboard cannot edit without loss opens read-only.
         const canOpenToEdit = !isConfig && isEditableInForm(policy.spec)
         return (
           <RowActionRow>
-            {readiness}
             {isConfig ? (
               <span className="text-xs text-subtle">set in config.yml</span>
             ) : null}
@@ -195,7 +137,7 @@ export function RoutingPage() {
       },
     })
     return base
-  }, [canEdit, expanded, isOperator, openPolicy])
+  }, [canEdit, openPolicy])
 
   // Which of the four delete surfaces a row goes to. Both name the workspace the
   // row lives in; only the deployment-wide pair carries the user scope, which
@@ -310,8 +252,6 @@ export function RoutingPage() {
             columns={columns}
             rows={rows}
             getRowKey={rowKeyOf}
-            detailKey={expanded}
-            renderDetail={renderDetail}
             isLoading={isListLoading}
             emptyContent="No routing policies yet."
           />

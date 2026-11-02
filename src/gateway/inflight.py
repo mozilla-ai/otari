@@ -33,7 +33,7 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import MutableMapping
+    from collections.abc import Callable, MutableMapping
 
     from starlette.requests import Request
     from starlette.types import ASGIApp, Receive, Scope, Send
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 # by the route preamble and read by the middleware that removes it. The scope
 # dict is the one object both halves are guaranteed to share.
 INFLIGHT_SCOPE_KEY = "otari.inflight_id"
+_CLEANUP_SCOPE_KEY = "otari.inflight_cleanup"
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +184,11 @@ def track_request(
     )
 
 
+def on_request_finished(request: Request, callback: Callable[[], None]) -> None:
+    """Release synchronous tracking state even if response streaming never starts."""
+    request.scope.setdefault(_CLEANUP_SCOPE_KEY, []).append(callback)
+
+
 class InFlightMiddleware:
     """Removes a request's registry entry once its response is fully sent.
 
@@ -196,6 +202,7 @@ class InFlightMiddleware:
         self.registry = registry
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Run the ASGI response and release HTTP tracking and cleanup callbacks on every exit."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -204,3 +211,5 @@ class InFlightMiddleware:
         finally:
             mapping: MutableMapping[str, Any] = scope
             self.registry.finish(mapping.get(INFLIGHT_SCOPE_KEY))
+            for cleanup in mapping.pop(_CLEANUP_SCOPE_KEY, ()):
+                cleanup()

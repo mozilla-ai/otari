@@ -138,7 +138,9 @@ decided on its own. `auto` keeps the provider's own tool on an attempt whose
 model runs it natively and runs Otari's on one that does not. `otari` always
 runs Otari's. `provider` always forwards the provider's own tool and never uses
 Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
-use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
+use `auto` for fallback cover. A workspace may pin the same choice for every
+request billed to it, and then a header that disagrees is refused with a 403.
+See [Who runs a tool](tools.md#who-runs-a-tool).
 
 ### Gateway tool calls on Chat Completions
 

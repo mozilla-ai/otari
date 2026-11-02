@@ -2197,7 +2197,7 @@
             "type": "string"
           },
           "offerings": {
-            "description": "What a request sent by catalog ID tries, first first. One entry means no backup.",
+            "description": "Offerings in baseline catalog order. Automatic selection can reorder them per request using cost, recent health, load, region, latency and cache continuity. One entry means no backup.",
             "items": {
               "$ref": "#/components/schemas/FallbackOfferingPublic"
             },
@@ -26770,6 +26770,16 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "fetch_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "max_results": {
             "anyOf": [
               {
@@ -26804,6 +26814,16 @@
             ],
             "title": "Purpose Hint"
           },
+          "search_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -26836,6 +26856,8 @@
           "allowed_domains",
           "blocked_domains",
           "provider_options",
+          "search_executor",
+          "fetch_executor",
           "created_at",
           "updated_at"
         ],
@@ -26880,6 +26902,17 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "fetch_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who runs a provider-native web-fetch declaration (Anthropic's web_fetch_<date>) for this workspace, in search_executor's vocabulary. Pins over the request's Otari-Web-Fetch header; null leaves the header in charge"
+          },
           "max_results": {
             "anyOf": [
               {
@@ -26919,6 +26952,17 @@
             ],
             "description": "Search only: hint used when a request declares otari_web_search without one of its own",
             "title": "Purpose Hint"
+          },
+          "search_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who runs a provider-native web-search declaration (Anthropic's web_search_<date>, OpenAI's web_search) for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's search), 'otari' or 'provider'. Pins over the request's Otari-Web-Search header; null leaves the header in charge. The deployment's web_search_intercept still claims every search"
           }
         },
         "required": [
@@ -35187,7 +35231,7 @@
     },
     "/api/v1/organizations/me/automatic-fallbacks": {
       "get": {
-        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them, each with its input price for this organization and\nwho runs the built-in tools on it, beside its traffic: how many requests a\nbackup served, and how many named one offering or a policy instead, by API\nkey and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
+        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them before automatic selection reorders it, each with\nits input price for this organization and who runs the built-in tools on it,\nbeside its traffic: how many requests a backup served, and how many named one\noffering or a policy instead, by API key and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
         "operationId": "routing-list_automatic_fallbacks",
         "responses": {
           "200": {
@@ -46809,7 +46853,7 @@
     },
     "/api/v1/tool-settings/guardrails/catalog": {
       "get": {
-        "description": "List the guardrails this gateway can run itself, for the form that defines one.\n\nEvery guardrail ``any_guardrail`` reaches over a hosted API, with the\nconstructor and per-call arguments each one takes, so a guardrail is\nconfigured by picking it and filling typed fields. It is not the whole\nlibrary: a guardrail that works by holding model weights in the process\nrunning it belongs in the guardrails service the profiles read beside this one\ndescribes, not here. A parameter names the environment variable that fills it\nwhere one exists, and ``requirement_groups`` carries the constraints satisfied\nby any of several parameters, which no single required flag can state. This is\nthe counterpart of\n``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather\nthan a provider, and on the same gate that one takes.\n\nReaches no service, so there is no unavailable state to report: the answer is\na property of the installed ``any_guardrail``, not of any deployment's state.\n\nOn the catalog router rather than the operator one beside it, because the\nform this feeds belongs to an organization and is filled by an owner or\nadmin, who reaches no operator route. So it is readable without\ndeployment-wide standing, by a dashboard session and by any API key alike.\nWhat it publishes carries no deployment state to withhold: the same bytes on\nevery deployment of the same build, and a parameter's environment variable is\na name, never whether that name is set.\n\nThe profiles read next door keeps the stricter gate, and the difference is\nreach rather than audience. That one dials ``guardrails_url``, so admitting a\nkey there would let a workspace credential probe the deployment's own\nservice. This one dials nothing.",
+        "description": "List the guardrails this gateway can run itself, for the form that defines one.\n\nEvery guardrail ``any_guardrail`` reaches over a hosted API, with the\nconstructor and per-call arguments each one takes, so a guardrail is\nconfigured by picking it and filling typed fields. It is not the whole\nlibrary: a guardrail that works by holding model weights in the process\nrunning it belongs in the guardrails service the profiles read beside this one\ndescribes, not here. A parameter names the environment variable that fills it\nwhere one exists, and ``requirement_groups`` carries the constraints satisfied\nby any of several parameters, which no single required flag can state. This is\nthe counterpart of\n``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather\nthan a provider, and on the same gate that one takes.\n\nReaches no service, so there is no unavailable state to report: the answer is\na property of the installed ``any_guardrail``, not of any deployment's state.\n\nOn the catalog router rather than the operator one beside it, because the\nform this feeds belongs to an organization and is filled by an owner or\nadmin, who reaches no operator route. So it is readable without\ndeployment-wide standing, by a dashboard session and by any API key alike.\nWhat it publishes carries no deployment state to withhold: the same bytes on\nevery deployment of the same build, and a parameter's environment variable is\na name, never whether that name is set.\n\nThe profiles read next door takes the same gate. It differs in reach: that\none dials ``guardrails_url``, from a short cache, and this one dials nothing.",
         "operationId": "tool-settings-list_builtin_guardrails",
         "responses": {
           "200": {
@@ -46839,7 +46883,7 @@
     },
     "/api/v1/tool-settings/guardrails/profiles": {
       "get": {
-        "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nNot on ``verify_catalog_reader``, despite being a catalog read: that gate\nadmits any API key to the deployment-describing reads, and admitting a key\nhere would let any workspace credential dial the deployment's guardrails\nservice. This is a management read, so it takes the router's own gate.",
+        "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nOn ``verify_catalog_reader``, so any API key reads it: a caller who may send\na profile name may learn which ones exist (otari#2690). The answer is cached\nfor 30 seconds per worker, so however many reads arrive, a worker sends the\ndeployment's guardrails service at most one request in that time.",
         "operationId": "tool-settings-list_guardrail_profiles",
         "responses": {
           "200": {

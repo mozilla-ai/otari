@@ -142,11 +142,14 @@ priced from its target.
 
 The two surfaces differ on a value the gateway does not know.
 `GET /api/v1/models` and `GET /api/v1/models/{model_id}` leave the field out
-altogether, including a nested one such as a per-tier rate override. The grouped
-catalog under `GET /api/v1/catalog/models` sends `null` instead. Both model
-routes always send `pricing_source`, where `none` says nobody has priced the
-model. The grouped catalog's offering carries `price_source`, which is `null`
-when nothing prices it.
+altogether, an unset cache rate inside `pricing` included. An offering under
+`GET /api/v1/catalog/models/{model_id}` sends `null` instead, and it is the
+offering that carries a price: the grouped listing summarizes one rather than
+describing it. A rate a pricing tier does not override is the exception, because
+it is stored as absent rather than as null, so neither surface sends it. Both
+model routes always send `pricing_source`, where `none` says nobody has priced
+the model. An offering carries `price_source`, which is `null` when nothing
+prices it.
 
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 so a client does not have to guess them. Both come from models.dev's entry for
@@ -386,7 +389,7 @@ A provider's own id can be long, so the gateway also accepts the two spellings
 the catalog shows. Each is relabeled like an alias, so a response's `model` is
 what was sent, and pricing, budgets and usage key on the offering reached.
 
-- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) resolves to the first of the model's offerings in this order. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
+- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) uses this baseline order for discovery and as a tie-breaker for automatic routing, which keeps the own key first as described below. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
 - `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
 - On an organization's own provider key, a provider's undated name (`anthropic:claude-haiku-4-5`) resolves to the dated build the key serves under it (`claude-haiku-4-5-20251001`), where exactly one serving model is that name plus a release date (`-YYYYMMDD` or `-YYYY-MM-DD`). The dated build's serving switch, price and allow-lists apply as if it had been sent. A name with two dated builds, at least one of them serving, is refused as not found (404 `model_not_found`), and the detail names both; a name whose dated builds are all switched off is refused as not serving (403 `model_not_serving`). Neither detail names the dated builds to a caller who reached the model through an alias. A selector whose prefix names a `providers:` instance is never rewritten this way, even for a caller whose organization also holds a key for that provider: the instance sends any id to the provider as written.
 
@@ -403,7 +406,103 @@ another tenant's selector lands, and a model nobody offers to the caller
 resolves as the deployment's view says. A model's `selector` in the catalog is
 null where the caller has no such spelling for it.
 
-A request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it.
+A request that names a catalog id with more than one offering falls back across them. Automatic routing ranks eligible offerings for each request as described below. When the selected offering fails before it sends a response, the next one serves the request, as a routing policy's `on_failure` list does. A catalog id spelled like the legacy `provider/model` of one of its own offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that offering first and the others after it in the usual order. The colon spelling of an offering (`openai:gpt-4o`) never falls back, so it is the way to pin one provider. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it.
+
+### Automatic provider selection
+
+Chat, Messages and Responses requests sent to an unpinned catalog ID
+use automatic selection by default. It compares up to 32 eligible offerings of
+the **same model**, keeps the best five, and retries in that order. Explicit
+policies, aliases, `instance:model` pins and legacy `provider/model` spellings
+that name an offering keep their existing behavior.
+
+```mermaid
+flowchart LR
+    A[Request for a model] --> B[Find allowed offerings<br/>of the same model]
+    B --> C{Valid session binding?<br/>Healthy + matching region}
+    C -->|Yes| D[Reuse provider + credential<br/>Preserve prompt-cache locality]
+    C -->|No| E[Rank alternatives<br/>Estimated input + output cost<br/>Health, region, load and latency]
+    D --> F{Budget and capacity<br/>allow this candidate?}
+    E --> F
+    F -->|Yes| G[Call provider]
+    F -->|No| H[Try next candidate<br/>or return error if none]
+    G -->|Retryable failure before output| H
+    H -->|Candidate available| F
+    G -->|Success| I[Remember provider + credential<br/>Refresh idle expiry<br/>1 hour by default]
+```
+
+Send the same `Otari-Conversation-Id` on each turn. Without it, every request is
+ranked independently. Region remains a preference, so fallback can cross regions.
+
+Selection uses these signals:
+
+- **Health:** recent upstream 429s, 5xx responses, connection failures and timeouts
+  put an offering behind healthy alternatives for 15 seconds. It stays available
+  as a last resort. Client cancellation and gateway refusals do not count as outages.
+- **Estimated cost:** known prices come before unknown prices. The estimate
+  includes input and output tokens, applicable long-context tiers, and cache-write
+  pricing where requested. It uses the caller's organization prices, then the
+  deployment list, then enabled defaults. Missing prices are never treated as free.
+  Token counts are estimates; output uses the request's limit or the configured
+  default. Tool calls and other work whose quantity is not yet known are not predicted.
+- **Own provider key:** among healthy, priced offerings, the organization's own
+  provider keys come before offerings the deployment pays for, even where those
+  are cheaper, faster or closer. The other signals order the offerings within each
+  group. An own key that is cooling down after an outage, or has no known price,
+  yields to the deployment's offerings until it recovers.
+- **Region:** among healthy, priced offerings, prefer the caller's region when
+  the operator has declared the endpoint's location. A caller can send
+  `Otari-Region: us` or `Otari-Region: eu`. Otherwise, an explicitly trusted edge
+  country header maps US to US and EU member countries to EU. Other or unknown
+  countries use the configured default, which is unset initially. This is a
+  preference with cross-region fallback, **not a residency guarantee**.
+- **Load and latency:** active calls to the same credential and model count
+  against its configured relative capacity. Recent successful calls supply an
+  exponentially weighted latency estimate: time to first output for streams,
+  completion time otherwise, kept separately by API and response mode. Unknown
+  latency is neutral; measurements expire after five minutes.
+- **Sticky sessions:** send the same `Otari-Conversation-Id` on every turn. After
+  a successful response, that conversation keeps its provider and credential,
+  even if another offering becomes cheaper or faster. The binding is reused only
+  while the provider is healthy, matches the current region preference, remains
+  allowed, and passes budget and rate-limit admission (including concurrency).
+  An unhealthy or refused bound provider loses its binding; a successful fallback
+  becomes the new binding. Cancellation does not invalidate or refresh it.
+  Sessions expire after one hour without a successful response by default,
+  configurable with `automatic_routing.session_ttl_seconds`. Without a conversation
+  ID, each request is ranked independently; matching prompt text is not a session.
+  Stickiness does not require cache pricing. It improves the chance of reusing a
+  provider prompt cache but neither enables caching nor guarantees a hit, and
+  never discounts the budget reservation.
+
+For a new session or an unusable binding, known prices precede unknown ones,
+including during an outage. Within each pricing-availability, health, own-key and
+region group, the score is estimated cost divided by the cheapest known cost in that
+group (with a $0.000001 floor), plus 0.5 times active calls divided by capacity,
+plus 0.25 times relative latency (capped at 3). Lower wins; ties keep the baseline
+order. A binding to an unpriced offering is discarded when a priced alternative
+is available, and a binding to an offering the deployment pays for is discarded
+when a healthy, priced own key is available. Prices are batch-read and reused for admission and settlement.
+An offering whose initial budget reservation is refused is skipped, and the next
+is checked at its full price. Every budget still has to admit the serving provider;
+if none fits, the request is refused without an upstream call.
+
+Feedback is local to each gateway worker, bounded to 10,000 health entries and
+10,000 conversation digests, and reset on restart. It measures traffic through
+that worker, not a provider's global utilization. Existing rate-limit admission
+still enforces capacity, including shared Redis limits. Session affinity is scoped
+to the authenticated workspace, user, key and API; credentials are also part of
+the provider identity. A credential supplied only at dispatch by a deployment
+extension has no reusable binding until it can be identified during selection.
+Only keyed digests and numeric observations are retained,
+not prompt text or credentials. Credential rotation starts a new history.
+Bedrock client recreation and Vertex service-account token refresh preserve that
+identity. Opaque custom credential objects, or service-account signers without a
+key ID, do not retain affinity because their identity cannot be verified safely.
+
+Configure endpoint regions, relative capacity and the trusted location header in
+[`automatic_routing`](configuration.md#automatic-routing). Set `enabled: false`
+to restore baseline selection. No scoring model or scored examples are needed.
 
 The Routing page's "Automatic fallback" section, read from
 `GET /api/v1/organizations/me/automatic-fallbacks`, lists every model your
@@ -411,7 +510,8 @@ organization sent requests to in the last 30 days, most requested first, by
 catalog id. Each row shows its requests (an absorbed attempt is not one), the
 share of them that sent the catalog id and so could fall back, and its providers
 in the order such a request tries them for your organization, each at the input
-price that order ranks by. The share is a dash for a model one provider serves,
+price that order ranks by. That order is the baseline; automatic routing can
+reorder it per request. The share is a dash for a model one provider serves,
 and is flagged below half. A row with requests that named a provider or a
 routing policy opens on the API keys that sent them, with the provider each
 reached; a policy's own fallback still applied to the ones that named a policy. The order is the
@@ -430,8 +530,7 @@ the request to copy, sent to the gateway's pick or to a provider pinned by
 its selector. It is read-only; an organization's own rate is set on Providers,
 which an offering on one of that organization's keys links to. An offering the
 deployment supplies the credential for says so instead, because its rate is the
-deployment price list's rather than a tenant's. A metered rate that differs from the provider's
-list price is marked with the list price.
+deployment price list's rather than a tenant's.
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the

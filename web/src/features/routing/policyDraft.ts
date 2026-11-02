@@ -58,7 +58,7 @@ export interface PolicyDraft {
 }
 
 /** What a new policy is for, picked before its form opens. */
-export type Intent = "fallback" | "weighted" | "knn" | "priority" | "tierdown"
+export type Intent = "fallback" | "weighted" | "priority" | "tierdown"
 
 /** How the main selection is made, on the policy page. */
 export type Selection = "single" | RouterBackend
@@ -79,12 +79,6 @@ export const INTENTS: readonly {
     description: "A weighted mix across models, such as 70% and 30%.",
   },
   {
-    value: "knn",
-    label: "Smart router",
-    description:
-      "Learns from scored examples to pick a cheap model or a strong one.",
-  },
-  {
     value: "priority",
     label: "Spill over at rate limits",
     description:
@@ -100,11 +94,12 @@ export const INTENTS: readonly {
 export const SELECTIONS: readonly { value: Selection; label: string }[] = [
   { value: "single", label: "One model" },
   { value: WEIGHTED_BACKEND, label: "Split traffic" },
-  { value: KNN_BACKEND, label: "Smart router" },
   { value: PRIORITY_BACKEND, label: "Spill over" },
 ]
 
-export function emptyPool(backend: RouterBackend = KNN_BACKEND): PoolDraft {
+export function emptyPool(
+  backend: RouterBackend = WEIGHTED_BACKEND,
+): PoolDraft {
   return { backend, models: [], weights: [], safeIndex: 0 }
 }
 

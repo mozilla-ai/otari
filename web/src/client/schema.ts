@@ -2717,10 +2717,10 @@ export interface paths {
          *
          *     A request that sends a model's catalog ID moves to the model's next offering
          *     when one fails, with no policy. Each model lists its offerings in the order
-         *     such a request tries them, each with its input price for this organization and
-         *     who runs the built-in tools on it, beside its traffic: how many requests a
-         *     backup served, and how many named one offering or a policy instead, by API
-         *     key and provider. The traffic is the
+         *     such a request tries them before automatic selection reorders it, each with
+         *     its input price for this organization and who runs the built-in tools on it,
+         *     beside its traffic: how many requests a backup served, and how many named one
+         *     offering or a policy instead, by API key and provider. The traffic is the
          *     workspaces the caller may see in their active organization, by the rule the
          *     organization's usage reads use.
          */
@@ -6071,10 +6071,8 @@ export interface paths {
          *     every deployment of the same build, and a parameter's environment variable is
          *     a name, never whether that name is set.
          *
-         *     The profiles read next door keeps the stricter gate, and the difference is
-         *     reach rather than audience. That one dials ``guardrails_url``, so admitting a
-         *     key there would let a workspace credential probe the deployment's own
-         *     service. This one dials nothing.
+         *     The profiles read next door takes the same gate. It differs in reach: that
+         *     one dials ``guardrails_url``, from a short cache, and this one dials nothing.
          */
         get: operations["tool-settings-list_builtin_guardrails"];
         put?: never;
@@ -6113,10 +6111,10 @@ export interface paths {
          *     caller-supplied and fetching it here would make this a way to have the
          *     gateway request an address of the caller's choosing.
          *
-         *     Not on ``verify_catalog_reader``, despite being a catalog read: that gate
-         *     admits any API key to the deployment-describing reads, and admitting a key
-         *     here would let any workspace credential dial the deployment's guardrails
-         *     service. This is a management read, so it takes the router's own gate.
+         *     On ``verify_catalog_reader``, so any API key reads it: a caller who may send
+         *     a profile name may learn which ones exist (otari#2690). The answer is cached
+         *     for 30 seconds per worker, so however many reads arrive, a worker sends the
+         *     deployment's guardrails service at most one request in that time.
          */
         get: operations["tool-settings-list_guardrail_profiles"];
         put?: never;
@@ -8450,7 +8448,7 @@ export interface components {
             name: string;
             /**
              * Offerings
-             * @description What a request sent by catalog ID tries, first first. One entry means no backup.
+             * @description Offerings in baseline catalog order. Automatic selection can reorder them per request using cost, recent health, load, region, latency and cache continuity. One entry means no backup.
              */
             offerings: components["schemas"]["FallbackOfferingPublic"][];
             /**
@@ -19640,6 +19638,7 @@ export interface components {
             default_enabled: boolean;
             /** Enabled */
             enabled: boolean;
+            fetch_executor: components["schemas"]["CodeExecutor"] | null;
             /** Max Results */
             max_results: number | null;
             /** Provider Options */
@@ -19648,6 +19647,7 @@ export interface components {
             } | null;
             /** Purpose Hint */
             purpose_hint: string | null;
+            search_executor: components["schemas"]["CodeExecutor"] | null;
             /** Updated At */
             updated_at: string | null;
             /** Web Search Configured */
@@ -19682,6 +19682,8 @@ export interface components {
              * @description False refuses web access for this workspace through otari_web_search, otari_web_fetch, and POST /api/v1/search.
              */
             enabled: boolean;
+            /** @description Who runs a provider-native web-fetch declaration (Anthropic's web_fetch_<date>) for this workspace, in search_executor's vocabulary. Pins over the request's Otari-Web-Fetch header; null leaves the header in charge */
+            fetch_executor?: components["schemas"]["CodeExecutor"] | null;
             /**
              * Max Results
              * @description Search only: ceiling on results one search returns, through otari_web_search and POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the provider's own maximum is the only limit.
@@ -19699,6 +19701,8 @@ export interface components {
              * @description Search only: hint used when a request declares otari_web_search without one of its own
              */
             purpose_hint?: string | null;
+            /** @description Who runs a provider-native web-search declaration (Anthropic's web_search_<date>, OpenAI's web_search) for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's search), 'otari' or 'provider'. Pins over the request's Otari-Web-Search header; null leaves the header in charge. The deployment's web_search_intercept still claims every search */
+            search_executor?: components["schemas"]["CodeExecutor"] | null;
         };
         /**
          * WorkspaceWebSearchKeyOverrideRequest

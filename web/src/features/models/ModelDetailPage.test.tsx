@@ -540,28 +540,6 @@ describe("ModelDetailPage", () => {
     }
   })
 
-  it("marks a metered rate that differs from the provider's list price", async () => {
-    mockApi()
-    GLM_DETAIL.offerings[0] = offering({
-      metadata_input_price_per_million: 1,
-      metadata_output_price_per_million: 2.01,
-    })
-    try {
-      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
-
-      await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
-      // Input is metered at half the list price and says so; output is within
-      // rounding of it and does not.
-      expect(screen.getByText("list $1.00")).toBeInTheDocument()
-      expect(screen.queryByText("list $2.01")).toBeNull()
-      expect(
-        screen.getByText(/differs from the price the provider publishes/),
-      ).toBeInTheDocument()
-    } finally {
-      GLM_DETAIL.offerings[0] = offering({})
-    }
-  })
-
   it("keeps the page read-only for a member", async () => {
     // A member, stated as one: the fixture's default role is owner, and an owner
     // now gets the rate link whether or not they operate the deployment, so a
@@ -618,5 +596,63 @@ describe("ModelDetailPage", () => {
         /Default pricing is off, so an offering with no stored rate/,
       ),
     ).toBeInTheDocument()
+  })
+
+  it("renders a metered rate alone when it differs from the provider's list price", async () => {
+    // Without a metadata price on each offering the rates agree with models.dev
+    // by construction and the absences below would hold for any page, so both
+    // are set far from the metered rate.
+    mockApi()
+    GLM_DETAIL.offerings[0] = offering({
+      price_source: "organization",
+      metadata_input_price_per_million: 1,
+      metadata_output_price_per_million: 4,
+    })
+    GLM_DETAIL.offerings[1] = offering({
+      selector: "fireworks:accounts/fireworks/models/glm-5p3",
+      short_selector: "fireworks:z-ai/glm-5.3",
+      provider: "fireworks",
+      provider_type: "fireworks",
+      pricing: {
+        input_price_per_million: 0.075,
+        output_price_per_million: 2.5,
+        cache_read_price_per_million: null,
+        cache_write_price_per_million: null,
+        pricing_tiers: [],
+        unit: "tokens",
+      },
+      price_source: "defaults",
+      price_reference: "fireworks:glm-5p3",
+      metadata_input_price_per_million: 0.2,
+      metadata_output_price_per_million: 3,
+    })
+
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const grid = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const rows = within(grid).getAllByRole("row").slice(1)
+    expect(rows).toHaveLength(2)
+    expect(
+      within(rows[0] as HTMLElement).getByRole("gridcell", {
+        name: /\$0\.075/,
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(rows[1] as HTMLElement).getByRole("gridcell", { name: /\$0\.50/ }),
+    ).toBeInTheDocument()
+
+    expect(within(grid).queryByText(/list \$/i)).toBeNull()
+    expect(within(grid).queryByText(/^list$/i)).toBeNull()
+    expect(
+      screen.queryByText(/differs from the price the provider publishes/i),
+    ).toBeNull()
+
+    expect(
+      within(grid).getByRole("columnheader", { name: "Price from" }),
+    ).toBeInTheDocument()
+    expect(within(grid).getByText("DEFAULT")).toBeInTheDocument()
+    expect(within(grid).getByText("YOUR RATE")).toBeInTheDocument()
   })
 })

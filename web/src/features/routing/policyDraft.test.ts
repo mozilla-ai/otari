@@ -79,7 +79,7 @@ describe("seedDraft", () => {
   })
 
   it("starts every other kind with no backup", () => {
-    for (const intent of ["weighted", "knn", "priority", "tierdown"] as const) {
+    for (const intent of ["weighted", "priority", "tierdown"] as const) {
       expect(seedDraft(intent).backups).toEqual([])
     }
   })
