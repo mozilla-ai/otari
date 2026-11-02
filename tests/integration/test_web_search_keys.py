@@ -362,9 +362,12 @@ def test_a_workspace_with_no_key_uses_the_deployments_search_unchanged(
 def test_an_archived_key_is_not_searched_with(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
-    key = _add_key(client, master_key_header, api_key="tvly-org-secret")
-    client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
+    key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
+    assert _searched_with(client, api_key_header)["provider_api_key"] == "tvly-org-secret"
 
+    archived = client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
+
+    assert archived.status_code == 200
     assert "provider" not in _searched_with(client, api_key_header)
 
 

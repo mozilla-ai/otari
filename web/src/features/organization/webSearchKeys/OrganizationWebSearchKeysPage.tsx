@@ -263,7 +263,7 @@ function KeysTable({
       {live.length > 0 ? (
         <p className="pt-3 text-caption">
           {!marked
-            ? copy.useForEveryWorkspace
+            ? copy.withoutDefault
             : marked.usable
               ? `Every workspace that pinned no key uses ${marked.name}.`
               : `${marked.name} can't be decrypted on this deployment, so workspaces that pinned no key use this deployment's own tool.`}
@@ -357,8 +357,11 @@ export function OrganizationWebSearchKeysPage() {
             ? "One key can't be decrypted on this deployment, so every call passes over it."
             : `${unreadableCount} keys can't be decrypted on this deployment, so every call passes over them.`}{" "}
           This happens when <code>OTARI_SECRET_KEY</code> changed since they
-          were stored. Enter the API key again on each to store it under the
-          current one.
+          were stored. Store each one&rsquo;s API key again, with{" "}
+          <code>
+            PATCH /api/v1/organizations/me/web-search-keys/&#123;key_id&#125;
+          </code>{" "}
+          and an <code>api_key</code>, to encrypt it under the current one.
         </InfoBanner>
       ) : null}
 

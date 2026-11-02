@@ -16,7 +16,7 @@ export const KIND_COPY: Readonly<
       noun: string
       serves: string
       empty: string
-      useForEveryWorkspace: string
+      withoutDefault: string
     }
   >
 > = {
@@ -25,7 +25,7 @@ export const KIND_COPY: Readonly<
     noun: "search provider",
     serves: "What the model's web searches and the search API run on.",
     empty: "No search keys. Workspaces search with this deployment's own tool.",
-    useForEveryWorkspace:
+    withoutDefault:
       "With no workspace default, workspaces search with this deployment's own tool, unless their admins pin a key.",
   },
   fetch: {
@@ -34,7 +34,7 @@ export const KIND_COPY: Readonly<
     serves:
       "What the model's fetches run on, and the pages a search reads for its results.",
     empty: "No fetch keys. Workspaces fetch with this deployment's own tool.",
-    useForEveryWorkspace:
+    withoutDefault:
       "With no workspace default, workspaces fetch with this deployment's own tool, unless their admins pin a key.",
   },
 }
