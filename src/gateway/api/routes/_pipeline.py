@@ -5759,7 +5759,6 @@ def build_streaming_response(
     reported_usage: CompletionUsage | None = None
 
     def _on_first_chunk() -> None:
-        """Record time to first output for usage accounting and automatic routing."""
         nonlocal first_chunk_at
         first_chunk_at = time.monotonic()
         if automatic_observation is not None:
@@ -5773,7 +5772,6 @@ def build_streaming_response(
         return chunk_usage
 
     async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
-        """Record a successful stream and settle its reported usage and reservations."""
         if automatic_observation is not None:
             automatic_observation.finish(success=True)
         if rate_limit_grant is not None:
@@ -5809,7 +5807,6 @@ def build_streaming_response(
         return inline_settlement(logged)
 
     async def _on_no_usage() -> None:
-        """Record routing success and settle an unmetered stream under the configured billing policy."""
         if automatic_observation is not None:
             automatic_observation.finish(success=True)
         # Stream completed but the provider sent no usage data: settle the
@@ -5922,7 +5919,6 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
-        """Record provider health and settle reported work, refunding unused reservations."""
         if automatic_observation is not None:
             automatic_observation.finish(unhealthy=_automatic_unhealthy(exc))
         if isinstance(exc, IncompleteStreamError):
@@ -5976,7 +5972,6 @@ def build_streaming_response(
                 await refund_reservation(db, reservation)
 
     async def _on_incomplete() -> None:
-        """Release routing load on disconnect and bill reported work before releasing the hold."""
         if automatic_observation is not None:
             automatic_observation.finish()
         # Client disconnected mid-stream: release the reservation.
@@ -6262,7 +6257,6 @@ async def run_single_attempt_stream(
                 attempt_kwargs: dict[str, Any],
                 mark_locked_in: Callable[[], None],
             ) -> AsyncIterator[ChunkT]:
-                """Top up the hold and open a candidate stream while tracking load and startup failures."""
                 nonlocal served_tools, observation
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
@@ -6655,7 +6649,6 @@ async def run_non_stream(
                 attempt_kwargs: dict[str, Any],
                 mark_locked_in: Callable[[], None],
             ) -> ResultT:
-                """Dispatch a candidate with its tools and record automatic routing success or failure."""
                 nonlocal served_tools
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
