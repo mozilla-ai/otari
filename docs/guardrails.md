@@ -83,6 +83,32 @@ curl http://localhost:8000/api/v1/chat/completions \
 | `monitor` (default) | Forwards to the provider and surfaces the verdict on the `Otari-Guardrails` response header. |
 | `block` | Returns `403` and never calls the provider when the input is flagged. |
 
+### Reading the `Otari-Guardrails` header
+
+A served non-streaming request carries one entry per input guardrail. A
+streamed response does not carry the header yet, though a `block` guardrail
+still refuses the request before any bytes are sent.
+
+```json
+[{"profile": "prompt-injection", "mode": "monitor", "valid": null, "score": null, "status": "unavailable", "reason": "not_configured"}]
+```
+
+`valid: null` alone cannot tell a check that did not run from one that ran and
+gave no verdict, so `status` says which:
+
+| `status` | Meaning |
+| --- | --- |
+| `evaluated` | The check ran. `valid` is `true` or `false`. |
+| `inconclusive` | The check ran and the guardrail returned no verdict. |
+| `unavailable` | The check could not run, and the request was served anyway. `reason` says why. |
+
+`reason` appears only on an `unavailable` entry. `not_configured` means the
+deployment has no guardrails service for the profile. `evaluation_failed`
+covers everything else: the service is down, does not serve the profile, or
+answered something malformed. The detail goes to the gateway's log, not to the
+caller. The guardrail's own explanation stays out of the header too, because it
+is free text of any length.
+
 ### When the guardrails service is unreachable
 
 A `block` guardrail that cannot be evaluated at all (service down, no URL
@@ -98,7 +124,7 @@ request body is different: it is yours to fix, so a URL that fails the check is
 a `400` naming what was wrong with it.
 
 Set `"on_unavailable": "monitor"` on an entry to trade that enforcement for
-availability: the request is served and the check is recorded as inconclusive.
+availability: the request is served and the check is recorded as `unavailable`.
 `"on_unavailable": "block"` is the default and the pre-existing behavior. An
 operator can also mandate a guardrail on a [routing policy](routing.md), in which
 case the stricter of the operator's and the caller's settings applies and a caller
@@ -405,9 +431,9 @@ field means one thing.
 **A definition this worker does not hold makes the check unevaluable**, and
 `mode` and `on_unavailable` decide from there: `block` with `on_unavailable:
 block` refuses the request with a 502, and anything else serves it and records
-the check as inconclusive. That covers a definition that is disabled, one that
-was deleted, one that failed to build, and the thirty second window after a write
-in which a sibling worker has not caught up. The request is never quietly sent to
+the check as `unavailable` with the reason `evaluation_failed`. That covers a
+definition that is disabled, one that was deleted, one that failed to build, and
+the thirty second window after a write in which a sibling worker has not caught up. The request is never quietly sent to
 the deployment's guardrails service instead, which has never heard of that
 profile.
 
