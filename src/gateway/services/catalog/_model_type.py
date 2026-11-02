@@ -22,11 +22,16 @@ ModelType = Literal["chat", "embedding", "image", "speech", "transcription", "re
 
 # The kinds a chat completion, a message or a response can never be served by.
 # Image, audio and video models are left out: an aggregator such as OpenRouter
-# serves some of them through chat completions.
-NOT_CHAT: frozenset[ModelType] = frozenset({"embedding", "rerank", "other"})
+# serves some of them through chat completions. So are moderation models, which
+# Llama Guard and Qwen3Guard are, and which are called through chat completions.
+NOT_CHAT: frozenset[ModelType] = frozenset({"embedding", "rerank", "transcription", "other"})
 
 # Where a model of a kind no chat endpoint serves is sent instead.
-_ENDPOINT_FOR: dict[ModelType, str] = {"embedding": "embeddings", "rerank": "rerank"}
+_ENDPOINT_FOR: dict[ModelType, str] = {
+    "embedding": "embeddings",
+    "rerank": "rerank",
+    "transcription": "audio/transcriptions",
+}
 
 # Together's ``type``. ``language`` is a base model and ``code`` a code model, both completed as chat.
 _TOGETHER_TYPES: dict[str, ModelType] = {
@@ -77,7 +82,9 @@ def type_from_listing(fields: dict[str, Any]) -> ModelType | None:
                 return tagged
     architecture = fields.get("architecture")
     if isinstance(architecture, dict):
-        return _from_output_modalities(architecture.get("output_modalities"))
+        from_architecture = _from_output_modalities(architecture.get("output_modalities"))
+        if from_architecture is not None:
+            return from_architecture
     from_modalities = _from_output_modalities(fields.get("output_modalities"))
     if from_modalities is not None:
         return from_modalities

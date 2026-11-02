@@ -45,6 +45,7 @@ def _listed(provider: str, model_id: str, **fields: Any) -> None:
         ({"max_completion_tokens": 0, "context_length": 8192}, "other"),
         ({"max_completion_tokens": 131072, "context_length": 131072}, None),
         ({"max_completion_tokens": False}, None),
+        ({"architecture": {}, "max_completion_tokens": 0}, "other"),
         # Nothing said
         ({}, None),
         ({"type": "something-new"}, None),
@@ -133,3 +134,16 @@ def test_a_model_known_only_as_no_chat_model_is_refused_chat_and_allowed_embeddi
         "'bge-multilingual-gemma2' is not a chat model, so it cannot serve a chat request."
     )
     assert not_embedding_detail("ovhcloud", "bge-multilingual-gemma2", "bge-multilingual-gemma2") is None
+
+
+def test_a_transcription_model_is_refused_chat_and_sent_to_transcriptions() -> None:
+    _listed("deepinfra", "openai/whisper-large-v3", metadata={"tags": ["stt"]})
+    _listed("together", "meta-llama/Llama-Guard-4-12B", type="moderation")
+    config = GatewayConfig()
+
+    assert not_chat_detail(config, None, ["deepinfra:openai/whisper-large-v3"], "whisper") == (
+        "'whisper' is a transcription model, which cannot serve a chat request. "
+        "Send it to /api/v1/audio/transcriptions."
+    )
+    # A moderation model such as Llama Guard is called through chat completions.
+    assert not_chat_detail(config, None, ["together:meta-llama/Llama-Guard-4-12B"], "guard") is None

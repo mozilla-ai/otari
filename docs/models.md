@@ -183,7 +183,7 @@ OVHcloud's `max_completion_tokens`), otherwise from models.dev, and is unset
 where neither does. models.dev gives an
 embedding model text output, as it does a chat model, so `architecture` alone
 does not tell them apart. A chat request whose every candidate is an embedding,
-rerank or `other` model is refused with `400` `wrong_model_type` before any provider is
+rerank, transcription or `other` model is refused with `400` `wrong_model_type` before any provider is
 called, as is an embeddings request for a model its provider lists as another
 kind.
 
