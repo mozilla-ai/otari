@@ -16,7 +16,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
-from gateway.services.model_catalog_service import fetch_models_dev_document
+from gateway.services.model_catalog_service import ModelsDevRefusedError, fetch_models_dev_document
 from gateway.services.pricing import (
     MAX_RESIDENT_GENERATIONS,
     ModelsDevPriceIndex,
@@ -185,9 +185,12 @@ def _prepare_document(catalog: ModelsDevCatalog) -> _PendingSnapshot:
 async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: float) -> _PendingSnapshot:
     """Fetch the upstream catalog and cut it down to the price fields, without activating it."""
 
-    catalog = await fetch_models_dev_document(
-        reuse_within=reuse_within, fill_cache=config is not None and config.models_dev_metadata
-    )
+    try:
+        catalog = await fetch_models_dev_document(
+            reuse_within=reuse_within, fill_cache=config is not None and config.models_dev_metadata
+        )
+    except ModelsDevRefusedError as exc:
+        raise PricingRefreshError("The models.dev data has a shape the gateway cannot read") from exc
     return await asyncio.to_thread(_prepare_document, catalog)
 
 

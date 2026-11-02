@@ -165,11 +165,19 @@ def _read_cache(ttl: int, *, serve_stale: bool = False, force: bool = False) -> 
 
 
 class ModelsDevFetchError(Exception):
-    """The models.dev catalog could not be downloaded or was not a JSON object."""
+    """The models.dev catalog could not be downloaded or read."""
+
+
+class ModelsDevRefusedError(ModelsDevFetchError):
+    """The download has a shape the gateway cannot read, so it is not served."""
 
 
 async def _download() -> ModelsDevCatalog:
-    """One bounded download of ``api.json``, read into a catalog; every failure is a ``ModelsDevFetchError``."""
+    """One bounded download of ``api.json``, read into a catalog; every failure is a ``ModelsDevFetchError``.
+
+    A document whose shape the gateway cannot read is refused. One it reads
+    with a few damaged models is kept, with one warning naming them.
+    """
     try:
         async with (
             httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
@@ -189,15 +197,23 @@ async def _download() -> ModelsDevCatalog:
     except Exception as exc:
         raise ModelsDevFetchError(f"models.dev catalog fetch failed: {exc}") from exc
     if not isinstance(data, dict):
-        raise ModelsDevFetchError("models.dev catalog was not a JSON object")
-    return parse_catalog(data)
+        raise ModelsDevRefusedError("models.dev catalog refused: it is not a JSON object")
+    catalog = parse_catalog(data)
+    if (reason := catalog.refusal()) is not None:
+        raise ModelsDevRefusedError(f"models.dev catalog refused: {reason}")
+    if catalog.issues.count:
+        logger.warning("models.dev catalog read with %s", catalog.issues.describe())
+    return catalog
 
 
 async def _fetch() -> ModelsDevCatalog | None:
     try:
         return await _download()
+    except ModelsDevRefusedError as exc:
+        logger.error("%s; keeping the last good copy", exc)
+        return None
     except ModelsDevFetchError as exc:
-        logger.warning("%s; ignoring", exc)
+        logger.warning("%s; keeping the last good copy", exc)
         return None
 
 
