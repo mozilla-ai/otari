@@ -933,3 +933,32 @@ def test_responses_decides_two_models_of_one_provider_apart(client: TestClient, 
     assert seen.tool_types(loop_kwargs) == set()
     assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
     assert len(seen.web_backends) == 1
+
+
+def test_responses_runs_a_search_the_workspace_pinned_to_otari_even_on_an_openai_head(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str]
+) -> None:
+    """An OpenAI SDK client changes nothing: the pin takes the search OpenAI would run, answered as OpenAI would."""
+    _pin(client, master_key_header, "search", "otari")
+
+    response, seen = _post_responses(client, api_key_header, _responses_body())
+
+    assert response.status_code == 200, response.text
+    assert seen.provider_calls == []
+    loop_kwargs, loop_extra = seen.loop_calls[0]
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
+    assert len(seen.web_backends) == 1
+
+
+def test_responses_refuses_a_header_that_disagrees_with_the_workspace_pin(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str]
+) -> None:
+    _pin(client, master_key_header, "search", "otari")
+
+    response, seen = _post_responses(client, {**api_key_header, WEB_SEARCH_HEADER: "provider"}, _responses_body())
+
+    assert response.status_code == 403, response.text
+    assert "web access policy decides who runs" in response.json()["detail"]
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []
