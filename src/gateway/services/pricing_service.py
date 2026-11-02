@@ -1,13 +1,15 @@
 """Shared pricing lookup utilities."""
 
+import time
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import ColumnElement, case, distinct, func, inspect, not_, or_, select, true, tuple_
+from sqlalchemy import ColumnElement, case, distinct, event, func, inspect, not_, or_, select, true, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import ORMExecuteState, Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.metered_pricing import priced_per_request
@@ -771,6 +773,115 @@ def pricing_provenance(resolved: ResolvedPricing) -> PricingProvenance:
     return PricingProvenance(resolved.source, reference, resolved.effective_at)
 
 
+# The stored half of :func:`resolve_model_pricing` at the current time, per
+# organization, model key and payer, so a request does not read two price rows
+# that change a few times a day. A miss is cached too; the models.dev fallback
+# behind it is in memory and always resolved fresh.
+#
+# A write takes effect at once in the process that made it: any session that
+# flushes a change to either price table clears the cache, and clears it again
+# when it commits or rolls back. Other workers and replicas pick it up within
+# PRICING_CACHE_TTL_SECONDS, the window the alias and routing policy caches
+# already have, and so does a rate scheduled to start or end in the future.
+PRICING_CACHE_TTL_SECONDS = 30.0
+_PRICING_CACHE_MAX_ENTRIES = 10_000
+_PRICE_TABLES = frozenset({ModelPricing.__table__, OrganizationModelPricing.__table__})
+_PRICES_WRITTEN = "gateway.prices_written"
+
+_stored_prices: dict[tuple[uuid.UUID | None, str, bool], tuple[float, ResolvedPricing | None]] = {}
+# Bumped on every clear, so a read that began before a write cannot cache what it read after it.
+_stored_prices_generation = 0
+
+
+def reset_pricing_cache() -> None:
+    """Drop every cached stored rate."""
+    global _stored_prices_generation
+    _stored_prices.clear()
+    _stored_prices_generation += 1
+
+
+def _note_price_write(session: Session) -> None:
+    session.info[_PRICES_WRITTEN] = True
+    reset_pricing_cache()
+
+
+@event.listens_for(Session, "after_flush")
+def _clear_on_price_flush(session: Session, _flush_context: object) -> None:
+    for row in (*session.new, *session.dirty, *session.deleted):
+        if isinstance(row, (ModelPricing, OrganizationModelPricing)):
+            _note_price_write(session)
+            return
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _clear_on_price_statement(state: ORMExecuteState) -> None:
+    if not state.is_select and getattr(state.statement, "table", None) in _PRICE_TABLES:
+        _note_price_write(state.session)
+
+
+@event.listens_for(Session, "after_commit")
+@event.listens_for(Session, "after_rollback")
+def _clear_on_price_transaction_end(session: Session) -> None:
+    if session.info.pop(_PRICES_WRITTEN, False):
+        reset_pricing_cache()
+
+
+def _transient_copy(row: ModelPricing) -> ModelPricing:
+    """``row`` as an object no session holds, so requests can share it."""
+    return ModelPricing(
+        **{attribute.key: getattr(row, attribute.key) for attribute in inspect(ModelPricing).column_attrs}
+    )
+
+
+async def _find_stored_pricing(
+    db: AsyncSession,
+    organization_id: uuid.UUID | None,
+    model_key: str,
+    as_of: datetime,
+    *,
+    deployment_paid: bool,
+) -> ResolvedPricing | None:
+    """The organization override or deployment rate in force at ``as_of``, without the models.dev fallback."""
+    key_forms = pricing_key_forms(model_key)
+
+    if organization_id is not None:
+        override = await _find_organization_override(
+            db, organization_id, key_forms, as_of, operator_set_only=deployment_paid
+        )
+        if override is not None:
+            pricing = override_as_model_pricing(override)
+            return ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
+
+    for key in key_forms:
+        stored = await _find_by_model_key(db, key, as_of)
+        if stored is not None:
+            return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
+    return None
+
+
+async def _cached_stored_pricing(
+    db: AsyncSession, organization_id: uuid.UUID | None, model_key: str, *, deployment_paid: bool
+) -> ResolvedPricing | None:
+    """:func:`_find_stored_pricing` now, from the process cache when it was read in the last TTL."""
+    key = (organization_id, model_key, deployment_paid)
+    now = time.monotonic()
+    cached = _stored_prices.get(key)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
+    generation = _stored_prices_generation
+    resolved = await _find_stored_pricing(
+        db, organization_id, model_key, normalize_effective_at(None), deployment_paid=deployment_paid
+    )
+    if resolved is not None and resolved.source == "deployment":
+        resolved = resolved._replace(pricing=_transient_copy(resolved.pricing))
+    if generation == _stored_prices_generation:
+        if len(_stored_prices) >= _PRICING_CACHE_MAX_ENTRIES:
+            _stored_prices.clear()
+        _stored_prices[key] = (now + PRICING_CACHE_TTL_SECONDS, resolved)
+    return resolved
+
+
 async def resolve_model_pricing(
     db: AsyncSession,
     provider: str | None,
@@ -788,28 +899,21 @@ async def resolve_model_pricing(
     that override: one the organization wrote, whether under a provider key it
     has since archived or before the deployment served the model, would let a
     tenant name the deployment's cost basis, down to zero.
+
+    Without ``as_of``, the stored rates come from the process cache above, so a
+    write elsewhere reaches this process within ``PRICING_CACHE_TTL_SECONDS``.
     """
     lookup_time = normalize_effective_at(as_of)
     model_key = f"{provider}:{model}" if provider else model
-    key_forms = pricing_key_forms(model_key)
-    legacy_keys = key_forms[1:]
 
-    if organization_id is not None:
-        override = await _find_organization_override(
-            db, organization_id, key_forms, lookup_time, operator_set_only=deployment_paid
+    if as_of is None:
+        stored = await _cached_stored_pricing(db, organization_id, model_key, deployment_paid=deployment_paid)
+    else:
+        stored = await _find_stored_pricing(
+            db, organization_id, model_key, lookup_time, deployment_paid=deployment_paid
         )
-        if override is not None:
-            pricing = override_as_model_pricing(override)
-            return ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
-
-    stored = await _find_by_model_key(db, model_key, lookup_time)
-
-    for legacy_key in legacy_keys:
-        if stored is not None:
-            break
-        stored = await _find_by_model_key(db, legacy_key, lookup_time)
     if stored is not None:
-        return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
+        return stored
 
     if use_defaults and default_pricing_enabled():
         matched = default_pricing_match(provider, model, lookup_time)
