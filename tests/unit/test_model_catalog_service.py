@@ -1,16 +1,24 @@
 """Unit tests for the models.dev catalog loader and the metadata it serves (no network)."""
 
+import json
+import logging
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.services import model_catalog_service as mcs
 from gateway.services.catalog import load_catalog_metadata, metadata_entry
 from gateway.services.model_catalog_service import ModelCatalogEntry, build_metadata_map
 from gateway.types.models_dev import ModelsDevCatalog, parse_catalog
+
+# The real fetch, before the shared conftest answers every fetch as unreachable.
+_REAL_FETCH = mcs._fetch
 
 
 @pytest.fixture(autouse=True)
@@ -244,16 +252,16 @@ async def test_catalog_metadata_fetches_only_when_a_read_may() -> None:
     assert await load_catalog_metadata(GatewayConfig(models_dev_metadata=False)) is None
 
 
-@pytest.mark.asyncio
-async def test_the_download_reads_the_body_into_a_catalog() -> None:
-    """The one parser runs on the way in, so every reader gets the typed catalog and never the raw JSON."""
+@contextmanager
+def _serving(body: object) -> Iterator[None]:
+    """models.dev answering with ``body`` as JSON."""
 
     class _Response:
         def raise_for_status(self) -> None:
             return None
 
         async def aiter_bytes(self) -> Any:
-            yield b'{"openai": {"id": "openai", "models": {"gpt-4o": {"name": "GPT-4o"}}}}'
+            yield json.dumps(body).encode()
 
         async def __aenter__(self) -> "_Response":
             return self
@@ -275,10 +283,70 @@ async def test_the_download_reads_the_body_into_a_catalog() -> None:
             return None
 
     with patch("httpx.AsyncClient", _Client):
+        yield
+
+
+@contextmanager
+def _logs(caplog: pytest.LogCaptureFixture) -> Iterator[None]:
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger=gateway_logger.name)
+    try:
+        yield
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+@pytest.mark.asyncio
+async def test_the_download_reads_the_body_into_a_catalog(caplog: pytest.LogCaptureFixture) -> None:
+    """The one parser runs on the way in, so every reader gets the typed catalog and never the raw JSON."""
+    with _serving({"openai": {"id": "openai", "models": {"gpt-4o": {"name": "GPT-4o"}}}}), _logs(caplog):
         catalog = await mcs._download()
 
     assert isinstance(catalog, ModelsDevCatalog)
     assert catalog.providers["openai"].models["gpt-4o"].name == "GPT-4o"
+    assert caplog.records == []
+
+
+@pytest.mark.asyncio
+async def test_a_download_with_a_few_damaged_models_is_kept_with_one_warning(caplog: pytest.LogCaptureFixture) -> None:
+    models = {f"m{n}": {"name": f"M{n}"} for n in range(9)} | {"bad": {"limit": {"context": "big"}}}
+    with _serving({"p": {"models": models}}), _logs(caplog):
+        catalog = await mcs._download()
+
+    assert len(catalog.providers["p"].models) == 10
+    assert [record.levelname for record in caplog.records] == ["WARNING"]
+    assert "1 unreadable values in 1 of 10 models; p.models.bad.limit.context: expected" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(["openai"], id="not-an-object"),
+        pytest.param({"openai": {"models": ["gpt-4o"]}}, id="no-models"),
+        pytest.param({"p": {"models": {"a": {}, "b": {"name": 3}, "c": "C"}}}, id="mostly-damaged"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_download_of_the_wrong_shape_is_refused(body: object) -> None:
+    with _serving(body), pytest.raises(mcs.ModelsDevRefusedError, match="models.dev catalog refused"):
+        await mcs._download()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_download_logs_one_error_and_keeps_the_last_good_catalog(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mcs, "_fetch", _REAL_FETCH)
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
+    with _serving({"openai": {"models": {"gpt-4o": {"name": "GPT-4o"}}}}):
+        good = await mcs.load_models_dev_catalog(config, force=True)
+    assert good is not None
+
+    with _serving({"openai": {"models": ["gpt-4o"]}}), _logs(caplog):
+        assert await mcs.load_models_dev_catalog(config, force=True) is good
+
+    assert [record.levelname for record in caplog.records] == ["ERROR"]
+    assert "openai.models: expected an object; keeping the last good copy" in caplog.text
 
 
 @pytest.mark.asyncio

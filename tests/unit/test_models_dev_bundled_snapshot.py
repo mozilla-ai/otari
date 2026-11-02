@@ -1,9 +1,12 @@
 """The packaged models.dev snapshot."""
 
 import json
+import subprocess
+import sys
 from dataclasses import replace
 from functools import cache
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -95,3 +98,34 @@ def test_the_generation_list_falls_back_to_the_bundled_snapshot() -> None:
     assert baseline.effective_at < accepted.effective_at
     assert accepted == generation
     reset_generations()
+
+
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "update_models_dev_snapshot.py"
+
+
+def _cut(document: object, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    source = tmp_path / "api.json"
+    source.write_text(json.dumps(document), "utf-8")
+    return subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), "--input", str(source), "--output", str(tmp_path / "out.json")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_the_release_script_cuts_a_snapshot_and_names_a_damaged_model(tmp_path: Path) -> None:
+    models = {f"m{n}": {"cost": {"input": 1, "output": 2}} for n in range(4)} | {"bad": {"cost": {"input": "1"}}}
+    result = _cut({"p": {"models": models}}, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "p.models.bad.cost.input: expected a number" in result.stderr
+    assert set(json.loads((tmp_path / "out.json").read_text("utf-8"))["p"]["models"]) == {*models}
+
+
+def test_the_release_script_refuses_a_document_it_cannot_read(tmp_path: Path) -> None:
+    result = _cut({"p": {"models": ["m"]}}, tmp_path)
+
+    assert result.returncode == 1
+    assert "refused: the document lists no models" in result.stderr
+    assert not (tmp_path / "out.json").exists()

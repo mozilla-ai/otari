@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
+from gateway.services.model_catalog_service import ModelsDevRefusedError
 from gateway.services.pricing import (
     active_generations,
     active_timeline,
@@ -141,6 +142,19 @@ async def test_a_fetch_failure_is_a_refresh_error(session: AsyncSession, monkeyp
     monkeypatch.setattr(refresh, "fetch_models_dev_document", fail)
     with pytest.raises(refresh.PricingRefreshError):
         await refresh.prepare_price_refresh(session)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_download_is_a_refresh_error_and_stores_nothing(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def refused(**_: Any) -> ModelsDevCatalog:
+        raise ModelsDevRefusedError("models.dev catalog refused: the document lists no models")
+
+    monkeypatch.setattr(refresh, "fetch_models_dev_document", refused)
+    with pytest.raises(refresh.PricingRefreshError, match="cannot read"):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
 
 
 @pytest.mark.asyncio
