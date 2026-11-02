@@ -22,9 +22,9 @@ OTARI_TOOL_CALLS_FIELD = "otari_tool_calls"
 # The gateway's own MCP entry ids, beside the ``otari_ws_`` ids of its searches.
 MCP_CALL_ID_PREFIX = "otari_mcp_"
 
-# A tool's text can be a whole page or a long log; an entry carries at most this much
-# of each, while the model reads it whole.
-REPORTED_TEXT_MAX_CHARS = 64 * 1024
+# A tool's text can be a whole page or a long log; an entry carries at most this many
+# UTF-8 bytes of each, while the model reads it whole.
+REPORTED_TEXT_MAX_BYTES = 64 * 1024
 
 
 def chat_entry(
@@ -45,8 +45,11 @@ def chat_entry(
 
 
 def capped(text: str) -> tuple[str, bool]:
-    """``text`` cut to :data:`REPORTED_TEXT_MAX_CHARS`, and whether it was cut."""
-    return text[:REPORTED_TEXT_MAX_CHARS], len(text) > REPORTED_TEXT_MAX_CHARS
+    """``text`` cut to :data:`REPORTED_TEXT_MAX_BYTES` at a character boundary, and whether it was cut."""
+    encoded = text.encode()
+    if len(encoded) <= REPORTED_TEXT_MAX_BYTES:
+        return text, False
+    return encoded[:REPORTED_TEXT_MAX_BYTES].decode(errors="ignore"), True
 
 
 def mcp_entry(

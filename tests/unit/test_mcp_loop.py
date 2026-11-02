@@ -44,7 +44,7 @@ from gateway.services.tools import (
     NativeCall,
     ToolUseBudget,
 )
-from gateway.services.tools._chat_tool_calls import REPORTED_TEXT_MAX_CHARS
+from gateway.services.tools._chat_tool_calls import REPORTED_TEXT_MAX_BYTES
 from gateway.services.tools._code_execution_chat import RENDERING as CHAT_CODE_EXECUTION
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
 
@@ -1938,11 +1938,22 @@ async def test_a_failed_mcp_call_is_reported_without_its_exception(monkeypatch: 
 
 @pytest.mark.asyncio
 async def test_a_long_mcp_result_is_cut_in_the_report(monkeypatch: pytest.MonkeyPatch) -> None:
-    long = "x" * (REPORTED_TEXT_MAX_CHARS + 1)
+    long = "x" * (REPORTED_TEXT_MAX_BYTES + 1)
     result = await _answer(monkeypatch, _FakeMcpPool(result=long), _mcp_call("c1"))
 
     [entry] = _reported(result)
-    assert entry["output"] == long[:REPORTED_TEXT_MAX_CHARS]
+    assert entry["output"] == long[:REPORTED_TEXT_MAX_BYTES]
+    assert entry["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_long_mcp_result_is_cut_by_its_bytes_at_a_character_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    long = "€" * REPORTED_TEXT_MAX_BYTES
+    result = await _answer(monkeypatch, _FakeMcpPool(result=long), _mcp_call("c1"))
+
+    [entry] = _reported(result)
+    assert len(entry["output"].encode()) <= REPORTED_TEXT_MAX_BYTES
+    assert entry["output"] == "€" * (REPORTED_TEXT_MAX_BYTES // 3)
     assert entry["truncated"] is True
 
 
