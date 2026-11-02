@@ -4304,11 +4304,7 @@ class _RequestWebPolicy:
         return self._policy
 
     async def executors(self) -> WorkspaceWebExecutors:
-        """Who the workspace pinned to run a provider's own search and fetch keywords.
-
-        Raises:
-            WebSearchPolicyResolutionFailedError: the policy could not be resolved.
-        """
+        """Who the workspace pinned to run a provider's own search and fetch keywords."""
         return await self._policies.executors(self._workspace_id)
 
 
@@ -4357,7 +4353,6 @@ async def _web_declarations(
         WebToolDeclarationError: a header cannot be read.
         WebSearchInterceptedError: the header hands the provider a search this deployment runs itself.
         WebToolExecutorPinnedError: the header asks for other than what the workspace pinned.
-        WebSearchPolicyResolutionFailedError: the workspace's pins could not be read.
     """
     return await read_web_declarations(
         declared.tools,
@@ -4394,8 +4389,6 @@ async def _admit_web_declarations(
             raise refusals[0]
     except (WebToolDeclarationError, WebSearchInterceptedError, WebToolExecutorPinnedError) as exc:
         raise domain_error(adapter, exc) from exc
-    except WebSearchPolicyResolutionFailedError as exc:
-        raise adapter.error(status.HTTP_503_SERVICE_UNAVAILABLE, exc.message, ErrorKind.API) from exc
     return candidates
 
 

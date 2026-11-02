@@ -327,16 +327,13 @@ class WorkspaceWebSearchPolicies:
     async def executors(self, workspace_id: uuid.UUID) -> tuple[CodeExecutor | None, CodeExecutor | None]:
         """Who the workspace pinned to run a provider's own search and fetch keywords, ``None`` where it did not.
 
-        Raises:
-            WebSearchPolicyResolutionFailedError: a stored domain rule is invalid.
+        Reads the pins alone: a stored domain rule governs only a tool Otari runs, so one
+        that is invalid must not refuse a keyword the provider runs.
         """
-        try:
-            policy = await resolve_workspace_web_search_config(self._db, workspace_id)
-        except InvalidStoredWebSearchDomainError:
-            raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID) from None
-        if policy is None:
+        config = await self._db.get(WorkspaceWebSearchConfig, workspace_id)
+        if config is None:
             return None, None
-        return policy.search_executor, policy.fetch_executor
+        return CodeExecutor.parse(config.search_executor), CodeExecutor.parse(config.fetch_executor)
 
 
 class WorkspaceWebSearchService:
