@@ -377,6 +377,9 @@ describe("nav registry", () => {
     expect(navItemForPath("/organization/provider-keys")?.surface).toBe(
       "organization_providers",
     )
+    expect(navItemForPath("/organization/web-search-keys")?.surface).toBe(
+      "organization_providers",
+    )
     expect(navItemForPath("/organization/guardrails")?.surface).toBe(
       "organization_guardrails",
     )
@@ -441,6 +444,13 @@ describe("nav registry", () => {
       "Providers",
       "Guardrails",
       "Org settings",
+    ])
+    // Providers groups the organization's two kinds of provider key.
+    expect(
+      general?.items[0]?.children?.map((child) => [child.label, child.to]),
+    ).toEqual([
+      ["Inference", "/organization/provider-keys"],
+      ["Web search", "/organization/web-search-keys"],
     ])
   })
 

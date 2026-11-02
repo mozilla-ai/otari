@@ -322,6 +322,12 @@ export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
 export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 
+// The organization's own search and fetch keys. A workspace uses the key it
+// pinned, else the organization's default of the kind, else the deployment's
+// own search or fetch tool.
+export type OrgWebSearchKey = Schemas["OrgWebSearchKeyPublic"]
+export type OrgWebSearchKeys = Schemas["OrgWebSearchKeysPublic"]
+
 // The models an organization offers on one of those keys. `price_source` names
 // the rung of the pricing ladder that answered, in the vocabulary the Models
 // page already uses, so a rate shown here and a rate shown there cannot claim

@@ -312,13 +312,27 @@ const ORGANIZATION_NAV_SECTIONS = [
     id: "org-general",
     label: "General",
     items: [
-      // Where an organization's models are offered, priced and switched. The
-      // deployment's own keys are Hosted providers, on the deployment rail.
+      // The organization's own provider keys: Inference is where its models
+      // are offered, priced and switched, and Web search holds its search and
+      // fetch keys. The deployment's own keys are Hosted providers and Web
+      // search, on the deployment rail.
       {
         to: "/organization/provider-keys",
         label: "Providers",
         surface: "organization_providers",
         icon: FiBox,
+        children: [
+          {
+            to: "/organization/provider-keys",
+            label: "Inference",
+            icon: FiBox,
+          },
+          {
+            to: "/organization/web-search-keys",
+            label: "Web search",
+            icon: FiGlobe,
+          },
+        ],
       },
       // The organization's own guardrails and where each one runs. Not the
       // workspace rail's `/tools/guardrails`, which sets the deployment's own
