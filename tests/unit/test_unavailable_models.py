@@ -7,8 +7,10 @@ import pytest
 from gateway.api.routes import _unavailable_models
 from gateway.core.config import GatewayConfig
 from gateway.models.providers import HostedProviderModel
+from gateway.services.health_checks._service import _capped
 from gateway.services.inference import is_model_unavailable_error
 from gateway.services.providers._hosted_offers import _hold_for_a_price, _release_price_hold
+from gateway.services.upstream_redaction import redact_upstream_message
 
 
 class _UpstreamError(Exception):
@@ -51,6 +53,27 @@ def test_a_refusal_that_may_be_the_requests_or_transient_is_not(exc: Exception) 
     assert not is_model_unavailable_error(exc)
 
 
+class _BodiedError(_UpstreamError):
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(status_code, f"Error code: {status_code} - {{'error': {{'message': {message!r}}}}}")
+        self.body = {"message": message}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        f"Invalid value for 'reasoning_effort': '{NOT_SERVERLESS}'",
+        "Invalid value: 'The model `gpt-4o` has been decommissioned'. Supported values are: 'low', 'high'.",
+    ],
+)
+def test_a_refusal_echoed_back_from_the_request_switches_nothing(message: str) -> None:
+    assert not is_model_unavailable_error(_BodiedError(400, message))
+
+
+def test_a_refusal_in_an_sdk_error_body_is_recognized_past_its_framing() -> None:
+    assert is_model_unavailable_error(_BodiedError(400, NOT_SERVERLESS))
+
+
 @pytest.mark.parametrize(
     ("exc", "deployment_paid"),
     [
@@ -71,7 +94,7 @@ def test_nothing_is_switched_off_unless_the_deployments_key_met_the_refusal(
 
 
 def test_the_refusal_mailed_to_operators_is_redacted_and_capped() -> None:
-    refusal = _unavailable_models._refusal(_UpstreamError(400, NOT_SERVERLESS + " key sk-live-abcdefghijklmnop " * 20))
+    refusal = _capped(redact_upstream_message(NOT_SERVERLESS + " key sk-live-abcdefghijklmnop " * 20))
 
     assert "sk-live-abcdefghijklmnop" not in refusal
     assert len(refusal) <= 300

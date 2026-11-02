@@ -48,14 +48,16 @@ _BILLING_MESSAGE_PROBES: tuple[str, ...] = (
     "insufficient credits",  # openrouter, together
 )
 
-# Lowercase substrings that identify a provider refusing the model itself, for
+# How a provider's own message opens when it refuses the model itself, for
 # every caller and every request, rather than anything a request carried. As
 # narrow as the billing probes, and for a stronger reason: a match switches the
-# model off for the whole deployment. "Does not exist" is deliberately absent,
-# because some providers answer a chat request to an embedding model with it.
-_UNAVAILABLE_MODEL_PROBES: tuple[str, ...] = (
-    "non-serverless model",  # together: the model now needs a dedicated endpoint
-    "has been decommissioned",  # groq
+# model off for the whole deployment. Matched at the start of the message, so
+# request text a provider echoes back inside a refusal of its own never matches.
+# "Does not exist" is deliberately absent, because some providers answer a chat
+# request to an embedding model with it.
+_UNAVAILABLE_MODEL_REFUSALS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"unable to access non-serverless model "),  # together: the model now needs a dedicated endpoint
+    re.compile(r"the model `[^`]+` has been decommissioned"),  # groq
 )
 _UNAVAILABLE_MODEL_STATUS_CODES = {400, 404}
 
@@ -434,14 +436,19 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
     """True when the provider refused the model itself, as no longer served on this account.
 
     A request cannot cause it and a retry cannot cure it, so the model is one an
-    operator should stop offering. Recognized by the provider's wording alone;
-    a refusal worded otherwise is not one.
+    operator should stop offering. Recognized by how the provider's own message
+    opens, read from the error body where the SDK kept one; a refusal worded
+    otherwise is not one.
     """
     _kind, status_code = upstream_exception_shape(exc)
     if status_code not in _UNAVAILABLE_MODEL_STATUS_CODES:
         return False
-    message = upstream_error_message(exc).lower()
-    return any(probe in message for probe in _UNAVAILABLE_MODEL_PROBES)
+    messages = upstream_body_messages(exc)
+    if messages is None:
+        messages = [str(getattr(current, "message", None) or current) for current in upstream_exception_chain(exc)]
+    return any(
+        refusal.match(message.strip().lower()) for message in messages for refusal in _UNAVAILABLE_MODEL_REFUSALS
+    )
 
 
 def is_provider_billing_error(exc: BaseException) -> bool:
