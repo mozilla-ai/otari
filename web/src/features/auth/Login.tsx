@@ -339,6 +339,8 @@ export function Login() {
     if (email.trim() !== "") rememberSignInAddress(email.trim())
   }
 
+  const isCredentialRefusal = error instanceof CredentialRefusal
+
   const clearError = () => {
     if (error) {
       setError(null)
@@ -800,7 +802,7 @@ export function Login() {
                         errorField === "password"
                           ? [
                               ERROR_IDS.password,
-                              error instanceof CredentialRefusal
+                              isCredentialRefusal
                                 ? LOGIN_REFUSAL_HINT_ID
                                 : undefined,
                             ]
@@ -823,7 +825,7 @@ export function Login() {
                     ) : null}
                     <LoginRefusalHint
                       email={email.trim()}
-                      refused={error instanceof CredentialRefusal}
+                      refused={isCredentialRefusal}
                     />
                   </TextField>
                   {offersResendVerification ? (

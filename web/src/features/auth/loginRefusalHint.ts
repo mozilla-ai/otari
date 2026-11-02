@@ -4,16 +4,8 @@
  */
 
 export interface LoginRefusalHintProps {
-  /**
-   * The address typed in the form, trimmed. A contributed control that moves
-   * the visitor somewhere that reloads the page can hand it on with
-   * `rememberSignInAddress`, so it is not typed twice.
-   */
+  /** The address typed in the form, trimmed. */
   email: string
-  /**
-   * Whether the gateway just refused the password with its 401. The seam is
-   * rendered whether or not this is true, so a contributed control can keep a
-   * live region mounted and have it announce the refusal when it arrives.
-   */
+  /** Whether the gateway just refused the password with its 401. */
   refused: boolean
 }

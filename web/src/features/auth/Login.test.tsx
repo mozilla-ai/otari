@@ -605,6 +605,27 @@ describe("Login", () => {
     )
   })
 
+  it("drops the refusal hint when the address is edited", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Incorrect email or password" }, 401),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    await user.type(screen.getByLabelText("Password"), "wrong")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+    expect(await screen.findByText(/refusal hint for/)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText("Email"), "x")
+    expect(screen.queryByText(/refusal hint/)).toBeNull()
+  })
+
   it("offers no refusal hint for a refusal that is not a rejected password", async () => {
     const user = userEvent.setup()
     const fetchMock = vi.spyOn(globalThis, "fetch")
