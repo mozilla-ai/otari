@@ -204,6 +204,15 @@ function mockApi(opts: MockOpts = {}) {
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(opts.context ?? organizationContext())
       }
+      // The workspace's view of its organization's search and fetch keys.
+      if (url.includes("/web-search-keys")) {
+        return jsonResponse({
+          data: [],
+          count: 0,
+          search_provider: "exa",
+          fetch_provider: "builtin",
+        })
+      }
       if (url.includes(`${API_ROOT}/tools`)) {
         if (opts.toolsStatus && opts.toolsStatus >= 400) {
           return jsonResponse({ detail: "nope" }, opts.toolsStatus)

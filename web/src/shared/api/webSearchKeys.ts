@@ -10,11 +10,13 @@ import type {
   OrgWebSearchKey,
   OrgWebSearchKeys,
   UpdateOrgWebSearchKeyRequest,
+  WorkspaceWebSearchKeys,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import {
   ORGANIZATION_WEB_SEARCH_KEYS,
   WORKSPACES,
+  workspaceMeta,
 } from "@/shared/api/queryKeys"
 
 /**
@@ -121,5 +123,98 @@ export function useDeleteOrgWebSearchKey() {
     mutationFn: (keyId: string) =>
       apiFetch<void>(keyPath(keyId), { method: "DELETE" }),
     onSuccess: () => invalidateKeys(queryClient),
+  })
+}
+
+function workspacePath(workspaceId: string, keyId = ""): string {
+  const base = `/workspaces/${encodeURIComponent(workspaceId)}/web-search-keys`
+  return keyId === "" ? base : `${base}/${encodeURIComponent(keyId)}`
+}
+
+/** The workspace's listing, every key of its organization on one page. */
+function workspaceListPath(workspaceId: string): string {
+  return `${workspacePath(workspaceId)}?limit=${KEY_PAGE_LIMIT}`
+}
+
+// One workspace's view of its organization's keys, which any member reads:
+// which key of each kind it uses, and what its searches and fetches run on.
+export function useWorkspaceWebSearchKeys(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "web-search-keys"],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<WorkspaceWebSearchKeys>(
+        workspaceListPath(workspaceId as string),
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+// Both writes answer with the workspace's listing, which replaces the cached
+// one at once. Once a write settles, failed or not, the listing and the web
+// search page (which reports whether a key serves the workspace) are read
+// again: a reset that failed partway has already removed some marks, and two
+// writes can answer out of order.
+function useWorkspaceKeysWrite(
+  write: (
+    workspaceId: string,
+    keyIds: string[],
+  ) => Promise<WorkspaceWebSearchKeys>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      keyIds,
+    }: {
+      workspaceId: string
+      keyIds: string[]
+    }) => write(workspaceId, keyIds),
+    onSuccess: (listing, { workspaceId }) => {
+      queryClient.setQueryData(
+        [WORKSPACES, workspaceId, "web-search-keys"],
+        listing,
+      )
+    },
+    onSettled: (_listing, _error, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "web-search-keys"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "web-search"],
+      })
+    },
+  })
+}
+
+/** Pin one key as the workspace's own for its kind; the gateway unpins the other. */
+export function usePinWorkspaceWebSearchKey() {
+  return useWorkspaceKeysWrite((workspaceId, [keyId]) =>
+    apiFetch<WorkspaceWebSearchKeys>(workspacePath(workspaceId, keyId), {
+      method: "PATCH",
+      body: JSON.stringify({ is_default: true }),
+    }),
+  )
+}
+
+/**
+ * Remove the workspace's pin and turned-off marks on the given keys, so it
+ * follows its organization's choice again. One call per key, since the API
+ * resets one key at a time; the last answer is the listing after all of them.
+ */
+export function useResetWorkspaceWebSearchKeys() {
+  return useWorkspaceKeysWrite(async (workspaceId, keyIds) => {
+    let listing: WorkspaceWebSearchKeys | undefined
+    for (const keyId of keyIds) {
+      listing = await apiFetch<WorkspaceWebSearchKeys>(
+        workspacePath(workspaceId, keyId),
+        { method: "DELETE" },
+      )
+    }
+    return (
+      listing ??
+      (await apiFetch<WorkspaceWebSearchKeys>(workspaceListPath(workspaceId)))
+    )
   })
 }

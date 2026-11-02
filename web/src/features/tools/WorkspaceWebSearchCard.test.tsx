@@ -5,7 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { WorkspaceWebSearchConfig } from "@/client"
+import type { WorkspaceWebSearchConfig, WorkspaceWebSearchKeys } from "@/client"
 import {
   MAX_RESULTS,
   WorkspaceWebSearchCard,
@@ -15,18 +15,40 @@ import { organizationContext, workspaceWebSearchConfig } from "@/tests/fixtures"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const SWITCH = "Allow web access"
+const NO_KEYS: WorkspaceWebSearchKeys = {
+  data: [],
+  count: 0,
+  search_provider: "exa",
+  fetch_provider: "builtin",
+}
+
+/** The keys read and the provider catalog, which every mock answers the same way. */
+function keysAnswer(url: string): Response | undefined {
+  if (url.includes("/web-search-keys")) return Response.json(NO_KEYS)
+  if (url.includes("/search-tools/providers")) return Response.json([])
+  return undefined
+}
 
 function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
   config = workspaceWebSearchConfig({ workspace_id: ALPHA }),
+  keys = NO_KEYS,
 }: {
   memberships?: { workspace_id: string; name: string; role: string }[]
   config?: WorkspaceWebSearchConfig
+  keys?: WorkspaceWebSearchKeys
 } = {}) {
   const calls: { url: string; method: string; body: unknown }[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = init?.method ?? "GET"
+    // Ahead of the config, whose path is a prefix of this one.
+    if (url.includes("/web-search-keys")) {
+      return Response.json(keys)
+    }
+    if (url.includes("/search-tools/providers")) {
+      return Response.json([])
+    }
     if (url.includes("/web-search")) {
       calls.push({
         url,
@@ -301,6 +323,8 @@ describe("WorkspaceWebSearchCard", () => {
     const calls: { url: string; method: string }[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input)
+      const keys = keysAnswer(url)
+      if (keys) return keys
       if (url.includes("/web-search")) {
         calls.push({ url, method: init?.method ?? "GET" })
         return new Response("boom", { status: 500 })
@@ -432,6 +456,8 @@ describe("WorkspaceWebSearchCard", () => {
       const configRequests: string[] = []
       vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
         const url = String(input)
+        const keys = keysAnswer(url)
+        if (keys) return keys
         if (url.includes("/web-search")) {
           configRequests.push(url)
           return new Response("forbidden", { status: 403 })
@@ -474,6 +500,8 @@ describe("WorkspaceWebSearchCard", () => {
     let releaseFirst: (() => void) | undefined
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input)
+      const keys = keysAnswer(url)
+      if (keys) return keys
       if (!url.includes("/web-search")) {
         return Response.json(
           organizationContext({

@@ -331,6 +331,10 @@ export type CreateOrgWebSearchKeyRequest =
   Schemas["OrgWebSearchKeyCreateRequest"]
 export type UpdateOrgWebSearchKeyRequest =
   Schemas["OrgWebSearchKeyUpdateRequest"]
+// One workspace's view of those keys: which of each kind it uses, and what its
+// searches and fetches run on.
+export type WorkspaceWebSearchKey = Schemas["WorkspaceWebSearchKeyPublic"]
+export type WorkspaceWebSearchKeys = Schemas["WorkspaceWebSearchKeysPublic"]
 
 // The models an organization offers on one of those keys. `price_source` names
 // the rung of the pricing ladder that answered, in the vocabulary the Models

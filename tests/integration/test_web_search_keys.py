@@ -55,7 +55,7 @@ from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tools import WebSearchKeyService, _web_search_keys
 
-from .conftest import MODEL_NAME
+from .conftest import MODEL_NAME, build_test_client
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _KEYS = f"{API_ROOT}/organizations/me/web-search-keys"
@@ -683,9 +683,41 @@ def test_the_workspace_listing_reports_what_its_calls_run_on(
 
     # The legacy URL is the deployment's search; the built-in fetcher its fetch.
     assert (on_the_deployment["search_provider"], on_the_deployment["fetch_provider"]) == ("searxng", "builtin")
+    assert (on_the_deployment["deployment_search_tool"], on_the_deployment["deployment_fetch_tool"]) == (
+        "searxng",
+        "builtin_fetch",
+    )
     assert (on_nothing["search_provider"], on_nothing["fetch_provider"]) == (None, "builtin")
+    assert (on_nothing["deployment_search_tool"], on_nothing["deployment_fetch_tool"]) == (None, "builtin_fetch")
     assert turned_off["search_provider"] is None
     assert on_its_key["search_provider"] == "exa"
+
+
+@pytest.fixture
+def named_default_client(postgres_url: str) -> Iterator[TestClient]:
+    """A deployment whose default search is a named tool."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        search_tools={"fake-search": {"provider": "fake"}},
+        web_search_default_tool="fake-search",
+    )
+    yield from build_test_client(config)
+
+
+def test_the_workspace_listing_names_the_deployments_tools_while_a_key_serves(
+    named_default_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = named_default_client
+    view = f"{API_ROOT}/workspaces/{_workspace_id(client, master_key_header)}/web-search-keys"
+    _add_key(client, master_key_header, provider="exa", api_key="exa-1", default=True)
+
+    listed = client.get(view, headers=master_key_header).json()
+
+    assert listed["search_provider"] == "exa"
+    assert (listed["deployment_search_tool"], listed["deployment_fetch_tool"]) == ("fake-search", "builtin_fetch")
 
 
 # --- serving with them on a deployment with no search of its own ---------------------------------

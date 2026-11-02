@@ -17,19 +17,26 @@ import {
 } from "@/features/tools/PolicyRow"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import { WorkspaceToolStatus } from "@/features/tools/WorkspaceToolStatus"
+import {
+  WorkspaceProviderOptions,
+  WorkspaceWebSearchKeyChoice,
+} from "@/features/tools/WorkspaceWebSearchKeys"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useClearWorkspaceWebSearchConfig,
   useSetWorkspaceWebSearchConfig,
   useWorkspaceWebSearchConfig,
 } from "@/shared/api/tools"
+import { useWorkspaceWebSearchKeys } from "@/shared/api/webSearchKeys"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
 // The stored row has three states (allowed, blocked, none) and can also narrow
 // results and domains, and pin who runs a provider's own search and fetch. The
-// card shows the switch and the pins, with the narrowing under Advanced; the
-// purpose hint and provider options are set through the API.
+// card shows the switch, which of its organization's keys the workspace
+// searches and fetches with, and who runs a provider's own tools, with the
+// narrowing and the provider's options under Advanced; the purpose hint is set
+// through the API.
 //
 // What "none" means is the deployment's `default_enabled`. Switching to that
 // value deletes a row that narrows nothing else, and any other change writes.
@@ -109,6 +116,9 @@ export function WorkspaceWebSearchCard({
   const manages = canManageWorkspace(context.data, selected?.role)
   const workspaceId = selected && manages ? selected.workspace_id : null
   const query = useWorkspaceWebSearchConfig(workspaceId)
+  // Any member reads which key the workspace uses; a member's status card shows
+  // those rows once the listing answers, so it never shows an empty frame.
+  const keyListing = useWorkspaceWebSearchKeys(selected?.workspace_id ?? null)
   const setConfig = useSetWorkspaceWebSearchConfig()
   const clearConfig = useClearWorkspaceWebSearchConfig()
   const save = useAutosave()
@@ -156,6 +166,14 @@ export function WorkspaceWebSearchCard({
       <WorkspaceToolStatus
         tool="web_search"
         leading={leading}
+        trailing={
+          keyListing.data || keyListing.error ? (
+            <WorkspaceWebSearchKeyChoice
+              workspaceId={selected.workspace_id}
+              canChoose={false}
+            />
+          ) : undefined
+        }
         workspace={selected}
       />
     )
@@ -221,6 +239,11 @@ export function WorkspaceWebSearchCard({
         }
       />
 
+      <WorkspaceWebSearchKeyChoice
+        workspaceId={selected.workspace_id}
+        canChoose
+      />
+
       <ExecutorRow
         label="Who runs provider web search"
         help="For a provider's own search tool (Anthropic and OpenAI web_search)."
@@ -275,6 +298,12 @@ export function WorkspaceWebSearchCard({
           parse={parseDomains}
           commit={(blocked_domains) => commitField({ blocked_domains })}
           disabled={narrowingDisabled}
+        />
+        <WorkspaceProviderOptions
+          workspaceId={selected.workspace_id}
+          stored={config?.provider_options}
+          disabled={narrowingDisabled}
+          save={(provider_options) => commitField({ provider_options })}
         />
       </AdvancedRows>
     </SettingsGroup>
