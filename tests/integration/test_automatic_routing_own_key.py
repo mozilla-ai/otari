@@ -30,6 +30,7 @@ from gateway.services import model_catalog_service as mcs
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy.org_provider_key_service import reset_org_provider_cache
+from gateway.types.models_dev import parse_catalog
 
 from .conftest import build_test_client
 
@@ -161,7 +162,7 @@ def _offer_own_key(client: TestClient, provider: str, model: str) -> None:
 
 def _refresh_index(client: TestClient, catalog_id: str, deployment: str, own: str) -> None:
     """Rebuild the index and check it holds the deployment's offering, and the organization's key in its view."""
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=_MODELS_DEV)):
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(_MODELS_DEV))):
         rebuilt = client.post(f"{API_ROOT}/catalog/selectors/refresh", headers=_MASTER)
     assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text
     index = selectors.current_selector_index()

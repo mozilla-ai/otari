@@ -102,7 +102,8 @@ say which: `shared/api/overlayRequestPolicy.ts` (the origin and credential every
 management request uses, settled before the bootstrap is read),
 `features/auth/overlayPublicAuthFields.tsx` (a control above the address on the
 pages that post one), `features/auth/overlayAuthShellSlot.tsx` (a control in the
-header of the public auth pages), `app/nav/overlayAccountMenuRows.tsx` (extra
+header of the public auth pages), `features/auth/overlayLoginRefusalHint.tsx` (a
+line under the password field after a refused sign-in), `app/nav/overlayAccountMenuRows.tsx` (extra
 rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
 the account control, the monogram here). Each ships inert; `src/overlaySeams.test.ts`
 lists every seam and checks it is reached by its `@/…` specifier.

@@ -24,9 +24,6 @@ from gateway.services.pricing.bundled import (
     bundled_generation,
     load_bundled_index,
 )
-from gateway.services.pricing.catalog_trim import (
-    trim_catalog,
-)
 from gateway.services.pricing.generations import (
     MAX_RESIDENT_GENERATIONS,
     active_generations,
@@ -84,6 +81,5 @@ __all__ = [
     "select_generation",
     "set_accepted_generations",
     "tool_rate_lookup",
-    "trim_catalog",
     "validated_units",
 ]

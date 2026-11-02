@@ -1079,6 +1079,10 @@ serves, with their history; the cleanup never runs on a schedule.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
+An update refuses models.dev data the gateway cannot read: a document that lists
+no models, or one with more than a quarter of its models damaged. The prices in
+force stay, and the update reports an error.
+
 Each accepted snapshot is kept, and a request or report priced for a past
 instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldest
 one for a time before the first. History therefore starts at the first accepted

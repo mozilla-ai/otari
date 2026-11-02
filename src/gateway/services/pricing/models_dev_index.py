@@ -1,4 +1,4 @@
-"""An immutable price index over a models.dev ``api.json`` document.
+"""An immutable price index over a typed models.dev catalog.
 
 Pure and synchronous: no database, no network. The index answers what a model
 costs, its context window and its display metadata, matching a provider and a
@@ -16,7 +16,16 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from gateway.core.metered_pricing import TIER_THRESHOLD_FIELD
-from gateway.services.model_catalog_service import models_dev_provider_id
+from gateway.types.models_dev import (
+    RATE_FIELDS,
+    ModelsDevCatalog,
+    ModelsDevCost,
+    ModelsDevModel,
+    ModelsDevProvider,
+    ModelsDevRates,
+    models_dev_provider_id,
+    parse_catalog,
+)
 
 REFERENCE_PREFIX = "models.dev:"
 
@@ -39,7 +48,6 @@ _BEDROCK_VERSION_SUFFIX = re.compile(r"(?:-v\d+(?::\d+)?|:\d+)$")
 MAX_RATE_PER_MILLION = Decimal(1_000_000)
 _RATE_PLACES = Decimal("0.00000001")
 
-_RATE_FIELDS = ("input", "output", "cache_read", "cache_write")
 _TIER_FIELD_NAMES = {
     "input": "input_price_per_million",
     "output": "output_price_per_million",
@@ -92,7 +100,7 @@ class ModelsDevPrice:
                 TIER_THRESHOLD_FIELD: tier.min_input_tokens,
                 **{
                     _TIER_FIELD_NAMES[name]: float(rate)
-                    for name in _RATE_FIELDS
+                    for name in RATE_FIELDS
                     if (rate := getattr(tier, name)) is not None
                 },
             }
@@ -121,82 +129,53 @@ def parse_rate(value: object) -> Decimal | None:
     return rate
 
 
-def invalid_rate_count(catalog: Mapping[str, Any]) -> int:
-    """How many rates in a parsed ``api.json`` are present but not believable prices."""
+def invalid_rate_count(catalog: ModelsDevCatalog) -> int:
+    """How many rates in a catalog are present but not believable prices."""
 
-    def bad(raw: object) -> int:
-        if not isinstance(raw, dict):
+    def bad(rates: ModelsDevRates | None) -> int:
+        if rates is None:
             return 0
-        return sum(1 for name in _RATE_FIELDS if raw.get(name) is not None and parse_rate(raw[name]) is None)
+        values = (getattr(rates, name) for name in RATE_FIELDS)
+        return len(rates.malformed) + sum(1 for value in values if value is not None and parse_rate(value) is None)
 
-    count = 0
-    for provider in catalog.values():
-        models = provider.get("models") if isinstance(provider, dict) else None
-        for model in models.values() if isinstance(models, dict) else ():
-            cost = model.get("cost") if isinstance(model, dict) else None
-            if not isinstance(cost, dict):
-                continue
-            count += bad(cost) + bad(cost.get("context_over_200k"))
-            tiers = cost.get("tiers")
-            count += sum(bad(tier) for tier in tiers) if isinstance(tiers, list) else 0
-    return count
+    return sum(
+        bad(model.cost.rates) + bad(model.cost.context_over_200k) + sum(bad(tier.rates) for tier in model.cost.tiers)
+        for _provider, model in catalog.models()
+        if model.cost is not None
+    )
 
 
-def _rates(raw: object) -> dict[str, Decimal]:
-    if not isinstance(raw, dict):
-        return {}
-    return {name: rate for name in _RATE_FIELDS if (rate := parse_rate(raw.get(name))) is not None}
+def _rates(rates: ModelsDevRates) -> dict[str, Decimal]:
+    return {name: rate for name in RATE_FIELDS if (rate := parse_rate(getattr(rates, name))) is not None}
 
 
-def _tiers(cost: Mapping[str, Any]) -> tuple[PriceTier, ...]:
+def _tiers(cost: ModelsDevCost) -> tuple[PriceTier, ...]:
     """``tiers`` of the context type, else ``context_over_200k`` as one tier."""
     by_threshold: dict[int, PriceTier] = {}
-    raw_tiers = cost.get("tiers")
-    for raw in raw_tiers if isinstance(raw_tiers, list) else ():
-        if not isinstance(raw, dict):
-            continue
-        kind = raw.get("tier")
-        if not isinstance(kind, dict) or kind.get("type") != "context":
-            continue
-        size = kind.get("size")
-        if isinstance(size, bool) or not isinstance(size, (int, float)) or size <= 0 or int(size) != size:
-            continue
-        if rates := _rates(raw):
-            by_threshold[int(size)] = PriceTier(min_input_tokens=int(size), **rates)
-    if not by_threshold and (rates := _rates(cost.get("context_over_200k"))):
+    for tier in cost.tiers:
+        if tier.kind == "context" and tier.size is not None and (rates := _rates(tier.rates)):
+            by_threshold[tier.size] = PriceTier(min_input_tokens=tier.size, **rates)
+    if not by_threshold and cost.context_over_200k is not None and (rates := _rates(cost.context_over_200k)):
         by_threshold[_OVER_200K_THRESHOLD] = PriceTier(min_input_tokens=_OVER_200K_THRESHOLD, **rates)
     return tuple(by_threshold[threshold] for threshold in sorted(by_threshold))
 
 
-def _str(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _context_window(model: Mapping[str, Any]) -> int | None:
-    limit = model.get("limit")
-    value = limit.get("context") if isinstance(limit, dict) else None
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return None
-    return value
-
-
-def _entry(provider: Mapping[str, Any], provider_id: str, model_id: str, model: Mapping[str, Any]) -> ModelsDevPrice:
-    cost = model.get("cost")
-    cost = cost if isinstance(cost, dict) else {}
-    rates = _rates(cost)
+def _entry(provider: ModelsDevProvider, model: ModelsDevModel) -> ModelsDevPrice:
+    cost = model.cost or ModelsDevCost(rates=ModelsDevRates())
+    rates = _rates(cost.rates)
     return ModelsDevPrice(
-        provider_id=provider_id,
-        model_id=model_id,
+        provider_id=provider.id,
+        model_id=model.id,
         input=rates.get("input"),
         output=rates.get("output"),
         cache_read=rates.get("cache_read"),
         cache_write=rates.get("cache_write"),
         tiers=_tiers(cost),
-        context_window=_context_window(model),
-        model_name=_str(model.get("name")),
-        provider_name=_str(provider.get("name")),
-        provider_doc=_str(provider.get("doc")),
-        canonical_model_id=_str(model.get("canonical_model_id")),
+        context_window=model.context_window,
+        model_name=model.name,
+        provider_name=provider.name,
+        provider_doc=provider.doc,
+        canonical_model_id=model.canonical_model_id,
     )
 
 
@@ -259,17 +238,14 @@ class ModelsDevPriceIndex:
         self._by_canonical = by_canonical
 
     @classmethod
-    def from_catalog(cls, raw: Mapping[str, Any]) -> "ModelsDevPriceIndex":
-        """Build an index from a parsed ``api.json``, skipping malformed entries."""
-        entries: list[ModelsDevPrice] = []
-        for key, provider in raw.items():
-            if not isinstance(provider, dict) or not isinstance(provider.get("models"), dict):
-                continue
-            provider_id = _str(provider.get("id")) or str(key)
-            for model_key, model in provider["models"].items():
-                if isinstance(model, dict):
-                    entries.append(_entry(provider, provider_id, _str(model.get("id")) or str(model_key), model))
-        return cls(entries)
+    def from_catalog(cls, catalog: ModelsDevCatalog) -> "ModelsDevPriceIndex":
+        """Build an index over every model of a typed catalog."""
+        return cls(_entry(provider, model) for provider, model in catalog.models())
+
+    @classmethod
+    def from_document(cls, raw: Mapping[str, Any]) -> "ModelsDevPriceIndex":
+        """Build an index from a parsed ``api.json`` or a stored snapshot, through the one catalog parser."""
+        return cls.from_catalog(parse_catalog(raw))
 
     def __len__(self) -> int:
         return sum(len(models) for models in self._by_provider.values())

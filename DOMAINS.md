@@ -140,6 +140,10 @@ short spellings and aliases.
 
 It also owns `services/tenancy/organization_model_access.py`.
 
+The models.dev document is typed in `types/models_dev.py`: catalog reads its
+facts and pricing reads its rates, so it sits below both and neither imports the
+other.
+
 ### routing
 
 Routing policies, their compiled plans and the router backends, and which

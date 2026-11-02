@@ -222,7 +222,7 @@ def set_config(config: GatewayConfig) -> None:
     _config = config
 
 
-def get_config(request: Request) -> GatewayConfig:
+async def get_config(request: Request) -> GatewayConfig:
     """Return the config for the current app from ``request.app.state``.
 
     Every shared resource (rate limiter, log writer, file store) lives on
@@ -1080,7 +1080,7 @@ def get_workspace_web_search_service(
 WorkspaceWebSearchServiceDep = Annotated[WorkspaceWebSearchService, Depends(get_workspace_web_search_service)]
 
 
-def get_workspace_code_execution_policies(
+async def get_workspace_code_execution_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceCodeExecutionPolicies:
@@ -1202,7 +1202,7 @@ def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiK
     return container.resolve(ApiKeyFormatPort, db)
 
 
-def get_code_execution_port(
+async def get_code_execution_port(
     config: Annotated[GatewayConfig, Depends(get_config)],
     container: ContainerDep,
 ) -> CodeExecutionPort | None:
@@ -1224,7 +1224,7 @@ def get_code_execution_port(
 CodeExecutionPortDep = Annotated[CodeExecutionPort | None, Depends(get_code_execution_port)]
 
 
-def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
+async def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
     """Resolve the billing adapter this build bound at startup."""
     return container.resolve(BillingPort, db)
 
@@ -1260,12 +1260,12 @@ def get_identity_provider_port(
     return container.resolve(IdentityProviderPort, db, uow=uow)
 
 
-def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
+async def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
     """Build the request path's reader of a workspace's MCP servers, on the request's session."""
     return WorkspaceMcpServers(db)
 
 
-def get_model_provider_port(
+async def get_model_provider_port(
     db: PortSessionDep,
     uow: UnitOfWorkDep,
     container: ContainerDep,
@@ -1313,7 +1313,7 @@ def get_web_provider_client(request: Request) -> httpx.AsyncClient:
     return client
 
 
-def get_optional_web_provider_client(request: Request) -> httpx.AsyncClient | None:
+async def get_optional_web_provider_client(request: Request) -> httpx.AsyncClient | None:
     """The app's web provider client, or ``None`` outside the app's lifespan, where a provider opens its own.
 
     For ``ToolPorts``, which every completion route takes, so a request that runs
@@ -1682,7 +1682,7 @@ def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> W
     )
 
 
-def get_workspace_web_search_policies(
+async def get_workspace_web_search_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceWebSearchPolicies:
@@ -2185,7 +2185,7 @@ class ToolPorts:
     web_provider_client: httpx.AsyncClient | None = None
 
 
-def get_tool_ports(
+async def get_tool_ports(
     code_execution: CodeExecutionPortDep,
     code_execution_policy: WorkspaceCodeExecutionPoliciesDep,
     mcp_server: WorkspaceMcpServersDep,
@@ -2225,7 +2225,7 @@ def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable
     return _require
 
 
-def get_log_writer(request: Request) -> LogWriter:
+async def get_log_writer(request: Request) -> LogWriter:
     writer: LogWriter = request.app.state.log_writer
     return writer
 
@@ -2252,7 +2252,7 @@ def get_file_service(
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 
 
-def get_optional_file_service(
+async def get_optional_file_service(
     request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
     db: Annotated[AsyncSession, Depends(get_db)],

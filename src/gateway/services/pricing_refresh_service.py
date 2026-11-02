@@ -16,7 +16,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
-from gateway.services.model_catalog_service import fetch_models_dev_document
+from gateway.services.model_catalog_service import ModelsDevRefusedError, fetch_models_dev_document
 from gateway.services.pricing import (
     MAX_RESIDENT_GENERATIONS,
     ModelsDevPriceIndex,
@@ -26,9 +26,9 @@ from gateway.services.pricing import (
     invalid_rate_count,
     reset_generations,
     set_accepted_generations,
-    trim_catalog,
 )
 from gateway.services.pricing_service import normalize_effective_at
+from gateway.types.models_dev import ModelsDevCatalog, snapshot_document
 
 _PREVIEW_CHANGE_LIMIT = 100
 # A candidate that loses more than this share of the active priced models, or
@@ -54,7 +54,7 @@ _applied_updated_at: datetime | None = None
 def _parse_snapshot(raw_snapshot: str) -> ModelsDevPriceIndex:
     """Index a stored snapshot, refusing one that carries no models."""
     try:
-        index = ModelsDevPriceIndex.from_catalog(json.loads(raw_snapshot))
+        index = ModelsDevPriceIndex.from_document(json.loads(raw_snapshot))
     except Exception as exc:
         raise ValueError("Invalid models.dev snapshot") from exc
     if len(index) == 0:
@@ -172,11 +172,10 @@ def _build_preview(
     )
 
 
-def _prepare_document(document: dict[str, object]) -> _PendingSnapshot:
-    trimmed = trim_catalog(document)
-    if (invalid := invalid_rate_count(trimmed)) > 0:
+def _prepare_document(catalog: ModelsDevCatalog) -> _PendingSnapshot:
+    if (invalid := invalid_rate_count(catalog)) > 0:
         raise PricingRefreshError(f"The models.dev data carries {invalid} implausible rates")
-    raw_snapshot = json.dumps(trimmed, separators=(",", ":"), ensure_ascii=False)
+    raw_snapshot = json.dumps(snapshot_document(catalog), separators=(",", ":"), ensure_ascii=False)
     index = _parse_snapshot(raw_snapshot)
     if not any(entry.priced for entry in index.entries()):
         raise PricingRefreshError("The models.dev data prices no models")
@@ -186,10 +185,13 @@ def _prepare_document(document: dict[str, object]) -> _PendingSnapshot:
 async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: float) -> _PendingSnapshot:
     """Fetch the upstream catalog and cut it down to the price fields, without activating it."""
 
-    document = await fetch_models_dev_document(
-        reuse_within=reuse_within, fill_cache=config is not None and config.models_dev_metadata
-    )
-    return await asyncio.to_thread(_prepare_document, document)
+    try:
+        catalog = await fetch_models_dev_document(
+            reuse_within=reuse_within, fill_cache=config is not None and config.models_dev_metadata
+        )
+    except ModelsDevRefusedError as exc:
+        raise PricingRefreshError("The models.dev data has a shape the gateway cannot read") from exc
+    return await asyncio.to_thread(_prepare_document, catalog)
 
 
 async def prepare_price_refresh(

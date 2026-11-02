@@ -187,6 +187,12 @@ rerank or `other` model is refused with `400` `wrong_model_type` before any prov
 called, as is an embeddings request for a model its provider lists as another
 kind.
 
+The live catalog is kept in memory and refetched in the background. When a fetch
+fails, or models.dev answers with a document the gateway cannot read, the last
+good copy stays in use and the gateway logs why. A document is refused when it
+lists no models or when more than a quarter of its models are damaged. A few
+damaged models are left out, and one warning names them.
+
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.

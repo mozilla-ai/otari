@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
+from gateway.services.model_catalog_service import ModelsDevRefusedError
 from gateway.services.pricing import (
     active_generations,
     active_timeline,
@@ -24,6 +25,7 @@ from gateway.services.pricing import (
     current_index,
     resolve_as_of,
 )
+from gateway.types.models_dev import ModelsDevCatalog, parse_catalog
 
 
 def _catalog(input_rate: float = 1, *, extra: bool = False) -> dict[str, Any]:
@@ -55,10 +57,9 @@ def upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """The catalog the fetch returns, and the arguments it was called with."""
     state: dict[str, Any] = {"catalog": _catalog(), "calls": []}
 
-    async def fetch(**kwargs: Any) -> dict[str, Any]:
+    async def fetch(**kwargs: Any) -> ModelsDevCatalog:
         state["calls"].append(kwargs)
-        catalog: dict[str, Any] = state["catalog"]
-        return catalog
+        return parse_catalog(state["catalog"])
 
     monkeypatch.setattr(refresh, "fetch_models_dev_document", fetch)
     return state
@@ -144,6 +145,19 @@ async def test_a_fetch_failure_is_a_refresh_error(session: AsyncSession, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_a_refused_download_is_a_refresh_error_and_stores_nothing(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def refused(**_: Any) -> ModelsDevCatalog:
+        raise ModelsDevRefusedError("models.dev catalog refused: the document lists no models")
+
+    monkeypatch.setattr(refresh, "fetch_models_dev_document", refused)
+    with pytest.raises(refresh.PricingRefreshError, match="cannot read"):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+
+
+@pytest.mark.asyncio
 async def test_a_catalog_without_models_is_not_stored(session: AsyncSession, upstream: dict[str, Any]) -> None:
     upstream["catalog"] = {"p": {"id": "p", "models": {}}}
     with pytest.raises(refresh.PricingRefreshError):
@@ -160,9 +174,9 @@ async def test_a_catalog_pricing_no_model_is_not_stored(session: AsyncSession, u
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("rate", [-1, 2_000_000])
+@pytest.mark.parametrize("rate", [-1, 2_000_000, "0.5", True])
 async def test_an_implausible_rate_rejects_the_whole_catalog(
-    session: AsyncSession, upstream: dict[str, Any], rate: float
+    session: AsyncSession, upstream: dict[str, Any], rate: object
 ) -> None:
     upstream["catalog"]["test"]["models"]["other"] = {"id": "other", "cost": {"input": 1, "output": rate}}
     with pytest.raises(refresh.PricingRefreshError, match="implausible"):

@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -68,6 +68,7 @@ from gateway.services.workspace_scope import (
     organization_for_key_id,
     organization_for_workspace_id,
 )
+from gateway.types.models_dev import ModelsDevCatalog
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -204,7 +205,7 @@ def alias_model(
     target: str,
     pricing_lookup: dict[str, ModelPricing],
     *,
-    models_dev: dict[str, Any] | None,
+    models_dev: ModelsDevCatalog | None,
 ) -> ModelObject:
     """Build a ModelObject for an alias, from config.yml or from storage.
 
@@ -732,7 +733,7 @@ class MergedCatalog:
     """The selectors phase 1 heard from a provider, as opposed to only priced."""
     deployment_key_models: HostedModels = field(default_factory=dict)
     """What the caller reaches on a deployment-owned key; see :attr:`CatalogScope.deployment_key_models`."""
-    models_dev: dict[str, Any] | None = None
+    models_dev: ModelsDevCatalog | None = None
     """The models.dev catalog the limits were read from, for a reader that joins more of it."""
     alias_targets: set[str] = field(default_factory=set)
     """Canonical keys of the caller's alias targets, whether or not the listing withheld them."""

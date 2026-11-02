@@ -14,7 +14,6 @@ import asyncio
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Set
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +53,7 @@ from gateway.services.tenancy.organization_model_access import (
     resolve_all_organizations_offered_keys,
     workspace_organizations,
 )
+from gateway.types.models_dev import ModelsDevCatalog
 
 
 def split_offering_selector(obj: ModelObject) -> tuple[str, str]:
@@ -76,7 +76,7 @@ def real_offerings(merged: MergedCatalog) -> list[ModelObject]:
 
 
 def seed_for(
-    config: GatewayConfig, catalog: dict[str, Any] | None, selector: str, instance: str, model_id: str
+    config: GatewayConfig, catalog: ModelsDevCatalog | None, selector: str, instance: str, model_id: str
 ) -> tuple[OfferingSeed, ModelCatalogEntry | None, str]:
     """One selector's identity seed, its models.dev entry, and the provider type behind the instance."""
     provider_type = config.provider_instance_type(instance)
@@ -92,7 +92,7 @@ def seed_for(
 
 
 def offering_seed(
-    config: GatewayConfig, catalog: dict[str, Any] | None, obj: ModelObject
+    config: GatewayConfig, catalog: ModelsDevCatalog | None, obj: ModelObject
 ) -> tuple[OfferingSeed, ModelCatalogEntry | None, str, str, str]:
     """One offering's identity seed, with the facts the seed was read from."""
     instance, model_id = split_offering_selector(obj)
@@ -112,7 +112,7 @@ def answered_by_listing(model_id: str, aliases: Mapping[str, str]) -> bool:
 
 def models_by_identity(
     config: GatewayConfig,
-    catalog: dict[str, Any] | None,
+    catalog: ModelsDevCatalog | None,
     listed: Iterable[ModelObject],
     *,
     organization_id: uuid.UUID | None = None,
@@ -206,7 +206,7 @@ def _organization_rate(
 async def _organization_views(
     db: AsyncSession,
     config: GatewayConfig,
-    catalog: dict[str, Any] | None,
+    catalog: ModelsDevCatalog | None,
     rows: list[OfferingRow],
     seeds: list[OfferingSeed],
 ) -> dict[uuid.UUID, OrganizationSelectors]:
