@@ -597,4 +597,42 @@ describe("ModelDetailPage", () => {
       ),
     ).toBeInTheDocument()
   })
+
+  it("renders a metered rate alone when it differs from the provider's list price", async () => {
+    // Neither offering is priced at the provider's published rate: one on the
+    // organization's own rate, one on a models.dev default. That is the case
+    // the page used to annotate with the list price, plus a banner explaining
+    // the two differed. Each cell now shows the metered rate and nothing else.
+    mockApi()
+    GLM_DETAIL.offerings[0] = offering({ price_source: "organization" })
+
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const grid = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const rows = within(grid).getAllByRole("row").slice(1)
+    expect(rows).toHaveLength(2)
+    // Each row's own metered rate, cheapest first.
+    expect(
+      within(rows[0] as HTMLElement).getByRole("gridcell", {
+        name: /\$0\.075/,
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(rows[1] as HTMLElement).getByRole("gridcell", { name: /\$0\.50/ }),
+    ).toBeInTheDocument()
+
+    // No list price is shown beside a rate, and no banner explains the
+    // difference from one.
+    expect(within(grid).queryByText(/list price/i)).toBeNull()
+    expect(screen.queryByText(/published price/i)).toBeNull()
+
+    // Where the rate came from is the comparison the page keeps.
+    expect(
+      within(grid).getByRole("columnheader", { name: "Price from" }),
+    ).toBeInTheDocument()
+    expect(within(grid).getByText("DEFAULT")).toBeInTheDocument()
+    expect(within(grid).getByText("YOUR RATE")).toBeInTheDocument()
+  })
 })
