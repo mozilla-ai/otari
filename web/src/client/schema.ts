@@ -19632,6 +19632,7 @@ export interface components {
             default_enabled: boolean;
             /** Enabled */
             enabled: boolean;
+            fetch_executor: components["schemas"]["CodeExecutor"] | null;
             /** Max Results */
             max_results: number | null;
             /** Provider Options */
@@ -19640,6 +19641,7 @@ export interface components {
             } | null;
             /** Purpose Hint */
             purpose_hint: string | null;
+            search_executor: components["schemas"]["CodeExecutor"] | null;
             /** Updated At */
             updated_at: string | null;
             /** Web Search Configured */
@@ -19674,6 +19676,8 @@ export interface components {
              * @description False refuses web access for this workspace through otari_web_search, otari_web_fetch, and POST /api/v1/search.
              */
             enabled: boolean;
+            /** @description Who runs a provider-native web-fetch declaration (Anthropic's web_fetch_<date>) for this workspace, in search_executor's vocabulary. Pins over the request's Otari-Web-Fetch header; null leaves the header in charge */
+            fetch_executor?: components["schemas"]["CodeExecutor"] | null;
             /**
              * Max Results
              * @description Search only: ceiling on results one search returns, through otari_web_search and POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the provider's own maximum is the only limit.
@@ -19691,6 +19695,8 @@ export interface components {
              * @description Search only: hint used when a request declares otari_web_search without one of its own
              */
             purpose_hint?: string | null;
+            /** @description Who runs a provider-native web-search declaration (Anthropic's web_search_<date>, OpenAI's web_search) for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's search), 'otari' or 'provider'. Pins over the request's Otari-Web-Search header; null leaves the header in charge. The deployment's web_search_intercept still claims every search */
+            search_executor?: components["schemas"]["CodeExecutor"] | null;
         };
         /**
          * WorkspaceWebSearchKeyOverrideRequest

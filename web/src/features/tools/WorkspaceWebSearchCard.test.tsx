@@ -532,10 +532,53 @@ describe("WorkspaceWebSearchCard", () => {
       "allowed_domains",
       "blocked_domains",
       "enabled",
+      "fetch_executor",
       "max_results",
       "provider_options",
       "purpose_hint",
+      "search_executor",
     ])
+  })
+
+  it("pins who runs a provider's own search, keeping the rest of the row", async () => {
+    const calls = mockApi({
+      config: allowed({
+        blocked_domains: ["example.com"],
+        fetch_executor: "provider",
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(
+      screen.getByRole("button", { name: /Who runs provider web search/ }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: "Always Otari" }),
+    )
+
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      search_executor: "otari",
+      fetch_executor: "provider",
+      blocked_domains: ["example.com"],
+    })
+  })
+
+  it("keeps a row that only pins when access is switched back to the default", async () => {
+    const calls = mockApi({
+      config: allowed({ enabled: false, search_executor: "otari" }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      search_executor: "otari",
+    })
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
   })
 
   it("keeps its ceiling equal to the one the server enforces", () => {

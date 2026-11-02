@@ -76,7 +76,7 @@ from gateway.services.tools._mcp_admission import (
     MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL,
     duplicate_mcp_server_name_detail,
 )
-from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL
+from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL, WorkspaceWebExecutors
 from gateway.services.traces import SessionRef
 
 ADAPTERS = [
@@ -146,6 +146,9 @@ class _Policy:
     ) -> ResolvedWebSearchConfig | None:
         self.asked.append(workspace_id)
         return self._policy
+
+    async def executors(self, workspace_id: uuid.UUID) -> WorkspaceWebExecutors:
+        return None, None
 
 
 def _ctx(

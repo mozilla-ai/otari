@@ -539,6 +539,54 @@ def test_otari_runs_otaris_tool_on_every_candidate(
     assert loop_extra.get("native_tools") == frozenset({_NAMES[tool]})
 
 
+_EXECUTOR_FIELDS = {"search": "search_executor", "fetch": "fetch_executor"}
+
+
+def _pin(client: TestClient, master_key_header: dict[str, str], tool: str, executor: str) -> None:
+    workspace_id = _default_workspace_id(client, master_key_header)
+    stored = client.put(
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search",
+        json={"enabled": True, _EXECUTOR_FIELDS[tool]: executor},
+        headers=master_key_header,
+    )
+    assert stored.status_code == 200, stored.text
+    assert stored.json()[_EXECUTOR_FIELDS[tool]] == executor
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_workspace_pin_runs_the_providers_own_keyword_on_otari_with_no_header(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    """An Anthropic SDK client changes nothing: the workspace's pin brings the tool here, answered natively."""
+    _pin(client, master_key_header, tool, "otari")
+
+    response, seen = _post_messages(client, api_key_header, _messages_body("claude-then-vertex", _DECLARATIONS[tool]))
+
+    assert response.status_code == 200, response.text
+    assert seen.provider_calls == []
+    loop_kwargs, loop_extra = seen.loop_calls[0]
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == frozenset({_NAMES[tool]})
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_header_that_disagrees_with_the_workspace_pin_is_refused(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    _pin(client, master_key_header, tool, "otari")
+
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, _HEADERS[tool]: "provider"},
+        _messages_body("claude-then-vertex", _DECLARATIONS[tool]),
+    )
+
+    assert response.status_code == 403, response.text
+    assert "web access policy decides who runs" in response.text
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []
+
+
 def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:
@@ -885,3 +933,41 @@ def test_responses_decides_two_models_of_one_provider_apart(client: TestClient, 
     assert seen.tool_types(loop_kwargs) == set()
     assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
     assert len(seen.web_backends) == 1
+
+
+_RESPONSES_DECLARATIONS = {"search": {"type": "web_search"}, "fetch": _FETCH}
+# Responses has no fetch item of its own to answer a fetch with.
+_RESPONSES_NATIVE = {"search": frozenset({WEB_SEARCH_TOOL_NAME}), "fetch": None}
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_responses_runs_a_tool_the_workspace_pinned_to_otari_even_on_an_openai_head(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    """An OpenAI SDK client changes nothing: the pin takes the tool the provider would run."""
+    _pin(client, master_key_header, tool, "otari")
+
+    body = {**_responses_body(), "tools": [_RESPONSES_DECLARATIONS[tool]]}
+    response, seen = _post_responses(client, api_key_header, body)
+
+    assert response.status_code == 200, response.text
+    assert seen.provider_calls == []
+    loop_kwargs, loop_extra = seen.loop_calls[0]
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == _RESPONSES_NATIVE[tool]
+    assert len(seen.web_backends) == 1
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_responses_refuses_a_header_that_disagrees_with_the_workspace_pin(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    _pin(client, master_key_header, tool, "otari")
+
+    body = {**_responses_body(), "tools": [_RESPONSES_DECLARATIONS[tool]]}
+    response, seen = _post_responses(client, {**api_key_header, _HEADERS[tool]: "provider"}, body)
+
+    assert response.status_code == 403, response.text
+    assert "web access policy decides who runs" in response.json()["detail"]
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []

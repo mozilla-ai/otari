@@ -26,10 +26,10 @@ Unavailable but recognized tools remain in the response with
 ## Who runs a tool
 
 An `otari_*` type is executed by Otari. A provider-native web-search type is
-forwarded to the provider unless [interception](#web-search-interception) or the
-request's `Otari-Web-Search` header says otherwise. Anthropic's web-fetch type
-is forwarded unless the request's [`Otari-Web-Fetch`](#anthropics-web-fetch)
-header says otherwise.
+forwarded to the provider unless [interception](#web-search-interception), the
+workspace's pin or the request's `Otari-Web-Search` header says otherwise.
+Anthropic's web-fetch type is forwarded unless the workspace's pin or the
+request's [`Otari-Web-Fetch`](#anthropics-web-fetch) header says otherwise.
 A provider-native code-execution type is decided by the request's
 [executor](#code-execution-executor). Each is decided for every attempt on its
 own, so a fallback can run Otari's tool where the first model ran its own.
@@ -71,10 +71,18 @@ below. One that cannot be served that way (the workspace has search off, or no
 price under `require_pricing`) is skipped and recorded as `Skipped:` in the
 activity log, and the request fails only when no model is left.
 
-The header can add a claim but never remove one: with `web_search_intercept`
-on, every search runs on Otari's backend whatever the header says, and
-`provider` is refused with a 403, because interception is what puts every
-search under the workspace's web-search policy and tool pricing.
+A [workspace web-access policy](#per-workspace-web-access-policy) may pin
+`search_executor` to one of the same three values. The pin wins over the
+header, and a header that disagrees with it is refused with a 403, as for the
+[code-execution executor](#code-execution-executor). This is how a workspace
+takes over the searches of a client it cannot change: an Anthropic SDK app
+declaring `web_search_<date>` keeps working, and gets the same native blocks
+back, while every search runs on Otari.
+
+The header and the pin can add a claim but never remove one: with
+`web_search_intercept` on, every search runs on Otari's backend whatever they
+say, and a `provider` header is refused with a 403, because interception is
+what puts every search under the workspace's web-search policy and tool pricing.
 
 Whenever Otari runs the search, the rules for a gateway-run search apply: the
 workspace's web-search policy and tool pricing. All of this
@@ -104,7 +112,9 @@ it a tool nobody runs. The `Otari-Web-Fetch` header takes it over the same way
 It is a header of its own, not part of `Otari-Web-Search`, because the two
 tools are native in different places and a request may want one taken over and
 not the other. There is no deployment-wide toggle like `web_search_intercept`
-for fetch. A claimed declaration is an [Otari fetch](#web-fetch): it needs
+for fetch; a [workspace web-access policy](#per-workspace-web-access-policy)
+may pin `fetch_executor` instead, which wins over the header the way
+`search_executor` does for search. A claimed declaration is an [Otari fetch](#web-fetch): it needs
 `web_fetch_enabled` (without it the keyword is forwarded unchanged), follows the
 workspace policy and pricing, and honors the declaration's `max_uses`,
 `allowed_domains` and `blocked_domains`. The URL in the returned blocks omits
@@ -622,7 +632,7 @@ A workspace policy can disable code execution or narrow the deployment limits:
 
 Manage it under
 `/api/v1/workspaces/{workspace_id}/code-execution-policy`. The dashboard's Code
-execution page sets `enabled`; every other field is set through the API. A policy
+execution page sets `enabled` and `executor`; every other field is set through the API. A policy
 cannot enable a missing deployment backend or exceed the deployment limits.
 Workspace-selected images must come from
 `sandbox_allowed_session_images` or the deployment's own session image.
@@ -865,10 +875,14 @@ A workspace web-access policy can:
   destinations, including redirects
 - provide a default purpose hint
 - supply provider options
+- pin `search_executor` and `fetch_executor`, who runs a provider's own search
+  and fetch keywords (see [Web-search interception](#web-search-interception)
+  and [Anthropic's web fetch](#anthropics-web-fetch)); like the code-execution
+  `executor`, these are choices rather than narrowings
 
 Manage it under `/api/v1/workspaces/{workspace_id}/web-search`. The dashboard's
-Tools > Web search page sets `enabled`, `max_results` and the domain lists; the purpose
-hint and provider options are set through the API.
+Tools > Web search page sets `enabled`, the two executors, `max_results` and the
+domain lists; the purpose hint and provider options are set through the API.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
 backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
