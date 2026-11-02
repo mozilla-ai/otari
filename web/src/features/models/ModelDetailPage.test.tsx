@@ -599,10 +599,9 @@ describe("ModelDetailPage", () => {
   })
 
   it("renders a metered rate alone when it differs from the provider's list price", async () => {
-    // Both offerings' metered rates are far from the price models.dev lists
-    // for them, well outside the 2% tolerance the list note used to apply, so
-    // the absences below are about a real disagreement rather than a missing
-    // one.
+    // Without a metadata price on each offering the rates agree with models.dev
+    // by construction and the absences below would hold for any page, so both
+    // are set far from the metered rate.
     mockApi()
     GLM_DETAIL.offerings[0] = offering({
       price_source: "organization",
@@ -635,7 +634,6 @@ describe("ModelDetailPage", () => {
     })
     const rows = within(grid).getAllByRole("row").slice(1)
     expect(rows).toHaveLength(2)
-    // Each row's own metered rate, cheapest first.
     expect(
       within(rows[0] as HTMLElement).getByRole("gridcell", {
         name: /\$0\.075/,
@@ -645,15 +643,12 @@ describe("ModelDetailPage", () => {
       within(rows[1] as HTMLElement).getByRole("gridcell", { name: /\$0\.50/ }),
     ).toBeInTheDocument()
 
-    // A rate stands alone: no list price beside it, and no banner explaining
-    // the two.
     expect(within(grid).queryByText(/list \$/i)).toBeNull()
     expect(within(grid).queryByText(/^list$/i)).toBeNull()
     expect(
       screen.queryByText(/differs from the price the provider publishes/i),
     ).toBeNull()
 
-    // Where the rate came from stays named.
     expect(
       within(grid).getByRole("columnheader", { name: "Price from" }),
     ).toBeInTheDocument()
