@@ -173,8 +173,11 @@ are unset for a model models.dev does not describe, which means unknown rather
 than unsupported. An alias reports its target's capabilities but no `name`,
 because the target's name would say what the alias points at.
 
-The live catalog is kept in memory and refetched in the background. When a fetch
-fails, or models.dev answers with a document the gateway cannot read, the last
+The live catalog is kept in memory and refetched in the background. The gateway
+reads models.dev's v2 catalog, and its v1 catalog when v2 cannot be fetched or
+read; it logs one warning when it falls back. v2 is still experimental at
+models.dev, and v1 is the reduced copy models.dev makes from it, so both give the
+same limits, capabilities and prices. When neither can be read, the last
 good copy stays in use and the gateway logs why. A document is refused when it
 lists no models or when more than a quarter of its models are damaged. A few
 damaged models are left out, and one warning names them.
