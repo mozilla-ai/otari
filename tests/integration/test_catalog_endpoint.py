@@ -137,7 +137,7 @@ def priced(catalog_client: TestClient, master_header: dict[str, str]) -> TestCli
 
 
 def _get(client: TestClient, path: str, **kwargs: Any) -> Any:
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         response = client.get(path, **kwargs)
     assert response.status_code == status.HTTP_200_OK, response.text
     return response.json()
@@ -235,7 +235,7 @@ def test_the_search_cannot_widen_what_the_caller_may_see(
 
 
 def test_the_window_is_bounded(priced: TestClient, master_header: dict[str, str]) -> None:
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         over = priced.get(f"{API_ROOT}/catalog/models?limit=1001", headers=master_header)
         long_term = priced.get(f"{API_ROOT}/catalog/models?search={'x' * 201}", headers=master_header)
 
@@ -290,7 +290,7 @@ def test_an_aliased_model_stays_in_the_catalog(priced: TestClient, master_header
 
 
 def test_an_unknown_model_is_404(priced: TestClient, master_header: dict[str, str]) -> None:
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         response = priced.get(f"{API_ROOT}/catalog/models/no-such-model", headers=master_header)
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -338,7 +338,7 @@ def test_an_api_key_sees_only_the_models_its_allow_list_permits(
     assert filtered["models"] == []
     assert filtered["facets"]["providers"] == ["nebius"]
 
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         denied = priced.get(f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=key_header)
     # Indistinguishable from a model that does not exist.
     assert denied.status_code == status.HTTP_404_NOT_FOUND
@@ -478,7 +478,7 @@ def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
 
     config = cast(FastAPI, priced.app).state.config
     try:
-        with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
+        with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
             rebuilt = priced.post(f"{API_ROOT}/catalog/selectors/refresh", headers=master_header)
         assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text
         assert rebuilt.json()["models"] >= 1
@@ -522,7 +522,7 @@ def test_a_visitor_reads_the_catalog_only_while_it_is_public(
     assert offering["usage_30d"] is None
 
     # A credential that is present and wrong is still a wrong credential.
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         refused = public_client.get(f"{API_ROOT}/catalog/models", headers={"Authorization": "Bearer not-a-key"})
     assert refused.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
 
@@ -601,7 +601,7 @@ def test_a_visitor_is_throttled_on_the_catalogs_own_budget(
     throttled_public_client: TestClient, master_header: dict[str, str]
 ) -> None:
     # The budget is per client address and counts anonymous reads only.
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         statuses = [throttled_public_client.get(f"{API_ROOT}/catalog/models").status_code for _ in range(3)]
         assert statuses == [status.HTTP_200_OK, status.HTTP_200_OK, status.HTTP_429_TOO_MANY_REQUESTS]
         # The detail shares the budget: it is the same catalog being read.

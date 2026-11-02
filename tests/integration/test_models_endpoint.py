@@ -323,7 +323,7 @@ def limits_client(limits_config: GatewayConfig, clean_database: None) -> Generat
 
 def _read(client: TestClient, path: str) -> Any:
     """GET ``path`` as the master key, with models.dev answering ``_MODELS_DEV``."""
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(_MODELS_DEV))):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(_MODELS_DEV)):
         response = client.get(path, headers={API_KEY_HEADER: "Bearer test-master-key"})
     assert response.status_code == 200, response.text
     return response.json()

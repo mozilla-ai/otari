@@ -188,9 +188,12 @@ rerank, transcription or `other` model is refused with `400` `wrong_model_type` 
 called, as is an embeddings request for a model its provider lists as another
 kind.
 
-The live catalog is kept in memory and refetched in the background. The gateway
-reads models.dev's v2 catalog, and its v1 catalog when v2 cannot be fetched or
-read; it logs one warning when it falls back. v2 is still experimental at
+One worker downloads the catalog every `models_dev_cache_ttl_seconds` (a day by
+default) and stores it in the database, and every worker serves the stored copy
+within 30 seconds. A model listing never waits on the download, and after a
+restart the gateway serves the stored copy at once. A failed download is tried
+again a minute later. The gateway reads models.dev's v2 catalog, and its v1
+catalog when v2 cannot be fetched or read; it logs one warning when it falls back. v2 is still experimental at
 models.dev, and v1 is the reduced copy models.dev makes from it, so both give the
 same limits, capabilities and prices. When neither can be read, the last
 good copy stays in use and the gateway logs why. A document is refused when it

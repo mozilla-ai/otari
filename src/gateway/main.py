@@ -89,10 +89,6 @@ from gateway.services.log_writer import (
     create_log_writer,
 )
 from gateway.services.master_key_service import ensure_master_key
-from gateway.services.model_catalog_service import (
-    clear_catalog_cache,
-    run_catalog_refresher,
-)
 from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
@@ -115,6 +111,9 @@ from gateway.services.pricing_init_service import (
 )
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
+    load_stored_models_dev_catalog,
+    reset_catalog_refresh_state,
+    run_catalog_refresher,
     run_price_snapshot_refresher,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
@@ -567,7 +566,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         reset_discovery_cache,
     ),
     _LifespanWorker(
-        "models.dev catalog", lambda config, _container: run_catalog_refresher(config), clear_catalog_cache
+        "models.dev catalog", lambda config, _container: run_catalog_refresher(config), reset_catalog_refresh_state
     ),
     # The short model spellings, rebuilt from the deployment's catalog view,
     # with the hosted port resolved per tick as a request would resolve it.
@@ -938,6 +937,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # After the overrides, so it sees the copy setting this process serves.
             _validate_provider_account_pepper(config)
             await load_persisted_price_snapshot(session)
+            # So the first request after a restart lists the stored model facts.
+            await load_stored_models_dev_catalog(session)
             # Persisted tool/guardrail overrides (service URLs + web-search
             # knobs) win over config/env too; apply them so the running worker
             # reflects a dashboard change made in a prior run.

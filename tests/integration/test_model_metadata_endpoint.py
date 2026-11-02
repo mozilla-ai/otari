@@ -1,15 +1,19 @@
 """Tests for GET /api/v1/models/metadata (models.dev enrichment, mocked fetch)."""
 
+import json
 from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.pricing import PricingSnapshot
 from gateway.services import model_catalog_service as mcs
-from gateway.types.models_dev import parse_catalog
+from gateway.services.pricing_refresh_service import MODELS_DEV_CATALOG_SOURCE
+from gateway.types.models_dev import catalog_document, parse_catalog
 
 from .conftest import build_test_client
 
@@ -61,7 +65,7 @@ def test_metadata_enriches_configured_models(postgres_url: str, master_header: d
     client_gen = _make_client(_config(postgres_url))
     client = next(client_gen)
     try:
-        with patch.object(mcs, "_fetch", new=AsyncMock(return_value=parse_catalog(CATALOG))):
+        with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
             resp = client.get(f"{API_ROOT}/models/metadata", headers=master_header)
         assert resp.status_code == 200
         body = resp.json()
@@ -108,6 +112,24 @@ def test_metadata_disabled_makes_no_fetch_and_serves_the_bundled_catalog(
         assert resp.json()["models"]["openai:gpt-4o"]["context_window"] == 128000
         # The outbound call is never made when enrichment is disabled.
         fetch_mock.assert_not_awaited()
+    finally:
+        client_gen.close()
+
+
+def test_the_first_read_after_a_restart_serves_the_stored_catalog(
+    postgres_url: str, test_db: Session, master_header: dict[str, str]
+) -> None:
+    """models.dev is unreachable and nothing is bundled, so the facts can only come from the stored row."""
+    test_db.add(
+        PricingSnapshot(source=MODELS_DEV_CATALOG_SOURCE, snapshot=json.dumps(catalog_document(parse_catalog(CATALOG))))
+    )
+    test_db.commit()
+    client_gen = _make_client(_config(postgres_url))
+    client = next(client_gen)
+    try:
+        resp = client.get(f"{API_ROOT}/models/metadata", headers=master_header)
+        assert resp.status_code == 200
+        assert resp.json()["models"]["openai:gpt-4o"]["context_window"] == 128000
     finally:
         client_gen.close()
 
