@@ -310,6 +310,7 @@ class HealthCheckService:
         for recipient in recipients:
             delivery = await mailer.send(to=recipient, message=message)
             if not delivery.delivered:
+                # codeql[py/clear-text-logging-sensitive-data]
                 logger.warning("Unavailable model alert for %s not delivered via %s", selector, delivery.transport)
 
     async def _forget_run(self, run_id: uuid.UUID) -> None:

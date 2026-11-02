@@ -54,13 +54,16 @@ async def _switch_off(config: GatewayConfig, instance: str, model: str, refusal:
             switched = await build_hosted_provider_service(uow, config=config).switch_off_unavailable(instance, model)
         if not switched:
             return
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.warning("Switched off hosted model %s: its provider refused to serve it", selector)
         async with create_unit_of_work() as uow:
             await build_health_check_service(uow, config).alert_unavailable(selector, refusal)
     except asyncio.CancelledError:
         raise
     except DATABASE_ERRORS as exc:
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.warning("Could not switch off unavailable model %s (%s)", selector, describe_database_error(exc))
     except Exception as exc:
         # A background task: nothing awaits it, so anything it raises ends here.
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.warning("Could not switch off unavailable model %s (%s)", selector, type(exc).__name__)
