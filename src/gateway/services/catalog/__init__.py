@@ -4,6 +4,7 @@ from gateway.services.catalog._aliases import hide_alias_target
 from gateway.services.catalog._dated import dated_builds
 from gateway.services.catalog._limits import ModelArchitecture, apply_model_metadata
 from gateway.services.catalog._metadata import load_catalog_metadata, metadata_entry
+from gateway.services.catalog._model_type import ModelType, model_type, not_chat_detail, not_embedding_detail
 from gateway.services.catalog._query import query_catalog
 from gateway.services.catalog._selectors import (
     CatalogModel,
@@ -30,6 +31,7 @@ __all__ = [
     "CatalogModel",
     "Identities",
     "ModelArchitecture",
+    "ModelType",
     "OfferingRow",
     "OrganizationSelectors",
     "SelectorIndex",
@@ -43,6 +45,9 @@ __all__ = [
     "load_catalog_metadata",
     "metadata_entry",
     "model_selector_for_slug",
+    "model_type",
+    "not_chat_detail",
+    "not_embedding_detail",
     "offering_input_rate",
     "organization_offerings",
     "query_catalog",

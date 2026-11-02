@@ -232,9 +232,10 @@ class HostedProvider(Base):
     )
 
 
-HostedModelDisabledReason = Literal["unpriced", "operator"]
+HostedModelDisabledReason = Literal["unpriced", "operator", "unavailable"]
 DISABLED_UNPRICED: HostedModelDisabledReason = "unpriced"
 DISABLED_BY_OPERATOR: HostedModelDisabledReason = "operator"
+DISABLED_UNAVAILABLE: HostedModelDisabledReason = "unavailable"
 
 
 class HostedProviderModel(Base):
@@ -252,7 +253,8 @@ class HostedProviderModel(Base):
 
     ``disabled_reason`` says why a row is off, and is null exactly when it is
     on: ``unpriced`` while it waits for a rate, ``operator`` while an operator
-    has switched it off. ``serves_unpriced`` marks a row switched on without a
+    has switched it off, ``unavailable`` since its provider refused to serve it
+    on the deployment's credential. ``serves_unpriced`` marks a row switched on without a
     rate on purpose, so a refresh does not hold it for one.
     """
 

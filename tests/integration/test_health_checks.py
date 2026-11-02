@@ -107,6 +107,9 @@ class _Roster:
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
         return {name: frozenset(models) for name, models in self.served.items() if models}
 
+    async def switch_off_unavailable(self, provider: str, model: str) -> bool:
+        return await self.switch_off_models({provider: [model]}) == 1
+
     async def switch_off_models(self, models: Mapping[str, Collection[str]]) -> int:
         self.switched_off.append({name: set(names) for name, names in models.items()})
         before = sum(len(names) for names in self.served.values())

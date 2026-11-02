@@ -924,6 +924,40 @@ describe("HostedProvidersPage", () => {
     )
   })
 
+  it("marks a model its provider refused as unavailable, and lets it be switched back on", async () => {
+    const requests = mockApi({
+      models: [
+        hostedModel({ enabled: false, disabled_reason: "unavailable" }),
+        hostedModel({
+          id: "m2",
+          model: "o9-preview",
+          enabled: false,
+          disabled_reason: "operator",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Models on openai" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on openai",
+    })
+    expect(await within(panel).findAllByText("Unavailable")).toHaveLength(1)
+
+    await user.click(
+      within(panel).getByRole("switch", { name: "Serve gpt-4o" }),
+    )
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    const [patch] = hostedRequests(requests, "PATCH")
+    expect(patch.url).toContain("/hosted-providers/openai/models/m1")
+    expect(patch.body).toEqual({ enabled: true })
+  })
+
   it("lists a provider defined in config.yml read-only, with its models still managed here", async () => {
     const requests = mockApi({
       providers: [

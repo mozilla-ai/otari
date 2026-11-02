@@ -5,7 +5,7 @@ from typing import Annotated, Any
 
 from any_llm import aembedding
 from any_llm.types.completion import CreateEmbeddingResponse
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,10 +18,12 @@ from gateway.api.deps import (
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import WRONG_MODEL_TYPE, error_headers
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.schemas.inference import EmbeddingResponse
 from gateway.services.budgets import estimate_cost
+from gateway.services.catalog import not_embedding_detail
 from gateway.services.inference import EMBEDDINGS_BILLING, InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
@@ -79,6 +81,12 @@ async def create_embedding(
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
+    def refuse_model(resolved: ResolvedProvider) -> HTTPException | None:
+        wrong_type = not_embedding_detail(resolved.instance, resolved.model, request.model)
+        if wrong_type is None:
+            return None
+        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=wrong_type, headers=error_headers(WRONG_MODEL_TYPE))
+
     async def call_provider(resolved: ResolvedProvider) -> CreateEmbeddingResponse:
         embedding_kwargs: dict[str, Any] = {
             "model": resolved.model,
@@ -108,6 +116,7 @@ async def create_embedding(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        refuse_model=refuse_model,
         request_params=request.model_fields_set,
         estimate=estimate,
         enforce_require_pricing=True,

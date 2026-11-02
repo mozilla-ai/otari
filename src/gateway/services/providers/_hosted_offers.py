@@ -24,7 +24,7 @@ from collections.abc import Collection, Mapping, Sequence
 
 from gateway.exceptions.providers_exceptions import HostedModelAlreadyOfferedError
 from gateway.models.pricing import SEED_ORIGIN, ModelPricing, PriceSource
-from gateway.models.providers import DISABLED_BY_OPERATOR, DISABLED_UNPRICED, HostedProviderModel
+from gateway.models.providers import DISABLED_BY_OPERATOR, DISABLED_UNAVAILABLE, DISABLED_UNPRICED, HostedProviderModel
 from gateway.repositories.providers import HostedModelConflict, HostedProviderModelRepository
 from gateway.schemas.providers import HostedModelCreateRequest, HostedModelRates, HostedModelUpdateRequest
 from gateway.services.pricing import DeploymentPricingService
@@ -44,8 +44,8 @@ def _key(provider: str, model: str) -> str:
 
 
 def _hold_for_a_price(row: HostedProviderModel) -> None:
-    """Switch a row off for want of a rate, unless an operator already switched it off."""
-    if row.disabled_reason != DISABLED_BY_OPERATOR:
+    """Switch a row off for want of a rate, unless it is already off for a reason a rate does not cure."""
+    if row.disabled_reason not in (DISABLED_BY_OPERATOR, DISABLED_UNAVAILABLE):
         row.enabled = False
         row.disabled_reason = DISABLED_UNPRICED
 
@@ -129,6 +129,10 @@ class HostedOffers:
     async def switch_off_by_operator(self, provider: str, models: Collection[str]) -> int:
         """Switch these models off under ``provider`` as an operator's choice. Returns how many were on."""
         return await self.models.switch_off(provider, models, reason=DISABLED_BY_OPERATOR)
+
+    async def switch_off_unavailable(self, provider: str, model: str) -> bool:
+        """Switch ``model`` off under ``provider`` because the provider refused to serve it. Whether it was on."""
+        return await self.models.switch_off(provider, [model], reason=DISABLED_UNAVAILABLE) > 0
 
     async def reseed(
         self, provider: str, defaults: Mapping[str, ModelPricing], *, serves_unlisted: bool = False

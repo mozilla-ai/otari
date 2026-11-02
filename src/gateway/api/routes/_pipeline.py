@@ -108,6 +108,7 @@ from gateway.api.routes._tools import (
     _resolve_sandbox_purpose_hint,
     _resolve_web_search_purpose_hint,
 )
+from gateway.api.routes._unavailable_models import note_unavailable_model
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
@@ -135,6 +136,7 @@ from gateway.core.error_codes import (
     PROVIDER_STREAM_INTERRUPTED,
     UNSUPPORTED_CONTENT,
     UPSTREAM_RATE_LIMITED,
+    WRONG_MODEL_TYPE,
     error_code_of,
     error_headers,
 )
@@ -221,7 +223,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
-from gateway.services.catalog import organization_offerings
+from gateway.services.catalog import not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
     ContainerLease,
     SandboxContainerRegistry,
@@ -273,6 +275,7 @@ from gateway.services.model_access import (
     unresolvable_model_detail,
     unresolved_model_refusal,
 )
+from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
@@ -3020,6 +3023,37 @@ async def resolve_request_context(
             )
             kind = ErrorKind.NOT_FOUND if refusal.status_code == status.HTTP_404_NOT_FOUND else ErrorKind.PERMISSION
             raise adapter.error(refusal.status_code, refusal.detail, kind, headers=error_headers(refusal.code))
+
+    candidates = (
+        [f"{attempt.instance}:{attempt.model}" for attempt in plan.attempts]
+        if plan is not None
+        else [f"{gate_instance}:{gate_model}"]
+        if gate_instance is not None
+        else []
+    )
+    wrong_type = not_chat_detail(config, cached_models_dev_catalog(config), candidates, model)
+    if wrong_type is not None:
+        await log_gateway_rejection(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            model=gate_model,
+            provider=gate_instance,
+            endpoint=adapter.endpoint,
+            detail=wrong_type,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            started_at=started_at,
+            request_id=request_id,
+            tags=tags,
+            safety_identifier=upstream_user,
+        )
+        raise adapter.error(
+            status.HTTP_400_BAD_REQUEST,
+            wrong_type,
+            ErrorKind.INVALID_REQUEST,
+            headers=error_headers(WRONG_MODEL_TYPE),
+        )
 
     # A plan dropped such candidates when it compiled; a plain model is refused here.
     try:
@@ -5930,6 +5964,7 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
+        note_unavailable_model(config, provider, model, exc, deployment_paid=deployment_paid)
         if automatic_observation is not None:
             automatic_observation.finish(unhealthy=_automatic_unhealthy(exc))
         if isinstance(exc, IncompleteStreamError):
@@ -6354,6 +6389,7 @@ async def run_single_attempt_stream(
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except Exception as exc:
+        note_unavailable_model(ctx.config, provider, model, exc, deployment_paid=ctx.deployment_paid)
         await _log_failure_and_refund(
             ctx,
             adapter,
@@ -6481,6 +6517,10 @@ async def log_exhausted_plan(
     if ctx.plan is None:
         return
     last = stopped_on or ctx.plan.attempts[-1]
+    if stopped_on is not None and exc.__cause__ is not None:
+        note_unavailable_model(
+            ctx.config, stopped_on.instance, stopped_on.model, exc.__cause__, deployment_paid=stopped_on.deployment_paid
+        )
     logged = await record_usage(
         db=ctx.db,
         log_writer=ctx.log_writer,
@@ -6532,6 +6572,7 @@ async def log_absorbed_attempt(
     on the row that settles the request's reservation, so this row carries the
     attempt's tokens and none of the tool ledger. See :func:`log_usage`.
     """
+    note_unavailable_model(ctx.config, attempt.instance, attempt.model, exc, deployment_paid=attempt.deployment_paid)
     await _log_absorbed_row(ctx, adapter, attempt, failure_error_message(exc), failure_status_code(exc))
 
 
@@ -6840,6 +6881,7 @@ async def run_non_stream(
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from e
     except Exception as e:
+        note_unavailable_model(ctx.config, provider, model, e, deployment_paid=ctx.deployment_paid)
         await _log_failure_and_refund(
             ctx,
             adapter,

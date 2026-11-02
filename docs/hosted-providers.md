@@ -26,7 +26,14 @@ key for the provider never serves it, because that key belongs to another
 endpoint. A request whose workspace belongs to no organization is served only
 on a hosted provider restricted to no organization.
 Only a model switched on in that roster is served on the hosted credential: a
-model switched off, or one the roster does not list, is refused with `424`. The
+model switched off, or one the roster does not list, is refused with `424`.
+A provider can stop serving a model it still lists, as Together does with a
+model it moves to dedicated endpoints. The first request the provider refuses
+that way on the hosted credential switches the model off, with
+`disabled_reason: unavailable`, and emails the Health page's alert list
+([Health checks](health-checks.md#email-alerts)); an operator switches it back
+on if the refusal was wrong. Only a refusal Otari recognizes as being about the
+model itself does this, never one an organization's own key met. The
 deployment settles the upstream bill for a hosted model, which is why its rate
 belongs to the deployment and not to any one organization. A hosted provider
 can be restricted to one organization, and every other organization is then

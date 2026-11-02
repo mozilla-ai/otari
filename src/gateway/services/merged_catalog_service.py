@@ -30,7 +30,7 @@ from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
-from gateway.services.catalog import ModelArchitecture, apply_model_metadata, load_catalog_metadata
+from gateway.services.catalog import ModelArchitecture, ModelType, apply_model_metadata, load_catalog_metadata
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
 from gateway.services.policy_store import effective_policies
@@ -147,6 +147,9 @@ class ModelObject(BaseModel):
     name: str | None = None
     supported_parameters: list[str] | None = None
     architecture: ModelArchitecture | None = None
+    # What kind of model this is (``chat``, ``embedding``, ...; see ``services/catalog/_model_type``), so a
+    # client can offer chat models alone. ``None`` where neither the provider's listing nor models.dev says.
+    type: ModelType | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False

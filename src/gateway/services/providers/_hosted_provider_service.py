@@ -444,6 +444,15 @@ class HostedProviderService:
                 [await self.offers.switch_off_by_operator(provider, names) for provider, names in models.items()]
             )
 
+    async def switch_off_unavailable(self, provider: str, model: str) -> bool:
+        """Stop serving ``model`` under ``provider``, which the provider refused to serve on the deployment's key.
+
+        Returns whether this call switched it off, so the operators are told once
+        however many requests met the refusal. An operator switches it back on.
+        """
+        async with self.uow:
+            return await self.offers.switch_off_unavailable(provider, model)
+
     async def remove_model(self, provider: str, model_id: uuid.UUID) -> None:
         """Stop offering a model. Its pricing history stays.
 
