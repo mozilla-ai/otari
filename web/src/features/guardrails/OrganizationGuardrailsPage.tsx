@@ -51,7 +51,11 @@ import {
   useUpdateOrganizationGuardrail,
 } from "@/shared/api/tools"
 import { useWorkspaces } from "@/shared/api/workspaces"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 // The organization's guardrails: what each check is, and where each one runs.
 //
@@ -353,6 +357,7 @@ export function OrganizationGuardrailsPage() {
                   label="Search guardrails"
                   placeholder="Search by name or guardrail"
                   value={search.value}
+                  maxLength={SEARCH_MAX_LENGTH}
                   onChange={search.onChange}
                   resultCount={isLoading ? undefined : shownDefined.length}
                   className="w-full md:w-96"

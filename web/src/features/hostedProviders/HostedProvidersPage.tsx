@@ -47,7 +47,11 @@ import {
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
@@ -676,6 +680,7 @@ export function HostedProvidersPage() {
               label="Search providers"
               placeholder="Search by name or provider"
               value={search.value}
+              maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={
                 providers.isPending || configured.isPending

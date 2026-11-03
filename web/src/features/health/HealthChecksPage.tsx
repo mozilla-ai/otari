@@ -33,7 +33,11 @@ import {
 import { looksLikeAddress, parseAddresses } from "@/shared/helpers/addresses"
 import { formatDateTimeMinutes } from "@/shared/helpers/format"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 // The server's cap on the alert list.
 const MAX_ALERT_EMAILS = 20
@@ -517,6 +521,7 @@ export function HealthChecksPage() {
                 label="Search providers and models"
                 placeholder="Search by provider or model"
                 value={search.value}
+                maxLength={SEARCH_MAX_LENGTH}
                 onChange={search.onChange}
                 resultCount={providerRows.length + results.length}
                 className="w-full md:w-96"
