@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from apron_auth.errors import ConfigurationError, IdentityFetchError, TokenExpiredError, TokenVerificationError
+from apron_auth.errors import ConfigurationError, IdentityFetchError, TokenExpiredError, TokenValidationError
 from apron_auth.workload import WorkloadTokenVerifier
 
 from gateway.core.settings.api_keys import FederationIssuer
@@ -227,7 +227,7 @@ class FederatedTokenVerifier:
             identity = await verifier.verify(token, audience=None)
         except TokenExpiredError as exc:
             raise FederationRefusedError("federation_expired") from exc
-        except TokenVerificationError as exc:
+        except TokenValidationError as exc:
             raise FederationRefusedError("federation_invalid_token") from exc
         except IdentityFetchError as exc:
             raise FederationUnavailableError from exc
