@@ -1,8 +1,8 @@
 """What kind of model a ``provider:model`` is: a chat model, an embedding model, and so on.
 
-The provider's own model listing is read first, because models.dev describes an
-embedding model as one that reads and writes text, which is how a chat picker
-built from the catalog came to offer one. Each provider says it in its own field:
+The provider's own model listing is read first, because it describes the model
+as that provider serves it, then models.dev's v2 ``type``. Each provider says it
+in its own field:
 Together a ``type``, DeepInfra ``metadata.tags``, DeepSeek ``output_modalities``.
 OVHcloud says less: a ``max_completion_tokens`` of 0 on every model that writes
 no text, which makes it ``other``, a model that is not a chat model and nothing
@@ -11,19 +11,18 @@ than guessed.
 """
 
 from collections.abc import Iterable
-from typing import Any, Literal
+from typing import Any
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.catalog._metadata import metadata_entry
-from gateway.services.model_catalog_service import ModelCatalogEntry
+from gateway.types.model_type import ModelType
 from gateway.types.models_dev import ModelsDevCatalog
-
-ModelType = Literal["chat", "embedding", "image", "speech", "transcription", "rerank", "moderation", "video", "other"]
 
 # The kinds a chat completion, a message or a response can never be served by.
 # Image, audio and video models are left out: an aggregator such as OpenRouter
 # serves some of them through chat completions. So are moderation models, which
-# Llama Guard and Qwen3Guard are, and which are called through chat completions.
+# Llama Guard and Qwen3Guard are, and which are called through chat completions,
+# and decision and realtime models, which some hosts may serve through them.
 NOT_CHAT: frozenset[ModelType] = frozenset({"embedding", "rerank", "transcription", "other"})
 
 # Where a model of a kind no chat endpoint serves is sent instead.
@@ -95,26 +94,6 @@ def type_from_listing(fields: dict[str, Any]) -> ModelType | None:
     return None
 
 
-def _type_from_catalog(entry: ModelCatalogEntry) -> ModelType | None:
-    """The kind models.dev's entry implies, where it implies one.
-
-    models.dev gives an embedding model text output, so the family is what
-    names one (``text-embedding``, ``mistral-embed``).
-    """
-    if entry.family is not None and "embed" in entry.family.lower():
-        return "embedding"
-    outputs = set(entry.output_modalities)
-    if "text" in outputs:
-        return "chat"
-    if outputs == {"image"}:
-        return "image"
-    if outputs == {"audio"}:
-        return "speech"
-    if outputs == {"video"}:
-        return "video"
-    return None
-
-
 def listed_model_type(instance: str, model_id: str) -> ModelType | None:
     """The kind ``instance``'s last model listing gives ``model_id``, or ``None``.
 
@@ -139,7 +118,7 @@ def model_type(config: GatewayConfig, models_dev: ModelsDevCatalog | None, selec
     if listed is not None:
         return listed
     entry = metadata_entry(models_dev, config.provider_instance_type(instance), model_id)
-    return _type_from_catalog(entry) if entry is not None else None
+    return entry.type if entry is not None else None
 
 
 def _a(kind: ModelType) -> str:

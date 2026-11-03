@@ -27,6 +27,7 @@ import httpx
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.pricing import bundled_catalog
+from gateway.types.model_type import ModelType, models_dev_model_type
 from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, ModelsDevModel, ModelsDevSource
 
 # The catalog is a few MB; a short read timeout keeps a slow models.dev from
@@ -70,6 +71,8 @@ class ModelCatalogEntry:
     deprecated: bool = False
     cost_input: float | None = None
     cost_output: float | None = None
+    type: ModelType | None = None
+    """The kind models.dev gives the model; ``None`` from a v1 document, which gives none."""
 
     @classmethod
     def from_model(cls, model: ModelsDevModel) -> "ModelCatalogEntry":
@@ -96,6 +99,7 @@ class ModelCatalogEntry:
             deprecated=model.status == "deprecated",
             cost_input=None if rates is None else rates.input,
             cost_output=None if rates is None else rates.output,
+            type=models_dev_model_type(model.type),
         )
 
 

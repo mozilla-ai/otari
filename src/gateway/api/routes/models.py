@@ -20,7 +20,7 @@ from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.services.catalog import apply_model_metadata, load_catalog_metadata
+from gateway.services.catalog import ModelType, apply_model_metadata, load_catalog_metadata
 from gateway.services.merged_catalog_service import (
     CatalogScope,
     ModelObject,
@@ -146,6 +146,10 @@ class ModelMetadata(BaseModel):
     deprecated: bool = False
     cost_input: float | None = None
     cost_output: float | None = None
+    type: ModelType | None = Field(
+        default=None,
+        description="What kind of model models.dev says it is. Null where the catalog gives no kind.",
+    )
 
 
 class ModelMetadataResponse(BaseModel):
@@ -179,6 +183,7 @@ def _to_metadata_schema(entry: ModelCatalogEntry) -> ModelMetadata:
         deprecated=entry.deprecated,
         cost_input=entry.cost_input,
         cost_output=entry.cost_output,
+        type=entry.type,
     )
 
 

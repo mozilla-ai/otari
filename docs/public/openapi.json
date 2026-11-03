@@ -12513,6 +12513,31 @@
             "default": false,
             "title": "Tool Call",
             "type": "boolean"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model models.dev says it is. Null where the catalog gives no kind.",
+            "title": "Type"
           }
         },
         "title": "ModelMetadata",
@@ -12654,6 +12679,8 @@
                   "rerank",
                   "moderation",
                   "video",
+                  "decision",
+                  "realtime",
                   "other"
                 ],
                 "type": "string"
