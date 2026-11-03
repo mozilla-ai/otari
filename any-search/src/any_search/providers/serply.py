@@ -25,10 +25,13 @@ side fails the call rather than degrading it: ``results`` and each item's
 result, must be there and be strings. Anything else raises
 ``unexpected_response``. A ``link`` that is not an http or https URL with a
 host, such as an opaque Google redirect token, which Serply sometimes returns
-in its place, is dropped rather than failing the search. Ads, places, the knowledge graph
-and Serply's other SERP features come in arrays of their own beside
-``results``, which the adapter does not read, so a field Serply adds breaks
-nothing. Serply dates no hit and reports no cost.
+in its place, is dropped rather than failing the search. Ads, places, the
+knowledge graph and Serply's other SERP features come in arrays of their own
+beside ``results``, which the adapter does not read, so a field Serply adds
+breaks nothing. Serply reports no cost, and the adapter dates no hit: a
+result's date is display text in the language of the region that served the
+search, such as ``May 27, 2026``, ``17 hours ago`` or ``27.05.2026``, so it
+stays in ``raw``.
 
 API: https://serply.io/docs/resources/google-search. ``tbs`` and ``tbm`` are
 Google's own parameters, which the documentation does not list; Serply passes

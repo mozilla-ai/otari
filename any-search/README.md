@@ -216,7 +216,7 @@ log. Each request names the library in its `User-Agent`.
 |---|---|
 | `url`, `title` | `link`, `title` |
 | `snippet` | `description`; Serply returns no page text, so `text` is always `None` |
-| `published` | always `None`: Serply's results carry no date |
+| `published` | always `None`: Serply shows a result's date as display text in the language of the region that served the search, such as `May 27, 2026`, `17 hours ago` or `27.05.2026`, so it stays in `raw` |
 
 Serply reports no cost. `max_results` becomes `num`, at most 10, one page of Google's results;
 a page can hold one more than asked for, so the hits are cut to the count as well. `time_range`
