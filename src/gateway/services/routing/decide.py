@@ -189,9 +189,9 @@ def explain_router_ordering(
 ) -> tuple[RouterOrdering | None, list[WeightedShare]]:
     """The ordering to show on a surface that has no request to route.
 
-    Returns ``(None, [])`` for any other router (``noop``, or a backend this build
-    does not have): the compiler falls through to the default target, and that
-    decline path is what ``explain`` documents.
+    Returns ``(None, [])`` for a backend this build does not have: the compiler
+    falls through to the default target, and that decline path is what
+    ``explain`` documents.
 
     The priority backend's order is the declared one, so it is shown as declared;
     which candidate has room is a request-time fact this surface does not read.

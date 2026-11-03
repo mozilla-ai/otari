@@ -187,9 +187,8 @@ class ExplainResponse(BaseModel):
     candidates: list[CandidateResponse]
     dropped: list[DroppedResponse]
     guardrails: list[dict[str, Any]]
-    # Set when the policy hands its ordering to a router. For a router whose order
-    # explain cannot know (``noop``, or a backend this build does not have) the plan
-    # above is the *decline* path, because explain deliberately dispatches nothing.
+    # Set when the policy hands its ordering to a router. For a backend this build
+    # does not have, the plan above is the *decline* path, because explain deliberately dispatches nothing.
     # Surfaced so the dashboard can say so rather than showing a one-candidate plan
     # that looks like the router was ignored. A weighted policy is the exception:
     # see `router_weights`.

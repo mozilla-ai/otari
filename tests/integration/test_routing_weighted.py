@@ -321,20 +321,18 @@ def test_a_stored_weighted_policy_needs_no_pricing(client: TestClient) -> None:
 
 
 def test_a_stored_policy_naming_a_router_this_build_lacks_serves_its_default(client: TestClient) -> None:
-    # `knn` is no longer a backend here, so a policy still naming it is stored like
-    # any unknown backend and serves its default target on every request.
     resp = client.post(
         f"{API_ROOT}/routing/policies",
         json={
-            "name": "stored-knn",
-            "spec": {"select": [{"router": "knn", "candidates": [LIGHT, BACKUP]}, {"default": HEAVY}]},
+            "name": "stored-unknown",
+            "spec": {"select": [{"router": "cheapest", "candidates": [LIGHT, BACKUP]}, {"default": HEAVY}]},
         },
         headers=HEADERS,
     )
     assert resp.status_code == 200, resp.text
 
     for _ in range(3):
-        served, calls = _chat(client, "stored-knn")
+        served, calls = _chat(client, "stored-unknown")
         assert served.status_code == 200, served.text
         assert calls == [HEAVY]
 

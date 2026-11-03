@@ -46,7 +46,6 @@ from gateway.services.routing._service import (
     RoutingService,
 )
 from gateway.services.routing.backends import (
-    NOOP_BACKEND,
     PRIORITY_BACKEND,
     WEIGHTED_BACKEND,
     RouterBackend,
@@ -86,7 +85,6 @@ __all__ = [
     "FALLBACK_WINDOW",
     "HOLD_INPUT_TOKENS",
     "HOLD_OUTPUT_TOKENS",
-    "NOOP_BACKEND",
     "PRIORITY_BACKEND",
     "ROUTER_LABEL",
     "ROUTER_LABEL_MODEL",

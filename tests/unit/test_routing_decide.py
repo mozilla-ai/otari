@@ -19,8 +19,6 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import PolicySpec
 from gateway.services.routing.backends import (
-    NoOpRouterBackend,
-    RouterBackend,
     RoutingContext,
     RoutingDecision,
     clear_router_backend_cache,
@@ -153,20 +151,6 @@ def test_a_router_policy_is_dynamic_and_its_candidates_are_validated_selectors()
 # -- backend resolution ----------------------------------------------------
 
 
-def test_noop_backend_declines() -> None:
-    backend = get_router_backend(GatewayConfig(), "noop")
-    assert isinstance(backend, NoOpRouterBackend)
-    assert isinstance(backend, RouterBackend)
-
-
-@pytest.mark.asyncio
-async def test_noop_decline_is_empty() -> None:
-    decision = await NoOpRouterBackend().rank(
-        RoutingContext(user_id="u", default_model="openai:gpt-5", candidate_pool=["openai:gpt-5-mini"])
-    )
-    assert decision.ordered_models == []
-
-
 def test_an_unknown_backend_resolves_to_none_rather_than_raising() -> None:
     # A build without the named backend must serve the policy's default target, not
     # fail every request through it.
@@ -215,12 +199,13 @@ async def test_a_decline_is_not_warned_about(
 
 
 @pytest.mark.asyncio
-async def test_a_policy_naming_the_removed_knn_router_serves_its_default(
-    config: GatewayConfig, router_warnings: Callable[[], list[str]]
+@pytest.mark.parametrize("router", ["knn", "noop"])
+async def test_a_config_policy_naming_a_retired_router_serves_its_default(
+    config: GatewayConfig, router_warnings: Callable[[], list[str]], router: str
 ) -> None:
-    """A stored ``knn`` policy is an unknown backend now: no ordering, one warning."""
-    retired = _spec(backend="knn")
-    assert get_router_backend(config, "knn") is None
+    """A ``config.yml`` policy is not migrated, so a retired router is an unknown one: no ordering, one warning."""
+    retired = _spec(backend=router)
+    assert get_router_backend(config, router) is None
 
     ordering = await decide_ordering(
         config, retired, policy_name="smart", user_id="u", allowlist=None, signal=_signal()
@@ -232,20 +217,20 @@ async def test_a_policy_naming_the_removed_knn_router_serves_its_default(
     assert [attempt.model for attempt in plan.attempts][0] == "gpt-5"
     warnings = router_warnings()
     assert len(warnings) == 1
-    assert "'knn'" in warnings[0]
-    assert "knn," not in warnings[0].split("Available backends:")[1]
+    assert f"'{router}'" in warnings[0]
+    assert router not in warnings[0].split("Available backends:")[1]
 
 
 @pytest.mark.asyncio
 async def test_same_named_policies_in_two_workspaces_each_warn_once(
     config: GatewayConfig, router_warnings: Callable[[], list[str]]
 ) -> None:
-    retired = _spec(backend="knn")
+    unknown = _spec(backend="cheapest")
     for workspace_id in (uuid.uuid4(), uuid.uuid4()):
         for _ in range(2):
             await decide_ordering(
                 config,
-                retired,
+                unknown,
                 policy_name="smart",
                 user_id="u",
                 allowlist=None,

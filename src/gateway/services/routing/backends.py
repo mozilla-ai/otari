@@ -13,9 +13,6 @@ not an error either, on the same principle the compiler already applies to a
 router that declines: routing is an optimization, so a policy naming a backend
 this build does not have serves its default target and warns once.
 
-* ``noop`` → :class:`NoOpRouterBackend`, which declines every request, so the
-  policy serves its default target while keeping its candidates and the rest of
-  its shape.
 * ``weighted`` → :class:`gateway.services.routing.weighted.WeightedRouterBackend`,
   a load balancer: one candidate per request, drawn in proportion to the weights
   the policy declares.
@@ -37,10 +34,8 @@ if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
 
 __all__ = [
-    "NOOP_BACKEND",
     "PRIORITY_BACKEND",
     "WEIGHTED_BACKEND",
-    "NoOpRouterBackend",
     "PriorityRouterBackend",
     "RouterBackend",
     "RoutingContext",
@@ -53,7 +48,6 @@ __all__ = [
     "owes_missing_backend_warning",
 ]
 
-NOOP_BACKEND = "noop"
 PRIORITY_BACKEND = "priority"
 
 
@@ -112,13 +106,6 @@ class RouterBackend(Protocol):
     async def rank(self, ctx: RoutingContext) -> RoutingDecision: ...
 
 
-class NoOpRouterBackend:
-    """Backend that always declines, so the policy's default target serves."""
-
-    async def rank(self, ctx: RoutingContext) -> RoutingDecision:
-        return RoutingDecision.decline("noop backend: always defers to the policy default")
-
-
 class PriorityRouterBackend:
     """Backend that keeps the pool in declared order: the first candidate with room serves.
 
@@ -153,7 +140,7 @@ def clear_router_backend_cache() -> None:
 
 def known_backends() -> tuple[str, ...]:
     """Backend names this build resolves, for an error message that lists them."""
-    return (NOOP_BACKEND, PRIORITY_BACKEND, WEIGHTED_BACKEND)
+    return (PRIORITY_BACKEND, WEIGHTED_BACKEND)
 
 
 def backend_is_weighted(name: str | None) -> bool:
@@ -196,8 +183,6 @@ def get_router_backend(config: GatewayConfig, name: str) -> RouterBackend | None
     actionable and this function does not know it.
     """
     backend = name.strip().lower()
-    if backend == NOOP_BACKEND:
-        return NoOpRouterBackend()
     if backend == PRIORITY_BACKEND:
         return PriorityRouterBackend()
     if backend == WEIGHTED_BACKEND:

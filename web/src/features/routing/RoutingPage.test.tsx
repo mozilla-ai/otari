@@ -14,12 +14,12 @@ import {
   ADMIN_WORKSPACE,
   adminContext,
   CHAIN,
-  KNN,
   MEMBERS,
   mockApi,
   policy,
   renderInWorkspace,
   renderPage,
+  UNKNOWN_ROUTER,
   WEIGHTED,
 } from "@/tests/routing"
 
@@ -289,9 +289,14 @@ describe("RoutingPage", () => {
     // The mutation holds its error until the next call, and the dialog reads it,
     // so without clearing it on close the second row opens already reporting a
     // failure that was about the first.
-    mockApi([policy("fast", CHAIN), policy("smart", KNN)], undefined, [], {
-      deleteBody: { status: 409, detail: "fast is referenced by an alias" },
-    })
+    mockApi(
+      [policy("fast", CHAIN), policy("smart", UNKNOWN_ROUTER)],
+      undefined,
+      [],
+      {
+        deleteBody: { status: 409, detail: "fast is referenced by an alias" },
+      },
+    )
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
@@ -339,10 +344,10 @@ describe("RoutingPage", () => {
     expect(deletes[0].url).toContain(`${API_ROOT}/aliases/legacy`)
   })
 
-  it("summarizes a stored knn policy by its pool under the neutral label", async () => {
-    // The gateway no longer has a knn backend, so the policy serves its default
-    // target; the row names the pool and that default rather than a router kind.
-    mockApi([policy("smart", KNN, { is_dynamic: true })])
+  it("summarizes an unknown router's policy by its pool under the neutral label", async () => {
+    // The gateway has no such backend, so the policy serves its default target;
+    // the row names the pool and that default rather than a router kind.
+    mockApi([policy("smart", UNKNOWN_ROUTER, { is_dynamic: true })])
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
@@ -435,9 +440,9 @@ describe("RoutingPage", () => {
   })
 
   it.each(["stored", "config"] as const)(
-    "shows a knn policy from %s read-only",
+    "shows an unknown router's policy from %s read-only",
     async (source) => {
-      mockApi([policy("smart", KNN, { is_dynamic: true, source })])
+      mockApi([policy("smart", UNKNOWN_ROUTER, { is_dynamic: true, source })])
       renderPage(<RoutingPage />)
 
       const row = (await screen.findByText("smart")).closest("tr")!

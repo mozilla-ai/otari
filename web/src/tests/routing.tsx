@@ -45,10 +45,10 @@ export const CHAIN: PolicySpec = {
   on_failure: ["anthropic:claude-haiku-4-5"],
 }
 
-/** A stored policy naming `knn`, a router backend this build no longer has. */
-export const KNN: PolicySpec = {
+/** A policy naming a router backend this build does not have. */
+export const UNKNOWN_ROUTER: PolicySpec = {
   select: [
-    { router: "knn", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
+    { router: "cheapest", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
     { default: "openai:gpt-5" },
   ],
 }

@@ -70,9 +70,6 @@ _REQUEST_SHAPING_HEADERS = (
     WEB_FETCH_HEADER,
     ROUTER_HEADER,
     "anthropic-beta",
-    # No feature reads it any more, but it stays a slot in every stored fingerprint:
-    # removing it would shift the slots after it and refuse every retry of an older claim.
-    "Otari-Router-Task",
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
 )
