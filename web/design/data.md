@@ -232,6 +232,7 @@ const rows = (keys.data ?? []).filter((key) =>
     placeholder="Search by name or prefix"
     value={search.value}
     onChange={search.onChange}
+    maxLength={SEARCH_MAX_LENGTH}
     resultCount={keys.isPending ? undefined : rows.length}
     className="w-full md:w-80"
   />

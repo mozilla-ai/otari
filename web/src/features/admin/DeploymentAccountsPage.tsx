@@ -30,7 +30,7 @@ import {
 } from "@/shared/api/deployment"
 import { formatRelative } from "@/shared/helpers/format"
 import { useUrlState } from "@/shared/helpers/urlState"
-import { useListSearch } from "@/shared/hooks/useListSearch"
+import { SEARCH_MAX_LENGTH, useListSearch } from "@/shared/hooks/useListSearch"
 
 import {
   accountLabel,
@@ -305,6 +305,7 @@ export function DeploymentAccountsPage() {
         placeholder="Search by name or email"
         value={search.value}
         onChange={search.onChange}
+        maxLength={SEARCH_MAX_LENGTH}
         resultCount={
           accounts.isPlaceholderData ? undefined : accounts.data?.count
         }
