@@ -16,6 +16,7 @@ two-row insert here.
 """
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -250,10 +251,20 @@ class WorkspaceService:
         user: User,
         workspace_id: uuid.UUID,
         workspace_update: WorkspaceUpdate,
+        stop_content: Callable[[uuid.UUID], Awaitable[None]] | None = None,
     ) -> WorkspacePublic:
-        """Rename a workspace, change its description, or turn keeping its trace content or tool output on or off."""
+        """Rename a workspace, change its description, or turn keeping its trace content or tool output on or off.
+
+        Turning either off calls ``stop_content``, so nothing taken in before the
+        switch is stored after it. The order is the rule: only once the caller is
+        known to manage the workspace; before the switch, so a failure there changes
+        nothing; and again after it, for an export that read the switch on in between.
+        """
         workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
+        narrows = workspace_update.trace_content_enabled is False or workspace_update.trace_content_tool_output is False
+        if narrows and stop_content is not None:
+            await stop_content(workspace.id)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
         for switch in ("trace_content_enabled", "trace_content_tool_output"):
@@ -273,6 +284,8 @@ class WorkspaceService:
         except IntegrityError:
             await self.db.rollback()
             raise WorkspaceAlreadyExistsError(str(update_data.get("name", workspace.name))) from None
+        if narrows and stop_content is not None:
+            await stop_content(workspace.id)
         return WorkspacePublic.model_validate(updated)
 
     async def delete_workspace(self, *, user: User, workspace_id: uuid.UUID) -> None:

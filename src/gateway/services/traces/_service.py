@@ -6,7 +6,7 @@ import dataclasses
 import math
 import uuid
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -214,21 +214,6 @@ class TraceService:
         if not kept.keeps:
             return None
         return ContentCapture(generation=generation, tool_output=tool_output and kept.tool_output)
-
-    async def turn_content_off[T](
-        self, workspace_id: uuid.UUID, *, authorize: Callable[[], Awaitable[None]], switch: Callable[[], Awaitable[T]]
-    ) -> T:
-        """Turn a workspace's content off with ``switch``, so nothing taken in before it is stored after it.
-
-        The order is the rule: ``authorize`` first, so only a manager ends the
-        generation; the generation ends before the switch, so a failure there changes
-        nothing; and again after it, for an export that read the switch on in between.
-        """
-        await authorize()
-        await self.stop_content(workspace_id)
-        result = await switch()
-        await self.stop_content(workspace_id)
-        return result
 
     async def stop_content(self, workspace_id: uuid.UUID) -> None:
         """Keep none of the content already captured in the workspace that is not stored yet, on any replica."""
