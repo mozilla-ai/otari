@@ -16,6 +16,9 @@ import type { RateRead } from "@/features/toolPricing/toolRates"
 
 export type WebToolKind = "search" | "fetch"
 
+/** Both kinds, in the order a page lists them. */
+export const WEB_TOOL_KINDS: readonly WebToolKind[] = ["search", "fetch"]
+
 /** The one fetch tool that always exists: the built-in fetcher. */
 export const BUILTIN_FETCH = "builtin_fetch"
 

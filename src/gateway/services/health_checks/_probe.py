@@ -77,11 +77,15 @@ def _status_code(exc: BaseException) -> int | None:
     return None
 
 
+def capped_error(text: str) -> str:
+    """``text`` cut to the length a provider error may take on the Health page or in an alert."""
+    return text if len(text) <= _ERROR_LIMIT else text[: _ERROR_LIMIT - 1] + "…"
+
+
 def _describe(exc: BaseException) -> str:
     # Shown on the Health page and mailed to the alert list, so redacted as any provider message is, before the cap.
     text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
-    text = redact_upstream_message(text) or type(exc).__name__
-    return text if len(text) <= _ERROR_LIMIT else text[: _ERROR_LIMIT - 1] + "…"
+    return capped_error(redact_upstream_message(text) or type(exc).__name__)
 
 
 async def probe(
