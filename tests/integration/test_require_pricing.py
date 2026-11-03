@@ -437,7 +437,7 @@ def _override(client: TestClient, db: Session, model_key: str, *, origin: str, k
             "model_key": model_key,
             "input_price_per_million": 10_000.0,
             "output_price_per_million": 0.0,
-            "unit": "tokens" if kind == "model" else "requests",
+            "unit": "token" if kind == "model" else "request",
         },
         headers=_MASTER_HEADER,
     )

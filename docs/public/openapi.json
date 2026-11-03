@@ -10262,9 +10262,9 @@
             "anyOf": [
               {
                 "enum": [
-                  "tokens",
-                  "requests",
-                  "images",
+                  "token",
+                  "request",
+                  "image",
                   "character",
                   "megapixel",
                   "second",
@@ -10490,9 +10490,9 @@
             "anyOf": [
               {
                 "enum": [
-                  "tokens",
-                  "requests",
-                  "images",
+                  "token",
+                  "request",
+                  "image",
                   "character",
                   "megapixel",
                   "second",
@@ -13230,11 +13230,11 @@
             "type": "array"
           },
           "unit": {
-            "default": "tokens",
+            "default": "token",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -13859,7 +13859,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelPublic": {
-        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: tokens, requests\nor images, so a per-request rate is not read as a per-token one.",
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: token, request\nor image, so a per-request rate is not read as a per-token one.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -13957,11 +13957,11 @@
             "title": "Pricing Id"
           },
           "unit": {
-            "default": "tokens",
+            "default": "token",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -15859,7 +15859,7 @@
             "type": "string"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens; unused by a rate in requests or images",
+            "description": "Price per 1M output tokens; unused by a rate per request or per image",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -15880,12 +15880,12 @@
             "title": "Pricing Tiers"
           },
           "unit": {
-            "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
+            "default": "token",
+            "description": "What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -16069,7 +16069,7 @@
             "type": "number"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens; unused by a rate in requests or images",
+            "description": "Price per 1M output tokens; unused by a rate per request or per image",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -16090,12 +16090,12 @@
             "title": "Pricing Tiers"
           },
           "unit": {
-            "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
+            "default": "token",
+            "description": "What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -17873,7 +17873,7 @@
                 "type": "null"
               }
             ],
-            "description": "USD for each request, for a rate in requests; null for any other unit.",
+            "description": "USD for each request, for a rate per request; null for any other unit.",
             "title": "Price Per Request"
           },
           "pricing_tiers": {
@@ -17884,7 +17884,7 @@
             "type": "array"
           },
           "unit": {
-            "description": "What the rates are per: tokens, requests, or images.",
+            "description": "What the rates are per: token for a model, request or image for a non-token endpoint.",
             "title": "Unit",
             "type": "string"
           },
@@ -21246,7 +21246,7 @@
             "type": "string"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens; unused by a rate in requests or images",
+            "description": "Price per 1M output tokens; unused by a rate per request or per image",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -21261,7 +21261,7 @@
                 "type": "null"
               }
             ],
-            "description": "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.",
+            "description": "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'request' with input_price_per_million at a million times this; not combined with token prices.",
             "title": "Price Per Request"
           },
           "pricing_tiers": {
@@ -21280,12 +21280,12 @@
             "title": "Pricing Tiers"
           },
           "unit": {
-            "default": "tokens",
-            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
+            "default": "token",
+            "description": "What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -45396,7 +45396,7 @@
     },
     "/api/v1/rerank": {
       "post": {
-        "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: requests``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\n``usage`` carries what the gateway metered: the provider's tokens, the\nsearch units billed when the model is priced per request, and, when the\nrequest was priced, ``cost_usd`` and ``pricing_source`` as a completion's\nusage does. ``meta`` is the provider's own billing report, unchanged.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: request``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\n``usage`` carries what the gateway metered: the provider's tokens, the\nsearch units billed when the model is priced per request, and, when the\nrequest was priced, ``cost_usd`` and ``pricing_source`` as a completion's\nusage does. ``meta`` is the provider's own billing report, unchanged.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "rerank-create_rerank",
         "requestBody": {
           "content": {

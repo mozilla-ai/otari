@@ -64,7 +64,7 @@ def looked_up(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Iterator[l
             input_price_per_million=Decimal("2.5"),
             output_price_per_million=Decimal("10"),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
         )
 
     monkeypatch.setattr("gateway.services.pricing_service.default_model_pricing", _stub)

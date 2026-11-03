@@ -57,7 +57,7 @@ from gateway.services.pricing_service import (
     rates_in_force,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
-from gateway.types.price_unit import PriceUnit
+from gateway.types.price_unit import AcceptedPriceUnit
 
 # Two routers under one prefix, one per authorization rule, so that adding a
 # route defaults to refusing a caller who is not a deployment operator and
@@ -131,7 +131,7 @@ class SetPricingRequest(PricedKind):
         ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
     )
     output_price_per_million: float = Field(
-        ge=0, description="Price per 1M output tokens; unused by a rate in requests or images"
+        ge=0, description="Price per 1M output tokens; unused by a rate per request or per image"
     )
     cache_read_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cached-input tokens"
@@ -147,7 +147,7 @@ class SetPricingRequest(PricedKind):
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
-    unit: PriceUnit = Field(default="tokens", description=PRICE_UNIT_DESCRIPTION)
+    unit: AcceptedPriceUnit = Field(default="token", description=PRICE_UNIT_DESCRIPTION)
     price_per_request: float | None = Field(
         default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
     )
@@ -177,9 +177,11 @@ class PricingResponse(BaseModel):
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
     pricing_tiers: list[PricingTier]
-    unit: str = Field(description="What the rates are per: tokens, requests, or images.")
+    unit: str = Field(
+        description="What the rates are per: token for a model, request or image for a non-token endpoint."
+    )
     price_per_request: float | None = Field(
-        default=None, description="USD for each request, for a rate in requests; null for any other unit."
+        default=None, description="USD for each request, for a rate per request; null for any other unit."
     )
     origin: str | None = Field(
         description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
@@ -199,9 +201,9 @@ class PricingResponse(BaseModel):
             cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
             cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
-            unit=pricing.unit or "tokens",
+            unit=pricing.unit or "token",
             price_per_request=(
-                float(Decimal(str(pricing.input_price_per_million)) / 1_000_000) if pricing.unit == "requests" else None
+                float(Decimal(str(pricing.input_price_per_million)) / 1_000_000) if pricing.unit == "request" else None
             ),
             origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
@@ -403,7 +405,7 @@ async def list_pricing_drift(
         rows.append(
             PricingDriftRow(
                 model_key=pricing.model_key,
-                unit=pricing.unit or "tokens",
+                unit=pricing.unit or "token",
                 origin=pricing.origin,
                 effective_at=pricing.effective_at.isoformat(),
                 input_price_per_million=float(pricing.input_price_per_million),

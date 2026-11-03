@@ -25,7 +25,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
-from gateway.types.price_unit import PriceUnit
+from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
 
 
 class OrgProviderKeyCreateRequest(SQLModel):
@@ -206,8 +206,8 @@ class OrgProviderKeyModelPublic(SQLModel):
     ``deployment`` for the deployment's own price list, and None when nothing
     prices the model yet. ``pricing_id`` names the organization's own row where
     there is one, so a client can edit that rate without re-deriving the key.
-    ``unit`` says what the rates are per, as on a pricing row: tokens, requests
-    or images, so a per-request rate is not read as a per-token one.
+    ``unit`` says what the rates are per, as on a pricing row: token, request
+    or image, so a per-request rate is not read as a per-token one.
     """
 
     id: uuid.UUID
@@ -219,7 +219,7 @@ class OrgProviderKeyModelPublic(SQLModel):
     cache_write_price_per_million: float | None = None
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
-    unit: PriceUnit = "tokens"
+    unit: PriceUnit = "token"
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
@@ -679,7 +679,7 @@ class HostedModelCreateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    unit: PriceUnit | None = None
+    unit: AcceptedPriceUnit | None = None
 
     @model_validator(mode="after")
     def _prices_come_as_a_pair(self) -> Self:
@@ -706,7 +706,7 @@ class HostedModelUpdateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    unit: PriceUnit | None = None
+    unit: AcceptedPriceUnit | None = None
     enabled: bool | None = None
 
     @model_validator(mode="after")
@@ -723,7 +723,7 @@ class HostedModelRates(SQLModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    unit: str = "tokens"
+    unit: str = "token"
 
     @classmethod
     def from_version(cls, version: ModelPricing, source: PriceSource) -> HostedModelRates:
@@ -734,7 +734,7 @@ class HostedModelRates(SQLModel):
             output_price_per_million=float(version.output_price_per_million),
             cache_read_price_per_million=as_float(version.cache_read_price_per_million),
             cache_write_price_per_million=as_float(version.cache_write_price_per_million),
-            unit=version.unit or "tokens",
+            unit=version.unit or "token",
         )
 
 

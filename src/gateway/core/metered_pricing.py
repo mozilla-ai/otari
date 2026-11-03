@@ -34,7 +34,7 @@ Rates are USD per million tokens. A rate of ``None`` means that meter is not
 priced separately, so its tokens stay in the fresh-input bucket and bill at the
 input rate: an absent cache rate is never a discount.
 
-A rate row whose ``unit`` is ``requests`` is the exception: its
+A rate row whose ``unit`` is ``request`` is the exception: its
 ``input_price_per_million`` is USD per million requests, and a request costs
 that divided by a million whatever tokens it reported (:func:`price_request`).
 
@@ -367,7 +367,7 @@ def _charge_line(meter: str, units: int, rate: Decimal, cost: Decimal) -> Charge
     return {"meter": meter, "units": units, "rate_per_million": float(rate), "cost": float(cost)}
 
 
-REQUESTS_UNIT: PriceUnit = "requests"
+REQUESTS_UNIT: PriceUnit = "request"
 
 
 def priced_per_request(pricing: typing.Any) -> bool:

@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
-from gateway.types.price_unit import PriceUnit
+from gateway.types.price_unit import AcceptedPriceUnit, current_unit_name
 
 PRICING_REFRESH_POLICIES: tuple[str, ...] = ("manual", "review", "auto")
 
@@ -43,15 +43,15 @@ _TOKEN_PRICE_FIELDS = (
 )
 PRICE_PER_REQUEST_DESCRIPTION = (
     "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's "
-    "answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not "
+    "answers. Shorthand for unit 'request' with input_price_per_million at a million times this; not "
     "combined with token prices."
 )
 
 PRICE_UNIT_DESCRIPTION = (
-    "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
-    "moderation call, or a completion model billed per call, 'images' for image generation."
+    "What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a "
+    "moderation call, or a completion model billed per call, 'image' for image generation."
     " Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored "
-    "and prices nothing."
+    "and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release."
 )
 
 
@@ -69,7 +69,7 @@ def _finite_decimal(value: Any) -> Decimal | None:
 def price_per_request_shorthand(data: Any) -> Any:
     """Expand ``price_per_request`` into the per-request rate it stands for, refusing a mix with token prices.
 
-    ``{"price_per_request": 0.005}`` becomes ``unit: requests`` with
+    ``{"price_per_request": 0.005}`` becomes ``unit: request`` with
     ``input_price_per_million: 5000`` and ``output_price_per_million: 0``,
     which is how a per-request rate is stored and billed. Exact in decimal, so
     a price like 0.003 does not come out as 3000.0000000000005 per million.
@@ -79,8 +79,8 @@ def price_per_request_shorthand(data: Any) -> Any:
     price = _finite_decimal(data["price_per_request"])
     if price is None:
         return data  # Left for the field's own validation to refuse.
-    if data.get("unit", "requests") != "requests":
-        raise ValueError("price_per_request is a price per request: leave unit out or set it to 'requests'")
+    if current_unit_name(data.get("unit", "request")) != "request":
+        raise ValueError("price_per_request is a price per request: leave unit out or set it to 'request'")
     per_million = price * 1_000_000
     mixed = [name for name in _TOKEN_PRICE_FIELDS if data.get(name) not in (None, 0, [])]
     # An input rate equal to the expansion is this same price validated again, as a dump of it reads.
@@ -91,7 +91,7 @@ def price_per_request_shorthand(data: Any) -> Any:
         raise ValueError(f"price_per_request replaces token prices; remove {', '.join(mixed)}")
     return {
         **data,
-        "unit": "requests",
+        "unit": "request",
         "input_price_per_million": float(per_million),
         "output_price_per_million": 0.0,
     }
@@ -120,7 +120,7 @@ class PricingConfig(BaseModel):
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
-    unit: PriceUnit = Field(default="tokens", description=PRICE_UNIT_DESCRIPTION)
+    unit: AcceptedPriceUnit = Field(default="token", description=PRICE_UNIT_DESCRIPTION)
     price_per_request: float | None = Field(
         default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
     )

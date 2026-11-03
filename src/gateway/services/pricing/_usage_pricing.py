@@ -1,9 +1,9 @@
 """Which meter a rate prices, and what one successful attempt costs at it.
 
-The rate's ``unit`` chooses the meter. A ``tokens`` rate prices tokens, an
-``images`` rate an ``images`` count, and a ``requests`` rate a ``requests`` or
+The rate's ``unit`` chooses the meter. A ``token`` rate prices tokens, an
+``image`` rate an ``images`` count, and a ``request`` rate a ``requests`` or
 ``search_units`` count, or one request for an attempt that reported neither.
-The one exception is a ``tokens`` rate on an endpoint billed per image or per
+The one exception is a ``token`` rate on an endpoint billed per image or per
 request, which is read in that endpoint's unit, as the configuration guide
 documented before the rate's unit decided. Settlement prices through
 :func:`price_usage`.
@@ -76,7 +76,7 @@ def price_usage(
 ) -> UsageCharge | None:
     """What one successful attempt costs at ``rate``, or ``None`` when ``rate`` prices nothing it reported.
 
-    A ``tokens`` rate on an attempt that reported images or requests is read in
+    A ``token`` rate on an attempt that reported images or requests is read in
     that unit, warning once per model and meter that the rate should name it.
 
     Raises:
@@ -85,13 +85,13 @@ def price_usage(
     counts = validated_units(units)
     if rate is None:
         return None
-    unit = rate.unit or "tokens"
-    if unit == "requests":
+    unit = rate.unit or "token"
+    if unit == "request":
         meter = next((m for m in (_REQUESTS, _SEARCH_UNITS) if m in counts), _REQUESTS)
         return _per_unit(meter, counts.get(meter, 1), _request_rate(rate))
-    if unit == "images":
+    if unit == "image":
         return _per_unit(_IMAGES, counts[_IMAGES], _image_rate(rate)) if _IMAGES in counts else None
-    if unit != "tokens":
+    if unit != "token":
         return None
     for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
         if meter in counts:
@@ -105,9 +105,9 @@ def price_usage(
     return UsageCharge(cost, meters, lines)
 
 
-# The rates the token meters read: a rate in ``tokens``, and an ``images`` rate
+# The rates the token meters read: a rate in ``token``, and an ``image`` rate
 # on a completion, which is read in tokens as it always was.
-_TOKEN_METERED_UNITS: frozenset[str] = frozenset({"tokens", "images"})
+_TOKEN_METERED_UNITS: frozenset[str] = frozenset({"token", "image"})
 
 
 def has_completion_meter(rate: ModelPricing | None) -> bool:
@@ -119,7 +119,7 @@ def has_completion_meter(rate: ModelPricing | None) -> bool:
     """
     if rate is None:
         return False
-    return priced_per_request(rate) or (rate.unit or "tokens") in _TOKEN_METERED_UNITS
+    return priced_per_request(rate) or (rate.unit or "token") in _TOKEN_METERED_UNITS
 
 
 def estimate_settles(rate: ModelPricing | None) -> bool:
@@ -159,12 +159,12 @@ def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: b
     """
     if rate is None or to_decimal(rate.input_price_per_million) is None:
         return False
-    unit = rate.unit or "tokens"
-    if unit == "requests":
+    unit = rate.unit or "token"
+    if unit == "request":
         return True
-    if unit == "images":
+    if unit == "image":
         return meter == _IMAGES
-    if unit != "tokens":
+    if unit != "token":
         return False
     return reports_tokens or meter in (_IMAGES, _REQUESTS)
 
@@ -224,9 +224,9 @@ def _warn_legacy(rate: ModelPricing, meter: str) -> None:
     _LEGACY_WARNED.add(key)
     if meter == _IMAGES:
         # An images rate is per million images, where this one is read as raw USD per image.
-        fix = "set its unit to images and multiply its input price by 1,000,000"
+        fix = "set its unit to image and multiply its input price by 1,000,000"
     else:
-        fix = "set its unit to requests, keeping its price"
+        fix = "set its unit to request, keeping its price"
     logger.warning(
         "Pricing %s is a token rate read per %s; %s, as a later release reads it strictly",
         rate.model_key,

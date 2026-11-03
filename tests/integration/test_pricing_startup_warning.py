@@ -154,7 +154,7 @@ def _tool_row(key: str, *, kind: str = "model") -> ModelPricing:
         effective_at=datetime(2020, 1, 1, tzinfo=UTC),
         input_price_per_million=5000.0,
         output_price_per_million=0.0,
-        unit="requests",
+        unit="request",
     )
 
 

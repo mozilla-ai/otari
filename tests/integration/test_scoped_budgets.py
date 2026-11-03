@@ -1605,7 +1605,7 @@ async def move(db: AsyncSession, handle: ReservationHandle, provider: str, *, co
             model_key=f"{instance}:{model}",
             input_price_per_million=Decimal(str(cost)) * 1_000_000 / _FALLBACK_TOKENS,
             output_price_per_million=Decimal(0),
-            unit="tokens",
+            unit="token",
             pricing_tiers=[],
         )
 
