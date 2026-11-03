@@ -35,6 +35,7 @@ def test_an_entry_is_normalized_to_the_form_it_is_stored_in(typed: str, stored: 
         "http://x.com",
         "*.person@example.com",
         "@person@example.com",
+        "example.xn--a-",
     ],
 )
 def test_a_value_that_is_neither_an_address_nor_a_domain_is_refused(typed: str) -> None:

@@ -12,7 +12,7 @@ from gateway.exceptions.identity_exceptions import BlockedEmailEntryExistsError
 from gateway.models.identity import BlockedEmail
 from gateway.repositories.base_repository import BaseRepository
 
-# The advisory lock a sign-in holds shared and a new block holds exclusive, so neither commits around the other.
+# The advisory lock a blocklist check holds shared and a new block holds exclusive, so neither commits around the other.
 _BLOCKLIST_LOCK_CLASS = 0x6F74_626C  # "otbl"
 
 
@@ -30,16 +30,16 @@ class BlockedEmailRepository(BaseRepository[BlockedEmail, Never, Never]):
         count = await self.db.scalar(select(func.count()).select_from(BlockedEmail))
         return list(rows.scalars().all()), int(count or 0)
 
-    async def lock_for_sign_in(self) -> None:
-        """Hold the blocklist lock shared until the transaction ends, so a block cannot commit around a sign-in.
+    async def lock_shared(self) -> None:
+        """Hold the blocklist lock shared until the transaction ends, so no block commits around this one.
 
-        Sign-ins do not wait for each other. A no-op on SQLite, which admits one writer at a time anyway.
+        Holders do not wait for each other. A no-op on SQLite, which admits one writer at a time anyway.
         """
         if dialect_name(self.db) == "postgresql":
             await self.db.execute(select(func.pg_advisory_xact_lock_shared(_BLOCKLIST_LOCK_CLASS, 0)))
 
-    async def lock_for_block(self) -> None:
-        """Hold the blocklist lock exclusive until the transaction ends, waiting out every sign-in in flight."""
+    async def lock_exclusive(self) -> None:
+        """Hold the blocklist lock exclusive until the transaction ends, waiting out every shared holder."""
         if dialect_name(self.db) == "postgresql":
             await self.db.execute(select(func.pg_advisory_xact_lock(_BLOCKLIST_LOCK_CLASS, 0)))
 

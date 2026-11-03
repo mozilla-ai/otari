@@ -159,7 +159,11 @@ def blocklist_entry(value: str) -> str | None:
                 return None
             break
     local, at, domain = candidate.rpartition("@")
-    domain = _ascii(domain)
+    try:
+        # Strict, unlike ``_ascii``: a label the library refuses (``xn--a-``) could never match an address.
+        domain = idna.encode(domain, uts46=True, transitional=False).decode("ascii")
+    except (idna.IDNAError, UnicodeError):
+        return None
     if not _BLOCKABLE_DOMAIN_PATTERN.match(domain):
         return None
     if not at:

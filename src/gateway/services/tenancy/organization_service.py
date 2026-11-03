@@ -1819,7 +1819,9 @@ class OrganizationService:
             if not claimed:
                 await self.db.rollback()
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
-        result = await self._resolve_invitation_to_active_membership(invitation, membership, organization)
+        result = await self._resolve_invitation_to_active_membership(
+            invitation, membership, organization, blocked_addresses
+        )
         verification_pending = invitee.hashed_password is not None and invitee.email_verified_at is None
         can_sign_in = password is not None or not _has_never_signed_in(invitee)
         claimed_identity = None
@@ -1843,6 +1845,7 @@ class OrganizationService:
         invitation: Invitation,
         membership: OrganizationMember,
         organization: Organization,
+        blocked_addresses: BlockedAddresses,
     ) -> AcceptInvitationResultPublic:
         """Flip a resolved pending invitation and its membership to ``active``, and commit.
 
@@ -1854,9 +1857,12 @@ class OrganizationService:
         equally entitled to whichever way they arrived.
 
         Callers resolve the invitation and take the organization's lock first;
-        this only writes.
+        this checks the blocklist again inside the block, so a block cannot
+        commit between the check and the activation, then writes.
         """
         async with self._require_unit_of_work():
+            if await blocked_addresses.blocked_among([invitation.email]):
+                raise BlockedEmailError(invitation.email)
             await self.invitations.update_status(invitation, {"status": "accepted"})
             membership = await self._update_membership(membership, {"status": "active"})
             assignments = [
@@ -2040,7 +2046,9 @@ class OrganizationService:
         if already is not None:
             return already
         invitation, membership, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
-        return await self._resolve_invitation_to_active_membership(invitation, membership, organization)
+        return await self._resolve_invitation_to_active_membership(
+            invitation, membership, organization, blocked_addresses
+        )
 
     async def _accepted_result_if_active(
         self,

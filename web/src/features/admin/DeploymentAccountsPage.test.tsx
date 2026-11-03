@@ -496,6 +496,33 @@ describe("Blocked emails", () => {
     )
   })
 
+  it("steps back a page when unblocking empties the last one", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ blocked: [BLOCKED_DOMAIN], blockedCount: 26 })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Next page, entries" }),
+    )
+    await waitFor(() =>
+      expect(
+        requests.some((request) =>
+          request.url.includes("/admin/blocked-emails?skip=25&limit=25"),
+        ),
+      ).toBe(true),
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Unblock spam.example" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Unblock" }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "Page number, entries" }),
+      ).toHaveValue("1"),
+    )
+  })
+
   it("drops the block banner once its entry is unblocked", async () => {
     const user = userEvent.setup()
     mockApi({ blocked: [BLOCKED_DOMAIN], blockedAccountCount: 1 })

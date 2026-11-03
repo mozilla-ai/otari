@@ -1,4 +1,5 @@
 import secrets
+import unicodedata
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass, replace
@@ -187,13 +188,16 @@ class IdentityService:
 
         """
         async with self._uow:
-            await self._blocked_emails.lock_for_sign_in()
+            # The shared lock before any row lock, so a block holding it exclusive cannot deadlock against this.
+            await self._blocked_emails.lock_shared()
+            active_organization_id = await self._organizations.active_organization_id_for_sign_in(account)
+            now = datetime.now(UTC)
+            # A write before the check, so on SQLite, where the lock is a no-op, this transaction holds the one
+            # write lock when it reads the blocklist.
+            await self._sessions.prune_expired(now)
             if account.email is not None and await self.blocked_among([account.email]):
                 logger.info("Refused a sign-in to account %s, whose address is blocked", account.id)
                 raise SignInBlockedError
-            active_organization_id = await self._organizations.active_organization_id_for_sign_in(account)
-            now = datetime.now(UTC)
-            await self._sessions.prune_expired(now)
             await self._users.record_sign_in(account.id, at=now)
             token = f"{_SESSION_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
             expires_at = now + timedelta(hours=self._session_ttl_hours)
@@ -209,12 +213,17 @@ class IdentityService:
         )
 
     async def blocked_among(self, emails: Collection[str]) -> set[str]:
-        """Return the members of ``emails`` the deployment's email blocklist matches."""
+        """Return the members of ``emails`` the deployment's email blocklist matches.
+
+        Holds the blocklist lock shared until the enclosing block commits, so called inside a caller's block, no
+        block can commit between this answer and that caller's writes.
+        """
         keys = {email: blocklist_keys(email) for email in emails}
         wanted = {key for email_keys in keys.values() for key in email_keys}
         if not wanted:
             return set()
         async with self._uow:
+            await self._blocked_emails.lock_shared()
             found = await self._blocked_emails.patterns_among(wanted)
         return {email for email, email_keys in keys.items() if found.intersection(email_keys)}
 
@@ -239,7 +248,7 @@ class IdentityService:
             raise InvalidBlockedEmailEntryError(value)
         async with self._uow:
             # Before matching, so an account a sign-in in flight creates is either matched here or refused there.
-            await self._blocked_emails.lock_for_block()
+            await self._blocked_emails.lock_exclusive()
             matched = await self._accounts_matching(pattern)
             if actor.id in matched:
                 raise DeploymentUserSelfChangeError("You cannot block your own email address")
@@ -275,15 +284,17 @@ class IdentityService:
     async def _accounts_matching(self, pattern: str) -> set[uuid.UUID]:
         """The ids of every account whose address the entry ``pattern`` blocks.
 
-        Queried by domain in both spellings a stored address may carry, then matched exactly by ``blocklist_keys``.
+        Queried by every spelling of the domain a stored address may carry, then matched exactly by ``blocklist_keys``.
         """
         is_domain = "@" not in pattern
         domain = pattern if is_domain else pattern.rsplit("@", 1)[1]
         spellings = {domain}
         try:
-            spellings.add(idna.decode(domain))
+            decoded = idna.decode(domain)
         except (idna.IDNAError, UnicodeError):
-            pass
+            decoded = domain
+        # A stored address may carry its domain composed or decomposed; ``blocklist_keys`` reads both alike.
+        spellings |= {unicodedata.normalize("NFC", decoded), unicodedata.normalize("NFD", decoded)}
         candidates = await self._users.list_with_email_at(spellings, include_subdomains=is_domain)
         return {user_id for user_id, email in candidates if pattern in blocklist_keys(email)}
 

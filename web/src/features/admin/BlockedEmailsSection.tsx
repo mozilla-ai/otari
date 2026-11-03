@@ -105,8 +105,12 @@ export function BlockedEmailsSection() {
             isPending={unblock.isPending}
             onConfirm={() =>
               unblock.mutate(entry.id, {
-                // The banner describes a block that no longer stands.
-                onSuccess: () => setLastBlocked(undefined),
+                onSuccess: () => {
+                  // The banner describes a block that no longer stands.
+                  setLastBlocked(undefined)
+                  // The page's last row is gone, so step back rather than show an empty page.
+                  if (rows.length === 1 && page > 0) setPage(page - 1)
+                },
               })
             }
           />
