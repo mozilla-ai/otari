@@ -266,8 +266,12 @@ class ModelsDevModel:
     last_updated: str | None = None
     cost: ModelsDevCost | None = None
     """The per-token text prices, as v1 shows them."""
-    type: str = "chat"
-    """What the model does (``chat``, ``image``, ``embedding``...); a document that gives none means ``chat``."""
+    type: str | None = "chat"
+    """What the model does (``chat``, ``image``, ``embedding``...); a v2 model that gives none is ``chat``.
+
+    ``None`` for a v1 model: v1 has no type, and calling every v1 model ``chat``
+    would call its embedding models chat models too.
+    """
     api: tuple[ModelsDevApi, ...] = ()
     """The protocols the host takes, in its order of preference. v2 only."""
     pricing: ModelsDevPricing | None = None
@@ -476,7 +480,7 @@ class _Reader:
             release_date=self.text(raw, "release_date", path),
             last_updated=self.text(raw, "last_updated", path),
             cost=self.cost(raw, path),
-            type=self.text(raw, "type", path) or "chat",
+            type=None,
         )
 
     def model_v2(self, key: str, raw: dict[str, Any], path: str) -> ModelsDevModel:

@@ -50,12 +50,23 @@ def test_a_stored_catalog_keeps_what_the_download_could_not_read() -> None:
 
 
 def test_a_stored_catalog_carries_its_marker_and_meta_and_leaves_out_defaults() -> None:
-    catalog = parse_catalog({"p": {"models": {"m": {}}}})
+    catalog = parse_catalog_v2({"p": {"models": {"m": {}}}})
 
-    document = _stored(catalog, source="https://models.dev/api.json")
+    document = _stored(catalog, source="https://models.dev/experimental/v2.0/api.json?type=all")
 
-    assert document["_meta"] == {"format": CATALOG_FORMAT, "source": "https://models.dev/api.json"}
+    assert document["_meta"] == {
+        "format": CATALOG_FORMAT,
+        "source": "https://models.dev/experimental/v2.0/api.json?type=all",
+    }
     assert document["providers"] == {"p": {"id": "p", "name": None, "doc": None, "models": {"m": {"id": "m"}}}}
+
+
+def test_a_stored_v1_model_keeps_its_missing_type() -> None:
+    """The default type is ``chat``, so a v1 model's ``None`` is written out and read back."""
+    document = _stored(parse_catalog({"p": {"models": {"m": {}}}}))
+
+    assert document["providers"]["p"]["models"]["m"] == {"id": "m", "type": None}
+    assert read_catalog_document(document).model_for("p", "m").type is None  # type: ignore[union-attr]
 
 
 def test_a_document_without_the_marker_is_an_older_price_snapshot() -> None:
