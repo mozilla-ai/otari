@@ -1,8 +1,9 @@
 """What ``require_pricing`` checks before a request's gateway-run tools may run.
 
 A tool call is priced at settlement by its rate keys: an instance's own row
-first, then the tool's ``otari:<tool>`` row, with only the operator's prices
-counting for a call the deployment paid for. The check at admission
+alone, or the tool's ``otari:<tool>`` row for a call on an organization key or
+on the old backend, with only the operator's prices counting for a call the
+deployment paid for. The check at admission
 looks the same rows up the same way, so a request it admits settles priced. The
 lookup needs the request's database session, so the caller makes it; this
 module says which rows to look up, which requests skip the check, and what the
@@ -12,12 +13,19 @@ refusal says.
 from dataclasses import dataclass
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.settings.tools import effective_fetch_instances, effective_search_instances
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools._registry import BUILTIN_TOOLS
 from gateway.services.tools._web_admission import AdmittedWebTools
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_search import InLoopSearch, ResolvedFetch, resolve_fetch, resolve_in_loop_search
-from gateway.types.tool_charges import RateKey, gateway_tool_pricing_key
+from gateway.types.tool_charges import (
+    InstanceRateKey,
+    RateKey,
+    describe_rate_key,
+    gateway_tool_pricing_key,
+    instance_rate_key,
+)
 
 
 @dataclass(frozen=True)
@@ -107,13 +115,30 @@ def configured_tools_to_price(config: GatewayConfig) -> list[PricedTool]:
     return priced
 
 
-def unpriced_tool_detail(name: str) -> str:
-    """The refusal of a request that would run ``name`` with no price, naming the row that prices any of its calls."""
-    key = gateway_tool_pricing_key(name)
+def deployment_tool_rate_keys(config: GatewayConfig) -> list[InstanceRateKey]:
+    """The own rate key of each of the deployment's search and fetch tools, ``builtin_fetch`` included.
+
+    Each is the row that prices its tool's calls. The startup warning reads it
+    for every tool a start knows, ``config.yml`` and stored alike.
+    """
+    instances = (*effective_search_instances(config).values(), *effective_fetch_instances(config).values())
+    return [instance_rate_key(instance.kind, instance.name, instance.provider) for instance in instances]
+
+
+def unpriced_tool_detail(name: str, rate_key: RateKey | None = None) -> str:
+    """The refusal of a request that would run ``name`` with no price, naming ``rate_key``, the row that prices it.
+
+    With no ``rate_key``, it names the tool's ``otari:<tool>`` row.
+    """
+    row = describe_rate_key(rate_key if rate_key is not None else gateway_tool_pricing_key(name))
     page = "Code execution pricing" if name == CODE_EXECUTION_TOOL_NAME else "Web search pricing"
+    where = (
+        f"POST {API_ROOT}/pricing, the dashboard's {page} page, or price_per_call on its entry in config.yml"
+        if isinstance(rate_key, InstanceRateKey)
+        else f"POST {API_ROOT}/pricing, or the dashboard's {page} page"
+    )
     return (
         f"The gateway tool '{name}' has no pricing, and this gateway runs with "
         "require_pricing enabled, so it will not run work it cannot bill. Set a "
-        f"per-request price for model_key '{key}' (POST {API_ROOT}/pricing, or the dashboard's "
-        f"{page} page), or set require_pricing to false to serve it unpriced."
+        f"per-request price for {row} ({where}), or set require_pricing to false to serve it unpriced."
     )

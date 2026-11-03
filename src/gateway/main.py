@@ -104,10 +104,10 @@ from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     initialize_tool_prices_from_config,
     warn_about_legacy_tool_prices,
+    warn_about_unpriced_web_tools,
     warn_if_gateway_tools_lack_pricing,
     warn_if_require_pricing_without_pricing,
     warn_if_router_candidates_lack_pricing,
-    warn_if_search_tools_lack_flat_pricing,
 )
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
@@ -945,7 +945,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await apply_tool_overrides_from_db(config, session)
             # Overlay dashboard-stored search tools before the checks below,
             # so a tool added through the dashboard is one the backend-URL
-            # warning and the flat-pricing warning can see. On a session of its
+            # warning and the unpriced-tool warning can see. On a session of its
             # own, once this one has handed its connection back, so startup
             # holds one pooled connection at a time.
             await release_session(session)
@@ -998,7 +998,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                     "prices; the next start that loads them writes them."
                 )
             await warn_if_require_pricing_without_pricing(config, session)
-            await warn_if_search_tools_lack_flat_pricing(config, session)
+            await warn_about_unpriced_web_tools(config, session)
             await warn_about_legacy_tool_prices(config, session)
             await warn_if_gateway_tools_lack_pricing(config, session)
             await warn_if_router_candidates_lack_pricing(config, session)
