@@ -13,10 +13,11 @@ from typing import Any
 
 import httpx
 import pytest
-from apron_auth.models import ServerMetadata
+from apron_auth.models import ServerMetadata, TimeoutPolicy
+from apron_auth.providers import oidc
 
 from gateway.exceptions.identity_exceptions import OIDCDiscoveryError
-from gateway.services.identity._discovery import discover_connection_metadata
+from gateway.services.identity._discovery import DISCOVERY_TIMEOUT_SECONDS, discover_connection_metadata
 
 ISSUER = "https://sso.example.test"
 _VALID_DOCUMENT: dict[str, Any] = {
@@ -197,8 +198,11 @@ async def test_discovery_refuses_a_document_over_the_byte_ceiling(monkeypatch: p
 
 @pytest.mark.asyncio
 async def test_discovery_refuses_a_document_that_never_ends(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A host that never finishes the document is refused on the total timeout."""
-    monkeypatch.setattr("gateway.services.identity._discovery.DISCOVERY_TIMEOUT_SECONDS", 0.05)
+    """A host that never finishes the document is refused on the whole-request limit."""
+    monkeypatch.setattr(
+        "gateway.services.identity._discovery.DISCOVERY_TIMEOUTS",
+        TimeoutPolicy(connect_seconds=0.05, request_seconds=0.05),
+    )
 
     async def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, headers={"content-type": "application/json"}, stream=_ForeverStream())
@@ -207,6 +211,31 @@ async def test_discovery_refuses_a_document_that_never_ends(monkeypatch: pytest.
 
     with pytest.raises(OIDCDiscoveryError):
         await discover_connection_metadata(ISSUER, allow_private_hosts=False)
+
+
+@pytest.mark.asyncio
+async def test_the_whole_request_limit_is_this_deployments_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The limit the library bounds the request with is the one handed to it, not its default.
+
+    Without this the test above would pass on apron-auth's own ten seconds and
+    say nothing about what this module configures.
+    """
+    policies: list[TimeoutPolicy] = []
+    discover = oidc.discover
+
+    async def _discover(issuer: str, **kwargs: Any) -> ServerMetadata:
+        policies.append(kwargs["timeouts"])
+        return await discover(issuer, **kwargs)
+
+    monkeypatch.setattr(oidc, "discover", _discover)
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return _json_response(_VALID_DOCUMENT)
+
+    _stub_discovery_transport(monkeypatch, handler)
+    await discover_connection_metadata(ISSUER, allow_private_hosts=False)
+
+    assert policies == [TimeoutPolicy(request_seconds=DISCOVERY_TIMEOUT_SECONDS)]
 
 
 @pytest.mark.asyncio
