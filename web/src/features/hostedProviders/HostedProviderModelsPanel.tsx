@@ -258,6 +258,7 @@ export function HostedProviderModelsPanel({
               label={`Search models on ${provider.name}`}
               placeholder="Search by model name"
               value={query}
+              maxLength={SEARCH_MAX_LENGTH}
               onChange={(next) => {
                 setQuery(next)
                 setPage(0)
@@ -278,7 +279,11 @@ export function HostedProviderModelsPanel({
                 models.isLoading ||
                 (models.isPlaceholderData && rows.length === 0)
               }
-              emptyContent="No models match this search."
+              // Not over a failed read: the banner above says what happened,
+              // and "no match" would read as a search that ran and found none.
+              emptyContent={
+                models.error ? undefined : "No models match this search."
+              }
             />
           </TableScrollFrame>
           <TablePagination

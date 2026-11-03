@@ -86,7 +86,7 @@ import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-import { useListSearch } from "@/shared/hooks/useListSearch"
+import { SEARCH_MAX_LENGTH, useListSearch } from "@/shared/hooks/useListSearch"
 
 import {
   asMembershipRole,
@@ -1374,6 +1374,7 @@ export function OrganizationMembersPage() {
           label="Search members"
           placeholder="Search by name or email"
           value={search.value}
+          maxLength={SEARCH_MAX_LENGTH}
           onChange={(next) => {
             search.onChange(next)
             setPage(0)

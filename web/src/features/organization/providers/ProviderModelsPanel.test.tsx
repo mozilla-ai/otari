@@ -100,6 +100,16 @@ afterEach(() => {
 })
 
 describe("ProviderModelsPanel", () => {
+  it("says nothing about a search when the model list failed", async () => {
+    mockApi({ listFails: true })
+    await renderPanel(true, vi.fn(), {}, "/?models_q=gpt")
+
+    expect(
+      await screen.findByText("Tenancy is unavailable"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("No models match this search.")).toBeNull()
+  })
+
   it("keeps the field, and its focus, when a search that matched nothing is cleared", async () => {
     // Held, so the unsearched list is still in flight while the rows are the
     // empty search's, kept as placeholder data.

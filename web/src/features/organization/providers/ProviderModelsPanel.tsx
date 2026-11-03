@@ -32,7 +32,7 @@ import {
 } from "@/shared/api/organizations"
 import { useDeleteOrganizationPricing } from "@/shared/api/pricing"
 import { formatRate } from "@/shared/helpers/format"
-import { useListSearch } from "@/shared/hooks/useListSearch"
+import { SEARCH_MAX_LENGTH, useListSearch } from "@/shared/hooks/useListSearch"
 
 import { OfferModelDialog } from "./OfferModelDialog"
 import { refreshOutcome } from "./refreshOutcome"
@@ -376,6 +376,7 @@ export function ProviderModelsPanel({
               label={`Search models on ${providerKey.name}`}
               placeholder="Search by model name"
               value={search.value}
+              maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={
                 models.isPlaceholderData ? undefined : models.data?.count
@@ -393,7 +394,11 @@ export function ProviderModelsPanel({
                 models.isLoading ||
                 (models.isPlaceholderData && rows.length === 0)
               }
-              emptyContent="No models match this search."
+              // Not over a failed read: the banner above says what happened,
+              // and "no match" would read as a search that ran and found none.
+              emptyContent={
+                models.error ? undefined : "No models match this search."
+              }
             />
           </TableScrollFrame>
           <TablePagination
