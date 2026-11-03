@@ -186,7 +186,7 @@ export function UseModelDrawer({
                     isActive={language === "python"}
                     onPress={() => setLanguage("python")}
                   >
-                    Python (Otari SDK)
+                    Python (OpenAI SDK)
                   </Tab>
                 </TabRow>
                 <CopyField
