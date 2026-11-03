@@ -23,6 +23,7 @@ from gateway.services.web_retrieval_network import (
     NoCookieJar,
     PinnedAsyncHTTPTransport,
     PinnedTransportError,
+    RetrievalAddressError,
     RetrievalTargetError,
     TransportFactory,
     validate_retrieval_target,
@@ -48,6 +49,11 @@ async def check_owned_endpoint_api_base(api_base: str) -> None:
     """Refuse a base URL unless every address its host resolves to is publicly routable."""
     try:
         await validate_retrieval_target(api_base)
+    except RetrievalAddressError as exc:
+        raise OwnedEndpointAddressError(
+            f"endpoint api_base refused: {exc}. A model server the deployment runs on a private "
+            "address is added as a hosted provider instead."
+        ) from None
     except RetrievalTargetError as exc:
         raise OwnedEndpointAddressError(f"endpoint api_base refused: {exc}") from None
 

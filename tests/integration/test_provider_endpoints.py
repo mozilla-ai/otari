@@ -169,7 +169,7 @@ def test_one_name_per_owner(client: TestClient) -> None:
         ({"name": "hosted"}, "names a provider"),
         ({"name": "my:vllm"}, "letters, digits"),
         ({"provider": "bedrock"}, "must be one of"),
-        ({"api_base": "http://127.0.0.1:8000/v1"}, "api_base refused"),
+        ({"api_base": "http://127.0.0.1:8000/v1"}, "added as a hosted provider instead"),
         ({"api_base": "http://169.254.169.254/latest"}, "api_base refused"),
         ({"api_base": "http://100.100.100.200/"}, "api_base refused"),
         ({"default_params": {"api_base": "http://10.0.0.1"}}, "cannot be endpoint defaults"),
