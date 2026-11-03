@@ -4359,7 +4359,10 @@ async def _admit_claims(
     if (unpriced := await _unpriced_tool(ctx, priced)) is not None:
         # The model gate's kind and code, so both no-pricing refusals have one wire shape per format.
         error = domain_error(
-            adapter, GatewayToolPricingRequiredError(unpriced_tool_detail(unpriced.name, unpriced.rate_keys[0]))
+            adapter,
+            GatewayToolPricingRequiredError(
+                unpriced_tool_detail(unpriced.name, unpriced.rate_keys[0], enrichment=unpriced.enrichment)
+            ),
         )
         return _ToolRefusal(error, unpriced_tool=unpriced)
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
@@ -4658,7 +4661,7 @@ async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: Re
         model=model,
         provider=provider,
         endpoint=adapter.endpoint,
-        detail=unpriced_tool_detail(tool.name, rate_key),
+        detail=unpriced_tool_detail(tool.name, rate_key, enrichment=tool.enrichment),
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         started_at=ctx.started_at,
         request_id=ctx.request_id,

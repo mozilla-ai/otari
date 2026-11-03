@@ -268,7 +268,16 @@ cannot be read is neither billed nor counted. Pages read on an
 `org:<provider>` and priced under `otari:web_fetch`. A search the older
 backend runs (the legacy settings, or a Tavily, Brave or SearXNG organization
 key) reads its pages on the built-in fetcher and records no fetch, until that
-backend is removed.
+backend is removed. With `require_pricing` on, a search whose pages would be
+read through a fetch instance with no price is refused with `402` before it
+runs, the detail naming that instance's row; `web_search_extract: false` turns
+the reading of pages off.
+
+**Upgrading from 0.36.** A fetch instance that reads pages needs a price, as
+the fetch tool does, or every search it enriches answers `402` under
+`require_pricing`. `builtin_fetch` has one on every upgraded database, and the
+startup warning names an instance that lacks one whether or not the fetch tool
+is enabled.
 
 ### Searches a provider runs itself
 
@@ -880,7 +889,11 @@ the same setting. It defaults to `true`.
 
 An organization can bring its own provider keys, so its workspaces' searches and
 fetches are paid by its own accounts and count against its own quotas, rather
-than the deployment's. Each key has a kind, fixed when it is added:
+than the deployment's. A search key alone leaves the pages a search reads to
+enrich its results on the deployment's fetch instance and account (see
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)); a fetch key moves
+them to the organization's, and `web_search_extract: false` reads none. Each
+key has a kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
