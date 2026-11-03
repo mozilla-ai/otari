@@ -62,7 +62,9 @@ Responses features Codex may use, such as tool types other than `function`; see
 Codex works best on a provider with a native Responses API.
 
 `GET /api/v1/models` lists the models a key can use, both on otari.ai and on a
-self-run gateway.
+self-run gateway. To list only the open-weight models a key can use, ask the catalog for them:
+`GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
+are the names to configure.
 
 ## Model metadata
 
