@@ -27,6 +27,7 @@ import httpx
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.pricing import bundled_catalog
+from gateway.types.model_endpoint import ModelEndpoint, models_dev_endpoints
 from gateway.types.model_type import ModelType, models_dev_model_type
 from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, ModelsDevModel, ModelsDevSource
 
@@ -73,6 +74,8 @@ class ModelCatalogEntry:
     cost_output: float | None = None
     type: ModelType | None = None
     """The kind models.dev gives the model; ``None`` from a v1 document, which gives none."""
+    endpoints: list[ModelEndpoint] = field(default_factory=list)
+    """The Otari routes that serve the model, from its ``api`` block; none from a v1 document, which has none."""
 
     @classmethod
     def from_model(cls, model: ModelsDevModel) -> "ModelCatalogEntry":
@@ -100,6 +103,7 @@ class ModelCatalogEntry:
             cost_input=None if rates is None else rates.input,
             cost_output=None if rates is None else rates.output,
             type=models_dev_model_type(model.type),
+            endpoints=list(models_dev_endpoints(api.protocol for api in model.api)),
         )
 
 
