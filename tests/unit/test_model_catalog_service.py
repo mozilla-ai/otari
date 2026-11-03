@@ -17,7 +17,7 @@ from gateway.log_config import logger as gateway_logger
 from gateway.services import model_catalog_service as mcs
 from gateway.services.catalog import load_catalog_metadata, metadata_entry
 from gateway.services.model_catalog_service import ModelCatalogEntry, build_metadata_map
-from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, parse_catalog
+from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, parse_catalog, parse_catalog_v2
 
 # The real fetch and fallback, before the shared conftest turns both off.
 _REAL_FETCH = mcs._fetch
@@ -99,6 +99,24 @@ def test_the_entry_reads_a_zero_or_negative_limit_as_unknown() -> None:
 
 def test_the_entry_marks_deprecated_status() -> None:
     assert _entry({"id": "old", "status": "deprecated"}).deprecated is True
+
+
+def _v2_entry(model: dict[str, Any]) -> ModelCatalogEntry:
+    return ModelCatalogEntry.from_model(parse_catalog_v2({"p": {"models": {"m": model}}}).providers["p"].models["m"])
+
+
+def test_the_entry_names_the_routes_its_protocols_map_to_in_models_dev_order() -> None:
+    api: dict[str, Any] = {"generate-content": {}, "chat-completions": {}, "interactions": {}, "responses": {}}
+
+    assert _v2_entry({"api": api}).endpoints == ["/chat/completions", "/responses"]
+
+
+def test_a_v2_entry_with_no_api_block_has_no_endpoints() -> None:
+    assert _v2_entry({}).endpoints == []
+
+
+def test_a_v1_entry_has_no_endpoints() -> None:
+    assert _entry(GPT_4O).endpoints == []
 
 
 def test_build_metadata_map_keys_by_instance() -> None:
