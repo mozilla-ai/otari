@@ -42,7 +42,7 @@ Otari implements three completion surfaces:
 - `POST /api/v1/responses`, OpenAI Responses
 
 Otari also serves embeddings, images, audio, files, batches,
-moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
+moderations, rerank, search, fetch, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
 ### Embedding input type
@@ -538,6 +538,115 @@ see [Provider failures](#provider-failures).
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
+
+## Fetch
+
+`POST /api/v1/fetch` and `POST /api/v1/fetch/{fetch_tool_name}` read one page
+through a configured fetch tool, as [Search](#search) runs a search tool. This is
+separate from `otari_web_fetch`, which lets a model fetch pages during a
+completion; both are described in [Built-in tools](tools.md#direct-fetch). A
+client that runs its own agent loop reads pages this way, with the gateway's URL
+checks, prices and budgets, without a completion for each page.
+
+The endpoint is served only where `web_fetch_enabled` is on, the one switch for
+every page the gateway fetches; off, it answers `400`.
+
+**Which tool.** The path names the tool. On `POST /api/v1/fetch`, the body's
+`fetch_tool_name` does, else the deployment's `web_fetch_default_tool`, else
+`builtin_fetch`, the gateway's own fetcher, which always exists. A call that
+names no tool runs on the workspace's
+[organization fetch key](tools.md#organization-search-keys) when it has a usable
+one; a named call runs on that tool with its own key. Either way the tool decides
+the access check, the `rate_limits` rules, the timeout and the usage row's model
+and provider. The access check reads the key's `allowed_tools`, else its user's,
+for the tool's name or `*`, as a search does
+([access control](access-control.md#users-and-identities)).
+
+**Which URLs.** The workspace's web-access policy applies in full: its switch, and
+its allowed and blocked domain lists, which bind the URL asked for and, on the
+built-in fetcher, every redirect. A provider tool is held to the URL it reports
+finding the page at; DeepSeek, Exa and Tabstack report none, so a redirect they
+follow escapes the lists (see [Fetch providers](tools.md#fetch-providers)). A
+private, loopback or link-local address is never fetched, whatever the lists say.
+
+**Request.**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `url` | string, required | The page: one public `http` or `https` URL. |
+| `fetch_tool_name` | string | The tool, when the path does not name one; `builtin_fetch` is a valid name. |
+| `max_chars` | integer, at least 1 | Cut the page text to this many characters. Unset, the tool's own `max_chars` option applies, else the provider's own limits. |
+| `include_raw` | boolean | Also return `raw`, the provider's whole response. Default `false`. |
+| `provider_options` | object | Native options of the provider serving the call, under its own names, as `GET /api/v1/search-tools/providers?kind=fetch` lists them. They win over the tool's own options. An option the provider does not take, or takes only from the deployment, is a 400 naming it. A call that names no tool may be served by an organization key on another provider, so name the tool when the options are meant for one provider. |
+| `user` | string | Who the fetch is billed to; see [Search](#search). |
+
+**Response.**
+
+```json
+{
+  "object": "fetch",
+  "fetch_tool": "builtin_fetch",
+  "url": "https://blog.python.org/2025/10/python-3140-final-is-here.html",
+  "final_url": "https://blog.python.org/2025/10/python-3140-final-is-here.html",
+  "title": "Python 3.14.0 (final) is here!",
+  "content_type": "text/html",
+  "text": "# Python 3.14.0 (final) is here! ...",
+  "published": null,
+  "truncated": false
+}
+```
+
+`url` is the URL asked for, in canonical form, and `final_url` where the page was
+found after redirects, the same as `url` when the provider does not report where
+a redirect led. `title` and `content_type` are empty strings when the provider
+gives none. `text` is the page's text as the provider extracted it: the built-in
+fetcher keeps an HTML page's content as light Markdown, without its navigation,
+banners, footers and sidebars. `published` is when the page was published, where
+the provider reports it, else `null`. `truncated` is `true` when `text` is less
+than the whole page: the body or the extracted text hit a limit of the
+provider's, or `max_chars` cut it. `raw` appears only when the request set
+`include_raw`.
+
+**Price.** A fetch is billed at the provider's reported cost when it reports one
+(Exa does), else at the tool's own per-call rate: its `price_per_call`, or a
+price row of kind `fetch` keyed by the tool's name, `builtin_fetch` included.
+A fetch the workspace's organization fetch key served is priced under
+`otari:web_fetch` instead. See
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
+
+**Errors.** Where a refusal carries a stable code, it is in the
+`Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
+
+| Situation | Status | `Otari-Error-Code` |
+|---|---|---|
+| No credentials, or a key that is not valid | 401 | |
+| `web_fetch_enabled` is off | 400 | |
+| The tool named is not configured, or cannot run as configured | 400 | |
+| The URL is not a valid public `http` or `https` URL or names a private address, asked for or reported by a provider after a redirect | 400 | |
+| A `provider_options` key the provider does not take from a request | 400 | |
+| The master key without a `user` | 400 | |
+| The body fails schema validation, such as a `max_chars` below 1 | 422 | `invalid_request` |
+| The workspace turned web access off | 403 | |
+| The workspace's domain lists disallow the URL, asked for or found after a redirect | 403 | |
+| The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
+| A `user` naming another user, where the key rejects a mismatch | 403 | |
+| A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
+| A budget refuses the fetch | 403 | `budget_exceeded` |
+| `require_pricing` is on and the fetch has no price (a row of kind `fetch` keyed by the tool's name, or its `price_per_call`; `otari:web_fetch` for a fetch the workspace's organization key serves); the detail names it | 402 | `pricing_required` |
+| The tool runs on the deployment's account and the organization has no funds paid in | 402 | `insufficient_funds` |
+| A rate limit is full | 429 | `rate_limited` |
+| The workspace's organization fetch key cannot be used as it is | 502 | |
+| The provider, or the built-in fetcher, failed the fetch: the page answered an error status, timed out, could not be reached, has a content type the fetcher does not read, or could not be extracted; on the built-in fetcher, a host that cannot be resolved or resolves to a private address (`url_invalid`) | 502 | |
+| The workspace's stored web-access policy cannot be read | 503 | |
+
+A failed fetch is a 502 whose `detail` names no upstream detail; the failure's
+safe fields ride as the same headers a [search](#search)'s 502 carries:
+`Otari-Error-Provider` (`builtin` for the gateway's own fetcher),
+`Otari-Error-Status` (the page's own HTTP status, when the fetcher reports one),
+`Otari-Error-Tag` (the provider's own tag, or the built-in fetcher's: `timeout`,
+`network`, `http_status`, `redirect`, `url_invalid`, `content_type`,
+`extraction`, `content_decoding`) and `Otari-Error-Retryable`. The body never
+carries the URL.
 
 ## Code execution
 

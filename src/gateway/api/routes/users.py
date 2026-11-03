@@ -53,8 +53,9 @@ class CreateUserRequest(BaseModel):
     )
     allowed_tools: list[str] | None = Field(
         default=None,
-        description="Default search tool access-list this user's keys inherit: null = the tools allowed_models "
-        "grants, [] = no tool, or search tool names ('*' for every search tool).",
+        description="Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: "
+        "null = the search tools allowed_models grants, [] = no tool, "
+        "or search and fetch tool names ('*' for every tool).",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
