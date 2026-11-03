@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from gateway.exceptions.tools_exceptions import (
     WebAccessNotEnabledError,
+    WebAccessRefusedError,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WorkspaceWebSearchDomainsExcludedError,
@@ -77,7 +78,7 @@ def apply_web_access_policy(
     workspace_domains = DomainPolicy()
     if policy is not None:
         if not policy.enabled:
-            raise WebAccessNotEnabledError() if fetch_requested else WebSearchNotEnabledError()
+            raise web_access_disabled_refusal(requested_tools)
         workspace_domains = DomainPolicy(
             allowed=canonicalize_domain_rules(policy.allowed_domains or ()),
             blocked=canonicalize_domain_rules(policy.blocked_domains or ()),
@@ -104,6 +105,11 @@ def apply_web_access_policy(
         fetch_policy=fetch_policy,
         search_credential=policy.credential if policy is not None and search_tool_entry is not None else None,
     )
+
+
+def web_access_disabled_refusal(requested_tools: Sequence[WebTool]) -> WebAccessRefusedError:
+    """How a workspace with web access off refuses ``requested_tools``: as Fetch, or as Search for Search alone."""
+    return WebAccessNotEnabledError() if WebTool.FETCH in requested_tools else WebSearchNotEnabledError()
 
 
 def _declared_rules(tool_entry: dict[str, Any] | None, field: str) -> tuple[CanonicalHost, ...] | None:

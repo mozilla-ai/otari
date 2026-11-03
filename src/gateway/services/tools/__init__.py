@@ -11,7 +11,8 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
-and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
+and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
+``web_access_disabled_refusal`` where the workspace turned web access off.
 ``with_typed_code_execution_tool`` reads Gemini's own code-execution declaration as the bare keyword, and
 ``provider_attempt_kwargs`` gives it back to each attempt that goes to Gemini.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
@@ -115,7 +116,7 @@ from gateway.services.tools._tool_prices import (
     unpriced_tool_detail,
 )
 from gateway.services.tools._use_budget import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
-from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy
+from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy, web_access_disabled_refusal
 from gateway.services.tools._web_admission import (
     NO_WEB_TOOLS,
     AdmittedWebTools,
@@ -225,6 +226,7 @@ __all__ = [
     "admit_mcp_servers",
     "admit_web_access",
     "apply_web_access_policy",
+    "web_access_disabled_refusal",
     "code_execution_declaration_forms",
     "decide_code_executor",
     "decide_candidate_tools",

@@ -382,8 +382,8 @@ class DirectSearchFieldRefusedError(TenancyValidationError):
         )
 
 
-class DirectSearchFailedError(TenancyError):
-    """The provider failed a direct search, or could not be reached.
+class DirectToolFailedError(TenancyError):
+    """The provider failed a direct tool call, or could not be reached.
 
     ``message`` is the provider's own account, for the usage row and the log
     only: an old client's can quote the upstream body. ``headers`` carry the
@@ -397,6 +397,10 @@ class DirectSearchFailedError(TenancyError):
         super().__init__(message)
         self.headers = headers
         self.upstream_status = upstream_status
+
+
+class DirectSearchFailedError(DirectToolFailedError):
+    """The provider failed a direct search, or could not be reached."""
 
 
 class GatewayToolPricingRequiredError(TenancyError):
@@ -442,6 +446,7 @@ class WebSearchCredentialRefusedError(TenancyError):
 __all__ = [
     "DirectSearchFailedError",
     "DirectSearchFieldRefusedError",
+    "DirectToolFailedError",
     "McpSessionsInterruptedError",
     "SandboxCredentialRefusedError",
     "SandboxImageNotAllowedError",
