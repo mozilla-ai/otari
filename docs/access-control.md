@@ -428,7 +428,7 @@ by the id it names it by. It needs neither the master key nor its key's id:
 | `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
 | `DELETE /api/v1/end-users?external_id=...` | Deletes the end user, answering `{"deleted": 1}`, or 404 |
 | `DELETE /api/v1/end-users?created_before=...` | Deletes up to `limit` (default 100, at most 1000) of the oldest end users created before that time, answering `{"deleted": n}`; repeat until `n` is 0 |
-| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
+| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with each one's name, limits and period and how many end users are on it |
 
 ```http
 PATCH /api/v1/end-users?external_id=fxa123:memories

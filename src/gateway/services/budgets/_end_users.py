@@ -163,13 +163,15 @@ class _EndUsers:
         )
 
     async def budgets(self, api_key: APIKey) -> list[EndUserBudgetPublic]:
-        """The budgets the key may assign, each with how many of its owner's end users are on it."""
+        """The budgets the key may assign, with their limits and how many of its owner's end users are on each."""
         _require_service_key(api_key)
         budget_ids = api_key.assignable_end_user_budgets()
         counts = await self._repositories.end_users.count_by_budget(str(api_key.user_id), budget_ids)
+        found = await self._repositories.budgets.get_many(budget_ids)
         return [
-            EndUserBudgetPublic(
-                budget_id=budget_id,
+            EndUserBudgetPublic.from_model(
+                budget_id,
+                found.get(budget_id),
                 is_default=budget_id == api_key.end_user_budget_id,
                 end_user_count=counts.get(budget_id, (0, 0))[0],
                 blocked_end_user_count=counts.get(budget_id, (0, 0))[1],

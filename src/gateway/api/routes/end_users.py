@@ -246,10 +246,10 @@ async def update_end_user(
 
 @budgets_router.get("")
 async def list_end_user_budgets(api_key: ServiceKey, budgets: BudgetServiceDep) -> list[EndUserBudgetPublic]:
-    """List the budgets the calling service key may put its end users on, with how many end users each holds.
+    """List the budgets the calling service key may put its end users on, with their limits and end user counts.
 
-    Requires a service key. The counts cover the end users of the key's user, blocked ones included and deleted
-    ones not.
+    Requires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The
+    counts cover the end users of the key's user, blocked ones included and deleted ones not.
     """
     return await budgets.list_end_user_budgets(api_key=api_key)
 
