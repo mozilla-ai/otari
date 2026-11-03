@@ -69,3 +69,23 @@ def test_missing_form_field_reports_a_body_validation_error() -> None:
         form_field(FormData(), "file", TypeAdapter(UploadFile), required=True)
 
     assert raised.value.errors()[0]["loc"] == ("body", "file")
+
+
+@pytest.mark.parametrize("form", [FormData(), FormData([("model", "")])])
+def test_missing_or_empty_required_scalar_reports_a_body_validation_error(form: FormData) -> None:
+    with pytest.raises(RequestValidationError) as raised:
+        form_field(form, "model", TypeAdapter(str), required=True)
+
+    assert raised.value.errors()[0]["type"] == "missing"
+    assert raised.value.errors()[0]["loc"] == ("body", "model")
+
+
+@pytest.mark.parametrize("form", [FormData(), FormData([("temperature", "")])])
+def test_missing_or_empty_optional_scalar_uses_default(form: FormData) -> None:
+    assert form_field(form, "temperature", TypeAdapter(float), default=0.5) == 0.5
+
+
+def test_nonempty_scalar_is_validated() -> None:
+    assert form_field(FormData([("temperature", "0")]), "temperature", TypeAdapter(float)) == 0.0
+    with pytest.raises(RequestValidationError):
+        form_field(FormData([("temperature", "invalid")]), "temperature", TypeAdapter(float))

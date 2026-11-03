@@ -235,6 +235,34 @@ def test_transcription_optional_fields(
     assert extra_field in call_kwargs
 
 
+@pytest.mark.parametrize("extra_field", ["language", "prompt", "response_format", "temperature"])
+def test_transcription_empty_optional_field_uses_default(
+    client: TestClient, api_key_header: dict[str, str], extra_field: str
+) -> None:
+    with patch(
+        "gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=_mock_transcription_response()
+    ) as mock:
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+            data={"model": "openai:whisper-1", extra_field: ""},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert extra_field not in mock.call_args.kwargs
+
+
+def test_transcription_empty_model_is_missing(client: TestClient, api_key_header: dict[str, str]) -> None:
+    resp = client.post(
+        f"{API_ROOT}/audio/transcriptions",
+        files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+        data={"model": ""},
+        headers=api_key_header,
+    )
+    assert resp.status_code == 422
+    assert any(error["type"] == "missing" and error["loc"] == ["body", "model"] for error in resp.json()["detail"])
+
+
 # === Speech tests ===
 
 

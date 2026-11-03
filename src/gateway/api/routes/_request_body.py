@@ -79,7 +79,7 @@ def form_field(
     required: bool = False,
 ) -> _T | None:
     """Validate one parsed form value with the same body location FastAPI uses."""
-    if name not in form:
+    if name not in form or form.get(name) == "":
         if required:
             raise RequestValidationError(
                 [{"type": "missing", "loc": ("body", name), "msg": "Field required", "input": None}]
