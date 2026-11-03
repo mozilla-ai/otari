@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from gateway.models.base import Base, UtcDateTime
 
 MAX_EMAIL_LENGTH = 255
-MAX_PROVIDER_LENGTH = 50
+MAX_PROVIDER_LENGTH = 255
 MAX_SUBJECT_LENGTH = 255
 MAX_BLOCK_REASON_LENGTH = 500
 
