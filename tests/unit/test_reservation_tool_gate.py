@@ -27,7 +27,6 @@ def _call(calls: int = 1) -> LabelCalls:
         calls=calls,
         unreported_calls=calls,
         reported_cost=Decimal(0),
-        enrichment_cost=Decimal(0),
         deployment_paid=True,
     )
 

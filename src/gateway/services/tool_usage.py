@@ -70,7 +70,7 @@ class ToolSpendGate(Protocol):
     """Holds one gateway-run call's price on the request's budgets before the call runs."""
 
     async def admit(self, call: LabelCalls) -> bool:
-        """Whether ``call``, one call with no reported cost, fits; a call that does not must not run."""
+        """Whether ``call``, its calls with no reported cost, fits; calls that do not must not run."""
         ...
 
 
@@ -89,7 +89,6 @@ class _LabelTotals:
     calls: int = 0
     unreported_calls: int = 0
     reported_cost: Decimal = Decimal(0)
-    enrichment_cost: Decimal = Decimal(0)
 
 
 class ToolUsageTally:
@@ -116,12 +115,14 @@ class ToolUsageTally:
         label: str | None = None,
         rate_keys: tuple[RateKey, ...] | None = None,
         deployment_paid: bool | None = None,
+        calls: int = 1,
     ) -> bool:
-        """Whether one more call of ``tool`` may run, priced as :meth:`record_result` would record it.
+        """Whether ``calls`` more calls of ``tool`` may run, each priced as :meth:`record_success` would record it.
 
         A backend asks before a billed call and answers a refusal with
         :data:`TOOL_BUDGET_EXCEEDED_TEXT`: settlement prices the call only after it
-        ran, so without the hold one request could spend past its cap.
+        ran, so without the hold one request could spend past its cap. The pages a
+        search reads together are one hold, so ``calls`` is their number.
         """
         if self.spend_gate is None:
             return True
@@ -129,10 +130,9 @@ class ToolUsageTally:
             tool=(tool or OVERFLOW_TOOL_NAME)[:MAX_TOOL_NAME_CHARS],
             label=label,
             rate_keys=rate_keys,
-            calls=1,
-            unreported_calls=1,
+            calls=calls,
+            unreported_calls=calls,
             reported_cost=Decimal(0),
-            enrichment_cost=Decimal(0),
             deployment_paid=deployment_paid,
         )
         return await self.spend_gate.admit(call)
@@ -145,25 +145,38 @@ class ToolUsageTally:
         label: str | None = None,
         rate_keys: tuple[RateKey, ...] | None = None,
         cost: Decimal | None = None,
-        enrichment_cost: Decimal | None = None,
         deployment_paid: bool | None = None,
     ) -> None:
         """Record a call that returned, classifying it on the sentinel.
 
-        A successful call is kept under its label with its rate keys (see
+        A successful call is recorded as :meth:`record_success` records one. A
+        failed call is counted and its cost dropped, since it is never billed.
+        """
+        if is_tool_error(text):
+            self._record(tool, failed=True)
+            return
+        self.record_success(tool, label=label, rate_keys=rate_keys, cost=cost, deployment_paid=deployment_paid)
+
+    def record_success(
+        self,
+        tool: str,
+        *,
+        label: str | None = None,
+        rate_keys: tuple[RateKey, ...] | None = None,
+        cost: Decimal | None = None,
+        deployment_paid: bool | None = None,
+    ) -> None:
+        """Record a call that succeeded, such as a page read to enrich a search's hit.
+
+        The call is kept under its label with its rate keys (see
         :class:`~gateway.types.tool_charges.LabelCalls`), and with the cost its
         provider reported, where ``None`` means it reported none and a rate
-        prices the call. A failed call's costs are dropped, since it is never
-        billed. A cost that is negative, not finite, or more than a cost column
-        holds is unusable: the call reads as unreported, and an enrichment cost
-        as none. ``deployment_paid`` says whose account ran the call, which
-        decides whose prices count and whether the organization's funds pay for
-        it; ``None`` reads it off the label.
+        prices the call. A cost that is negative, not finite, or more than a cost
+        column holds is unusable: the call reads as unreported. ``deployment_paid``
+        says whose account ran the call, which decides whose prices count and
+        whether the organization's funds pay for it; ``None`` reads it off the label.
         """
-        failed = is_tool_error(text)
-        key = self._record(tool, failed=failed)
-        if failed:
-            return
+        key = self._record(tool, failed=False)
         totals = self._labels.setdefault((key, label, rate_keys, deployment_paid), _LabelTotals())
         totals.calls += 1
         reported = _usable_cost(cost)
@@ -171,7 +184,6 @@ class ToolUsageTally:
             totals.unreported_calls += 1
         else:
             totals.reported_cost += reported
-        totals.enrichment_cost += _usable_cost(enrichment_cost) or Decimal(0)
 
     def record_provider_searches(self, provider: str, searches: int, *, deployment_paid: bool) -> None:
         """Record searches a model's provider ran itself and bills per search, as Anthropic's search does.
@@ -228,7 +240,6 @@ class ToolUsageTally:
                 calls=totals.calls,
                 unreported_calls=totals.unreported_calls,
                 reported_cost=totals.reported_cost,
-                enrichment_cost=totals.enrichment_cost,
                 deployment_paid=deployment_paid,
             )
             for (tool, label, rate_keys, deployment_paid), totals in self._labels.items()

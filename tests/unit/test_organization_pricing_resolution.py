@@ -703,7 +703,7 @@ def test_the_deployment_price_list_also_prefers_the_canonical_tool_key() -> None
 # Tool calls by label (design L)
 #
 # Each label is priced at the costs its calls reported, plus its first priced
-# rate key's rate for each call that reported none, plus its enrichment costs.
+# rate key's rate for each call that reported none.
 # Rates here are per call in the per-million convention: 10_000 is $0.01.
 # =============================================================================
 
@@ -716,7 +716,6 @@ def _calls(
     calls: int = 1,
     unreported_calls: int | None = None,
     reported_cost: str = "0",
-    enrichment_cost: str = "0",
 ) -> LabelCalls:
     return LabelCalls(
         tool=tool,
@@ -725,7 +724,6 @@ def _calls(
         calls=calls,
         unreported_calls=calls if unreported_calls is None else unreported_calls,
         reported_cost=Decimal(reported_cost),
-        enrichment_cost=Decimal(enrichment_cost),
     )
 
 
@@ -856,28 +854,36 @@ def test_a_reported_zero_is_billed_at_zero_although_a_rate_exists() -> None:
     _run(scenario)
 
 
-def test_enrichment_costs_are_added_to_the_search_that_ran_them() -> None:
+def test_the_pages_a_search_read_settle_as_fetches_at_the_row_of_what_read_them() -> None:
+    """A search and the pages read to enrich it are two labels, each priced by its own rate keys."""
+
     async def scenario(session: AsyncSession) -> None:
         await _tool_price(session, _EXA, 10_000.0)
+        await _tool_price(session, "otari:web_fetch", 2_000.0)
 
         charges = await price_tool_calls(
             session,
             [
+                _calls(label=_EXA, rate_keys=(_EXA,)),
                 _calls(
-                    label=_EXA,
-                    rate_keys=(_EXA,),
-                    calls=2,
-                    unreported_calls=1,
-                    reported_cost="0.005",
-                    enrichment_cost="0.003",
-                )
+                    tool="web_fetch",
+                    label="org:tabstack",
+                    rate_keys=("otari:web_fetch",),
+                    calls=3,
+                    unreported_calls=2,
+                    reported_cost="0.001",
+                ),
             ],
             as_of=_NOW,
         )
 
-        # 0.005 reported + 0.01 for the unreported call + 0.003 of enrichment.
-        assert charges.total == Decimal("0.018")
-        assert charges.lines[0]["cost"] == pytest.approx(0.018)
+        # 0.01 for the search; 0.001 reported plus 2 × 0.002 for the pages.
+        assert charges.total == Decimal("0.015")
+        assert [(line["meter"], line["label"]) for line in charges.lines] == [
+            ("web_fetch_calls", "org:tabstack"),
+            ("web_search_calls", _EXA),
+        ]
+        assert [line["cost"] for line in charges.lines] == [pytest.approx(0.005), pytest.approx(0.01)]
 
     _run(scenario)
 
