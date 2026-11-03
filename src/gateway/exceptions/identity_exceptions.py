@@ -373,6 +373,20 @@ class OAuthIdentityLinkConflictError(TenancyConflictError):
         super().__init__(f"Another sign-in with that {provider} account finished first. Sign in again.")
 
 
+class OIDCDiscoveryError(TenancyValidationError):
+    """An organization's own OpenID Connect issuer could not be read into a usable configuration.
+
+    The message names the issuer field alone. It carries no host, no status code, and no provider
+    or transport text, because the issuer is an address the deployment did not choose and a refusal
+    must not describe the attempt back to whoever can read it.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This deployment could not read the issuer's OpenID configuration. Check the issuer address and try again."
+        )
+
+
 class CurrentPasswordIncorrectError(TenancyValidationError):
     """The current password given with a password change does not match.
 
@@ -588,6 +602,7 @@ __all__ = [
     "OAuthNotConfiguredError",
     "OAuthProviderUnavailableError",
     "OAuthStateError",
+    "OIDCDiscoveryError",
     "PasskeyAlreadyRegisteredError",
     "PasskeyCeremonyError",
     "PasskeyLimitReachedError",
