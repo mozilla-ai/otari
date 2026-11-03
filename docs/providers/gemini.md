@@ -54,14 +54,14 @@ Chat completions take only text-generation models. Embedding models such as `gem
 
 If you have not already started Otari and created a client key, follow the [Quickstart](../quickstart.md) first.
 
-Then make a request with the Otari Python SDK (`pip install otari`; any
-OpenAI-compatible client also works), using a `gemini:<model>` selector:
+Then make a request with the OpenAI client (`pip install openai`), using
+a `gemini:<model>` selector:
 
 ```python
-from otari import OtariClient
+from openai import OpenAI
 
-client = OtariClient(api_base="http://localhost:8000", api_key="tk-...")
-resp = client.completion(
+client = OpenAI(base_url="http://localhost:8000/api/v1", api_key="tk-...")
+resp = client.chat.completions.create(
     model="gemini:gemini-3-flash-preview",
     messages=[{"role": "user", "content": "Say hello in five words."}],
 )

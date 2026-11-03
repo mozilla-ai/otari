@@ -68,14 +68,14 @@ Everything after the colon is passed straight to OpenAI, so any model your key c
 
 If you have not already started Otari and created a client key, follow the [Quickstart](../quickstart.md) through step 3 first.
 
-Then make a request with the Otari Python SDK (`pip install otari`; any
-OpenAI-compatible client also works), using an `openai:<model>` selector:
+Then make a request with the OpenAI client (`pip install openai`), using
+an `openai:<model>` selector:
 
 ```python
-from otari import OtariClient
+from openai import OpenAI
 
-client = OtariClient(api_base="http://localhost:8000", api_key="tk-...")
-resp = client.completion(
+client = OpenAI(base_url="http://localhost:8000/api/v1", api_key="tk-...")
+resp = client.chat.completions.create(
     model="openai:gpt-4o-mini",
     messages=[{"role": "user", "content": "Say hello in five words."}],
 )

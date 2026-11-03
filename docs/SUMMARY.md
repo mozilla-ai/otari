@@ -40,7 +40,6 @@
 * [Use with a ChatGPT subscription](chatgpt-subscription.md)
 * [Agent traces](traces.md)
 * [Importing external usage](external-usage.md)
-* [SDK compatibility](sdk-compatibility.md)
 
 ## For platform builders
 
