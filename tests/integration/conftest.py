@@ -217,6 +217,13 @@ def clean_database(postgres_url: str) -> None:
 
 
 @pytest.fixture
+def unpriced_builtin_fetch(postgres_url: str, clean_database: None) -> None:
+    """A database whose ``builtin_fetch`` has no price: a migration gives it 0 on a fresh one."""
+    with _reset_engine(postgres_url).begin() as conn:
+        conn.execute(text("DELETE FROM model_pricing WHERE kind = 'fetch' AND model_key = 'builtin_fetch'"))
+
+
+@pytest.fixture
 def test_db(postgres_url: str, clean_database: None) -> Generator[Session]:
     """Create a test database session."""
     engine = create_engine(postgres_url, pool_pre_ping=True)

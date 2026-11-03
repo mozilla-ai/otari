@@ -729,6 +729,7 @@ async def test_a_fetch_whose_provider_reports_its_cost_is_billed_that_cost(
 
 @pytest.mark.asyncio
 async def test_a_built_in_fetch_is_labeled_builtin_fetch_and_priced_under_otari_web_fetch(
+    unpriced_builtin_fetch: None,
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
@@ -899,7 +900,7 @@ async def test_unpriced_tool_is_refused_when_require_pricing_is_on(
 
 @pytest.mark.asyncio
 async def test_unpriced_fetch_is_refused_before_the_provider_call(
-    strict_pricing_client: TestClient,
+    strict_pricing_client: TestClient, unpriced_builtin_fetch: None
 ) -> None:
     headers = {API_KEY_HEADER: "Bearer test-master-key"}
     strict_pricing_client.post(f"{API_ROOT}/users", json={"user_id": "fetch-user"}, headers=headers)
