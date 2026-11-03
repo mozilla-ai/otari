@@ -1,23 +1,19 @@
-"""The core ``ProviderFilePort``: a provider's files API reached through any-llm.
-
-OpenAI's container files are the one read any-llm has no call for, so that read
-goes over this adapter's own connection.
-"""
+"""The core ``ProviderFilePort``: a provider's files API reached through any-llm."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import AsyncGenerator
+from contextlib import AbstractAsyncContextManager
 from functools import cached_property
-from urllib.parse import quote
 
 import httpx
 from anthropic import AnthropicError
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 from any_llm.types.files import AsyncFileDownload
+from openai import OpenAIError
 from pydantic import ValidationError
 
 from gateway.exceptions.files_exceptions import (
@@ -32,8 +28,6 @@ from gateway.types.provider_file import ProviderCopyReceipt, ProviderFile
 
 __all__ = ["AnyLlmProviderFiles"]
 
-OPENAI_BASE = "https://api.openai.com/v1"
-
 # How long to wait on the provider for a connection or for the next chunk.
 _TIMEOUT = httpx.Timeout(30.0)
 
@@ -41,8 +35,8 @@ _TIMEOUT = httpx.Timeout(30.0)
 _FILE_PROVIDERS = frozenset({LLMProvider.ANTHROPIC, LLMProvider.OPENAI})
 
 # How a file call fails. any-llm raises its own error, or re-raises the provider
-# SDK's while unified exceptions are off, and the OpenAI container read is httpx.
-_FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, httpx.HTTPError, ValidationError)
+# SDK's while unified exceptions are off.
+_FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, OpenAIError, httpx.HTTPError, ValidationError)
 
 _NOT_FOUND = 404
 
@@ -119,21 +113,6 @@ def _declared_size(download: AsyncFileDownload) -> int:
         if name.lower() == "content-length" and value.isdigit():
             return int(value)
     return 0
-
-
-def _container_file_request(file: ProviderFile, credential: ResolvedCredential) -> tuple[str, dict[str, str]]:
-    """The URL and headers that read ``file``'s bytes out of its OpenAI container.
-
-    Raises :class:`ProviderFileUnavailableError` for a file that names no container.
-    """
-    # OpenAI keys a container file on its container as well as its ID.
-    if not file.container_id:
-        raise ProviderFileUnavailableError(f"openai file {file.file_id} names no container to read it from")
-    base = (credential.api_base or OPENAI_BASE).rstrip("/")
-    return (
-        f"{base}/containers/{quote(file.container_id, safe='')}/files/{quote(file.file_id, safe='')}/content",
-        {"Authorization": f"Bearer {credential.api_key}"},
-    )
 
 
 class _AnyLlmFileSession(ProviderFileSession):
@@ -279,18 +258,8 @@ class _AnyLlmFileSession(ProviderFileSession):
     def _open(self, file: ProviderFile) -> AbstractAsyncContextManager[AsyncFileDownload]:
         if self._provider is LLMProvider.ANTHROPIC:
             return self._llm.adownload_file(file.file_id)
-        return self._open_container_file(file)
-
-    @asynccontextmanager
-    async def _open_container_file(self, file: ProviderFile) -> AsyncIterator[AsyncFileDownload]:
-        """Open an OpenAI container file's download, which any-llm has no call for.
-
-        Stopgap: read it through any-llm once that can reach a container's files
-        (mozilla-ai/any-llm#1419, tracked in #1480).
-        """
-        url, headers = _container_file_request(file, self._credential)
-        async with self._connection.stream("GET", url, headers=headers) as response:
-            response.raise_for_status()
-            yield AsyncFileDownload(
-                status_code=response.status_code, headers=response.headers, chunks=response.aiter_bytes()
-            )
+        # OpenAI keys a container file on its container as well as its ID, and
+        # without one any-llm would read the unrelated Files API instead.
+        if not file.container_id:
+            raise ProviderFileUnavailableError(f"openai file {file.file_id} names no container to read it from")
+        return self._llm.adownload_file(file.file_id, container_id=file.container_id)
