@@ -28,6 +28,7 @@ __all__ = [
     "LISTING_PREFIX",
     "MAX_ISSUE_EXAMPLES",
     "MODELS_DEV_SOURCES",
+    "MODELS_DEV_UNITS",
     "RATE_FIELDS",
     "REFUSE_DAMAGED_SHARE",
     "ModelsDevApi",
@@ -75,6 +76,10 @@ _MAX_SEGMENT = 64
 
 # The rate fields of a ``cost`` block and of each tier in it, USD per million tokens.
 RATE_FIELDS = ("input", "output", "cache_read", "cache_write")
+
+# The units a v2 price can be in (``CostUnitV2Values`` in models.dev's
+# ``packages/core/src/schema-v2.ts``). A price that names none is per ``token``.
+MODELS_DEV_UNITS = ("token", "character", "image", "megapixel", "second", "minute")
 
 # models.dev spells a handful of providers differently from any-llm. Looked up
 # by the any-llm implementation name; a provider absent here is spelled the same
