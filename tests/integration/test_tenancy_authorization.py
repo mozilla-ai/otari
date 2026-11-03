@@ -47,7 +47,7 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
-from .tenancy_helpers import NO_MAIL_LIMIT, NO_TERMS, membership_writes
+from .tenancy_helpers import NO_BLOCKED_ADDRESSES, NO_MAIL_LIMIT, NO_TERMS, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -259,6 +259,7 @@ async def test_an_admin_cannot_add_a_new_owner(async_db: AsyncSession) -> None:
         await OrganizationService(async_db, **membership_writes(async_db)).create_active_organization_member_for_user(
             user=admin,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com", role="owner"),
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
 
@@ -288,6 +289,7 @@ async def test_a_plain_member_cannot_add_members(async_db: AsyncSession) -> None
         await OrganizationService(async_db, **membership_writes(async_db)).create_active_organization_member_for_user(
             user=member,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
 
@@ -300,6 +302,7 @@ async def test_an_admin_can_add_members(async_db: AsyncSession) -> None:
     ).create_active_organization_member_for_user(
         user=admin,
         request=ActiveOrganizationMemberCreateRequest(email="ada@example.com", role="member"),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     assert result.status == "active"
@@ -316,6 +319,7 @@ async def test_an_added_member_lands_in_the_adding_organization_only(async_db: A
     result = await service.create_active_organization_member_for_user(
         user=owner,
         request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     assert result.user_id is not None
@@ -547,6 +551,7 @@ async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a
         request=InviteOrganizationMemberRequest(email="invitee@example.com"),
         config=_TEST_CONFIG,
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invitation.accept_link is not None
     await service.accept_invitation(invitation.accept_link.split("token=")[1], claims=NO_TERMS)
@@ -863,6 +868,7 @@ async def test_a_plain_member_cannot_invite(async_db: AsyncSession) -> None:
             request=InviteOrganizationMemberRequest(email="ada@example.com"),
             config=_TEST_CONFIG,
             mail_limit=NO_MAIL_LIMIT,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
 
@@ -875,6 +881,7 @@ async def test_an_admin_can_invite(async_db: AsyncSession) -> None:
         request=InviteOrganizationMemberRequest(email="ada@example.com", role="member"),
         config=_TEST_CONFIG,
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     assert result.status == "invited"
@@ -893,6 +900,7 @@ async def test_an_admin_cannot_invite_an_owner(async_db: AsyncSession) -> None:
             request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
             config=_TEST_CONFIG,
             mail_limit=NO_MAIL_LIMIT,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
 
@@ -906,6 +914,7 @@ async def test_a_viewer_cannot_revoke_an_invitation(async_db: AsyncSession) -> N
         request=InviteOrganizationMemberRequest(email="ada@example.com"),
         config=_TEST_CONFIG,
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     with pytest.raises(NotAuthorizedError):
@@ -926,6 +935,7 @@ async def test_an_admin_cannot_revoke_a_pending_owner_invitation(async_db: Async
         request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
         config=_TEST_CONFIG,
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     with pytest.raises(MembershipUpdateError, match="owners"):
@@ -944,6 +954,7 @@ async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db:
         request=InviteOrganizationMemberRequest(email="ada@example.com"),
         config=_TEST_CONFIG,
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     with pytest.raises(InvitationAlreadyPendingError):
@@ -952,4 +963,5 @@ async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db:
             request=InviteOrganizationMemberRequest(email="ada@example.com"),
             config=_TEST_CONFIG,
             mail_limit=NO_MAIL_LIMIT,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )

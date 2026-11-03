@@ -1,9 +1,11 @@
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import DashboardSession
@@ -23,6 +25,11 @@ class DashboardSessionRepository(BaseRepository[DashboardSession, Never, Never])
     async def delete_for_user(self, user_id: uuid.UUID) -> None:
         """Stage the deletion of every session one account holds."""
         await self.db.execute(delete(DashboardSession).where(DashboardSession.user_id == user_id))
+
+    async def delete_for_users(self, user_ids: Collection[uuid.UUID]) -> None:
+        """Stage the deletion of every session the accounts in ``user_ids`` hold, in one statement."""
+        if user_ids:
+            await self.db.execute(delete(DashboardSession).where(col(DashboardSession.user_id).in_(user_ids)))
 
     async def add(self, *, token_hash: str, user_id: uuid.UUID, created_at: datetime, expires_at: datetime) -> None:
         """Stage a session for an account."""

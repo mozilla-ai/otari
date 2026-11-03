@@ -45,6 +45,7 @@ from gateway.services.tenancy.provisioning_service import (
 )
 
 from .tenancy_helpers import (
+    NO_BLOCKED_ADDRESSES,
     budget_service,
     create_budget,
     create_member,
@@ -168,6 +169,7 @@ async def test_member_added_via_organization_workspace_assignment_is_materialize
             role="member",
             workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
         ),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     assert result.user_id is not None
@@ -222,6 +224,7 @@ async def test_reviving_a_suspended_workspace_membership_is_materialized(async_d
             role="member",
             workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
         ),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     revived = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, target.id)

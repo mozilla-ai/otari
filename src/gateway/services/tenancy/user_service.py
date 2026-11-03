@@ -73,11 +73,12 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.models.tenancy import CallerIdentityPublic, User
 from gateway.ports.growth_signal_port import GrowthSignalPort
-from gateway.repositories.identity import BlockedEmailRepository, WebAuthnCredentialRepository
+from gateway.repositories.identity import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
+from gateway.services.organizations import BlockedAddresses
 from gateway.services.password_service import (
     hash_password_async,
     verify_absent_password_async,
@@ -342,6 +343,7 @@ async def create_user_for_signup(
     password: str,
     uow: UnitOfWork,
     organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
     full_name: str | None = None,
     terms_accepted: bool = False,
 ) -> User | None:
@@ -393,7 +395,7 @@ async def create_user_for_signup(
     full_name = _normalized_full_name(full_name)
 
     address = validated_email(email)
-    if await _is_blocked(db, address):
+    if await blocked_addresses.blocked_among([address]):
         await verify_absent_password_async(password)
         return None
     identity = await UserRepository(db).get_by_email(address)
@@ -548,16 +550,12 @@ async def verify_email(
     return identity
 
 
-async def _is_blocked(db: AsyncSession, address: str) -> bool:
-    """Whether the deployment's email blocklist matches ``address``, which then gets no account and no mail."""
-    return await BlockedEmailRepository(db).matching(address) is not None
-
-
 async def resend_verification_email(
     db: AsyncSession,
     config: GatewayConfig,
     *,
     organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
     background_tasks: BackgroundTasks,
     email: str,
 ) -> None:
@@ -583,7 +581,9 @@ async def resend_verification_email(
     mailer.require_ready()
 
     address = validated_email(email)
-    identity = None if await _is_blocked(db, address) else await UserRepository(db).get_by_email(address)
+    identity = (
+        None if await blocked_addresses.blocked_among([address]) else await UserRepository(db).get_by_email(address)
+    )
     if (
         identity is None
         or identity.hashed_password is None
@@ -618,6 +618,7 @@ async def request_password_reset(
     config: GatewayConfig,
     *,
     organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
     background_tasks: BackgroundTasks,
     email: str,
 ) -> None:
@@ -641,7 +642,9 @@ async def request_password_reset(
     mailer.require_ready()
 
     address = validated_email(email)
-    identity = None if await _is_blocked(db, address) else await UserRepository(db).get_by_email(address)
+    identity = (
+        None if await blocked_addresses.blocked_among([address]) else await UserRepository(db).get_by_email(address)
+    )
     if identity is not None and identity.is_active and _signs_in_only_without_password(identity):
         await verify_absent_password_async(_TIMING_EQUALIZER)
         _schedule_account_exists_notice(mailer, identity, background_tasks=background_tasks, to=address)

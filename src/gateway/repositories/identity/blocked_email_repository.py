@@ -1,11 +1,11 @@
 import uuid
+from collections.abc import Collection
 from typing import Never
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.email_domains import blocklist_keys
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import BlockedEmailEntryExistsError
 from gateway.models.identity import BlockedEmail
@@ -26,13 +26,12 @@ class BlockedEmailRepository(BaseRepository[BlockedEmail, Never, Never]):
         count = await self.db.scalar(select(func.count()).select_from(BlockedEmail))
         return list(rows.scalars().all()), int(count or 0)
 
-    async def matching(self, email: str) -> BlockedEmail | None:
-        """Return an entry that blocks ``email``, or None."""
-        keys = blocklist_keys(email)
-        if not keys:
-            return None
-        result = await self.db.execute(select(BlockedEmail).where(BlockedEmail.pattern.in_(keys)).limit(1))
-        return result.scalar_one_or_none()
+    async def patterns_among(self, patterns: Collection[str]) -> set[str]:
+        """Return the members of ``patterns`` that are blocked."""
+        if not patterns:
+            return set()
+        result = await self.db.execute(select(BlockedEmail.pattern).where(BlockedEmail.pattern.in_(patterns)))
+        return set(result.scalars().all())
 
     async def add(self, *, pattern: str, reason: str | None, created_by_user_id: uuid.UUID) -> BlockedEmail:
         """Stage a new entry.

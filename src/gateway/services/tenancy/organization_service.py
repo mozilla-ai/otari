@@ -88,7 +88,6 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspaceMemberUpdate,
 )
-from gateway.repositories.identity import BlockedEmailRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -104,7 +103,7 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import InvitationMailLimit
+from gateway.services.organizations import BlockedAddresses, InvitationMailLimit
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -122,8 +121,20 @@ from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
     DEFAULT_WORKSPACE_NAME,
+    load_bootstrap_identity,
     password_claims_deployment,
 )
+
+
+def _shaped_addresses(raw: list[str]) -> set[str]:
+    """The addresses in ``raw`` that pass the shape check, normalized; the loop reports the rest."""
+    shaped: set[str] = set()
+    for value in raw:
+        try:
+            shaped.add(_validated_email(value))
+        except TenancyValidationError:
+            continue
+    return shaped
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -344,11 +355,15 @@ class OrganizationService:
         self.workspaces = WorkspaceMemberRepository(db)
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
-        self.blocked_emails = BlockedEmailRepository(db)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
     # ------------------------------------------------------------------
+
+    async def bootstrap_operator_id(self) -> uuid.UUID | None:
+        """Return the id of the identity first-boot provisioning made the deployment's operator, or None."""
+        bootstrap = await load_bootstrap_identity(self.db)
+        return None if bootstrap is None else bootstrap.id
 
     async def get_active_organization_for_user(self, user: User) -> Organization:
         """Return the organization the caller acts in, falling back to a live membership if the pointer is stale.
@@ -1105,6 +1120,7 @@ class OrganizationService:
         *,
         user: User,
         request: ActiveOrganizationMemberCreateRequest,
+        blocked_addresses: BlockedAddresses,
     ) -> ActiveOrganizationMemberCreateResultPublic:
         """Add someone to the caller's organization, by address.
 
@@ -1127,7 +1143,8 @@ class OrganizationService:
         )
 
         email = _validated_email(request.email)
-        await self._refuse_blocked_address(email)
+        if await blocked_addresses.blocked_among([email]):
+            raise BlockedEmailError(email)
         assignments = request.workspace_assignments or []
         await self._require_workspaces_in_organization(organization, assignments)
 
@@ -1331,6 +1348,7 @@ class OrganizationService:
         request: InviteOrganizationMemberRequest,
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
+        blocked_addresses: BlockedAddresses,
     ) -> InviteOrganizationMemberResultPublic:
         """Invite an address to the caller's organization by email.
 
@@ -1357,6 +1375,8 @@ class OrganizationService:
         )
 
         email = _validated_email(request.email)
+        if await blocked_addresses.blocked_among([email]):
+            raise BlockedEmailError(email)
         assignments = request.workspace_assignments or []
         await self._require_workspaces_in_organization(organization, assignments)
 
@@ -1404,6 +1424,7 @@ class OrganizationService:
         request: BulkInviteOrganizationMembersRequest,
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
+        blocked_addresses: BlockedAddresses,
     ) -> BulkInviteOrganizationMembersResultPublic:
         """Invite several addresses to the caller's organization at once.
 
@@ -1426,6 +1447,8 @@ class OrganizationService:
         staged: list[tuple[Invitation, OrganizationMember, str]] = []
         failed: list[BulkInvitationFailurePublic] = []
         seen: set[str] = set()
+        # One lookup for the whole batch, before anything is staged.
+        blocked = await blocked_addresses.blocked_among(_shaped_addresses(request.emails))
         for raw in request.emails:
             try:
                 email = _validated_email(raw)
@@ -1433,6 +1456,8 @@ class OrganizationService:
                     failed.append(BulkInvitationFailurePublic(email=raw, detail=f"{email} is listed more than once"))
                     continue
                 seen.add(email)
+                if email in blocked:
+                    raise BlockedEmailError(email)
                 # A savepoint, not a rollback: rolling the whole transaction back
                 # would expire every instance loaded so far, the organization
                 # and the caller's membership included.
@@ -1480,11 +1505,6 @@ class OrganizationService:
         invited = await asyncio.gather(*(mail(*one) for one in staged))
         return BulkInviteOrganizationMembersResultPublic(invited=list(invited), failed=failed)
 
-    async def _refuse_blocked_address(self, email: str) -> None:
-        """Refuse an address the deployment's email blocklist matches, before anything is written for it."""
-        if await self.blocked_emails.matching(email) is not None:
-            raise BlockedEmailError(email)
-
     async def _stage_invitation(
         self,
         *,
@@ -1498,11 +1518,9 @@ class OrganizationService:
     ) -> tuple[Invitation, OrganizationMember, str]:
         """Write one invitation and its ``invited`` membership, uncommitted; return them with the raw token.
 
-        Refuses an address that already holds an active membership, one with
-        a still-unexpired invitation pending, or one the deployment's email
-        blocklist matches.
+        Refuses an address that already holds an active membership, or one with
+        a still-unexpired invitation pending.
         """
-        await self._refuse_blocked_address(email)
         target = await self._identity_for_address(email, organization)
 
         # Locked before the status check that decides create/revive/refuse,
@@ -2163,6 +2181,7 @@ class OrganizationService:
         invitation_id: uuid.UUID,
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
+        blocked_addresses: BlockedAddresses,
     ) -> InviteOrganizationMemberResultPublic:
         """Give a pending or expired invitation a new link, and email it where mail can be sent. Owners and admins only.
 
@@ -2195,7 +2214,8 @@ class OrganizationService:
             invitee = await self.users.get(membership.user_id)
             if invitee is None or not invitee.is_active:
                 raise OrganizationMemberDeactivatedError(invitation.email)
-            await self._refuse_blocked_address(invitation.email)
+            if await blocked_addresses.blocked_among([invitation.email]):
+                raise BlockedEmailError(invitation.email)
             invitation = await self.invitations.update_status(
                 invitation,
                 {

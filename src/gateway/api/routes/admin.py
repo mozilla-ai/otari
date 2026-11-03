@@ -29,6 +29,7 @@ from gateway.models.tenancy import (
 from gateway.schemas.identity import (
     BlockedEmailCreatedPublic,
     BlockedEmailCreateRequest,
+    BlockedEmailPublic,
     BlockedEmailsPublic,
     PasswordLinkPublic,
 )
@@ -155,20 +156,24 @@ async def issue_password_link(identities: IdentityServiceDep, user_id: uuid.UUID
     return PasswordLinkPublic(mail_sent=link.mail_sent, link=link.link, expires_at=link.expires_at)
 
 
-@router.get("/blocked-emails")
+@router.get("/blocked-emails", dependencies=[Depends(require_deployment_administration)])
 async def list_blocked_emails(
-    service: DeploymentUserServiceDep,
-    current_identity: CurrentIdentity,
+    identities: IdentityServiceDep,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> BlockedEmailsPublic:
     """List the addresses and domains blocked from holding an account on this deployment, newest first."""
-    return await service.list_blocked_emails(actor=current_identity, skip=skip, limit=limit)
+    rows, count = await identities.list_blocked_emails(skip=skip, limit=limit)
+    return BlockedEmailsPublic(data=[BlockedEmailPublic.of(row) for row in rows], count=count)
 
 
-@router.post("/blocked-emails", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/blocked-emails",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_deployment_administration)],
+)
 async def block_email(
-    service: DeploymentUserServiceDep,
+    identities: IdentityServiceDep,
     current_identity: CurrentIdentity,
     body: BlockedEmailCreateRequest,
 ) -> BlockedEmailCreatedPublic:
@@ -182,14 +187,17 @@ async def block_email(
     Refused with 400 for a value that is neither an address nor a domain, or one that would block your own
     address or the deployment's bootstrap operator's, and with 409 for one already blocked.
     """
-    return await service.block_email(actor=current_identity, request=body)
+    block = await identities.block_email(actor=current_identity, value=body.value, reason=body.reason)
+    return BlockedEmailCreatedPublic(
+        **BlockedEmailPublic.of(block.entry).model_dump(), blocked_account_count=block.blocked_account_count
+    )
 
 
-@router.delete("/blocked-emails/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def unblock_email(
-    service: DeploymentUserServiceDep,
-    current_identity: CurrentIdentity,
-    entry_id: uuid.UUID,
-) -> None:
+@router.delete(
+    "/blocked-emails/{entry_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_administration)],
+)
+async def unblock_email(identities: IdentityServiceDep, current_identity: CurrentIdentity, entry_id: uuid.UUID) -> None:
     """Remove a blocklist entry, so the accounts it matched may sign in again."""
-    await service.unblock_email(actor=current_identity, entry_id=entry_id)
+    await identities.unblock_email(actor=current_identity, entry_id=entry_id)

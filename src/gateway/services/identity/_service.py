@@ -1,12 +1,20 @@
 import secrets
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+import idna
+
+from gateway.core.email_domains import blocklist_entry, blocklist_keys
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    BlockedEmailEntryNotFoundError,
+    BootstrapOperatorProtectedError,
     DeploymentUserNotFoundError,
+    DeploymentUserSelfChangeError,
+    InvalidBlockedEmailEntryError,
     OAuthAccountLinkedElsewhereError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
@@ -15,7 +23,7 @@ from gateway.exceptions.identity_exceptions import (
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import EmailAssertion, MailedLinkStatus, ProviderIdentity
+from gateway.models.identity import BlockedEmail, EmailAssertion, MailedLinkStatus, ProviderIdentity
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
@@ -61,6 +69,14 @@ class SignIn:
     session_token: str
     session_expires_at: datetime
     password_removed: bool = False
+
+
+@dataclass(frozen=True)
+class EmailBlock:
+    """A new blocklist entry, and how many existing accounts it matched."""
+
+    entry: BlockedEmail
+    blocked_account_count: int
 
 
 @dataclass(frozen=True)
@@ -157,7 +173,7 @@ class IdentityService:
 
         """
         async with self._uow:
-            if account.email is not None and await self._blocked_emails.matching(account.email) is not None:
+            if account.email is not None and await self.blocked_among([account.email]):
                 logger.info("Refused a sign-in to account %s, whose address is blocked", account.id)
                 raise SignInBlockedError
             await self._sign_in_listener.account_signed_in(account)
@@ -185,6 +201,83 @@ class IdentityService:
             session_token=token,
             session_expires_at=expires_at,
         )
+
+    async def blocked_among(self, emails: Collection[str]) -> set[str]:
+        """Return the members of ``emails`` the deployment's email blocklist matches."""
+        keys = {email: blocklist_keys(email) for email in emails}
+        wanted = {key for email_keys in keys.values() for key in email_keys}
+        if not wanted:
+            return set()
+        async with self._uow:
+            found = await self._blocked_emails.patterns_among(wanted)
+        return {email for email, email_keys in keys.items() if found.intersection(email_keys)}
+
+    async def list_blocked_emails(self, *, skip: int, limit: int) -> tuple[list[BlockedEmail], int]:
+        """Return a page of the email blocklist, newest entry first, and how many entries there are."""
+        async with self._uow:
+            return await self._blocked_emails.list_page(skip=skip, limit=limit)
+
+    async def block_email(self, *, actor: User, value: str, reason: str | None) -> EmailBlock:
+        """Block an address, or a domain and its subdomains, and end the sessions of every account it matches.
+
+        Raises:
+            InvalidBlockedEmailEntryError: If ``value`` is neither an address nor a domain.
+            DeploymentUserSelfChangeError: If the entry matches ``actor``'s own address.
+            BootstrapOperatorProtectedError: If it matches the bootstrap operator's, whose session master-key sign-in
+                mints.
+            BlockedEmailEntryExistsError: If the entry is already blocked.
+
+        """
+        pattern = blocklist_entry(value)
+        if pattern is None:
+            raise InvalidBlockedEmailEntryError(value)
+        async with self._uow:
+            matched = await self._accounts_matching(pattern)
+            if actor.id in matched:
+                raise DeploymentUserSelfChangeError("You cannot block your own email address")
+            bootstrap_id = await self._organizations.bootstrap_operator_id()
+            if bootstrap_id is not None and bootstrap_id in matched:
+                raise BootstrapOperatorProtectedError("The deployment's bootstrap operator's address cannot be blocked")
+            entry = await self._blocked_emails.add(
+                pattern=pattern, reason=(reason or "").strip() or None, created_by_user_id=actor.id
+            )
+            await self._sessions.delete_for_users(matched)
+        logger.warning(
+            "Email blocklist entry added by operator: actor=%s entry=%s matched_accounts=%s",
+            actor.id,
+            entry.id,
+            len(matched),
+        )
+        return EmailBlock(entry=entry, blocked_account_count=len(matched))
+
+    async def unblock_email(self, *, actor: User, entry_id: uuid.UUID) -> None:
+        """Remove a blocklist entry, so the accounts it matched may sign in again.
+
+        Raises:
+            BlockedEmailEntryNotFoundError: If there is no such entry.
+
+        """
+        async with self._uow:
+            entry = await self._blocked_emails.get(entry_id)
+            if entry is None:
+                raise BlockedEmailEntryNotFoundError(entry_id)
+            await self._blocked_emails.remove(entry)
+        logger.warning("Email blocklist entry removed by operator: actor=%s entry=%s", actor.id, entry_id)
+
+    async def _accounts_matching(self, pattern: str) -> set[uuid.UUID]:
+        """The ids of every account whose address the entry ``pattern`` blocks.
+
+        Queried by domain in both spellings a stored address may carry, then matched exactly by ``blocklist_keys``.
+        """
+        is_domain = "@" not in pattern
+        domain = pattern if is_domain else pattern.rsplit("@", 1)[1]
+        spellings = {domain}
+        try:
+            spellings.add(idna.decode(domain))
+        except (idna.IDNAError, UnicodeError):
+            pass
+        candidates = await self._users.list_with_email_at(spellings, include_subdomains=is_domain)
+        return {user_id for user_id, email in candidates if pattern in blocklist_keys(email)}
 
     async def issue_password_link(self, account_id: uuid.UUID) -> PasswordLink:
         """Give an account a single-use link that sets its password, for someone who operates the deployment.

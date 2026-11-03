@@ -43,7 +43,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.tenancy import OrganizationService
 
-from .tenancy_helpers import NO_MAIL_LIMIT, NO_TERMS, membership_writes
+from .tenancy_helpers import NO_BLOCKED_ADDRESSES, NO_MAIL_LIMIT, NO_TERMS, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -110,6 +110,7 @@ async def _invite(
         ),
         config=_TEST_CONFIG,
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
 
