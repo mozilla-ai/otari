@@ -213,7 +213,7 @@ def _sign_in_with_google(client: TestClient, monkeypatch: pytest.MonkeyPatch, *,
 
 @pytest.fixture
 def oauth(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(test_config, "public_base_url", "http://testserver")
+    monkeypatch.setattr(test_config, "public_base_url", "https://testserver")
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
 

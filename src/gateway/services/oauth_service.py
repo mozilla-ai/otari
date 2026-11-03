@@ -30,7 +30,7 @@ secret's digest, and the callback must present the cookie (RFC 9700, section
 4.7.1). One secret per browser rather than per flow: a second tab starting a
 sign-in reuses the cookie it finds, so neither tab's callback breaks the other.
 
-What is this module's own is the two overrides in ``_provider_config``: the
+What is this module's own is the two overrides in ``_as_configured_here``: the
 presets widen scopes and, for Google, ask for offline access, and neither is
 wanted here. See that function.
 
@@ -50,7 +50,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
 from apron_auth import OAuthClient, ProviderConfig
-from apron_auth.errors import INVALID_GRANT, NonceValidationError, StateError, TokenExchangeError
+from apron_auth.errors import INVALID_GRANT, ConfigurationError, NonceValidationError, StateError, TokenExchangeError
 from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
@@ -445,10 +445,15 @@ def require_configured(config: GatewayConfig, provider: str) -> None:
 
     Raises:
         OAuthNotConfiguredError: If ``provider`` is unknown here, either half of
-            its client credentials is missing, or ``public_base_url`` is.
+            its client credentials is missing, ``public_base_url`` is, or the
+            redirect URI it builds is neither https nor a loopback address.
 
     """
-    _credentials(config, provider)
+    client_id, client_secret = _credentials(config, provider)
+    try:
+        _provider_config(config, provider, client_id, client_secret)
+    except ConfigurationError:
+        raise OAuthNotConfiguredError.insecure_address(provider) from None
 
 
 def _credentials(config: GatewayConfig, provider: str) -> tuple[str, str]:
@@ -466,21 +471,32 @@ def _credentials(config: GatewayConfig, provider: str) -> tuple[str, str]:
     return credentials
 
 
-def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret: str) -> OAuthClient:
-    """The apron-auth client that builds ``provider``'s authorization URL and spends its code."""
-    client_id, client_secret = _credentials(config, provider)
+def _provider_config(config: GatewayConfig, provider: str, client_id: str, client_secret: str) -> ProviderConfig:
+    """Build ``provider``'s configuration from this deployment's own settings.
+
+    Raises:
+        ConfigurationError: If the redirect URI this builds is neither https nor
+            a loopback address.
+
+    """
     preset = apron_google.preset if provider == "google" else apron_github.preset
-    identity_handler = (
-        apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
-    )
     provider_config = preset(
         client_id=client_id,
         client_secret=client_secret,
         scopes=list(_PROVIDERS[provider].scopes),
         redirect_uri=redirect_uri(config, provider),
     )
+    return _as_configured_here(provider_config, provider)
+
+
+def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret: str) -> OAuthClient:
+    """The apron-auth client that builds ``provider``'s authorization URL and spends its code."""
+    client_id, client_secret = _credentials(config, provider)
+    identity_handler = (
+        apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
+    )
     return OAuthClient(
-        _as_configured_here(provider_config, provider),
+        _provider_config(config, provider, client_id, client_secret),
         state_store=_DatabaseStateStore(db, provider, _flow_hash(flow_secret)),
         identity_handler=identity_handler,
     )
