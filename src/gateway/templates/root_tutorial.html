@@ -466,7 +466,7 @@
             <span class="step-num" aria-hidden="true">02</span>
             <div>
               <h3>Install a client</h3>
-              <p>Any OpenAI-compatible SDK works. Here we use the Otari Python SDK.</p>
+              <p>Otari speaks the OpenAI API, so use the OpenAI Python client.</p>
             </div>
           </div>
           <figure class="code">
@@ -478,7 +478,7 @@
                 <span class="copy-label" aria-hidden="true"></span>
               </button>
             </figcaption>
-            <pre tabindex="0" role="region" aria-label="Client install command"><code>pip install otari</code></pre>
+            <pre tabindex="0" role="region" aria-label="Client install command"><code>pip install openai</code></pre>
           </figure>
         </article>
 
@@ -487,7 +487,7 @@
             <span class="step-num" aria-hidden="true">03</span>
             <div>
               <h3>Send a chat completion</h3>
-              <p>Point <code>api_base</code> at Otari and call any model as <code>provider:model</code>.</p>
+              <p>Point <code>base_url</code> at Otari and call any model as <code>provider:model</code>.</p>
             </div>
           </div>
           <figure class="code">
@@ -501,14 +501,14 @@
             </figcaption>
             <pre tabindex="0" role="region" aria-label="Chat completion example"><code>import os
 
-from otari import OtariClient
+from openai import OpenAI
 
-client = OtariClient(
-    api_base="http://localhost:8000",
+client = OpenAI(
+    base_url="http://localhost:8000/api/v1",
     api_key=os.environ["OTARI_API_KEY"],
 )
 
-response = client.completion(
+response = client.chat.completions.create(
     model="openai:gpt-4o",
     messages=[{"role": "user", "content": "Hello!"}],
 )

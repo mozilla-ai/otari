@@ -225,8 +225,8 @@ SDK's release.
 
 For the full model (the spec-version compatibility scheme, the two-merge
 lifecycle, and the per-SDK registries and secrets) see
-[`docs/sdk-compatibility.md`](docs/sdk-compatibility.md) and each SDK repo's
-`RELEASE.md`.
+[`scripts/sdk_codegen/README.md`](scripts/sdk_codegen/README.md) and each SDK
+repo's `RELEASE.md`.
 
 ## Integration package releases
 
