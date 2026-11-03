@@ -74,6 +74,19 @@ def test_a_retired_router_entry_is_dropped_and_the_rest_kept(before: tuple[Confi
     }
 
 
+def test_every_retired_policy_in_one_upgrade_is_rewritten(before: tuple[Config, Engine]) -> None:
+    config, engine = before
+    _policy(engine, "smart", {"select": [{"router": "knn", "candidates": _POOL}, {"default": "openai:gpt-5"}]})
+    _policy(engine, "fast", {"select": [{"router": "noop", "candidates": _POOL}, {"default": "openai:gpt-5-nano"}]})
+    _policy(engine, "plain", {"select": [{"default": "openai:gpt-5"}]})
+
+    assert _upgraded(config, engine) == {
+        "smart": {"select": [{"default": "openai:gpt-5"}]},
+        "fast": {"select": [{"default": "openai:gpt-5-nano"}]},
+        "plain": {"select": [{"default": "openai:gpt-5"}]},
+    }
+
+
 def test_policies_on_a_live_router_are_untouched(before: tuple[Config, Engine]) -> None:
     config, engine = before
     weighted = {

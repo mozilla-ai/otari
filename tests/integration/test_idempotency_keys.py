@@ -268,6 +268,20 @@ def test_reusing_a_key_with_different_routing_headers_is_refused(
     assert provider.await_count == 1
 
 
+def test_the_retired_router_task_header_does_not_change_the_fingerprint(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "retired-router-task")
+
+    assert _post_chat(client, {**headers, "Otari-Router-Task": "first"}, provider).status_code == 200
+    replayed = _post_chat(client, {**headers, "Otari-Router-Task": "second"}, provider)
+
+    assert replayed.status_code == 200, replayed.text
+    assert replayed.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
+    assert provider.await_count == 1
+
+
 def test_reusing_a_key_with_different_tags_headers_is_refused(
     client: TestClient, master_key_header: dict[str, str], user: None
 ) -> None:
