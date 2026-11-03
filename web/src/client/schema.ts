@@ -1185,6 +1185,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/code/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Code
+         * @description Run code in the gateway's sandbox and return its output.
+         *
+         *     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
+         *     code execution policy is off is refused, and its execution ceiling and pinned
+         *     image apply. It is priced under ``otari:code_execution`` and reserved against
+         *     the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+         *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
+         *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
+         *     sending that id back runs in the same sandbox, with its files and
+         *     interpreter state.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user.
+         */
+        post: operations["code-execution-execute_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/decisions": {
         parameters: {
             query?: never;
@@ -9635,6 +9675,83 @@ export interface components {
             type: "choice";
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * CodeExecuteRequest
+         * @description A direct code execution request: the code to run, and the sandbox to run it in.
+         * @example {
+         *       "code": "print(1 + 1)",
+         *       "container": "auto"
+         *     }
+         */
+        CodeExecuteRequest: {
+            /**
+             * Code
+             * @description Python source to run in the sandbox
+             */
+            code: string;
+            /**
+             * Container
+             * @description 'auto' to hold the sandbox after the run, or a container id an earlier response named in Otari-Container-Id to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends.
+             */
+            container?: string | null;
+            /**
+             * File Ids
+             * @description Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.
+             */
+            file_ids?: string[] | null;
+            /**
+             * Timeout Seconds
+             * @description How long the code may run. Never more than the workspace's code execution ceiling, or 60 seconds when it sets none.
+             */
+            timeout_seconds?: number | null;
+            /**
+             * User
+             * @description User ID for usage attribution
+             */
+            user?: string | null;
+        };
+        /**
+         * CodeExecuteResponse
+         * @description A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``.
+         */
+        CodeExecuteResponse: {
+            /**
+             * Files
+             * @description The files the code wrote. Empty when it wrote none, or where the Files API is off.
+             */
+            files: components["schemas"]["CodeExecutionOutputFile"][];
+            /**
+             * Object
+             * @default code_execution.result
+             * @constant
+             */
+            object: "code_execution.result";
+            /**
+             * Return Code
+             * @description The program's exit status; null when the sandbox did not report one.
+             */
+            return_code: number | null;
+            /** Stderr */
+            stderr: string;
+            /** Stdout */
+            stdout: string;
+        };
+        /**
+         * CodeExecutionOutputFile
+         * @description A file the code wrote, stored in the Files API.
+         */
+        CodeExecutionOutputFile: {
+            /**
+             * File Id
+             * @description Download it from GET /api/v1/files/{file_id}/content
+             */
+            file_id: string;
+            /**
+             * Filename
+             * @description The name the code gave it in the working directory
+             */
+            filename: string;
         };
         /**
          * CodeExecutor
@@ -21575,6 +21692,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "code-execution-execute_code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeExecuteResponse"];
                 };
             };
             /** @description Validation Error */

@@ -555,6 +555,65 @@ class SearchResponse(pydantic.BaseModel):
     )
 
 
+_MAX_CODE_EXECUTION_INPUTS = 32
+
+
+class CodeExecuteRequest(pydantic.BaseModel):
+    """A direct code execution request: the code to run, and the sandbox to run it in."""
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={"example": {"code": "print(1 + 1)", "container": "auto"}},
+    )
+
+    code: str = pydantic.Field(min_length=1, description="Python source to run in the sandbox")
+    container: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "'auto' to hold the sandbox after the run, or a container id an earlier response named in "
+            "Otari-Container-Id to run in that sandbox again, with its files and interpreter state. "
+            "Omitted, the sandbox is released when the run ends."
+        ),
+    )
+    timeout_seconds: int | None = pydantic.Field(
+        default=None,
+        ge=1,
+        description=(
+            "How long the code may run. Never more than the workspace's code execution ceiling, "
+            "or 60 seconds when it sets none."
+        ),
+    )
+    file_ids: list[str] | None = pydantic.Field(
+        default=None,
+        max_length=_MAX_CODE_EXECUTION_INPUTS,
+        description=(
+            "Uploads from POST /api/v1/files to put in the working directory before the code runs, "
+            "each under its own filename."
+        ),
+    )
+    user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
+
+
+class CodeExecutionOutputFile(pydantic.BaseModel):
+    """A file the code wrote, stored in the Files API."""
+
+    file_id: str = pydantic.Field(description="Download it from GET /api/v1/files/{file_id}/content")
+    filename: str = pydantic.Field(description="The name the code gave it in the working directory")
+
+
+class CodeExecuteResponse(pydantic.BaseModel):
+    """A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``."""
+
+    object: Literal["code_execution.result"] = "code_execution.result"
+    stdout: str
+    stderr: str
+    return_code: int | None = pydantic.Field(
+        description="The program's exit status; null when the sandbox did not report one."
+    )
+    files: list[CodeExecutionOutputFile] = pydantic.Field(
+        description="The files the code wrote. Empty when it wrote none, or where the Files API is off."
+    )
+
+
 class OtariToolCallSource(pydantic.BaseModel):
     """One page a gateway-run search returned: where it is, never its text."""
 

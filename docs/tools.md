@@ -421,6 +421,28 @@ encrypted with `OTARI_SECRET_KEY` and never shown again, only its last four
 characters. With no key in either place the gateway still starts, logs an
 error, and refuses each code-execution call until one is set.
 
+### Running code without a model
+
+`POST /api/v1/code/execute` runs code the caller sends, as
+[direct search](#direct-search) runs a query, for a client whose step needs the
+sandbox but no model, such as rerunning a script to check its output:
+
+```json
+{"code": "print(1 + 1)", "container": "auto"}
+```
+
+The code reaches the sandbox exactly as sent. The run is admitted as an
+`otari_code_execution` call is: the [workspace policy](#per-workspace-code-policy)
+can turn it off, and its `exec_timeout_s` and pinned image apply. It is priced
+under `otari:code_execution` and held against the caller's budgets. Every run
+that reached the sandbox is billed, including code that failed, unlike a model's
+failed call in the tool loop: here the caller asked for the run and reads its
+exit status itself. `file_ids` puts uploads from the [Files API](files.md) in the
+working directory, and each file the code writes comes back in `files` with a
+`file_id` to download. `container` works as on the completion routes (below),
+with the id in `Otari-Container-Id`. The request, the response and the errors
+are in the [API reference](api-reference.md#code-execution).
+
 ### Reusing a sandbox across requests
 
 Within one request, every code call the model makes shares one sandbox, so a

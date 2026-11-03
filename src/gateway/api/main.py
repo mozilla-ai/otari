@@ -20,6 +20,7 @@ from gateway.api.routes import (
     budgets,
     catalog,
     chat,
+    code_execution,
     country_database,
     decisions,
     embeddings,
@@ -150,6 +151,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # since the harness dispatches the subagent to its own provider.
     agent_routing.router,
     search.router,
+    code_execution.router,
     batches.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would

@@ -539,6 +539,52 @@ see [Provider failures](#provider-failures).
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
 
+## Code execution
+
+`POST /api/v1/code/execute` runs code in the gateway's sandbox and returns its
+output, with no model involved. It is admitted, priced and budgeted as an
+`otari_code_execution` call; see
+[Running code without a model](tools.md#running-code-without-a-model).
+
+**Request.**
+
+| Field | Type | Description |
+|---|---|---|
+| `code` | string | Python source to run. Required, and sent to the sandbox unchanged. |
+| `container` | string | `auto` to hold the sandbox after the run, or an `otari_cntr_…` id from an earlier `Otari-Container-Id` to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends. |
+| `timeout_seconds` | integer | How long the code may run. Capped at the workspace's `exec_timeout_s`, or 60 seconds when it sets none. |
+| `file_ids` | array of strings | Uploads from `POST /api/v1/files` to put in the working directory before the code runs, each under its own filename. At most 32. |
+| `user` | string | The billed user, as on the completion routes ([the `user` field](#the-user-field)). Required with the master key. |
+
+**Response.**
+
+```json
+{
+  "object": "code_execution.result",
+  "stdout": "2\n",
+  "stderr": "",
+  "return_code": 0,
+  "files": [{"file_id": "file-…", "filename": "chart.png"}]
+}
+```
+
+Code that fails is still a `200`, and is billed: its `return_code` is nonzero,
+or its `stderr` carries the error. `files` lists each file the code wrote,
+stored in the Files API, so `GET /api/v1/files/{file_id}/content` downloads it;
+it is empty where the Files API is off. A held sandbox is named in
+`Otari-Container-Id` and `Otari-Container-Expires-At`.
+
+**Errors.**
+
+| Status | When |
+|---|---|
+| `400` | No sandbox is configured, `container` names a sandbox that has expired or does not exist, or a `file_ids` entry is not an upload the caller can read (or the Files API is off). |
+| `402` | `require_pricing` is on and `otari:code_execution` has no price (`pricing_required`), or the organization's funds are exhausted. |
+| `403` | The workspace's code execution policy is off, or the billed user's budget is spent. |
+| `409` | The named container is running another request. |
+| `502` | The sandbox could not be reached. |
+| `503` | The sandbox is temporarily out of capacity, with `Retry-After` when it gave one. |
+
 ## Decisions
 
 `POST /api/v1/decisions` answers typed questions about a piece of content with
