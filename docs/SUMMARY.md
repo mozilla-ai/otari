@@ -20,6 +20,7 @@
 * [Health checks](health-checks.md)
 * [OpenAI provider guide](providers/openai.md)
 * [Gemini provider guide](providers/gemini.md)
+* [Azure OpenAI provider guide](providers/azureopenai.md)
 
 ## For integrators
 
