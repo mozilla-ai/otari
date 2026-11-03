@@ -491,7 +491,9 @@ def test_an_unpriced_in_loop_search_is_refused_naming_its_row_with_its_code(
     chat_loop.assert_not_called()
 
 
-def test_the_in_loop_refusal_carries_its_code_in_the_body_too(strict_pricing_client: TestClient) -> None:
+def test_the_in_loop_refusal_carries_its_code_in_the_body_too(
+    strict_pricing_client: TestClient, unpriced_builtin_fetch: None
+) -> None:
     resp = _in_loop(strict_pricing_client, "otari_web_fetch", AsyncMock())
 
     assert resp.status_code == 402, resp.text

@@ -119,7 +119,7 @@ async def test_no_warning_once_a_flat_rate_exists(async_db: AsyncSession, caplog
 
 @pytest.mark.asyncio
 async def test_gateway_tool_warning_includes_fetch_without_a_search_backend(
-    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture, unpriced_builtin_fetch: None
 ) -> None:
     _capture_gateway_logs(caplog)
     try:
