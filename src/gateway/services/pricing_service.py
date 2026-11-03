@@ -1,5 +1,6 @@
 """Shared pricing lookup utilities."""
 
+import time
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -21,7 +22,11 @@ from gateway.models.pricing import (
     PricingKind,
 )
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
-from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.repositories.pricing import (
+    OrganizationModelPricingRepository,
+    pending_price_writes,
+    price_write_generation,
+)
 from gateway.services.pricing import (
     PROVIDER_TOOL_LIST_PRICES,
     ModelsDevPrice,
@@ -772,6 +777,63 @@ def pricing_provenance(resolved: ResolvedPricing) -> PricingProvenance:
     return PricingProvenance(resolved.source, reference, resolved.effective_at)
 
 
+# The stored half of :func:`resolve_model_pricing` at the current time, per
+# organization, model key and payer, so a request does not read two price rows
+# that change a few times a day. A miss is cached too; the models.dev fallback
+# behind it is in memory and always resolved fresh.
+#
+# A write takes effect at once in the process that made it: the pricing
+# repository counts every flush, commit and rollback of a price change, and a
+# new count drops the cache. A session holding an uncommitted price change
+# neither reads nor fills it, so its own write is what it sees and nobody else
+# does. Other workers and replicas pick a change up within
+# PRICING_CACHE_TTL_SECONDS, the window the alias and routing policy caches
+# already have, and so does a rate scheduled to start or end in the future.
+PRICING_CACHE_TTL_SECONDS = 30.0
+_PRICING_CACHE_MAX_ENTRIES = 10_000
+
+_stored_prices: dict[tuple[uuid.UUID | None, str, bool], tuple[float, ResolvedPricing | None]] = {}
+_stored_prices_generation = price_write_generation()
+
+
+def reset_pricing_cache() -> None:
+    """Drop every cached stored rate."""
+    _stored_prices.clear()
+
+
+def _cached_stored_pricing(key: tuple[uuid.UUID | None, str, bool]) -> tuple[bool, ResolvedPricing | None]:
+    """Whether ``key`` has an entry from the last TTL with no price write since, and that entry."""
+    global _stored_prices_generation
+    generation = price_write_generation()
+    if generation != _stored_prices_generation:
+        _stored_prices.clear()
+        _stored_prices_generation = generation
+    cached = _stored_prices.get(key)
+    if cached is None or cached[0] <= time.monotonic():
+        return False, None
+    return True, cached[1]
+
+
+def _cache_stored_pricing(
+    key: tuple[uuid.UUID | None, str, bool], resolved: ResolvedPricing | None, *, read_at_generation: int
+) -> ResolvedPricing | None:
+    """Keep ``resolved`` for the TTL unless a price write landed while it was read, and return what callers get."""
+    if resolved is not None and resolved.source == "deployment":
+        resolved = resolved._replace(pricing=_transient_copy(resolved.pricing))
+    if read_at_generation == price_write_generation():
+        if len(_stored_prices) >= _PRICING_CACHE_MAX_ENTRIES:
+            _stored_prices.clear()
+        _stored_prices[key] = (time.monotonic() + PRICING_CACHE_TTL_SECONDS, resolved)
+    return resolved
+
+
+def _transient_copy(row: ModelPricing) -> ModelPricing:
+    """``row`` as an object no session holds, so requests can share it."""
+    return ModelPricing(
+        **{attribute.key: getattr(row, attribute.key) for attribute in inspect(ModelPricing).column_attrs}
+    )
+
+
 async def resolve_model_pricing(
     db: AsyncSession,
     provider: str | None,
@@ -789,28 +851,36 @@ async def resolve_model_pricing(
     that override: one the organization wrote, whether under a provider key it
     has since archived or before the deployment served the model, would let a
     tenant name the deployment's cost basis, down to zero.
+
+    Without ``as_of``, the stored rates come from the process cache above, so a
+    write elsewhere reaches this process within ``PRICING_CACHE_TTL_SECONDS``.
     """
     lookup_time = normalize_effective_at(as_of)
     model_key = f"{provider}:{model}" if provider else model
-    key_forms = pricing_key_forms(model_key)
-    legacy_keys = key_forms[1:]
+    cache_key = (organization_id, model_key, deployment_paid)
+    use_cache = as_of is None and not pending_price_writes(db)
 
-    if organization_id is not None:
-        override = await _find_organization_override(
-            db, organization_id, key_forms, lookup_time, operator_set_only=deployment_paid
-        )
-        if override is not None:
-            pricing = override_as_model_pricing(override)
-            return ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
-
-    stored = await _find_by_model_key(db, model_key, lookup_time)
-
-    for legacy_key in legacy_keys:
-        if stored is not None:
-            break
-        stored = await _find_by_model_key(db, legacy_key, lookup_time)
+    hit, stored = _cached_stored_pricing(cache_key) if use_cache else (False, None)
+    if not hit:
+        generation = price_write_generation()
+        key_forms = pricing_key_forms(model_key)
+        if organization_id is not None:
+            override = await _find_organization_override(
+                db, organization_id, key_forms, lookup_time, operator_set_only=deployment_paid
+            )
+            if override is not None:
+                pricing = override_as_model_pricing(override)
+                stored = ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
+        for key in key_forms:
+            if stored is not None:
+                break
+            row = await _find_by_model_key(db, key, lookup_time)
+            if row is not None:
+                stored = ResolvedPricing(row, "deployment", row.model_key, normalize_effective_at(row.effective_at))
+        if use_cache:
+            stored = _cache_stored_pricing(cache_key, stored, read_at_generation=generation)
     if stored is not None:
-        return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
+        return stored
 
     if use_defaults and default_pricing_enabled():
         matched = default_pricing_match(provider, model, lookup_time)
