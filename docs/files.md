@@ -44,7 +44,8 @@ curl http://localhost:8000/api/v1/chat/completions \
 Before you use a local or self-hosted model here (for example
 `ollama:llama3`), make sure Otari is configured for that backend under
 `providers`: set its route (`api_base`, when needed) and any backend
-credentials it expects (such as an API key or token). Otari also requires pricing for that model key by default: add pricing, enable
+credentials it expects (such as an API key or token). Otari also requires
+pricing for that model key by default: add pricing, enable
 `default_pricing` if it covers the model, or set `require_pricing: false` for
 an intentionally unpriced backend.
 
@@ -105,6 +106,22 @@ belongs to the signed-in person in the workspace the switcher has selected, the
 same owner a Playground completion runs as, so its `file_id` resolves in their
 messages and in nobody else's. The same person's files uploaded with one of
 their keys in that workspace are listed there too.
+
+## Who can see an uploaded file
+
+A file belongs to the user who uploaded it and to the workspace the uploading API
+key belongs to. Both have to match for a request to reach it, on the listing, the
+metadata, the download, the delete, and the `file_id` references resolved out of
+a chat message. So a user who holds keys in two workspaces reaches each
+workspace's files only through that workspace's key, and anything they cannot see
+answers 404 rather than 403, which is what keeps a foreign id indistinguishable
+from a missing one.
+
+The workspace comes off the key rather than a header, because a caller controls
+its headers and not which key it holds. The master key is the exception: it is the
+operator acting deployment-wide and sees every workspace, narrowable with
+`GET /api/v1/files?workspace_id=<id>`. A master-key upload lands in the deployment's
+default workspace.
 
 ## Files and code execution
 
@@ -280,22 +297,6 @@ produced file is streamed from the sandbox into the store and never held whole.
 > it implements. A backend that neither names nor lists a file does not have it
 > collected.
 
-### Who can see an uploaded file
-
-A file belongs to the user who uploaded it and to the workspace the uploading API
-key belongs to. Both have to match for a request to reach it, on the listing, the
-metadata, the download, the delete, and the `file_id` references resolved out of
-a chat message. So a user who holds keys in two workspaces reaches each
-workspace's files only through that workspace's key, and anything they cannot see
-answers 404 rather than 403, which is what keeps a foreign id indistinguishable
-from a missing one.
-
-The workspace comes off the key rather than a header, because a caller controls
-its headers and not which key it holds. The master key is the exception: it is the
-operator acting deployment-wide and sees every workspace, narrowable with
-`GET /api/v1/files?workspace_id=<id>`. A master-key upload lands in the deployment's
-default workspace.
-
 ## What Otari does per attachment
 
 For each file/image block it resolves the **target model's** capabilities, then:
@@ -333,7 +334,8 @@ one to Vertex AI, which has no Files API in any-llm.
 Otari must know whether the target model is natively multimodal. It uses,
 in order:
 
-1. `model_capabilities` **config override**: authoritative.
+1. `model_capabilities` **config override**: authoritative (see
+  [Capabilities](models.md#capabilities) for its syntax).
 2. **Known model exceptions**: a hosted model its provider's flag over-reports
   and that drops the file silently rather than refusing it. Today that is
   DeepSeek's `deepseek-v4-pro`, which answers as if no image came, while its
@@ -389,13 +391,6 @@ account a copy is in. Without it, provider copies are off whatever
 how images are handled for text-only models. The describe model may be a local
 vision model (e.g. `ollama:qwen2-vl`) to keep captioning free.
 - `model_capabilities`: per-model `supports_image` / `supports_pdf` overrides.
-
-**Upgrading from 0.6.** Two things change. `GET /api/v1/files` returns at most
-100 files per page where it returned every file, so a client with more than
-100 files must follow `has_more`. And the sweep now runs by default, so a
-deleted file, or one past `files_retention_hours`, loses its row and bytes
-within an hour where cleanup was the operator's task. Set
-`files_sweep_interval_sec: 0` to keep it that way.
 
 A file's row is written before its bytes, so an upload that is refused, loses
 its connection or stops partway leaves a row naming its blob rather than a blob
@@ -486,3 +481,14 @@ file (`.doc`, `.ppt`, `.xls`) is not extracted. Extracted text stops at 16 MiB, 
 read for its first 1,000 pages, and an Office file whose XML inflates past 256 MiB is not
 extracted. OCR is optional; install the
 `ocr` extra (`uv sync --extra ocr` in a checkout) to enable it.
+
+## Upgrading
+
+### From 0.6
+
+Two things change. `GET /api/v1/files` returns at most
+100 files per page where it returned every file, so a client with more than
+100 files must follow `has_more`. And the sweep now runs by default, so a
+deleted file, or one past `files_retention_hours`, loses its row and bytes
+within an hour where cleanup was the operator's task. Set
+`files_sweep_interval_sec: 0` to keep it that way.

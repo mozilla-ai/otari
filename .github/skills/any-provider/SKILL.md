@@ -25,8 +25,11 @@ context and calls the adapter.
 2. **Write the adapter.** Build the request from the shared parameters and the native options,
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
-   - Send with `self._http.request`, which uses the host's client and the provider's timeout and
-     turns a transport failure into a `ProviderError` without its text.
+   - Send with `self._http.request`, which uses the host's client and the provider's timeout,
+     names the library in the request's `User-Agent` (`any-search/<version>` or
+     `any-fetch/<version>`) and turns a transport failure into a `ProviderError` without its
+     text. An adapter sets no `User-Agent` of its own, even where the provider's SDK names
+     itself: that header is the one exception to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
@@ -45,6 +48,8 @@ context and calls the adapter.
    - A date without a zone is UTC.
    - The cost is the provider's reported figure only, as a `Decimal`, with `cost_source` set.
    - `api_base` replaces the endpoint for every provider; strip its trailing slash.
+   - Bump the package's `__version__` (`<import name>/__init__.py`): it names the library in
+     every request's `User-Agent`, so a provider can tie a change in its traffic to a release.
 3. **Record fixtures and test.** Record one fixture per case (below) with
    `uv run python <package>/scripts/record_fixture.py`. Keep them small: ask for few results and
    little text. Check the key is not in them. Then add:

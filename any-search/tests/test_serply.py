@@ -12,7 +12,8 @@ import httpx
 import pytest
 
 from any_search import AnySearch, MissingCredentialError, ProviderError, SearchResult, UnsupportedParameterError
-from any_search.providers.serply import MAX_RESULTS, USER_AGENT
+from any_search._http import USER_AGENT
+from any_search.providers.serply import MAX_RESULTS
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "serply"
 KEY = "test-key"
@@ -52,7 +53,7 @@ def test_metadata() -> None:
     assert (metadata.query_in_url, metadata.key_in_url) == (True, False)
     assert metadata.max_results == MAX_RESULTS == 10
     assert not [option for option in metadata.options if option.operator_only]
-    # What the adapter sets itself is not an option.
+    # What the adapter, or the library, sets itself is not an option.
     names = {option.name for option in metadata.options}
     assert not names & {"q", "num", "X-Api-Key", "User-Agent"}
 

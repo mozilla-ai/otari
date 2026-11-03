@@ -22,7 +22,6 @@ on:
       - 'scripts/prepare_gitbook_site.py'
       - 'tests/unit/test_gitbook_site.py'
       - 'tests/unit/test_docs_links.py'
-      - '.gitbook.yaml'
       - '.gitbook-branch-readme.md'
       - '.github/workflows/otari-docs.yml'
   workflow_dispatch:

@@ -33,6 +33,12 @@ AnySearch.get_provider_metadata("fake")
   timeout, and never closes it or changes its settings. Without one, the provider opens a client
   with httpx's defaults and closes it in `aclose()`, which `async with` calls.
 
+Every request a provider sends carries `User-Agent: any-search/<version>`, the library's own
+version (`any_search.__version__`, which a change to the library bumps in the same PR), so a
+provider, or a proxy that allowlists outbound traffic, can tell the library's requests apart. A
+`client` that sets a `User-Agent` of its own keeps it: httpx's default is replaced, and a client
+that carries none is filled in.
+
 `search` takes two shared parameters, which every provider maps onto its own: `max_results` and
 `time_range` (`day`, `week`, `month` or `year`). Every other keyword is a native option, passed to
 the provider under its own name. An option the provider's metadata does not list raises
@@ -210,7 +216,7 @@ behind a usable `pdate` is not read. Fields the adapter does not read are ignore
 `serply` calls Serply's [Google Search API](https://serply.io/docs/resources/google-search),
 `GET /v1/search`, with the key read from `SERPLY_API_KEY` when not passed. The key travels in the
 `X-Api-Key` header; the query travels in the URL, which the log filter above keeps out of httpx's
-log. Each request names the library in its `User-Agent`.
+log.
 
 | `SearchHit` | From Serply |
 |---|---|

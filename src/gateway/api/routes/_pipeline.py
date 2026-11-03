@@ -424,7 +424,7 @@ from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.session_principal import SessionPrincipal
-from gateway.types.tool_charges import LabelCalls, RateKey, describe_rate_key
+from gateway.types.tool_charges import InstanceRateKey, LabelCalls, RateKey, describe_rate_key
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
@@ -4081,7 +4081,7 @@ async def prepare_gateway_tools(
     NOTE: callers must not release the budget reservation after a refusal from here.
     """
     web_policy = _RequestWebPolicy(backends.ports.web_search_policy, ctx.workspace_id)
-    unpriced_tool: str | None = None
+    unpriced_tool: PricedTool | None = None
     try:
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         await _admit_guardrails(adapter, ctx, response, declared)
@@ -4202,7 +4202,7 @@ class _ToolRefusal:
     """
 
     error: HTTPException
-    unpriced_tool: str | None = None
+    unpriced_tool: PricedTool | None = None
 
 
 def _decide_for_candidates(
@@ -4401,8 +4401,10 @@ async def _admit_claims(
     )
     if (unpriced := await _unpriced_tool(ctx, priced)) is not None:
         # The model gate's kind and code, so both no-pricing refusals have one wire shape per format.
-        error = domain_error(adapter, GatewayToolPricingRequiredError(unpriced_tool_detail(unpriced.name)))
-        return _ToolRefusal(error, unpriced_tool=unpriced.name)
+        error = domain_error(
+            adapter, GatewayToolPricingRequiredError(unpriced_tool_detail(unpriced.name, unpriced.rate_keys[0]))
+        )
+        return _ToolRefusal(error, unpriced_tool=unpriced)
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
 
 
@@ -4677,24 +4679,29 @@ async def _copying_produced_files(
         yield chunk
 
 
-async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: RequestContext, tool: str) -> None:
-    """Record a request refused because ``tool`` has no price.
+async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: RequestContext, tool: PricedTool) -> None:
+    """Record a request refused because ``tool`` has no price, under the row its calls lack.
 
-    Logged for the same reason the model gate logs its 402: an operator who
-    turns require_pricing on has to be able to see that live traffic is
-    being dropped, and by what.
+    A search or fetch tool's refusal is recorded under the tool and its
+    provider, and any other tool's under ``otari:<tool>``. Logged for the same
+    reason the model gate logs its 402: an operator who turns require_pricing on
+    has to be able to see that live traffic is being dropped, and by what.
     """
-    key = gateway_tool_pricing_key(tool)
-    logger.warning("Rejecting request: gateway tool '%s' has no pricing under '%s'", tool, key)
+    rate_key = tool.rate_keys[0]
+    if isinstance(rate_key, InstanceRateKey) and rate_key.legacy_key is not None:
+        provider, model = rate_key.legacy_key.partition(":")[0], rate_key.name
+    else:
+        provider, model = GATEWAY_TOOL_PRICING_PROVIDER, gateway_tool_pricing_key(tool.name)
+    logger.warning("Rejecting request: gateway tool '%s' has no pricing for %s", tool.name, describe_rate_key(rate_key))
     await log_gateway_rejection(
         db=ctx.db,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
-        model=key,
-        provider=GATEWAY_TOOL_PRICING_PROVIDER,
+        model=model,
+        provider=provider,
         endpoint=adapter.endpoint,
-        detail=unpriced_tool_detail(tool),
+        detail=unpriced_tool_detail(tool.name, rate_key),
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         started_at=ctx.started_at,
         request_id=ctx.request_id,

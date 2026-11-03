@@ -36,7 +36,7 @@ export OTARI_JUNIE_KEY=<your-otari-key>
 junie --model custom:otari "Add a docstring to the add function in calc.py"
 ```
 
-Any model in your catalog works in `id`, `primaryModel` and `fasterModel`: the catalog id that `GET /api/v1/models` returns for your key, which lets Otari choose the provider, or a `provider:model` selector, which pins one (see [Listing available models](models.md#listing-available-models)).
+Any model in your catalog works in `id`, `primaryModel` and `fasterModel`: the catalog id that `GET /api/v1/models` returns for your key, which lets Otari choose the provider, or a `provider:model` selector, which pins one. [Model format](models.md#model-format) has the spellings Otari accepts, and [Listing available models](models.md#listing-available-models) shows which models your key can use.
 
 ### Junie sends a `user` field
 
@@ -50,13 +50,13 @@ LLMBadResponseException: 'user' field does not match the authenticated API key's
 
 There are two ways to accept the field, and they differ in what you get back.
 
-**Make the key a [service key](access-control.md#service-keys-and-end-users).** This is the better option and it needs no setting relaxed, so leave `reject_user_mismatch` on the deployment default. On a service key, a name other than the key's own user names one of that key's end users, so Otari creates an end user for the value Junie sends and records its spend on its own. That gives you spend per client rather than one combined total, and the service key can then put that end user on a budget itself with `PUT /api/v1/end-users?external_id=...`.
+**Make the key a [service key](end-users.md).** This is the better option and it needs no setting relaxed, so leave `reject_user_mismatch` on the deployment default. On a service key, a name other than the key's own user names one of that key's end users, so Otari creates an end user for the value Junie sends and records its spend on its own. That gives you spend per client rather than one combined total, and the service key can then put that end user on a budget itself with `PUT /api/v1/end-users?external_id=...`.
 
-**Or set `reject_user_mismatch=false` on the key.** Simpler, and a per-key override, so the deployment-wide default stays as it is. Spend binds to the key's own user, so the whole of Junie's usage lands in one place.
+**Or set [`reject_user_mismatch=false`](api-keys.md#accept-or-reject-mismatched-user-fields) on the key.** Simpler, and a per-key override, so the deployment-wide default stays as it is. Spend binds to the key's own user, so the whole of Junie's usage lands in one place.
 
 Either way the spend stays inside the key owner's account, so accepting the field never lets a key draw on another account's budget.
 
-See [Mismatched `user` fields](access-control.md#mismatched-user-fields) for the full picture.
+See [Mismatched `user` fields](api-keys.md#mismatched-user-fields) for the full picture.
 
 ### Automatic discovery does not find Otari
 
@@ -78,4 +78,4 @@ AI Assistant lists models with `GET /api/v1/models` and sends no `user` field, s
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
 - [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
-- [Access control](access-control.md): how budgets bind to a key's user.
+- [Access control](access-control.md#how-a-request-is-attributed): how a request is attributed to a key's user and its budgets.
