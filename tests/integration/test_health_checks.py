@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from any_llm.exceptions import ModelNotFoundError
+from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,13 +28,16 @@ from gateway.schemas.health_checks import HealthCheckSettingsUpdate
 from gateway.services.health_checks import HealthCheckOffering, HealthCheckService, list_hosted_offerings
 from gateway.services.health_checks._service import HostedRoster
 from gateway.services.mail import MailDelivery, Mailer, MailMessage
+from gateway.services.model_discovery_service import get_model_cache
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
+from gateway.types.models_dev import parse_catalog_v2
 
 from .conftest import build_test_client
 
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 _CHECKS = f"{API_ROOT}/health-checks"
 _PROBE = "gateway.services.health_checks._probe"
+_OFFERINGS_MODULE = "gateway.services.health_checks._offerings"
 
 _OFFERINGS = [
     HealthCheckOffering(
@@ -535,6 +539,67 @@ async def test_a_run_checks_what_the_hosted_providers_serve_on_their_own_keys(
     assert [(call["provider"], call["model"], call["api_key"], call["api_base"]) for call in sent] == [
         ("openai", "gpt-test", "sk-hosted-eu-1234", "https://eu.example.com/v1")
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_run_asks_the_models_kind_rather_than_its_id(
+    async_db: AsyncSession, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The kind decides, not the id: an id that names an embedding model is no reason to skip a chat model.
+
+    The provider's listing outranks models.dev, so a model it lists as an
+    embedding model is skipped although models.dev calls it a chat model.
+    """
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    async_db.add_all(
+        [
+            HostedProvider(
+                name="openai-eu",
+                provider="openai",
+                encrypted_api_key=encrypt_secret("sk-hosted-1234"),
+                api_key_last4="1234",
+            ),
+            HostedProviderModel(provider="openai-eu", model="embed-chat"),
+            HostedProviderModel(provider="openai-eu", model="vectors"),
+            HostedProviderModel(provider="openai-eu", model="unlisted"),
+            HostedProviderModel(provider="openai-eu", model="listed-vectors"),
+        ]
+    )
+    await async_db.flush()
+    catalog = parse_catalog_v2(
+        {
+            "openai": {
+                "models": {
+                    "embed-chat": {"type": "chat"},
+                    "vectors": {"type": "embedding"},
+                    "listed-vectors": {"type": "chat"},
+                }
+            }
+        }
+    )
+    get_model_cache().set(
+        "openai-eu",
+        [
+            Model.model_validate(
+                {"id": "listed-vectors", "object": "model", "created": 0, "owned_by": "openai-eu", "type": "embedding"}
+            )
+        ],
+    )
+
+    try:
+        with patch(f"{_OFFERINGS_MODULE}.cached_models_dev_catalog", return_value=catalog):
+            offerings = await list_hosted_offerings(
+                build_hosted_provider_service(UnitOfWork(async_db), config=test_config), test_config
+            )
+    finally:
+        get_model_cache().clear("openai-eu")
+
+    assert {o.model: o.chat for o in offerings} == {
+        "embed-chat": True,
+        "vectors": False,
+        "unlisted": True,
+        "listed-vectors": False,
+    }
 
 
 async def _listed(offerings: Sequence[HealthCheckOffering]) -> Sequence[HealthCheckOffering]:

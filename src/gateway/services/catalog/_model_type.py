@@ -111,16 +111,23 @@ def listed_model_type(instance: str, model_id: str) -> ModelType | None:
     return type_from_listing(listed.model_extra or {})
 
 
+def offering_model_type(
+    models_dev: ModelsDevCatalog | None, instance: str, provider_type: str, model_id: str
+) -> ModelType | None:
+    """The kind of ``model_id`` on ``instance``: its listing's word for it, then models.dev's for ``provider_type``."""
+    listed = listed_model_type(instance, model_id)
+    if listed is not None:
+        return listed
+    entry = metadata_entry(models_dev, provider_type, model_id)
+    return entry.type if entry is not None else None
+
+
 def model_type(config: GatewayConfig, models_dev: ModelsDevCatalog | None, selector: str) -> ModelType | None:
     """The kind of the ``provider:model`` ``selector``: its listing's word for it, then models.dev's."""
     instance, separator, model_id = selector.partition(":")
     if not separator:
         return None
-    listed = listed_model_type(instance, model_id)
-    if listed is not None:
-        return listed
-    entry = metadata_entry(models_dev, config.provider_instance_type(instance), model_id)
-    return entry.type if entry is not None else None
+    return offering_model_type(models_dev, instance, config.provider_instance_type(instance), model_id)
 
 
 def catalog_model_type(offerings: Sequence[tuple[str, ModelType | None]], vendor: str | None) -> ModelType | None:
