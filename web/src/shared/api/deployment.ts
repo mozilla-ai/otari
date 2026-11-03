@@ -5,6 +5,9 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  BlockedEmailCreated,
+  BlockedEmails,
+  CreateBlockedEmailRequest,
   DashboardBuild,
   DeploymentAdminAccess,
   DeploymentUser,
@@ -147,5 +150,53 @@ export function useIssuePasswordLink() {
         `/admin/users/${encodeURIComponent(id)}/password-link`,
         { method: "POST" },
       ),
+  })
+}
+
+/**
+ * The deployment's email blocklist, newest entry first.
+ *
+ * One page of the largest size the route allows: the list is an operator's
+ * hand-kept set rather than a growing log, so it is not paged here.
+ */
+export function useBlockedEmails(enabled = true) {
+  return useQuery({
+    queryKey: [DEPLOYMENT_ADMIN, "blocked-emails"],
+    queryFn: () => apiFetch<BlockedEmails>("/admin/blocked-emails?limit=1000"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function useBlockEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateBlockedEmailRequest) =>
+      apiFetch<BlockedEmailCreated>("/admin/blocked-emails", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    // Blocking ends the matching accounts' sessions, which the accounts list
+    // does not show, so only the blocklist itself goes stale.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [DEPLOYMENT_ADMIN, "blocked-emails"],
+      })
+    },
+  })
+}
+
+export function useUnblockEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/admin/blocked-emails/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [DEPLOYMENT_ADMIN, "blocked-emails"],
+      })
+    },
   })
 }

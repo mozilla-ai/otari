@@ -38,6 +38,7 @@ import {
   organizationSummary,
   passwordLinkBlockedReason,
 } from "./accounts"
+import { BlockedEmailsSection } from "./BlockedEmailsSection"
 import { PasswordLinkDialog } from "./PasswordLinkDialog"
 
 // Every account on the deployment, which is the one identity list that is not
@@ -48,7 +49,8 @@ import { PasswordLinkDialog } from "./PasswordLinkDialog"
 //
 // The controls match what the API serves: deactivate (which also ends that
 // account's dashboard sessions), reactivate, grant or remove operator access,
-// and send a password link to someone who cannot sign in. Creating an account
+// send a password link to someone who cannot sign in, and keep the email
+// blocklist (`BlockedEmailsSection`). Creating an account
 // is not here, because an account without a
 // membership can do nothing and memberships are the organization surface's; nor
 // is deleting one, because historical attribution resolves through rows that
@@ -330,6 +332,8 @@ export function DeploymentAccountsPage() {
         isFetching={accounts.isFetching}
         label="accounts"
       />
+
+      <BlockedEmailsSection />
 
       <ConfirmDialog
         isOpen={deactivating !== undefined}

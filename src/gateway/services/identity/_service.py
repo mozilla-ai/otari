@@ -11,6 +11,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
     PasswordLinkUnavailableError,
+    SignInBlockedError,
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
@@ -96,6 +97,7 @@ class IdentityService:
     ) -> None:
         """``terms_url`` is the terms the deployment publishes, or ``None`` where it publishes none."""
         self._uow = uow
+        self._blocked_emails = repositories.blocked_emails
         self._links = repositories.links
         self._passkeys = repositories.passkeys
         self._sessions = repositories.sessions
@@ -129,6 +131,8 @@ class IdentityService:
             OAuthIdentityLinkConflictError: If a concurrent sign-in linked the identity to another account first.
             TermsNotAcceptedError: If the sign-in would create or first claim an account without the published
                 terms. Nothing the sign-in staged is kept, including an organization the policy provisioned.
+            SignInBlockedError: If the deployment's email blocklist matches the account's address, with the
+                same rollback.
             TenancyError: If the identity provider policy refuses the identity.
 
         """
@@ -146,8 +150,16 @@ class IdentityService:
         """Sign in an account that has proven who it is, and start its dashboard session.
 
         What the sign-in listener stages and the session commit together.
+
+        Raises:
+            SignInBlockedError: If the deployment's email blocklist matches the account's address. Nothing the
+                caller staged in the same block is kept, an account a first provider sign-in created included.
+
         """
         async with self._uow:
+            if account.email is not None and await self._blocked_emails.matching(account.email) is not None:
+                logger.info("Refused a sign-in to account %s, whose address is blocked", account.id)
+                raise SignInBlockedError
             await self._sign_in_listener.account_signed_in(account)
             return await self.start_session(account)
 

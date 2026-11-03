@@ -1,0 +1,57 @@
+import uuid
+from typing import Never
+
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from gateway.core.email_domains import blocklist_keys
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import BlockedEmailEntryExistsError
+from gateway.models.identity import BlockedEmail
+from gateway.repositories.base_repository import BaseRepository
+
+
+class BlockedEmailRepository(BaseRepository[BlockedEmail, Never, Never]):
+    """Query the deployment's email blocklist."""
+
+    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
+        super().__init__(db, BlockedEmail)
+
+    async def list_page(self, *, skip: int, limit: int) -> tuple[list[BlockedEmail], int]:
+        """Return a page of entries, newest first, and how many there are in all."""
+        rows = await self.db.execute(
+            select(BlockedEmail).order_by(BlockedEmail.created_at.desc(), BlockedEmail.id).offset(skip).limit(limit)
+        )
+        count = await self.db.scalar(select(func.count()).select_from(BlockedEmail))
+        return list(rows.scalars().all()), int(count or 0)
+
+    async def matching(self, email: str) -> BlockedEmail | None:
+        """Return an entry that blocks ``email``, or None."""
+        keys = blocklist_keys(email)
+        if not keys:
+            return None
+        result = await self.db.execute(select(BlockedEmail).where(BlockedEmail.pattern.in_(keys)).limit(1))
+        return result.scalar_one_or_none()
+
+    async def add(self, *, pattern: str, reason: str | None, created_by_user_id: uuid.UUID) -> BlockedEmail:
+        """Stage a new entry.
+
+        Raises:
+            BlockedEmailEntryExistsError: If ``pattern`` is already blocked.
+
+        """
+        entry = BlockedEmail(pattern=pattern, reason=reason, created_by_user_id=created_by_user_id)
+        try:
+            # A savepoint, so a duplicate leaves the rest of the transaction usable.
+            async with self.db.begin_nested():
+                self.db.add(entry)
+                await self.db.flush()
+        except IntegrityError as error:
+            raise BlockedEmailEntryExistsError(pattern) from error
+        return entry
+
+    async def remove(self, entry: BlockedEmail) -> None:
+        """Stage the removal of an entry."""
+        await self.db.delete(entry)
+        await self.db.flush()

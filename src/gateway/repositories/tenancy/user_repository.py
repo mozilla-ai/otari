@@ -198,6 +198,21 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         )
         return list(result.scalars().all()), count
 
+    async def list_with_email_at(self, domains: Collection[str], *, include_subdomains: bool) -> list[User]:
+        """Return every identity whose address is at one of ``domains``, or under one where ``include_subdomains``.
+
+        Matched case-insensitively, as ``get_by_email`` is. ``domains`` are plain host names, so they hold no
+        ``LIKE`` wildcard to escape.
+        """
+        email = func.lower(col(User.email))
+        conditions = [email.like(f"%@{domain.lower()}") for domain in domains]
+        if include_subdomains:
+            conditions.extend(email.like(f"%@%.{domain.lower()}") for domain in domains)
+        if not conditions:
+            return []
+        result = await self.db.execute(select(User).where(or_(*conditions)))
+        return list(result.scalars().all())
+
     async def get_by_verification_token_hash(self, token_hash: str) -> User | None:
         """Return the identity a hashed email-verification token names, or None.
 

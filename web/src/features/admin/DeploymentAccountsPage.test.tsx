@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DeploymentUser, PasswordLink } from "@/client"
+import type { BlockedEmail, DeploymentUser, PasswordLink } from "@/client"
 import { DeploymentAccountsPage } from "@/features/admin/DeploymentAccountsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -29,6 +29,8 @@ function mockApi(opts: {
   accounts?: DeploymentUser[]
   count?: number
   passwordLink?: PasswordLink
+  blocked?: BlockedEmail[]
+  blockedAccountCount?: number
 }) {
   const granted = opts.granted ?? true
   const accounts = opts.accounts ?? [deploymentUser()]
@@ -45,6 +47,22 @@ function mockApi(opts: {
 
     if (url.includes(`${API_ROOT}/admin/access`)) {
       return jsonResponse({ granted })
+    }
+    if (url.includes(`${API_ROOT}/admin/blocked-emails`)) {
+      const blocked = opts.blocked ?? []
+      if (method === "GET") {
+        return jsonResponse({ data: blocked, count: blocked.length })
+      }
+      if (method === "DELETE") {
+        return new Response(null, { status: 204 })
+      }
+      return jsonResponse(
+        {
+          ...BLOCKED_DOMAIN,
+          blocked_account_count: opts.blockedAccountCount ?? 0,
+        },
+        201,
+      )
     }
     if (url.endsWith("/password-link")) {
       return jsonResponse(opts.passwordLink, 201)
@@ -98,6 +116,15 @@ const OPERATOR = deploymentUser({
   is_self: true,
   last_sign_in_at: "2026-01-01T00:00:00+00:00",
 })
+
+const BLOCKED_DOMAIN: BlockedEmail = {
+  id: "cccccccc-0000-0000-0000-000000000000",
+  pattern: "spam.example",
+  kind: "domain",
+  reason: "throwaway signups",
+  created_by_user_id: null,
+  created_at: "2026-01-01T00:00:00+00:00",
+}
 
 const realMatchMedia = window.matchMedia
 
@@ -433,5 +460,69 @@ describe("DeploymentAccountsPage", () => {
         request.url.includes(`${API_ROOT}/admin/users`),
       ),
     ).toBe(false)
+  })
+})
+
+describe("Blocked emails", () => {
+  it("lists each entry with what it covers and why", async () => {
+    mockApi({ blocked: [BLOCKED_DOMAIN] })
+    await renderPage(<DeploymentAccountsPage />)
+
+    const table = await screen.findByRole("grid", { name: "Blocked emails" })
+    expect(await within(table).findByText("spam.example")).toBeInTheDocument()
+    expect(within(table).getByText("DOMAIN AND SUBDOMAINS")).toBeInTheDocument()
+    expect(within(table).getByText("throwaway signups")).toBeInTheDocument()
+  })
+
+  it("blocks what was typed and says how many accounts it caught", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ blockedAccountCount: 2 })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await user.type(
+      await screen.findByRole("textbox", { name: "Address or domain" }),
+      " @spam.example ",
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason (optional)" }),
+      "throwaway signups",
+    )
+    await user.click(screen.getByRole("button", { name: "Block" }))
+
+    expect(
+      await screen.findByText(
+        "Blocked spam.example. 2 existing accounts can no longer sign in, and their sessions were ended.",
+      ),
+    ).toBeInTheDocument()
+    const posted = requests.find(
+      (request) =>
+        request.method === "POST" &&
+        request.url.endsWith("/admin/blocked-emails"),
+    )
+    expect(posted?.body).toEqual({
+      value: "@spam.example",
+      reason: "throwaway signups",
+    })
+  })
+
+  it("unblocks an entry after asking", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ blocked: [BLOCKED_DOMAIN] })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Unblock spam.example" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Unblock" }))
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" &&
+            request.url.endsWith(`/admin/blocked-emails/${BLOCKED_DOMAIN.id}`),
+        ),
+      ).toBe(true),
+    )
   })
 })

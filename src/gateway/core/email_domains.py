@@ -136,8 +136,45 @@ def is_public_email_domain(domain: str) -> bool:
     return any(".".join(labels[start:]) in PUBLIC_EMAIL_DOMAINS for start in range(len(labels) - 1))
 
 
+def blocklist_entry(value: str) -> str | None:
+    """Normalize an operator's typed blocklist entry, or return ``None`` when it can block nobody.
+
+    An entry is a whole address (``person@example.com``) or a domain (``example.com``, also typed as
+    ``@example.com`` or ``*.example.com``), and a domain entry covers its subdomains. The domain part is
+    punycoded, so the entry matches whichever form an address arrives in (see ``blocklist_keys``).
+    """
+    candidate = value.strip().lower().rstrip(".")
+    for prefix in ("*.", "@"):
+        candidate = candidate.removeprefix(prefix)
+    local, at, domain = candidate.rpartition("@")
+    domain = _ascii(domain)
+    if not is_registrable_domain(domain):
+        return None
+    if not at:
+        return domain
+    if not local or "@" in local or any(character.isspace() for character in local):
+        return None
+    return f"{local}@{domain}"
+
+
+def blocklist_keys(email: str) -> tuple[str, ...]:
+    """Every blocklist entry that would match ``email``: the address itself, then each domain it sits under.
+
+    ``person@mail.example.com`` yields the address, ``mail.example.com`` and ``example.com``, and never a
+    bare top-level domain, so one lookup on these keys answers whether any entry blocks the address.
+    """
+    domain = email_domain(email)
+    if domain is None:
+        return ()
+    local = email.rsplit("@", 1)[0].strip().lower()
+    labels = domain.split(".")
+    return (f"{local}@{domain}", *(".".join(labels[start:]) for start in range(len(labels) - 1)))
+
+
 __all__ = [
     "PUBLIC_EMAIL_DOMAINS",
+    "blocklist_entry",
+    "blocklist_keys",
     "email_domain",
     "is_public_email_domain",
     "is_registrable_domain",

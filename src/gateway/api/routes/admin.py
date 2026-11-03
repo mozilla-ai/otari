@@ -26,7 +26,12 @@ from gateway.models.tenancy import (
     DeploymentUsersPublic,
     DeploymentUserUpdateRequest,
 )
-from gateway.schemas.identity import PasswordLinkPublic
+from gateway.schemas.identity import (
+    BlockedEmailCreatedPublic,
+    BlockedEmailCreateRequest,
+    BlockedEmailsPublic,
+    PasswordLinkPublic,
+)
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 
 # Auth on the router for the reason `routes/organizations.py` declares it there:
@@ -148,3 +153,43 @@ async def issue_password_link(identities: IdentityServiceDep, user_id: uuid.UUID
     """
     link = await identities.issue_password_link(user_id)
     return PasswordLinkPublic(mail_sent=link.mail_sent, link=link.link, expires_at=link.expires_at)
+
+
+@router.get("/blocked-emails")
+async def list_blocked_emails(
+    service: DeploymentUserServiceDep,
+    current_identity: CurrentIdentity,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+) -> BlockedEmailsPublic:
+    """List the addresses and domains blocked from holding an account on this deployment, newest first."""
+    return await service.list_blocked_emails(actor=current_identity, skip=skip, limit=limit)
+
+
+@router.post("/blocked-emails", status_code=status.HTTP_201_CREATED)
+async def block_email(
+    service: DeploymentUserServiceDep,
+    current_identity: CurrentIdentity,
+    body: BlockedEmailCreateRequest,
+) -> BlockedEmailCreatedPublic:
+    """Block an address, or a domain and its subdomains, from holding an account on this deployment.
+
+    A blocked address cannot sign up, be added to or invited into an organization, or sign in by password,
+    passkey or provider, and nothing is mailed to it for signup, verification or a password reset. Every
+    existing account the entry matches has its dashboard sessions ended now; the account itself is kept, so
+    removing the entry lets it sign in again. API keys are not affected.
+
+    Refused with 400 for a value that is neither an address nor a domain, or one that would block your own
+    address or the deployment's bootstrap operator's, and with 409 for one already blocked.
+    """
+    return await service.block_email(actor=current_identity, request=body)
+
+
+@router.delete("/blocked-emails/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unblock_email(
+    service: DeploymentUserServiceDep,
+    current_identity: CurrentIdentity,
+    entry_id: uuid.UUID,
+) -> None:
+    """Remove a blocklist entry, so the accounts it matched may sign in again."""
+    await service.unblock_email(actor=current_identity, entry_id=entry_id)

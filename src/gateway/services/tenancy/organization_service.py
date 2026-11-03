@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyConflictError, TenancyValidationError
-from gateway.exceptions.identity_exceptions import TermsNotAcceptedError
+from gateway.exceptions.identity_exceptions import BlockedEmailError, TermsNotAcceptedError
 from gateway.exceptions.organizations_exceptions import (
     DefaultOrganizationDeletionError,
     InvitationAlreadyPendingError,
@@ -88,6 +88,7 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspaceMemberUpdate,
 )
+from gateway.repositories.identity import BlockedEmailRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -343,6 +344,7 @@ class OrganizationService:
         self.workspaces = WorkspaceMemberRepository(db)
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
+        self.blocked_emails = BlockedEmailRepository(db)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
@@ -1125,6 +1127,7 @@ class OrganizationService:
         )
 
         email = _validated_email(request.email)
+        await self._refuse_blocked_address(email)
         assignments = request.workspace_assignments or []
         await self._require_workspaces_in_organization(organization, assignments)
 
@@ -1477,6 +1480,11 @@ class OrganizationService:
         invited = await asyncio.gather(*(mail(*one) for one in staged))
         return BulkInviteOrganizationMembersResultPublic(invited=list(invited), failed=failed)
 
+    async def _refuse_blocked_address(self, email: str) -> None:
+        """Refuse an address the deployment's email blocklist matches, before anything is written for it."""
+        if await self.blocked_emails.matching(email) is not None:
+            raise BlockedEmailError(email)
+
     async def _stage_invitation(
         self,
         *,
@@ -1490,9 +1498,11 @@ class OrganizationService:
     ) -> tuple[Invitation, OrganizationMember, str]:
         """Write one invitation and its ``invited`` membership, uncommitted; return them with the raw token.
 
-        Refuses an address that already holds an active membership, or one with
-        a still-unexpired invitation pending.
+        Refuses an address that already holds an active membership, one with
+        a still-unexpired invitation pending, or one the deployment's email
+        blocklist matches.
         """
+        await self._refuse_blocked_address(email)
         target = await self._identity_for_address(email, organization)
 
         # Locked before the status check that decides create/revive/refuse,
@@ -2185,6 +2195,7 @@ class OrganizationService:
             invitee = await self.users.get(membership.user_id)
             if invitee is None or not invitee.is_active:
                 raise OrganizationMemberDeactivatedError(invitation.email)
+            await self._refuse_blocked_address(invitation.email)
             invitation = await self.invitations.update_status(
                 invitation,
                 {

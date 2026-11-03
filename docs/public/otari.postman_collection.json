@@ -38,6 +38,102 @@
           }
         },
         {
+          "name": "List Blocked Emails",
+          "request": {
+            "description": "List the addresses and domains blocked from holding an account on this deployment, newest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Block Email",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"value\": \"string\"\n}"
+            },
+            "description": "Block an address, or a domain and its subdomains, from holding an account on this deployment.\n\nA blocked address cannot sign up, be added to or invited into an organization, or sign in by password,\npasskey or provider, and nothing is mailed to it for signup, verification or a password reset. Every\nexisting account the entry matches has its dashboard sessions ended now; the account itself is kept, so\nremoving the entry lets it sign in again. API keys are not affected.\n\nRefused with 400 for a value that is neither an address nor a domain, or one that would block your own\naddress or the deployment's bootstrap operator's, and with 409 for one already blocked.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails"
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails"
+            }
+          }
+        },
+        {
+          "name": "Unblock Email",
+          "request": {
+            "description": "Remove a blocklist entry, so the accounts it matched may sign in again.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails",
+                ":entry_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails/:entry_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "entry_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "List Deployment Users",
           "request": {
             "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.\n``search`` narrows the page and the count together.",
