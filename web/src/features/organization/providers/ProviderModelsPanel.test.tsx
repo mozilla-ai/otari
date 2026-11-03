@@ -168,7 +168,7 @@ describe("ProviderModelsPanel", () => {
           input_price_per_million: 2000,
           output_price_per_million: 0,
           price_source: "organization",
-          unit: "requests",
+          unit: "request",
         }),
       ],
     })

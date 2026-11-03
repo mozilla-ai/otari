@@ -609,7 +609,7 @@ function ActivityPageContent({
   // The model selector whose price is being set from a request detail, and
   // unset when that dialog is closed.
   const [modelPriceKey, setModelPriceKey] = useState<string>()
-  const [modelPriceUnit, setModelPriceUnit] = useState<PricingUnit>("tokens")
+  const [modelPriceUnit, setModelPriceUnit] = useState<PricingUnit>("token")
   const priceModel = scope.isDeploymentWide
     ? (model: string, endpoint: string) => {
         setPriceOpenCount((count) => count + 1)
@@ -700,7 +700,7 @@ function ActivityPageContent({
           rates.cache_read_price_per_million ?? null,
         cache_write_price_per_million:
           rates.cache_write_price_per_million ?? null,
-        unit: rates.unit ?? "tokens",
+        unit: rates.unit ?? "token",
       },
       { onSuccess: () => setModelPriceKey(undefined) },
     )
