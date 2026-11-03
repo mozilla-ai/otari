@@ -30,7 +30,7 @@ from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
 from gateway.services.mcp_stateless import failure_class
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
-from gateway.services.traces import RequestTrace
+from gateway.services.traces import RequestTrace, ToolSpans
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -139,6 +139,7 @@ class MCPClientPool:
         self._tally = tally
         # The request's trace, which records each connection and call. None outside a request.
         self._trace = trace
+        self._spans = ToolSpans(trace, "mcp")
         self._owner: asyncio.Task[None] | None = None
         self._release = asyncio.Event()
 
@@ -283,20 +284,11 @@ class MCPClientPool:
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
-            if self._trace is not None:
-                self._trace.record_tool_call(
-                    tool_name=name, tool_type="mcp", started=started, ok=False, arguments=arguments
-                )
+            self._spans.record(started, ok=False, arguments=arguments, tool_name=name)
             raise
-        if self._trace is not None:
-            self._trace.record_tool_call(
-                tool_name=name,
-                tool_type="mcp",
-                started=started,
-                ok=not result.is_error,
-                arguments=arguments,
-                result=_result_text(result),
-            )
+        self._spans.record(
+            started, ok=not result.is_error, arguments=arguments, result=_result_text(result), tool_name=name
+        )
         return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:

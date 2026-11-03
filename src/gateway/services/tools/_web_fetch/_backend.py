@@ -52,6 +52,7 @@ from gateway.services.tools._web_names import (
     web_fetch_tool_definition,
 )
 from gateway.services.tools._web_tool_failure import BUDGET_EXCEEDED_TAG, CALL_LIMIT_TAG, WebToolFailure, failed_text
+from gateway.services.traces import ToolSpans
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy
 
@@ -115,7 +116,7 @@ class WebFetchBackend:
         # The app's client, for a provider instance. None outside an app, where the provider opens its own per call.
         self._web_provider_client = web_provider_client
         self._tally = tally
-        self._trace = trace
+        self._spans = ToolSpans(trace, "otari_web_fetch", WEB_FETCH_TOOL_NAME)
         self._cap = cap
         self._stack = AsyncExitStack()
         self._client: httpx.AsyncClient | None = None
@@ -195,15 +196,7 @@ class WebFetchBackend:
                 cost=page.cost if page is not None else None,
                 deployment_paid=not resolved.on_credential,
             )
-        if self._trace is not None:
-            self._trace.record_tool_call(
-                tool_name=WEB_FETCH_TOOL_NAME,
-                tool_type="otari_web_fetch",
-                started=started,
-                ok=not is_tool_error(text),
-                arguments=arguments,
-                result=text,
-            )
+        self._spans.record(started, ok=not is_tool_error(text), arguments=arguments, result=text)
         return text
 
     async def _fetch(self, arguments: dict[str, Any]) -> str:

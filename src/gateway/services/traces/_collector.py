@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from gateway.log_config import logger
 from gateway.services.traces._context import ContextWeights
@@ -228,7 +229,7 @@ class RequestTrace:
         tool_type: str,
         started: datetime,
         ok: bool,
-        arguments: object = None,
+        arguments: Mapping[str, Any] | None,
         result: str | None = None,
     ) -> None:
         """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool).
@@ -408,3 +409,32 @@ class RequestTrace:
 
 def _elapsed_ms(started: datetime, ended: datetime) -> int:
     return max(0, round((ended - started).total_seconds() * 1000))
+
+
+@dataclass(frozen=True)
+class ToolSpans:
+    """Records a gateway-run tool's calls on a request's trace, its type and its name bound once.
+
+    Over no trace it records nothing, so a backend never checks for one. An MCP pool
+    runs many tools under one type, so it names each call's tool instead.
+    """
+
+    trace: RequestTrace | None
+    tool_type: str
+    tool_name: str | None = None
+
+    def record(
+        self,
+        started: datetime,
+        *,
+        ok: bool,
+        arguments: Mapping[str, Any] | None,
+        result: str | None = None,
+        tool_name: str | None = None,
+    ) -> None:
+        """One call: ``arguments`` as the model sent them, ``result`` as the model reads it, None where it failed."""
+        name = tool_name or self.tool_name
+        if self.trace is not None and name is not None:
+            self.trace.record_tool_call(
+                tool_name=name, tool_type=self.tool_type, started=started, ok=ok, arguments=arguments, result=result
+            )
