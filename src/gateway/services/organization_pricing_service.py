@@ -77,6 +77,7 @@ from gateway.services.provider_kwargs import is_deployment_instance_key, split_s
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.price_unit import PriceUnit
 
 
 @dataclass(frozen=True)
@@ -99,7 +100,7 @@ class PricingOverrideInput:
     pricing_tiers: list[dict[str, object]]
     effective_from: datetime
     effective_to: datetime | None
-    unit: str = "tokens"
+    unit: PriceUnit = "tokens"
 
 
 def _describe_period(effective_from: datetime, effective_to: datetime | None) -> str:

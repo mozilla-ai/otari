@@ -1108,7 +1108,9 @@ the default it shadows, so a config-file price that has fallen behind the
 provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
-Each stored rate also carries its `unit` (`tokens`, `requests`, or `images`)
+Each stored rate also carries its `unit` (`tokens`, `requests` or `images`, or
+one of the units under
+[Per-request pricing](#per-request-pricing-audio-moderations-rerank-and-completion-models))
 and its `origin` (`config` or `api`), so a rate the config file re-seeds on
 every restart is distinguishable from one set in the dashboard.
 
@@ -1189,6 +1191,15 @@ in `tokens`, because its tokens are recorded on the usage row.
 A flat per-image or per-request rate cannot follow what the caller chooses: an
 image's size and quality, or an audio file's length. Set it at the dearest
 option you allow.
+
+A rate can also name `character`, `megapixel`, `second`, `minute` or
+`web_search`, the units models.dev prices some models in (a character or token
+price is per million, a search price per 1,000, and the rest per one). They are
+stored ahead of their meters: a rate in one of them prices nothing yet, so a
+budgeted request on such a rate is refused under `require_pricing` as any
+unpriced request is, and the refusal names the unit. With `require_pricing`
+off, the request is served and its usage row carries no cost. Such a rate is
+never billed as tokens. A later release gives each unit a meter.
 
 An unpriced request on audio or moderations is served at zero cost. Image
 generation, embeddings, rerank and direct search are subject to

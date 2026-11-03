@@ -1,9 +1,15 @@
-"""The one list of price units, pinned to models.dev's."""
+"""The one list of price units, pinned to models.dev's and to the API."""
+
+import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from gateway.types.models_dev import MODELS_DEV_UNITS
 from gateway.types.price_unit import PRICE_PER, PRICE_UNITS, models_dev_unit
+
+SPEC = Path(__file__).resolve().parents[2] / "docs" / "public" / "openapi.json"
 
 # ``CostUnitV2Values`` in models.dev's ``packages/core/src/schema-v2.ts``, as of 2026-11-03.
 # ``web_search`` is not among them: it is the ``web_search.price`` field, USD per 1,000 searches.
@@ -63,3 +69,27 @@ def test_every_models_dev_unit_is_a_price_unit() -> None:
 )
 def test_a_models_dev_unit_names_otari_unit(value: str | None, unit: str | None) -> None:
     assert models_dev_unit(value) == unit
+
+
+def _unit_enums(node: Any, path: str = "") -> dict[str, list[str]]:
+    """Every ``unit`` property of the spec that carries an enum, by its path."""
+    found: dict[str, list[str]] = {}
+    if isinstance(node, dict):
+        unit = node.get("properties", {}).get("unit") if isinstance(node.get("properties"), dict) else None
+        if isinstance(unit, dict):
+            enums = [item["enum"] for item in (unit, *unit.get("anyOf", ())) if isinstance(item.get("enum"), list)]
+            if enums:
+                found[path] = enums[0]
+        for key, value in node.items():
+            found.update(_unit_enums(value, f"{path}/{key}"))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            found.update(_unit_enums(value, f"{path}/{index}"))
+    return found
+
+
+def test_every_unit_enum_in_the_api_is_the_one_list() -> None:
+    enums = _unit_enums(json.loads(SPEC.read_text("utf-8")))
+
+    assert enums, "the spec names no unit enum"
+    assert {path: tuple(values) for path, values in enums.items() if tuple(values) != PRICE_UNITS} == {}

@@ -69,6 +69,7 @@ from gateway.services.workspace_scope import (
     organization_for_workspace_id,
 )
 from gateway.types.models_dev import ModelsDevCatalog
+from gateway.types.price_unit import PriceUnit
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -103,11 +104,11 @@ class ModelPricingInfo(BaseModel):
     # pricing_service._pricing_tiers emits (a `min_input_tokens` of 0 fails
     # `gt=0`, and a tier with no rate override fails validate_has_rate_override).
     pricing_tiers: Sequence[PricingTier | dict[str, float | int]] = Field(default_factory=list)
-    # What the rates are per (``PRICING_UNITS``). A gateway-run tool's row is per
-    # million requests, and a reader that assumed tokens would be wrong by the
-    # whole unit; the catalog never lists one, but the field travels with the
-    # price so a caller reading one model is told too.
-    unit: str = "tokens"
+    # What the rates are per. A gateway-run tool's row is per million requests,
+    # and a reader that assumed tokens would be wrong by the whole unit; the
+    # catalog never lists one, but the field travels with the price so a caller
+    # reading one model is told too.
+    unit: PriceUnit = "tokens"
 
 
 def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:

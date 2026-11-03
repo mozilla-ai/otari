@@ -344,3 +344,26 @@ def test_a_price_per_request_that_is_not_a_number_is_refused(
     )
 
     assert refused.status_code == 422
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_a_model_priced_in_a_unit_with_no_meter_settles_unpriced(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    stream: bool,
+) -> None:
+    """A rate stored ahead of its meter prices nothing: the tokens are recorded, no cost, nothing held."""
+    # A non-zero output rate a token pricing would apply, so a token charge would show.
+    _price(client, master_key_header, unit="second", output=1_000_000.0)
+    headers = _user_key(client, master_key_header)
+
+    response, reserved = _chat(client, headers, stream=stream, usage=REPORTED_USAGE)
+
+    assert response.status_code == 200, response.text
+    assert all(amount == 0 for amount in reserved), reserved
+    row = _row(db_session_factory)
+    assert (row.prompt_tokens, row.completion_tokens) == (12, 34)
+    assert row.cost is None
+    assert row.billing_meters is None
+    assert _user(client, master_key_header)["spend"] == 0

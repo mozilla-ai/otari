@@ -47,7 +47,7 @@ from gateway.services.budgets._scoped_enforcement import (
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
 from gateway.services.budgets._scoped_enforcement import settle as settle_scoped
-from gateway.services.pricing import price_usage
+from gateway.services.pricing import has_completion_meter, price_usage
 from gateway.services.pricing_service import find_model_pricing, is_free_pricing, search_unit_cost
 from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
@@ -402,7 +402,9 @@ class EstimateInputs:
 
     def get_reserved_output_tokens(self, pricing: ModelPricing | None) -> int | None:
         """Return the output tokens an estimate on ``pricing`` assumes, or None where a lower limit cannot shrink it."""
-        if pricing is None or priced_per_request(pricing) or pricing.output_price_per_million <= 0:
+        if pricing is None or not has_completion_meter(pricing) or priced_per_request(pricing):
+            return None
+        if pricing.output_price_per_million <= 0:
             return None
         return self.max_output_tokens if self.max_output_tokens is not None else self.default_output_tokens
 
@@ -442,9 +444,10 @@ def estimate_cost(
     requested, the input is conservatively reserved at the rate a write on the
     requested TTL bills at (a ``1h`` request also covers its 5m writes), since
     any prompt token could become a cache write. The estimate is reconciled to
-    actual usage on completion.
+    actual usage on completion. A rate in a unit no completion meter reads
+    settles unpriced, so it holds nothing.
     """
-    if pricing is None:
+    if not has_completion_meter(pricing):
         return ZERO
     # Whole tokens, rounded up: a fraction of a token is not billable, and the
     # estimate is an upper bound, so the fraction rounds towards the gateway.
