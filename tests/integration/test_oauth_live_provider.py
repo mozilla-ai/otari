@@ -88,12 +88,12 @@ def _live_state(provider: str) -> str:
     return state
 
 
-def _live_flow_secret(provider: str) -> str:
-    """The flow cookie ``/authorize`` set, or skip: the row answers to nothing else."""
-    secret = os.environ.get(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_SECRET", "")
-    if not secret:
+def _live_browser_token(provider: str) -> str:
+    """The browser token the flow cookie holds for ``state``, or skip: the state is derived from it."""
+    token = os.environ.get(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_SECRET", "")
+    if not token:
         pytest.skip(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_SECRET is required")
-    return secret
+    return token
 
 
 def _live_config(provider: str) -> GatewayConfig:
@@ -122,12 +122,12 @@ async def test_a_real_authorization_code_exchanges_for_an_identity(provider: str
     config = _live_config(provider)
     code = _live_code(provider)
     state = _live_state(provider)
-    flow_secret = _live_flow_secret(provider)
+    browser_token = _live_browser_token(provider)
 
     init_db(config)
     async with create_session() as db:
         identity = await oauth_service.exchange_code(
-            config, provider, code=code, state=state, flow_secret=flow_secret, db=db
+            config, provider, code=code, state=state, browser_token=browser_token, db=db
         )
         # Committed, because the state was consumed for real: leaving it
         # spendable would contradict what this module is checking.

@@ -26,7 +26,7 @@ from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from apron_auth import OAuthClient
+from apron_auth import StoredStateClient
 from fastapi import FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 from fastapi.testclient import TestClient
@@ -46,7 +46,13 @@ from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.identity import IdentityService
-from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH
+from gateway.services.oauth_service import (
+    FLOW_COOKIE_NAME,
+    FLOW_COOKIE_PATH,
+    MAX_FLOW_COOKIE_CHARS,
+    MAX_LIVE_FLOWS,
+    browser_token_for,
+)
 from gateway.services.tenancy.organization_service import OrganizationService, SignupRegistration
 
 from .conftest import build_test_client
@@ -92,7 +98,7 @@ def stub_exchange(
     spent: list[str] = []
 
     async def _exchange(
-        _config: GatewayConfig, provider: str, *, code: str, state: str, flow_secret: str | None, db: Any
+        _config: GatewayConfig, provider: str, *, code: str, state: str, browser_token: str | None, db: Any
     ) -> ProviderIdentity:
         spent.append(code)
         return ProviderIdentity(
@@ -1837,9 +1843,9 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
         return True
 
     monkeypatch.setattr(oauth_service._DatabaseStateStore, "consume", _consume)
-    monkeypatch.setattr(OAuthClient, "_token_request", _token_request)
-    monkeypatch.setattr(OAuthClient, "fetch_identity", _fetch_identity)
-    monkeypatch.setattr(OAuthClient, "revoke_token", _revoke_token)
+    monkeypatch.setattr(StoredStateClient, "_token_request", _token_request)
+    monkeypatch.setattr(StoredStateClient, "fetch_identity", _fetch_identity)
+    monkeypatch.setattr(StoredStateClient, "revoke_token", _revoke_token)
     return endpoint
 
 
@@ -2034,7 +2040,7 @@ def test_a_refused_exchange_leaves_the_state_spendable_for_the_retry(
     async def _boom(self: Any, _data: dict[str, str]) -> Any:
         raise RuntimeError("the provider was unreachable")
 
-    monkeypatch.setattr(OAuthClient, "_token_request", _boom)
+    monkeypatch.setattr(StoredStateClient, "_token_request", _boom)
     failed = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
 
     # An unreachable provider is an upstream failure, not the caller's.
@@ -2094,24 +2100,146 @@ def test_a_callback_from_a_browser_that_did_not_start_the_flow_is_refused(
     assert finished.status_code == 200, finished.text
 
 
-def test_two_tabs_in_one_browser_share_the_cookie_and_both_finish(
+def test_two_tabs_in_one_browser_both_finish(
     client: TestClient,
     oauth_configured: None,
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The cookie holds a token per live flow, keyed by the state that flow sends.
+
+    Two tabs is something a person does without meaning to, and a sign-in the
+    browser started and then cannot finish looks like a broken product.
+    """
     add_member(client, master_key_header, email="ada@example.com")
     stub_token_endpoint(monkeypatch)
     first = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
-    cookie = client.cookies[FLOW_COOKIE_NAME]
-    second = client.get(f"{API_ROOT}/auth/oauth/github/authorize").json()["state"]
+    second = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
 
-    # The second call reused the cookie instead of rotating it out from under the first tab.
-    assert client.cookies[FLOW_COOKIE_NAME] == cookie
+    assert first != second
+    earlier = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": first})
+    assert earlier.status_code == 200, earlier.text
+    later = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": second})
+    assert later.status_code == 200, later.text
+
+
+def test_a_browser_that_starts_one_flow_too_many_loses_its_oldest(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cookie a browser keeps adding to needs a bound, and the oldest flow is the one to drop."""
+    add_member(client, master_key_header, email="ada@example.com")
+    posted = stub_token_endpoint(monkeypatch).posted
+    states = [client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"] for _ in range(MAX_LIVE_FLOWS + 1)]
+
+    evicted = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": states[0]})
+    assert evicted.status_code == 400, evicted.text
+    assert posted == []
+    kept = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": states[1]})
+    assert kept.status_code == 200, kept.text
+
+
+def test_a_state_the_cookie_does_not_name_is_left_to_the_library_to_refuse(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing here refuses first: the state travels to apron-auth with no token and it decides.
+
+    One binding check in the flow cannot come to differ from a second one, and
+    the flow the state names stays live for the browser that started it.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    posted = stub_token_endpoint(monkeypatch).posted
+    elsewhere = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    elsewheres_cookie = client.cookies[FLOW_COOKIE_NAME]
+    client.cookies.clear()
+    client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    assert browser_token_for(client.cookies[FLOW_COOKIE_NAME], elsewhere) is None
+
+    refused = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": elsewhere})
+
+    assert refused.status_code == 400, refused.text
+    assert posted == []
+    client.cookies.clear()
+    client.cookies.set(FLOW_COOKIE_NAME, elsewheres_cookie, path=FLOW_COOKIE_PATH)
+    finished = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": elsewhere})
+    assert finished.status_code == 200, finished.text
+
+
+def test_a_finished_sign_in_takes_its_own_flow_out_of_the_cookie(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A redeemed flow's token can buy nothing, so the browser stops holding it."""
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    first = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    second = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+
     assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": first}).status_code == 200
+    held = client.cookies[FLOW_COOKIE_NAME]
+    assert browser_token_for(held, first) is None
+    assert browser_token_for(held, second) is not None
+
     assert (
-        client.post(f"{API_ROOT}/auth/oauth/github/callback", json={"code": "c2", "state": second}).status_code == 200
+        client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": second}).status_code == 200
     )
+    assert FLOW_COOKIE_NAME not in client.cookies
+
+
+def test_a_cookie_this_deployment_cannot_read_refuses_the_sign_in_and_nothing_else(
+    client: TestClient,
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mangled or stale cookie costs a sign-in to start again, never a failed request."""
+    posted = stub_token_endpoint(monkeypatch).posted
+    state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    client.cookies.clear()
+    client.cookies.set(FLOW_COOKIE_NAME, "a-cookie-this-deployment-never-set", path=FLOW_COOKIE_PATH)
+
+    refused = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
+
+    assert refused.status_code == 400, refused.text
+    assert posted == []
+
+
+def test_a_browser_holding_an_over_long_cookie_can_still_start_a_sign_in(
+    client: TestClient,
+    oauth_configured: None,
+) -> None:
+    """A cookie no route would accept is one no route rewrites, and this one is HttpOnly."""
+    client.cookies.set(FLOW_COOKIE_NAME, "x" * (MAX_FLOW_COOKIE_CHARS + 1), path=FLOW_COOKIE_PATH)
+
+    started = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+
+    assert started.status_code == 200, started.text
+    jar: SimpleCookie = SimpleCookie()
+    for header in started.headers.get_list("set-cookie"):
+        jar.load(header)
+    rewritten = jar[FLOW_COOKIE_NAME].value
+    assert browser_token_for(rewritten, started.json()["state"]) is not None
+
+
+def test_a_callback_stating_no_code_is_refused_rather_than_called_an_outage(
+    client: TestClient,
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A callback carrying no code to redeem never reached the provider, so it is not the provider failing."""
+    posted = stub_token_endpoint(monkeypatch).posted
+    state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+
+    refused = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "", "state": state})
+
+    assert refused.status_code == 400, refused.text
+    assert posted == []
 
 
 def test_the_refusal_does_not_say_which_way_the_state_was_wrong(

@@ -21,14 +21,14 @@ when the authorization URL is built and consumed by the exchange. apron-auth's
 mints the verifier and ``exchange_code`` reads it back, and neither the code
 challenge nor the state comparison is this module's own arithmetic.
 
-**The row is bound to the browser as well as to the flow.** A ``code`` and a
-``state`` travel together in one redirect URL, and that URL is written to the
-access log and to browser history, so a row keyed on the state alone would let
-whoever reads either finish the sign-in for the full TTL. So ``/authorize``
-also sets an HttpOnly cookie carrying a random flow secret, the row keeps that
-secret's digest, and the callback must present the cookie (RFC 9700, section
-4.7.1). One secret per browser rather than per flow: a second tab starting a
-sign-in reuses the cookie it finds, so neither tab's callback breaks the other.
+**The authorization is bound to the browser as well as to the flow.** A
+``code`` and a ``state`` travel together in one redirect URL, and that URL is
+written to the access log and to browser history, so a flow keyed on the state
+alone would let whoever reads either finish the sign-in for the full TTL
+(RFC 9700, section 4.7.1). apron-auth issues a browser token per authorization
+request and refuses a callback that token does not match. The token lives in an
+HttpOnly cookie, one entry per sign-in in flight, which is what lets two tabs
+each finish their own.
 
 What is this module's own is the two overrides in ``_as_configured_here``: the
 presets widen scopes and, for Google, ask for offline access, and neither is
@@ -41,16 +41,23 @@ flow this deployment actually started, which the browser cannot do. They fail
 in different directions. See ``web/src/features/auth/OAuthCallbackPage.tsx``.
 """
 
+import base64
 import hashlib
-import hmac
-import secrets
-import string
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
-from apron_auth import OAuthClient, ProviderConfig
-from apron_auth.errors import INVALID_GRANT, ConfigurationError, NonceValidationError, StateError, TokenExchangeError
+from apron_auth import AuthorizationCallback, ProviderConfig, StoredStateClient
+from apron_auth.errors import (
+    INVALID_GRANT,
+    AuthorizationResponseError,
+    ConfigurationError,
+    NonceValidationError,
+    StateError,
+    TokenExchangeError,
+)
 from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
@@ -82,6 +89,22 @@ from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
 
 
 @dataclass(frozen=True)
+class BrowserAuthorization:
+    """One authorization request, built for the browser that asked for it.
+
+    ``state`` names the flow wherever one is recorded or looked up, and reveals
+    nothing about ``browser_token``.
+
+    NOTE: ``browser_token`` belongs in ``FLOW_COOKIE_NAME`` and nowhere script
+    can read it.
+    """
+
+    url: str
+    state: str
+    browser_token: str
+
+
+@dataclass(frozen=True)
 class _Provider:
     """One provider's scopes, the name it writes itself under, and whether its email claim can be trusted.
 
@@ -97,14 +120,18 @@ class _Provider:
 # here and the flow cookie its path, so the cookie cannot end up scoped to
 # somewhere the routes are not.
 OAUTH_ROUTE_PREFIX = "/auth/oauth"
-# The cookie that binds a pending authorization to the browser that started it.
-# Scoped to the OAuth routes, which are the only ones that read it.
+# The cookie that binds each pending authorization to the browser that started
+# it. Scoped to the OAuth routes, which are the only ones that read it.
 FLOW_COOKIE_NAME = "otari_oauth_flow"
 FLOW_COOKIE_PATH = f"{API_ROOT}{OAUTH_ROUTE_PREFIX}"
-# What ``secrets.token_urlsafe(32)`` produces; anything else in the cookie is
-# not ours and is replaced rather than reused.
-_FLOW_SECRET_LENGTH = 43
-_URLSAFE_CHARACTERS = frozenset(string.ascii_letters + string.digits + "-_")
+# How many sign-ins one browser may have in flight. A browser holds one cookie,
+# so an unbounded one would grow for as long as somebody keeps starting flows,
+# and three concurrent sign-ins is already more than a person does.
+MAX_LIVE_FLOWS = 3
+# Three live flows encode to under 500 characters, so a longer value is one this
+# deployment never wrote. The bound is what an unauthenticated caller can make
+# this process decode.
+MAX_FLOW_COOKIE_CHARS = 1024
 
 _PROVIDERS: dict[str, _Provider] = {
     "google": _Provider(label="Google", scopes=("openid", "email", "profile"), email_claim_trusted=True),
@@ -196,10 +223,9 @@ class _DatabaseStateStore:
     flow to retry.
     """
 
-    def __init__(self, db: AsyncSession, provider: str, flow_hash: str) -> None:
+    def __init__(self, db: AsyncSession, provider: str) -> None:
         self._db = db
         self._provider = provider
-        self._flow_hash = flow_hash
 
     async def save(self, state: PendingState) -> None:
         """Stage one pending authorization, and sweep whatever has expired."""
@@ -217,7 +243,6 @@ class _DatabaseStateStore:
             OAuthPendingState(
                 state_hash=_state_hash(state.state),
                 provider=self._provider,
-                flow_hash=self._flow_hash,
                 code_verifier=state.code_verifier,
                 nonce=state.nonce,
                 redirect_uri=state.redirect_uri,
@@ -236,13 +261,12 @@ class _DatabaseStateStore:
         by primary key and reading what came back means exactly one of them
         does.
 
-        ``provider`` and the flow secret are compared after the row is claimed
-        rather than added to the WHERE clause, so a state minted for one
-        provider and returned to another, or presented from a browser other
-        than the one that started it, is refused as itself rather than as an
-        unknown state. The delete is staged on the request's transaction and
-        the refusal keeps that transaction from committing, so the row survives
-        for the callback it was minted for.
+        ``provider`` is compared after the row is claimed rather than added to
+        the WHERE clause, so a state minted for one provider and returned to
+        another is refused as itself rather than as an unknown state. The
+        delete is staged on the request's transaction and the refusal keeps
+        that transaction from committing, so the row survives for the callback
+        it was minted for.
         """
         row = (
             await self._db.execute(
@@ -250,7 +274,6 @@ class _DatabaseStateStore:
                 .where(col(OAuthPendingState.state_hash) == _state_hash(state_key))
                 .returning(
                     col(OAuthPendingState.provider),
-                    col(OAuthPendingState.flow_hash),
                     col(OAuthPendingState.code_verifier),
                     col(OAuthPendingState.nonce),
                     col(OAuthPendingState.redirect_uri),
@@ -261,12 +284,9 @@ class _DatabaseStateStore:
         ).first()
         if row is None:
             return None
-        provider, flow_hash, code_verifier, nonce, redirect_uri, created_at, expires_at = row
+        provider, code_verifier, nonce, redirect_uri, created_at, expires_at = row
         if provider != self._provider:
             logger.warning("OAuth state minted for %s was returned to %s", provider, self._provider)
-            return None
-        if not hmac.compare_digest(flow_hash, self._flow_hash):
-            logger.warning("OAuth %s callback came from a browser other than the one that started it", provider)
             return None
         if expires_at <= datetime.now(UTC):
             return None
@@ -285,49 +305,88 @@ class _DatabaseStateStore:
         )
 
 
-def _flow_hash(flow_secret: str) -> str:
-    """The digest a row keeps of the browser's flow secret; same reasoning as ``_state_hash``."""
-    return hashlib.sha256(flow_secret.encode()).hexdigest()
-
-
 def _state_hash(state: str) -> str:
     """The key a state is stored under: its SHA-256, hex.
 
-    The state is a 256-bit random value from ``secrets``, so this is a lookup
-    key and not a password hash; a single round is right and a KDF would be
-    theater. What it buys is that a reader of the table holds digests, and the
-    callback compares against the preimage.
+    The state is already unguessable, so this is a lookup key and not a
+    password hash; a single round is right and a KDF would be theater. What it
+    buys is that a reader of the table holds digests, and the callback compares
+    against the preimage.
     """
     return hashlib.sha256(state.encode()).hexdigest()
 
 
-def flow_secret_for(existing: str | None) -> str:
-    """The flow secret this browser's authorizations are bound under.
+def browser_token_for(flow_cookie: str | None, state: str) -> str | None:
+    """The browser token ``flow_cookie`` holds for ``state``, or ``None`` where it holds none.
 
-    Reused when the browser already holds one of ours, so a second tab starting
-    a sign-in does not invalidate the first tab's; minted otherwise. A cookie
-    that is not the shape this module issues is somebody else's and is replaced.
+    This selects which of the browser's live flows to present and decides
+    nothing about it: apron-auth makes the one binding check, against the state
+    the callback carried.
     """
-    if existing and len(existing) == _FLOW_SECRET_LENGTH and _is_urlsafe(existing):
-        return existing
-    return secrets.token_urlsafe(32)
+    return _live_flows(flow_cookie).get(state)
 
 
-def _is_urlsafe(value: str) -> bool:
-    return all(character in _URLSAFE_CHARACTERS for character in value)
+def apply_flow_cookie(
+    response: Response, flow_cookie: str | None, authorization: BrowserAuthorization, *, secure: bool
+) -> None:
+    """Add ``authorization`` to the flows the browser has in flight, and write the cookie back.
+
+    The oldest flow is evicted once a browser holds more than
+    ``MAX_LIVE_FLOWS``.
+    """
+    flows = _live_flows(flow_cookie)
+    flows[authorization.state] = authorization.browser_token
+    _write_flow_cookie(response, dict(list(flows.items())[-MAX_LIVE_FLOWS:]), secure=secure)
 
 
-def apply_flow_cookie(response: Response, secret: str, *, secure: bool) -> None:
-    """Set (or refresh) the flow cookie with the attributes the session cookie uses.
+def drop_finished_flow(response: Response, flow_cookie: str | None, state: str, *, secure: bool) -> None:
+    """Write the cookie back without ``state``, or delete it where that was the last flow.
+
+    A redeemed flow's token can buy nothing and must not sit in the browser for
+    the rest of the cookie's life.
+    """
+    kept = {flow: token for flow, token in _live_flows(flow_cookie).items() if flow != state}
+    _write_flow_cookie(response, kept, secure=secure)
+
+
+def _live_flows(flow_cookie: str | None) -> dict[str, str]:
+    """The browser token of each sign-in this cookie has in flight, keyed by its state, oldest first.
+
+    A cookie that cannot be read carries no flows, so a mangled, stale or
+    over-long one costs a person a sign-in to start again rather than a failed
+    request. Refusing one on the way in would be worse than reading none: it is
+    HttpOnly, so nothing but a new authorization request can rewrite it.
+    """
+    if not flow_cookie or len(flow_cookie) > MAX_FLOW_COOKIE_CHARS:
+        return {}
+    try:
+        flows = json.loads(base64.urlsafe_b64decode(flow_cookie + "=" * (-len(flow_cookie) % 4)))
+    except ValueError:
+        return {}
+    if not isinstance(flows, dict):
+        return {}
+    return {state: token for state, token in flows.items() if isinstance(state, str) and isinstance(token, str)}
+
+
+def _write_flow_cookie(response: Response, flows: Mapping[str, str], *, secure: bool) -> None:
+    """Set the flow cookie to exactly ``flows``, with the attributes the session cookie uses, or delete it.
 
     ``Lax`` rather than ``Strict`` because the request that spends it is a
     same-origin POST from the dashboard, which either setting carries; ``Lax``
     just does not depend on that staying true. The path keeps it off every
     request that is not an OAuth one.
+
+    The value is base64url of compact JSON so that braces and quotes stay out
+    of a header the browser has to hand back byte for byte. It conceals
+    nothing.
     """
+    if not flows:
+        response.delete_cookie(FLOW_COOKIE_NAME, path=FLOW_COOKIE_PATH, httponly=True, secure=secure, samesite="lax")
+        return
+    encoded = base64.urlsafe_b64encode(json.dumps(flows, separators=(",", ":")).encode()).decode().rstrip("=")
     response.set_cookie(
         FLOW_COOKIE_NAME,
-        secret,
+        encoded,
         max_age=OAUTH_STATE_TTL_SECONDS,
         httponly=True,
         secure=secure,
@@ -336,23 +395,20 @@ def apply_flow_cookie(response: Response, secret: str, *, secure: bool) -> None:
     )
 
 
-async def authorization_url(
-    config: GatewayConfig, provider: str, *, db: AsyncSession, flow_secret: str
-) -> tuple[str, str]:
-    """The provider consent screen to send the browser to, and the state to keep.
+async def authorization_url(config: GatewayConfig, provider: str, *, db: AsyncSession) -> BrowserAuthorization:
+    """The provider consent screen to send the browser to, the state to keep, and the token that binds them.
 
     Staged, not committed: the caller commits, so an authorization URL is never
-    handed back over a row that failed to write. ``flow_secret`` is the value
-    the browser will hold in ``FLOW_COOKIE_NAME``; only its digest is stored.
+    handed back over a row that failed to write.
 
     Raises:
         OAuthNotConfiguredError: If this deployment configured no client
             credentials for ``provider``, or does not know its own address.
 
     """
-    client = _client(config, provider, db, flow_secret)
-    url, pending = await client.get_authorization_url(redirect_uri=redirect_uri(config, provider))
-    return url, pending.state
+    client = _client(config, provider, db)
+    bound = await client.get_authorization_url(redirect_uri=redirect_uri(config, provider))
+    return BrowserAuthorization(url=bound.url, state=bound.state, browser_token=bound.browser_token)
 
 
 async def exchange_code(
@@ -361,7 +417,7 @@ async def exchange_code(
     *,
     code: str,
     state: str,
-    flow_secret: str | None,
+    browser_token: str | None,
     db: AsyncSession,
 ) -> ProviderIdentity:
     """Trade an authorization code for the identity the provider vouches for.
@@ -371,35 +427,47 @@ async def exchange_code(
     claim also yields the PKCE verifier and the redirect URI the authorization
     request was built with, which is why neither is passed here.
 
-    ``flow_secret`` is the browser's ``FLOW_COOKIE_NAME`` cookie, or ``None``
-    when it sent none. A callback without it is refused before the database is
-    touched: there is no row it could match.
+    ``browser_token`` is the token the browser's flow cookie holds for
+    ``state``, or ``None`` where it holds none. The ``state`` must be the one
+    that token mints, which is checked before the row is claimed and before the
+    provider is called, so a callback presented from anywhere else redeems
+    nothing and leaves the authorization live.
 
     Raises:
         OAuthNotConfiguredError: If this deployment configured no client
             credentials for ``provider``, or does not know its own address.
         OAuthStateError: If ``state`` names no authorization this deployment is
             still waiting on, for ``provider``, from this browser.
-        OAuthExchangeError: If the provider says the code is invalid, expired or spent, the ID token does not
-            carry the nonce the authorization request sent, or the identity does not fit the link table.
+        OAuthExchangeError: If the callback states no code to redeem, the provider says the code is invalid,
+            expired or spent, the ID token does not carry the nonce the authorization request sent, or the
+            identity does not fit the link table.
         OAuthProviderUnavailableError: If the provider fails or cannot be reached during the exchange or the
             identity fetch.
             The provider's own words stay on the traceback and out of the response, as that error's docstring says.
 
     """
-    if flow_secret is None:
-        logger.warning("Refused a %s callback that carried no flow cookie", provider)
-        raise OAuthStateError
-    client = _client(config, provider, db, flow_secret)
+    client = _client(config, provider, db)
     try:
-        tokens = await client.exchange_code(code=code, state=state)
+        tokens = await client.exchange_code(AuthorizationCallback(code=code, state=state), browser_token=browser_token)
         profile = await client.fetch_identity(tokens)
     except StateError as error:
         # Ahead of the catch-all below, which would otherwise render a refused
         # state as "the provider did not complete the sign-in" and send an
         # operator looking at a provider that was never contacted.
-        logger.warning("Refused a %s callback whose state matched no pending sign-in", provider)
+        if browser_token is None:
+            logger.warning(
+                "Refused a %s callback the browser presented no flow token for: its cookie did not arrive, "
+                "or no longer holds that sign-in",
+                provider,
+            )
+        else:
+            logger.warning("Refused a %s callback whose state names no sign-in this deployment is waiting on", provider)
         raise OAuthStateError from error
+    except AuthorizationResponseError as error:
+        # Also ahead of the catch-all: the response states no code to redeem, so
+        # nothing was asked of the provider and nothing there failed.
+        logger.warning("Refused a %s callback that states no authorization code", provider)
+        raise OAuthExchangeError(provider_label(provider)) from error
     except NonceValidationError as error:
         # Also ahead of the catch-all: a token response that does not answer the
         # request this deployment made is a refused sign-in, not an outage.
@@ -489,15 +557,15 @@ def _provider_config(config: GatewayConfig, provider: str, client_id: str, clien
     return _as_configured_here(provider_config, provider)
 
 
-def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret: str) -> OAuthClient:
+def _client(config: GatewayConfig, provider: str, db: AsyncSession) -> StoredStateClient:
     """The apron-auth client that builds ``provider``'s authorization URL and spends its code."""
     client_id, client_secret = _credentials(config, provider)
     identity_handler = (
         apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
     )
-    return OAuthClient(
+    return StoredStateClient(
         _provider_config(config, provider, client_id, client_secret),
-        state_store=_DatabaseStateStore(db, provider, _flow_hash(flow_secret)),
+        _DatabaseStateStore(db, provider),
         identity_handler=identity_handler,
     )
 
@@ -530,15 +598,19 @@ def _as_configured_here(provider_config: ProviderConfig, provider: str) -> Provi
 
 
 __all__ = [
+    "BrowserAuthorization",
     "FLOW_COOKIE_NAME",
     "FLOW_COOKIE_PATH",
+    "MAX_FLOW_COOKIE_CHARS",
+    "MAX_LIVE_FLOWS",
     "OAUTH_ROUTE_PREFIX",
     "apply_flow_cookie",
     "authorization_url",
     "base_url",
+    "browser_token_for",
     "callback_landing_target",
+    "drop_finished_flow",
     "exchange_code",
-    "flow_secret_for",
     "provider_label",
     "redirect_uri",
     "require_configured",
