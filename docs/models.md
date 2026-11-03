@@ -313,8 +313,7 @@ targets. The grouped catalog (`GET /api/v1/catalog/models` and the Models page)
 lists real models only and never an alias, so an aliased model stays in it.
 
 Aliases are useful for a curated catalog. A routing policy is the broader form
-when a name needs conditions, failover, weighting, learned selection, or
-mandatory guardrails. See [Routing](routing.md).
+when a name needs conditions, failover, weighting, or mandatory guardrails. See [Routing](routing.md).
 
 Alias names cannot contain `:` or `/`, collide with provider instances, or
 point to another alias.
@@ -335,7 +334,7 @@ scoping parameters.
 ## Routing-policy model names
 
 A static one-target policy resolves anywhere an alias does. A conditional,
-weighted, or learned policy applies only to Chat Completions, Messages, and
+weighted, or priority policy applies only to Chat Completions, Messages, and
 Responses because other endpoints do not provide the request context needed to
 choose a candidate.
 
@@ -557,7 +556,7 @@ key ID, do not retain affinity because their identity cannot be verified safely.
 
 Configure endpoint regions, relative capacity and the trusted location header in
 [`automatic_routing`](configuration.md#automatic-routing). Set `enabled: false`
-to restore baseline selection. No scoring model or scored examples are needed.
+to restore baseline selection.
 
 The dashboard's Models page and the Routing page's Automatic fallback section
 show this catalog and this order; see [Models and Routing](dashboard.md#models-and-routing).

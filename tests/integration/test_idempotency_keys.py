@@ -42,7 +42,6 @@ from gateway.core.config import (
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
     RESPONSE_DURATION_HEADER,
-    ROUTER_TASK_HEADER,
     SERVER_TIMING_HEADER,
     TAGS_HEADER,
     GatewayConfig,
@@ -255,7 +254,7 @@ def test_reusing_a_key_with_different_tool_headers_is_refused(
     assert provider.await_count == 1
 
 
-@pytest.mark.parametrize("header", [ROUTER_TASK_HEADER, CONVERSATION_HEADER])
+@pytest.mark.parametrize("header", [CONVERSATION_HEADER])
 def test_reusing_a_key_with_different_routing_headers_is_refused(
     client: TestClient, master_key_header: dict[str, str], user: None, header: str
 ) -> None:

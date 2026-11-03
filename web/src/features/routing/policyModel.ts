@@ -20,7 +20,6 @@ export type RoutingRow = RoutingPolicyResponse & { kind: "policy" | "alias" }
 
 /** The router backends the form can write. Any other is shown read-only rather
  *  than rewritten as one of these on save. */
-export const KNN_BACKEND = "knn"
 export const WEIGHTED_BACKEND = "weighted"
 export const PRIORITY_BACKEND = "priority"
 
@@ -57,8 +56,8 @@ export function buildInitialPool(spec: PolicySpec): string[] {
 
 /** A backend name as the server reads it.
  *
- *  The resolver matches on `name.strip().lower()`, so `" KNN "` selects the learned
- *  router. Comparing the raw string here would show a policy the gateway routes
+ *  The resolver matches on `name.strip().lower()`, so `" Weighted "` selects the
+ *  weighted router. Comparing the raw string here would show a policy the gateway routes
  *  perfectly well as an unrecognized backend, read-only and mislabelled.
  */
 export function normalizeBackend(name: string | undefined): string | undefined {
@@ -173,8 +172,8 @@ export const rowKeyOf = (row: RoutingRow): string =>
 
 /** Whether the dashboard offers editing for a spec.
  *
- * Learned routing is read-only. Other unsupported options stay read-only too,
- * because the form would drop them when rebuilding the spec on save.
+ * Unsupported options, including a router backend the form does not know, stay
+ * read-only, because the form would drop them when rebuilding the spec on save.
  */
 export function isEditableInForm(spec: PolicySpec): boolean {
   // Sections re-emit `select` as tier-downs, then the router, then the

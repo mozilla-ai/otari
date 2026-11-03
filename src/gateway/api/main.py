@@ -60,7 +60,6 @@ from gateway.api.routes import (
     responses,
     retired_root,
     routing,
-    routing_memory,
     scoped_budgets,
     search,
     search_tools,
@@ -216,10 +215,6 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     aliases.router,
     provider_endpoints.router,
     routing.router,
-    # Both under /routing: the operator's teach any user's memory, the key's only
-    # its own user's.
-    routing_memory.operator_router,
-    routing_memory.key_router,
     # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     pricing.operator_router,

@@ -31,7 +31,6 @@ from gateway.core.config import (
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
     ROUTER_HEADER,
-    ROUTER_TASK_HEADER,
     TAGS_HEADER,
     GatewayConfig,
 )
@@ -71,7 +70,9 @@ _REQUEST_SHAPING_HEADERS = (
     WEB_FETCH_HEADER,
     ROUTER_HEADER,
     "anthropic-beta",
-    ROUTER_TASK_HEADER,
+    # No longer read by anything, but a slot in every stored fingerprint: removing
+    # it would shift the slots after it and refuse every retry of an older claim.
+    "Otari-Router-Task",
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
 )

@@ -16,16 +16,12 @@ import {
   findFallthroughTarget,
   findRouterBackend,
   findWeights,
-  KNN_BACKEND,
   MAX_CANDIDATES,
   PRIORITY_BACKEND,
   WEIGHTED_BACKEND,
 } from "./policyModel"
 
-export type RouterBackend =
-  | typeof KNN_BACKEND
-  | typeof WEIGHTED_BACKEND
-  | typeof PRIORITY_BACKEND
+export type RouterBackend = typeof WEIGHTED_BACKEND | typeof PRIORITY_BACKEND
 
 export interface TierDown {
   threshold: number
@@ -117,9 +113,7 @@ function seedPool(backend: RouterBackend, first: string): PoolDraft {
 
 /** A backend name the form can write, or undefined for one it cannot. */
 function writableBackend(name: string | undefined): RouterBackend | undefined {
-  return name === KNN_BACKEND ||
-    name === WEIGHTED_BACKEND ||
-    name === PRIORITY_BACKEND
+  return name === WEIGHTED_BACKEND || name === PRIORITY_BACKEND
     ? name
     : undefined
 }
@@ -133,7 +127,9 @@ export function draftFromSpec(spec: PolicySpec): PolicyDraft {
       models.length === 0
         ? emptyPool()
         : {
-            backend: writableBackend(findRouterBackend(spec)) ?? KNN_BACKEND,
+            // Another backend is never saved: `isEditableInForm` keeps it read-only.
+            backend:
+              writableBackend(findRouterBackend(spec)) ?? WEIGHTED_BACKEND,
             models,
             weights: models.map((selector) => String(declared[selector] ?? 0)),
             safeIndex: findFallthroughIndex(spec),

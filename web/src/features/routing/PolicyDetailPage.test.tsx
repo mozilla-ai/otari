@@ -8,7 +8,7 @@ import { API_ROOT } from "@/shared/api/client"
 import {
   adminContext,
   CHAIN,
-  LEARNED,
+  KNN,
   mockApi,
   policy,
   policyWrites,
@@ -67,12 +67,12 @@ function lastWrite(calls: { url: string; method: string; body: unknown }[]) {
 }
 
 describe("PolicyDetailPage", () => {
-  it("opens an existing learned policy read-only without rewriting it", async () => {
-    const { calls } = mockApi([policy("smart", LEARNED, { is_dynamic: true })])
+  it("opens a stored knn policy read-only as an unsupported router", async () => {
+    const { calls } = mockApi([policy("smart", KNN, { is_dynamic: true })])
     renderPolicy("smart")
 
     expect(
-      await screen.findByText(/Smart router is no longer available/),
+      await screen.findByText(/Uses options this page cannot show yet/),
     ).toBeInTheDocument()
     const spec = await section("Stored spec")
     expect(spec.getByText(/"knn"/)).toBeInTheDocument()
@@ -90,9 +90,6 @@ describe("PolicyDetailPage", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "fast" }),
     ).toBeInTheDocument()
-    expect(
-      screen.queryByRole("radio", { name: "Smart router" }),
-    ).not.toBeInTheDocument()
     for (const title of [
       "Name",
       "Main selection",

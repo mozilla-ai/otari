@@ -441,7 +441,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
     "gateway/services/pricing_service.py",
-    "gateway/services/routing/knn.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tenancy/authorization.py",
@@ -503,7 +502,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/rerank.py",
     "gateway/api/routes/responses.py",
     "gateway/api/routes/routing.py",
-    "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
     "gateway/api/routes/search.py",
     "gateway/api/routes/settings.py",
@@ -600,7 +598,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/pricing.py",
     "gateway/api/routes/routing.py",
-    "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
     "gateway/api/routes/settings.py",
     "gateway/api/routes/tool_settings.py",
@@ -619,7 +616,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/playground_service.py",
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
-    "gateway/services/routing/knn.py",
     "gateway/services/tenancy/deployment_user_service.py",
     "gateway/services/tenancy/org_provider_key_service.py",
     "gateway/services/tenancy/organization_domain_service.py",
@@ -1575,17 +1571,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.routing.AgentRecommender": {
         "repository": "gateway/repositories/routing/agent_recommender_repository.py",
         "baseline": (),
-    },
-    "gateway.models.routing.RouterPreference": {
-        "repository": None,
-        "baseline": ("gateway/api/routes/routing_memory.py",),
-    },
-    "gateway.models.routing.RoutingMemory": {
-        "repository": None,
-        "baseline": (
-            "gateway/api/routes/routing_memory.py",
-            "gateway/services/routing/knn.py",
-        ),
     },
     "gateway.models.routing.RoutingPolicy": {
         "repository": None,

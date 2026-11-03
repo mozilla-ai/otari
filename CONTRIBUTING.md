@@ -48,7 +48,7 @@ print(
 
 - keys, users, orgs, workspaces, budgets, usage records, or pricing
 - route schemas, the OpenAPI spec, or the Anthropic and Responses envelopes
-- routing, fallback across attempts, or routing memory
+- routing, or fallback across attempts
 - `config.yml` layering, the `providers:` block, or provider instances and aliases
 - the dashboard, built-in tools, the MCP loop, or guardrails
 

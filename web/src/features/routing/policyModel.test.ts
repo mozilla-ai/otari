@@ -93,7 +93,7 @@ describe("initialPool", () => {
 
 describe("normalizedBackend", () => {
   it("matches the server's own strip-and-lower", () => {
-    expect(normalizeBackend(" KNN ")).toBe("knn")
+    expect(normalizeBackend(" Weighted ")).toBe("weighted")
   })
 
   it("passes undefined through", () => {
