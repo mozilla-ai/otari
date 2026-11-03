@@ -13,7 +13,7 @@ refusal says.
 from dataclasses import dataclass
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.settings.tools import effective_fetch_instances, effective_search_instances
+from gateway.core.settings.tools import BUILTIN_FETCH, effective_fetch_instances, effective_search_instances
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools._registry import BUILTIN_TOOLS
 from gateway.services.tools._web_admission import AdmittedWebTools
@@ -128,13 +128,14 @@ def deployment_tool_rate_keys(config: GatewayConfig) -> list[InstanceRateKey]:
 def unpriced_tool_detail(name: str, rate_key: RateKey | None = None) -> str:
     """The refusal of a request that would run ``name`` with no price, naming ``rate_key``, the row that prices it.
 
-    With no ``rate_key``, it names the tool's ``otari:<tool>`` row.
+    With no ``rate_key``, it names the tool's ``otari:<tool>`` row. ``price_per_call``
+    is offered for a tool a ``config.yml`` entry can declare, which ``builtin_fetch`` is not.
     """
     row = describe_rate_key(rate_key if rate_key is not None else gateway_tool_pricing_key(name))
     page = "Code execution pricing" if name == CODE_EXECUTION_TOOL_NAME else "Web search pricing"
     where = (
         f"POST {API_ROOT}/pricing, the dashboard's {page} page, or price_per_call on its entry in config.yml"
-        if isinstance(rate_key, InstanceRateKey)
+        if isinstance(rate_key, InstanceRateKey) and rate_key.name != BUILTIN_FETCH
         else f"POST {API_ROOT}/pricing, or the dashboard's {page} page"
     )
     return (

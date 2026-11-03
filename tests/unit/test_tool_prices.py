@@ -150,7 +150,15 @@ def test_the_refusal_names_the_instances_own_row() -> None:
     assert "'web_search' has no pricing" in detail
     assert f"kind 'search' and model_key '{_INSTANCE}'" in detail
     assert "Web search pricing page" in detail
+    assert "price_per_call" in detail
     assert "require_pricing" in detail
+
+
+def test_the_builtin_fetch_refusal_offers_no_config_entry() -> None:
+    detail = unpriced_tool_detail(WEB_FETCH_TOOL_NAME, _BUILTIN_FETCH.rate_keys[0])
+
+    assert "kind 'fetch' and model_key 'builtin_fetch'" in detail
+    assert "price_per_call" not in detail
 
 
 def test_the_refusal_of_a_tool_on_its_own_row_names_that_row() -> None:
