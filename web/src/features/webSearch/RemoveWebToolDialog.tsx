@@ -9,9 +9,10 @@ import { oldPriceKey, type WebToolRow } from "./webTools"
 
 // Removing a tool leaves two things keyed by its name: its price, and its place
 // in the search tool access lists of API keys and users. A later tool of the
-// same name would inherit both. The price is offered for deletion here, checked,
-// with the row under the tool's old key when that is the price the page shows;
-// the access lists are only named, since nothing here can edit them.
+// same name would inherit both. The price is offered for deletion here, checked.
+// A price under the tool's old `<provider>:<name>` key is only named: for a
+// provider that also serves models, such as DeepSeek, that key can be a model's
+// price. The access lists are only named, since nothing here can edit them.
 export function RemoveWebToolDialog({
   tool,
   isDefault,
@@ -42,12 +43,6 @@ export function RemoveWebToolDialog({
       }
       if (alsoPrice) {
         await deletePrice.mutateAsync({ kind: tool.kind, modelKey: tool.name })
-        if (isPricedUnderOldKey) {
-          await deletePrice.mutateAsync({
-            kind: "model",
-            modelKey: oldPriceKey(tool),
-          })
-        }
       }
       onClose()
     } catch {
@@ -84,6 +79,13 @@ export function RemoveWebToolDialog({
               open to them.
             </p>
           ) : null}
+          {isPricedUnderOldKey ? (
+            <p>
+              Its price is stored under {oldPriceKey(tool)}, which stays, so a
+              new tool named {tool.name} on {tool.provider} would be billed at
+              it.
+            </p>
+          ) : null}
           <Checkbox
             isSelected={alsoPrice}
             onChange={setAlsoPrice}
@@ -92,12 +94,7 @@ export function RemoveWebToolDialog({
             }
           >
             <span className="flex flex-col gap-0.5">
-              <span>
-                Also delete its price
-                {isPricedUnderOldKey
-                  ? `, stored under ${oldPriceKey(tool)}`
-                  : ""}
-              </span>
+              <span>Also delete its price</span>
               <span className="text-caption">
                 Requests already billed keep what they cost.
               </span>

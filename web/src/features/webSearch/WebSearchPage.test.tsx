@@ -535,11 +535,9 @@ describe("WebSearchPage", () => {
     expect(writes(requests, "DELETE", "/pricing/exa")[0].url).toContain(
       "kind=search",
     )
-    // Its price is its own row, so the old key is left alone.
-    expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
   })
 
-  it("deletes the price under a removed tool's old key when that is its price", async () => {
+  it("names, and keeps, the price under a removed tool's old key", async () => {
     const user = userEvent.setup()
     const requests = mockApi({
       rates: { "model:exa:exa": rate("exa:exa", 0.004) },
@@ -553,19 +551,19 @@ describe("WebSearchPage", () => {
     await user.click(screen.getByRole("button", { name: "Remove exa" }))
     const confirm = await screen.findByRole("alertdialog")
     expect(
-      within(confirm).getByText("Also delete its price, stored under exa:exa"),
+      within(confirm).getByText(
+        /Its price is stored under exa:exa, which stays/,
+      ),
     ).toBeInTheDocument()
     await user.click(
       within(confirm).getByRole("button", { name: "Remove permanently" }),
     )
 
     await waitFor(() =>
-      expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(1),
+      expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
     )
-    expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")[0].url).toContain(
-      "kind=model",
-    )
-    expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1)
+    // For a provider that also serves models, that key can be a model's price.
+    expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
   })
 
   it("configures a stored tool by sending only what changed", async () => {
