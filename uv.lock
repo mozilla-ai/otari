@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version == '3.14.*' and sys_platform == 'linux'",
@@ -380,7 +380,7 @@ wheels = [
 
 [[package]]
 name = "apron-auth"
-version = "0.20.0"
+version = "0.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "authlib", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
@@ -388,9 +388,9 @@ dependencies = [
     { name = "joserfc", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a6/dd/1d53181b7df5ebdb8e31747e6a8a9d4e6ef1db09f8b9d91a1a5d51fa5433/apron_auth-0.20.0.tar.gz", hash = "sha256:662c5404898bb3964f4f94dcfa0dc2e096942b852b1adaf3a09f79f36dc105d0", size = 367575, upload-time = "2026-10-27T18:38:15.619Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/25/5dbc01032dd163c9bfce23ed5192617a03d75515773e460f6d7e2d4e2954/apron_auth-0.22.0.tar.gz", hash = "sha256:52ed7f38fedbb24a230b59df46c1d76c45bb4c897dbfeec31859300ea202ff24", size = 421164, upload-time = "2026-11-03T20:06:48.545Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/af/537fb5a278299a1263245de651cc902a7f8c44235160b4d86ad37da987b0/apron_auth-0.20.0-py3-none-any.whl", hash = "sha256:953cb755b4abfd6b4931caf9964c8e45832bbbb99b2e674fb2ec2024a8eb1cf0", size = 169744, upload-time = "2026-10-27T18:38:14.012Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/f1/db0037c5d668dcb4c8a8e0fa21b88fd51817aad86c61751ee4e69bbc5e1d/apron_auth-0.22.0-py3-none-any.whl", hash = "sha256:d69eeed36b360d52b4f99f13945bfaaf97816828e167b352449ebddf22765268", size = 192027, upload-time = "2026-11-03T20:06:46.735Z" },
 ]
 
 [[package]]
@@ -1408,7 +1408,7 @@ requires-dist = [
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
     { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.46.0" },
     { name = "any-search", editable = "any-search" },
-    { name = "apron-auth", specifier = ">=0.20.0,<0.21.0" },
+    { name = "apron-auth", specifier = ">=0.22.0,<0.23.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "boto3", marker = "extra == 'kms'", specifier = ">=1.42.0" },
