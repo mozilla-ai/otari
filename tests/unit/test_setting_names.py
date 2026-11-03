@@ -110,6 +110,7 @@ _SETTING_NAMES = frozenset(
         "oauth_github_client_secret",
         "oauth_google_client_id",
         "oauth_google_client_secret",
+        "oidc_allow_private_hosts",
         "open_signup",
         "passkeys_enabled",
         "password_reset_expiry_hours",
