@@ -8,6 +8,7 @@ import base64
 import ipaddress
 import json
 import time
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
@@ -27,6 +28,7 @@ from gateway.services.api_keys import (
     FederationRefusedError,
     FederationUnavailableError,
     match_federation_rules,
+    rule_matches,
     unverified_issuer,
 )
 from gateway.services.url_safety import UnsafeURLError, validate_federation_url
@@ -117,9 +119,13 @@ class _Issuer:
         return httpx.Response(404)
 
 
-def _verifier(issuer: _Issuer, *, jwks_uri: str | None = JWKS_URI) -> FederatedTokenVerifier:
+def _verifier(
+    issuer: _Issuer, *, jwks_uri: str | None = JWKS_URI, audiences: Sequence[str] = (AUDIENCE,)
+) -> FederatedTokenVerifier:
     return FederatedTokenVerifier(
-        [FederationIssuer(issuer=ISSUER, jwks_uri=jwks_uri)], transport_factory=issuer.transport
+        [FederationIssuer(issuer=ISSUER, jwks_uri=jwks_uri)],
+        audiences=audiences,
+        transport_factory=issuer.transport,
     )
 
 
@@ -387,8 +393,8 @@ async def test_the_verifier_fetches_with_the_configured_private_host_setting() -
     issuer = [FederationIssuer(issuer=ISSUER, jwks_uri="https://10.0.0.1/keys")]
 
     with pytest.raises(FederationUnavailableError):
-        await FederatedTokenVerifier(issuer).verify(_token())
-    assert FederatedTokenVerifier(issuer, allow_private_hosts=True).allow_private_hosts is True
+        await FederatedTokenVerifier(issuer, audiences=[AUDIENCE]).verify(_token())
+    assert FederatedTokenVerifier(issuer, audiences=[AUDIENCE], allow_private_hosts=True).allow_private_hosts is True
 
 
 @pytest.mark.asyncio
@@ -434,7 +440,7 @@ async def test_a_public_fetch_refuses_a_host_that_resolves_privately(monkeypatch
 @pytest.mark.asyncio
 async def test_a_members_issuer_is_verified_when_the_rule_names_it() -> None:
     issuer = _Issuer([_jwk(SIGNING_KEY, "k1")])
-    verifier = FederatedTokenVerifier([], member_issuers=True, transport_factory=issuer.transport)
+    verifier = FederatedTokenVerifier([], audiences=[AUDIENCE], member_issuers=True, transport_factory=issuer.transport)
 
     identity = await verifier.verify(_token(), member_issuer=ISSUER)
 
@@ -452,7 +458,9 @@ async def test_a_members_issuer_is_trusted_only_when_admitted_and_named(
     member_issuers: bool, member_issuer: str | None
 ) -> None:
     issuer = _Issuer([_jwk(SIGNING_KEY, "k1")])
-    verifier = FederatedTokenVerifier([], member_issuers=member_issuers, transport_factory=issuer.transport)
+    verifier = FederatedTokenVerifier(
+        [], audiences=[AUDIENCE], member_issuers=member_issuers, transport_factory=issuer.transport
+    )
 
     with pytest.raises(FederationRefusedError) as refused:
         await verifier.verify(_token(), member_issuer=member_issuer)
@@ -465,7 +473,7 @@ async def test_a_members_issuer_is_trusted_only_when_admitted_and_named(
 async def test_a_members_issuer_is_never_fetched_from_a_private_host() -> None:
     """Even on a deployment that lets its own issuers sit on a private network."""
     private = "https://10.0.0.1"
-    verifier = FederatedTokenVerifier([], allow_private_hosts=True, member_issuers=True)
+    verifier = FederatedTokenVerifier([], audiences=[AUDIENCE], allow_private_hosts=True, member_issuers=True)
 
     with pytest.raises(FederationUnavailableError):
         await verifier.verify(_token(iss=private), member_issuer=private)
@@ -477,7 +485,7 @@ async def test_the_verifiers_kept_for_members_issuers_are_bounded(monkeypatch: p
 
     monkeypatch.setattr(_federation, "MAX_MEMBER_ISSUERS", 2)
     issuer = _Issuer([])
-    verifier = FederatedTokenVerifier([], member_issuers=True, transport_factory=issuer.transport)
+    verifier = FederatedTokenVerifier([], audiences=[AUDIENCE], member_issuers=True, transport_factory=issuer.transport)
 
     for name in ("a", "b", "c"):
         member_issuer = f"https://{name}.example.com"
@@ -485,6 +493,89 @@ async def test_the_verifiers_kept_for_members_issuers_are_bounded(monkeypatch: p
             await verifier.verify(_token(iss=member_issuer), member_issuer=member_issuer)
 
     assert list(verifier._by_member_issuer) == ["https://b.example.com", "https://c.example.com"]
+
+
+# The audiences this deployment answers to
+
+
+@pytest.mark.asyncio
+async def test_a_token_naming_a_configured_audience_is_admitted() -> None:
+    issuer = _Issuer([_jwk(SIGNING_KEY, "k1")])
+
+    identity = await _verifier(issuer).verify(_token())
+
+    assert identity.audiences == (AUDIENCE,)
+
+
+@pytest.mark.asyncio
+async def test_a_token_naming_an_audience_this_deployment_does_not_answer_to_is_refused() -> None:
+    """Even where a rule names that audience, which is what makes this a check of its own."""
+    issuer = _Issuer([_jwk(SIGNING_KEY, "k1")])
+    elsewhere = "https://elsewhere.example.com"
+    token = _token(aud=elsewhere)
+    rule = _rule(audience=elsewhere)
+
+    assert await _refusal(_verifier(issuer), token) == "federation_wrong_audience"
+
+    # The rule itself admits this token, so what refused it above is the
+    # deployment's own audience and not the rule.
+    admitted = await _verifier(issuer, audiences=[elsewhere]).verify(token)
+    assert rule_matches(rule, admitted)
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_answering_to_several_names_admits_a_token_naming_any_of_them() -> None:
+    issuer = _Issuer([_jwk(SIGNING_KEY, "k1")])
+    second = "https://otari-eu.example.com"
+    verifier = _verifier(issuer, audiences=[AUDIENCE, second])
+
+    assert (await verifier.verify(_token())).subject == SUBJECT
+    assert (await verifier.verify(_token(aud=second))).subject == SUBJECT
+
+
+def test_a_verifier_that_answers_to_no_audience_cannot_be_built() -> None:
+    """Otherwise the empty set reaches verification, where a refused token and a misconfigured one look alike."""
+    with pytest.raises(ValueError, match="at least one audience"):
+        FederatedTokenVerifier([], audiences=[])
+
+
+def test_the_audience_is_validated_at_config_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", "a-secret-key-for-the-access-tokens")
+    monkeypatch.setenv("OTARI_FEDERATION_ISSUERS", json.dumps([ISSUER]))
+
+    with pytest.raises(ValueError, match="federation_audiences names no audience"):
+        GatewayConfig().validate_declared_access()
+
+    monkeypatch.setenv("OTARI_FEDERATION_AUDIENCES", json.dumps([AUDIENCE]))
+    GatewayConfig().validate_declared_access()
+
+
+def test_a_deployment_on_members_own_rules_alone_is_held_to_the_same_audience_rule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Such a deployment lists no issuer of its own, and the tokens it verifies still name a recipient."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", "a-secret-key-for-the-access-tokens")
+    config = GatewayConfig.model_validate({"federation_member_rules": True})
+
+    with pytest.raises(ValueError, match="federation_member_rules is set, but federation_audiences names no audience"):
+        config.validate_declared_access()
+
+
+def test_an_empty_or_repeated_audience_entry_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_FEDERATION_AUDIENCES", json.dumps(["  "]))
+    with pytest.raises(ValidationError, match="federation_audiences"):
+        GatewayConfig()
+
+    monkeypatch.setenv("OTARI_FEDERATION_AUDIENCES", json.dumps([AUDIENCE, AUDIENCE]))
+    with pytest.raises(ValidationError, match="listed more than once"):
+        GatewayConfig()
+
+    monkeypatch.setenv("OTARI_FEDERATION_AUDIENCES", json.dumps([f" {AUDIENCE} "]))
+    assert GatewayConfig().federation_audiences == [AUDIENCE]
+
+
+def test_a_deployment_with_no_federation_needs_no_audience() -> None:
+    GatewayConfig().validate_declared_access()
 
 
 def test_the_private_host_setting_is_validated_at_config_load(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -518,7 +609,9 @@ def test_federation_with_a_secret_key_starts(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
-    GatewayConfig.model_validate({"federation_issuers": [ISSUER]}).validate_declared_access()
+    GatewayConfig.model_validate(
+        {"federation_issuers": [ISSUER], "federation_audiences": [AUDIENCE]}
+    ).validate_declared_access()
 
 
 def test_members_rules_without_a_secret_key_refuse_to_start(monkeypatch: pytest.MonkeyPatch) -> None:

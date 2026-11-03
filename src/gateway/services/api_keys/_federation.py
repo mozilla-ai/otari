@@ -11,8 +11,9 @@ token exchange that names it.
 Verification is apron-auth's (``apron_auth.workload``): the signature against
 the issuer's published keys, public-key algorithms only, and the claims. What
 is Otari's is which issuers are trusted, where their keys may be fetched from,
-and the rules. Every refusal carries a reason for the authentication-failure
-metric and nothing from the token itself.
+which audiences this deployment answers to, and the rules. Every refusal
+carries a reason for the authentication-failure metric and nothing from the
+token itself.
 """
 
 import base64
@@ -25,7 +26,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from apron_auth.errors import ConfigurationError, IdentityFetchError, TokenExpiredError, TokenValidationError
+from apron_auth.errors import (
+    ConfigurationError,
+    IdentityFetchError,
+    TokenExpiredError,
+    TokenValidationError,
+    TokenValidationReason,
+)
+from apron_auth.models import WorkloadIssuer
 from apron_auth.workload import WorkloadTokenVerifier
 
 from gateway.core.settings.api_keys import FederationIssuer
@@ -110,18 +118,27 @@ class FederatedTokenVerifier:
     come from the issuer a member's rule names, verified by a verifier built on its first use; its keys are always
     fetched under the outbound checks with private hosts refused, whatever ``allow_private_hosts`` says, since a
     member chose the URL. ``transport_factory`` replaces the outbound checks, for tests only.
+
+    ``audiences`` is the set this deployment answers to and it is this verifier's own policy, so no caller passes
+    one in. An empty set is refused at construction, so a deployment cannot admit a token minted for another
+    service at the same issuer by leaving it out.
     """
 
     def __init__(
         self,
         issuers: Sequence[FederationIssuer],
         *,
+        audiences: Sequence[str],
         allow_private_hosts: bool = False,
         member_issuers: bool = False,
         transport_factory: TransportFactory | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        if not audiences:
+            msg = "A deployment verifying workload identity tokens must answer to at least one audience"
+            raise ValueError(msg)
         self.issuers = tuple(issuers)
+        self.audiences = tuple(audiences)
         self.allow_private_hosts = allow_private_hosts
         self.member_issuers = member_issuers
         self._clock = clock
@@ -133,7 +150,9 @@ class FederatedTokenVerifier:
         for entry in self.issuers:
             try:
                 verifier = WorkloadTokenVerifier(
-                    entry.issuer, jwks_url=entry.jwks_uri, transport_factory=factory, clock=clock
+                    [WorkloadIssuer(issuer=entry.issuer, jwks_url=entry.jwks_uri)],
+                    transport_factory=factory,
+                    clock=clock,
                 )
             except ConfigurationError:
                 # Settings validation admits only https issuers, so only an unfetchable URL lands here.
@@ -147,7 +166,7 @@ class FederatedTokenVerifier:
             return self._by_member_issuer[issuer]
         try:
             verifier: WorkloadTokenVerifier | None = WorkloadTokenVerifier(
-                issuer, transport_factory=self._member_factory, clock=self._clock
+                [WorkloadIssuer(issuer=issuer)], transport_factory=self._member_factory, clock=self._clock
             )
         except ConfigurationError:
             # A member's rule admits only https issuers, so only an unfetchable URL lands here.
@@ -160,10 +179,11 @@ class FederatedTokenVerifier:
     async def verify(self, token: str, *, member_issuer: str | None = None) -> FederatedIdentity:
         """Verify ``token`` and return what it says about its bearer.
 
-        The audience is left to the rules, which are what name the accepted ones. ``member_issuer`` is the issuer of
-        the member's rule the token is being checked against, which the token must carry; it is trusted for this
-        token alone, and only when the verifier admits member issuers. An allow-listed issuer is verified as
-        configured either way.
+        The token must name one of the audiences this deployment answers to, which is what proves it was minted
+        for this deployment; a rule's own audience still has to match on top of that. ``member_issuer`` is the
+        issuer of the member's rule the token is being checked against, which the token must carry; it is trusted
+        for this token alone, and only when the verifier admits member issuers. An allow-listed issuer is verified
+        as configured either way.
 
         Raises:
             FederationRefusedError: the token does not verify.
@@ -181,10 +201,12 @@ class FederatedTokenVerifier:
         if verifier is None:
             raise FederationUnavailableError
         try:
-            identity = await verifier.verify(token, audience=None)
+            identity = await verifier.verify(token, audience=self.audiences)
         except TokenExpiredError as exc:
             raise FederationRefusedError("federation_expired") from exc
         except TokenValidationError as exc:
+            if exc.reason is TokenValidationReason.AUDIENCE:
+                raise FederationRefusedError("federation_wrong_audience") from exc
             raise FederationRefusedError("federation_invalid_token") from exc
         except IdentityFetchError as exc:
             raise FederationUnavailableError from exc

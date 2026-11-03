@@ -13,9 +13,10 @@ expiry, blocked user, model allow-list, budgets and ceilings, and service-key
 status.
 
 Workload identity needs `OTARI_SECRET_KEY`, which signs the access tokens of the
-[token exchange](#claude-code-and-the-anthropic-sdks). With `federation_issuers`
-or `federation_member_rules` set and no `OTARI_SECRET_KEY`, the gateway refuses
-to start.
+[token exchange](#claude-code-and-the-anthropic-sdks), and `federation_audiences`,
+the audiences this deployment answers to. With `federation_issuers` or
+`federation_member_rules` set and either one missing, the gateway refuses to
+start.
 
 ## How a token is checked
 
@@ -34,11 +35,18 @@ JWT is checked as an identity token:
 3. It must carry `iss`, `sub`, `aud`, `exp` and `iat`. It must not be expired,
    and neither `iat` nor `nbf` may be in the future, each with 60 seconds of
    allowed clock skew. Its `exp` may be at most 24 hours away.
-4. It must match a federation rule: the rule's issuer, an `aud` value equal to
+4. One of its `aud` values must be on `federation_audiences`. That is what
+   proves the token was minted for this deployment, rather than for another
+   service that happens to trust the same issuer.
+5. It must match a federation rule: the rule's issuer, an `aud` value equal to
    the rule's audience, and each of the rule's `subject` and `email` that is
    set. An email matches only when the token's `email_verified` is `true`.
-5. The rules that match must all belong to one key. A token matching rules on
+6. The rules that match must all belong to one key. A token matching rules on
    two keys authenticates as neither.
+
+Steps 4 and 5 are not the same check. The deployment's audience is the
+operator's and no tenant can add to it; a rule's audience is the one that key's
+own workload names, and a member may set it. A token has to satisfy both.
 
 Any failure answers `401 Invalid API key`, as for an unknown key. The
 `gateway_auth_failures` metric records which check failed, under a
@@ -107,22 +115,29 @@ In `config.yml`:
 ```yaml
 federation_issuers:
   - https://accounts.google.com
+federation_audiences:
+  - https://otari.example.com
 ```
 
 Or in the environment:
 
 ```bash
 export OTARI_FEDERATION_ISSUERS='["https://accounts.google.com"]'
+export OTARI_FEDERATION_AUDIENCES='["https://otari.example.com"]'
 ```
 
 An entry may also be a mapping, `{issuer: ..., jwks_uri: ...}`, to name the
-signing-key location rather than discover it. Restart the gateway to apply it.
+signing-key location rather than discover it. `federation_audiences` lists every
+name this deployment answers to, so a deployment reached under more than one
+name lists each. Restart the gateway to apply either.
 
 ### 2. Create the key and give it a rule
 
 Create the key as usual, with the user, budgets and allow-list the backend
 should have. Then give it a rule naming the service account's unique ID and
-email, with the gateway's URL as the audience. Naming both is strictest: the
+email, with the gateway's URL as the audience. The rule's audience is one the
+workload's tokens carry, and it has to be on `federation_audiences` as well, so
+using the gateway's URL for both keeps it recognizable. Naming both is strictest: the
 unique ID changes if the account is recreated under the same email. See
 [Federation rules](#federation-rules).
 
@@ -261,7 +276,8 @@ master key.
 It is checked on every request, so any of these cuts it off at once: deleting
 the rule, deactivating or expiring the key, removing an operator rule's issuer
 from `federation_issuers`, or turning `federation_member_rules` off for a
-member's rule.
+member's rule. Removing an audience from `federation_audiences` refuses the next
+exchange; an access token already issued lasts out its time to live.
 
 The token is stateless: Otari signs it with a key derived from
 `OTARI_SECRET_KEY` and stores nothing. Every replica sharing that secret
