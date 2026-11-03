@@ -23,10 +23,12 @@ async function openEveryFilterGroup(page: Page): Promise<void> {
 
 test.describe("models catalog filter rail", () => {
   // The rail runs past the fold once its groups are open, so a control low in
-  // it is reached by scrolling the page. These cover what reaching it must not
-  // do to the shell around it. Whether focus scrolls a clipped ancestor is
-  // engine behavior rather than layout, so this file runs in Chrome and in
-  // WebKit.
+  // it is reached by scrolling. Whether focus then scrolls a clipped ancestor
+  // is engine behavior, so this file runs in Chrome and in WebKit.
+
+  /** The box around the content region, found from it rather than by class. */
+  const outerBox = (page: Page) =>
+    page.locator("#root > div:has(main#main-content)")
 
   test("the shell's outer box cannot be scrolled", async ({ page }) => {
     await login(page)
@@ -41,7 +43,8 @@ test.describe("models catalog filter rail", () => {
 
     // `main` is the one scroller on the page. The box around it offers no
     // scrollbar and takes no wheel, so a scroll of it is one nothing can undo.
-    const outer = page.locator("#root > div").first()
+    const outer = outerBox(page)
+    await expect(outer).toHaveCount(1)
     expect(
       await outer.evaluate((element) => {
         element.scrollTop = element.scrollHeight
