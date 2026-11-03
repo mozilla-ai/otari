@@ -133,6 +133,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "audio.router": _DATA_PLANE,
     "batches.router": _DATA_PLANE,
     "chat.router": _DATA_PLANE,
+    "code_execution.router": _DATA_PLANE,
     "embeddings.router": _DATA_PLANE,
     "decisions.router": _DATA_PLANE,
     "files.router": _DATA_PLANE,
