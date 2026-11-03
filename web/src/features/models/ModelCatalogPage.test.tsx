@@ -154,6 +154,7 @@ const CATALOG: CatalogResponse = {
       { value: "Z.ai", vendor_slug: "z-ai" },
       { value: "Moonshot AI", vendor_slug: "moonshot-ai" },
     ],
+    types: ["chat"],
   },
 }
 

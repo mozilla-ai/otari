@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.types.model import Model
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -22,7 +23,8 @@ from gateway.models.tenancy import DashboardSession, Organization, OrganizationM
 from gateway.ports.model_provider_port import NO_ORGANIZATION
 from gateway.services import model_catalog_service as mcs
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.types.models_dev import parse_catalog
+from gateway.services.model_discovery_service import get_model_cache
+from gateway.types.models_dev import parse_catalog, parse_catalog_v2
 
 from .conftest import build_test_client
 from .hosted_port_helpers import HostedModelProvider, bind_model_provider
@@ -436,6 +438,58 @@ def test_the_list_carries_what_the_filters_and_the_search_need(
     assert isinstance(glm["discovered"], bool)
 
 
+def test_the_catalog_names_each_models_kind_and_filters_by_it(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    catalog = parse_catalog_v2(
+        {
+            "nebius": {
+                "models": {
+                    "zai-org/GLM-5.3": {"name": "GLM-5.3", "type": "chat"},
+                    "moonshotai/Kimi-K2.6": {"name": "Kimi K2.6", "type": "image"},
+                }
+            },
+            "fireworks-ai": {"models": {"accounts/fireworks/models/glm-5p3": {"name": "GLM 5.3", "type": "chat"}}},
+        }
+    )
+    path = f"{API_ROOT}/catalog/models"
+
+    def get(**params: Any) -> Any:
+        with patch.object(mcs, "_fallback", return_value=catalog):
+            response = priced.get(path, headers=master_header, params=params)
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return response.json()
+
+    body = get(include_facets=True)
+    assert {model["id"]: model["type"] for model in body["models"]} == {
+        "z-ai/glm-5.3": "chat",
+        "moonshotai/kimi-k2.6": "image",
+    }
+    assert body["facets"]["types"] == ["chat", "image"]
+    assert [model["id"] for model in get(type="image")["models"]] == ["moonshotai/kimi-k2.6"]
+    assert [model["id"] for model in get(type=["image", "chat"])["models"]] == [
+        "z-ai/glm-5.3",
+        "moonshotai/kimi-k2.6",
+    ]
+
+    # The provider's listing outranks models.dev. Kimi has one offering, so its kind is that offering's.
+    get_model_cache().set(
+        "nebius",
+        [
+            Model.model_validate(
+                {"id": "moonshotai/Kimi-K2.6", "object": "model", "created": 0, "owned_by": "nebius", "type": "chat"}
+            )
+        ],
+    )
+    try:
+        assert next(m for m in get()["models"] if m["id"] == "moonshotai/kimi-k2.6")["type"] == "chat"
+        assert "moonshotai/kimi-k2.6" in [model["id"] for model in get(type="chat")["models"]]
+        assert get(type="image")["models"] == []
+        assert get(include_facets=True)["facets"]["types"] == ["chat"]
+    finally:
+        get_model_cache().clear("nebius")
+
+
 def test_prices_compare_at_the_tier_a_request_size_settles_at(
     priced: TestClient, master_header: dict[str, str]
 ) -> None:
@@ -735,6 +789,7 @@ def test_facets_describe_the_whole_catalog_rather_than_the_page(
         {"capability": "invalid"},
         {"pricing": "invalid"},
         {"source": "invalid"},
+        {"type": "invalid"},
     ],
 )
 def test_invalid_filter_values_return_validation_errors(

@@ -10,11 +10,13 @@ more is known of. A listing that says nothing leaves the kind unknown rather
 than guessed.
 """
 
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.catalog._metadata import metadata_entry
+from gateway.services.model_identity import own_providers_for_vendor_slug, vendor_slug
 from gateway.types.model_type import ModelType
 from gateway.types.models_dev import ModelsDevCatalog
 
@@ -119,6 +121,24 @@ def model_type(config: GatewayConfig, models_dev: ModelsDevCatalog | None, selec
         return listed
     entry = metadata_entry(models_dev, config.provider_instance_type(instance), model_id)
     return entry.type if entry is not None else None
+
+
+def catalog_model_type(offerings: Sequence[tuple[str, ModelType | None]], vendor: str | None) -> ModelType | None:
+    """The kind of a catalog model: the kind most of its offerings give, ``None`` when none gives one.
+
+    ``offerings`` are each offering's provider type and kind, in the catalog's
+    order. Offerings can disagree, because one provider's listing may say
+    ``embedding`` where another's models.dev entry says ``chat``. A tie goes to
+    the vendor's own provider, then to the first offering.
+    """
+    known = [(provider_type, kind) for provider_type, kind in offerings if kind is not None]
+    if not known:
+        return None
+    counts = Counter(kind for _provider_type, kind in known)
+    top = max(counts.values())
+    tied = [kind for _provider_type, kind in known if counts[kind] == top]
+    own = own_providers_for_vendor_slug(vendor_slug(vendor)) if vendor else frozenset()
+    return next((kind for provider_type, kind in known if kind in tied and provider_type in own), tied[0])
 
 
 def _a(kind: ModelType) -> str:

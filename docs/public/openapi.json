@@ -3390,6 +3390,27 @@
             "title": "Total Count",
             "type": "integer"
           },
+          "types": {
+            "description": "Every kind an authorized model has, sorted.",
+            "items": {
+              "enum": [
+                "chat",
+                "embedding",
+                "image",
+                "speech",
+                "transcription",
+                "rerank",
+                "moderation",
+                "video",
+                "decision",
+                "realtime",
+                "other"
+              ],
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          },
           "vendors": {
             "items": {
               "$ref": "#/components/schemas/CatalogVendorFacet"
@@ -3401,7 +3422,8 @@
         "required": [
           "total_count",
           "providers",
-          "vendors"
+          "vendors",
+          "types"
         ],
         "title": "CatalogFacets",
         "type": "object"
@@ -3622,6 +3644,31 @@
             },
             "title": "Selectors",
             "type": "array"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.",
+            "title": "Type"
           },
           "unpriced_count": {
             "description": "How many offerings carry no price for this caller.",
@@ -3858,6 +3905,31 @@
             },
             "title": "Selectors",
             "type": "array"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.",
+            "title": "Type"
           },
           "unpriced_count": {
             "description": "How many offerings carry no price for this caller.",
@@ -30144,6 +30216,34 @@
               },
               "maxItems": 100,
               "title": "Capability",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Match any kind; a model of unknown kind does not match.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "description": "Match any kind; a model of unknown kind does not match.",
+              "items": {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Type",
               "type": "array"
             }
           },

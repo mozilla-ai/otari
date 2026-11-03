@@ -7,7 +7,7 @@ import pytest
 from any_llm.types.model import Model
 
 from gateway.core.config import GatewayConfig
-from gateway.services.catalog import model_type, not_chat_detail, not_embedding_detail
+from gateway.services.catalog import catalog_model_type, model_type, not_chat_detail, not_embedding_detail
 from gateway.services.catalog._model_type import type_from_listing
 from gateway.services.model_discovery_service import get_model_cache
 from gateway.types.models_dev import parse_catalog, parse_catalog_v2
@@ -180,3 +180,26 @@ def test_a_transcription_model_is_refused_chat_and_sent_to_transcriptions() -> N
     )
     # A moderation model such as Llama Guard is called through chat completions.
     assert not_chat_detail(config, None, ["together:meta-llama/Llama-Guard-4-12B"], "guard") is None
+
+
+@pytest.mark.parametrize(
+    ("offerings", "vendor", "expected"),
+    [
+        # The kind most offerings give.
+        ([("together", "embedding"), ("deepinfra", "embedding"), ("openai", "chat")], "OpenAI", "embedding"),
+        # An offering of unknown kind does not vote.
+        ([("together", None), ("deepinfra", None), ("openai", "chat")], None, "chat"),
+        ([("together", None)], None, None),
+        ([], None, None),
+        # A tie goes to the vendor's own provider, wherever it is in the list.
+        ([("openrouter", "chat"), ("openai", "embedding")], "OpenAI", "embedding"),
+        ([("openai", "embedding"), ("openrouter", "chat")], "OpenAI", "embedding"),
+        # With no offering from the vendor, the first offering's kind.
+        ([("openrouter", "chat"), ("together", "embedding")], "OpenAI", "chat"),
+        ([("together", "embedding"), ("openrouter", "chat")], None, "embedding"),
+    ],
+)
+def test_a_catalog_model_has_the_kind_most_of_its_offerings_give(
+    offerings: list[tuple[str, str | None]], vendor: str | None, expected: str | None
+) -> None:
+    assert catalog_model_type(offerings, vendor) == expected  # type: ignore[arg-type]
