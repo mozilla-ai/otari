@@ -14,6 +14,7 @@ import {
   buildOptions,
   sameOptions,
   splitOptions,
+  WEB_TOOL_KINDS,
   type WebToolKind,
 } from "@/features/webSearch/webTools"
 import { useSearchProviders } from "@/shared/api/tools"
@@ -33,8 +34,6 @@ import { useAutosave } from "@/shared/hooks/useAutosave"
 
 /** The list's value for the deployment's own tool. */
 const DEPLOYMENT = "deployment"
-
-const KINDS: readonly WebToolKind[] = ["search", "fetch"]
 
 const LABEL: Readonly<Record<WebToolKind, string>> = {
   search: "Search with",
@@ -197,7 +196,7 @@ export function WorkspaceWebSearchKeyChoice({
           {`These lists show the first ${formatNumber(data.length)} of your organization's ${formatNumber(count)} keys.`}
         </p>
       ) : null}
-      {KINDS.map((kind) => (
+      {WEB_TOOL_KINDS.map((kind) => (
         <KindChoice
           key={kind}
           kind={kind}

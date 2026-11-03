@@ -31,7 +31,7 @@ from gateway.services.health_checks._alerts import (
     render_health_alert,
     render_unavailable_alert,
 )
-from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome, probe_all
+from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome, capped_error, probe_all
 from gateway.services.health_checks._summary import FailureStreak, failure_streaks, summarize
 from gateway.services.inference import is_model_unavailable_error
 from gateway.services.mail import Mailer
@@ -47,8 +47,6 @@ ABANDONED_AFTER = timedelta(hours=1)
 # Where an alert links to, the dashboard route of the Health page.
 HEALTH_PAGE = "/#/health-checks"
 HOSTED_PROVIDERS_PAGE = "/#/admin/hosted-providers"
-# A provider's refusal is mailed to the alert list, so capped like a health check's error.
-_REFUSAL_LIMIT = 300
 
 
 ListOfferings = Callable[[], Awaitable[Sequence[HealthCheckOffering]]]
@@ -71,10 +69,6 @@ def refusal_switches_off(exc: BaseException, *, deployment_paid: bool) -> bool:
     reach says nothing about the deployment's.
     """
     return deployment_paid and is_model_unavailable_error(exc)
-
-
-def _capped(refusal: str) -> str:
-    return refusal if len(refusal) <= _REFUSAL_LIMIT else refusal[: _REFUSAL_LIMIT - 1] + "…"
 
 
 def _model_of(result: HealthCheckResult) -> str:
@@ -315,7 +309,7 @@ class HealthCheckService:
         selector = f"{provider}:{model}"
         # codeql[py/clear-text-logging-sensitive-data]
         logger.warning("Switched off hosted model %s: its provider refused to serve it", selector)
-        await self._alert_unavailable(selector, _capped(redact_upstream_message(refusal)))
+        await self._alert_unavailable(selector, capped_error(redact_upstream_message(refusal)))
         return True
 
     async def _alert_unavailable(self, selector: str, refusal: str) -> None:

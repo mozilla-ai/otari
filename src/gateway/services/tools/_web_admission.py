@@ -223,14 +223,15 @@ async def read_web_declarations(
     provider_fetch_entry = first_provider_web_fetch_tool(tools)
     intercept_web_search = web_search_intercept_enabled(config)
     backend_configured = _web_search_tool.TOOL.configured(config)
-    claimable = (provider_search_entry is not None and backend_configured) or (
-        provider_fetch_entry is not None and config.web_fetch_enabled
-    )
+    search_claimable = provider_search_entry is not None and backend_configured
+    fetch_claimable = provider_fetch_entry is not None and config.web_fetch_enabled
     workspace_search_executor, workspace_fetch_executor = (
-        await resolve_executors() if claimable and resolve_executors is not None else (None, None)
+        await resolve_executors()
+        if (search_claimable or fetch_claimable) and resolve_executors is not None
+        else (None, None)
     )
     search_preference: CodeExecutor | None = None
-    if provider_search_entry is not None and backend_configured:
+    if search_claimable:
         if web_search_header_conflicts(requested_web_search, intercept=intercept_web_search):
             raise WebSearchInterceptedError(WEB_SEARCH_INTERCEPTED_DETAIL)
         search_preference = (
@@ -239,7 +240,7 @@ async def read_web_declarations(
             else _pinned(requested_web_search, workspace_search_executor, WEB_SEARCH_EXECUTOR_PINNED_DETAIL)
         )
     fetch_preference: CodeExecutor | None = None
-    if provider_fetch_entry is not None and config.web_fetch_enabled:
+    if fetch_claimable:
         fetch_preference = _pinned(requested_web_fetch, workspace_fetch_executor, WEB_FETCH_EXECUTOR_PINNED_DETAIL)
     declared = (
         (_web_search_tool.TOOL, provider_search_entry, search_preference, backend_configured),

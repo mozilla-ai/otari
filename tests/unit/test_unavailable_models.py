@@ -7,7 +7,7 @@ import pytest
 from gateway.api.routes import _unavailable_models
 from gateway.core.config import GatewayConfig
 from gateway.models.providers import HostedProviderModel
-from gateway.services.health_checks._service import _capped
+from gateway.services.health_checks._probe import capped_error
 from gateway.services.inference import is_model_unavailable_error
 from gateway.services.providers._hosted_offers import _hold_for_a_price, _release_price_hold
 from gateway.services.upstream_redaction import redact_upstream_message
@@ -94,7 +94,7 @@ def test_nothing_is_switched_off_unless_the_deployments_key_met_the_refusal(
 
 
 def test_the_refusal_mailed_to_operators_is_redacted_and_capped() -> None:
-    refusal = _capped(redact_upstream_message(NOT_SERVERLESS + " key sk-live-abcdefghijklmnop " * 20))
+    refusal = capped_error(redact_upstream_message(NOT_SERVERLESS + " key sk-live-abcdefghijklmnop " * 20))
 
     assert "sk-live-abcdefghijklmnop" not in refusal
     assert len(refusal) <= 300

@@ -21,7 +21,7 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { canManage } from "@/features/organization/roles"
-import type { WebToolKind } from "@/features/webSearch/webTools"
+import { WEB_TOOL_KINDS, type WebToolKind } from "@/features/webSearch/webTools"
 import {
   useOrganizationContext,
   useProviderKeyEncryption,
@@ -53,8 +53,6 @@ import { KIND_COPY, keyForEveryWorkspace, keysOfKind } from "./webSearchKeys"
 const FilledStar: IconType = (props) => (
   <FiStar {...props} fill="currentColor" />
 )
-
-const KINDS: readonly WebToolKind[] = ["search", "fetch"]
 
 function KeysTable({
   kind,
@@ -371,7 +369,7 @@ export function OrganizationWebSearchKeysPage() {
       {/* Withheld from a member along with the read: the banner above is their
           answer, and an empty table would say the organization has no keys. */}
       {canEdit || context.isPending
-        ? KINDS.map((kind) => (
+        ? WEB_TOOL_KINDS.map((kind) => (
             <KeysTable
               key={kind}
               kind={kind}
