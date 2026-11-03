@@ -9122,6 +9122,11 @@ export interface components {
              * @description Authorized models before any of the request's filters.
              */
             total_count: number;
+            /**
+             * Types
+             * @description Every kind an authorized model has, sorted.
+             */
+            types: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
             /** Vendors */
             vendors: components["schemas"]["CatalogVendorFacet"][];
         };
@@ -9225,6 +9230,11 @@ export interface components {
              */
             selectors: string[];
             /**
+             * Type
+             * @description What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+            /**
              * Unpriced Count
              * @description How many offerings carry no price for this caller.
              */
@@ -9322,6 +9332,11 @@ export interface components {
              * @description Every offering's selector, so the list can be searched by one.
              */
             selectors: string[];
+            /**
+             * Type
+             * @description What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
             /**
              * Unpriced Count
              * @description How many offerings carry no price for this caller.
@@ -21443,6 +21458,8 @@ export interface operations {
                 output_modality?: string[];
                 /** @description Require every capability. */
                 capability?: components["schemas"]["CatalogCapability"][];
+                /** @description Match any kind; a model of unknown kind does not match. */
+                type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
                 /** @description Minimum context window; unknown windows do not match. */
                 min_context?: number;
                 /** @description Maximum cheapest input price per million tokens; unpriced models do not match. */

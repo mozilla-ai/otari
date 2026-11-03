@@ -54,6 +54,8 @@ from gateway.models.usage import UsageLog
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.schemas.catalog import CatalogCapabilities, CatalogFacets, CatalogModelSummary, CatalogQuery
 from gateway.services.catalog import (
+    ModelType,
+    catalog_model_type,
     current_selector_index,
     model_selector_for_slug,
     query_catalog,
@@ -234,6 +236,8 @@ class _Offering:
     metadata: ModelCatalogEntry | None
     model_id: str
     """The provider's own id, which a usage row carries beside the instance."""
+    type: ModelType | None
+    """The kind the provider's listing or models.dev gives this offering."""
 
 
 async def _usage_by_selector(
@@ -396,6 +400,7 @@ async def _group(
             ),
             metadata=metadata,
             model_id=model_id,
+            type=obj.type,
         )
 
     return _Grouped(
@@ -488,6 +493,7 @@ def _summary(
         vendor=identity.vendor,
         description=_first(entry.description for entry in [*winners, *described]),
         family=_first(entry.family for entry in described),
+        type=catalog_model_type([(member.wire.provider_type, member.type) for member in members], identity.vendor),
         capabilities=CatalogCapabilities(
             reasoning=any(entry.reasoning for entry in described),
             tool_call=any(entry.tool_call for entry in described),

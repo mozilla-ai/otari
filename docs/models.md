@@ -383,8 +383,10 @@ Filters and sorting apply to the caller's full authorized catalog before `skip`
 and `limit` select a page. `count` is the number of matching models before paging;
 `limit` defaults to 100 and is capped at 1,000.
 
-Repeat `provider` or `vendor` to match any selected value. An empty `vendor`
-selects models whose vendor is unknown. Repeat `input_modality`,
+Repeat `provider`, `vendor` or `type` to match any selected value. An empty `vendor`
+selects models whose vendor is unknown, and `type` never matches a model of
+unknown kind. A model's `type` is the kind most of its offerings give (see
+`type` above); a tie goes to the vendor's own provider. Repeat `input_modality`,
 `output_modality`, or `capability` to require every selected value. The endpoint
 also accepts `search`, `min_context`, `max_input`, `pricing`, `source`, and
 `released_within_days`. Release windows end today in UTC and exclude unknown
@@ -394,7 +396,7 @@ and future dates. A price ceiling excludes models with no known input rate.
 with `direction=asc` or `desc`. Unknown values sort last in either direction;
 names and catalog ids break ties so pages have a stable order.
 
-Request `include_facets=true` to receive the provider and vendor choices from
+Request `include_facets=true` to receive the provider, vendor and type choices from
 the complete authorized catalog, whatever the filters match, so a filter that
 matches nothing can still be undone. `facets.total_count` counts authorized
 models before filtering. `facets` is null unless requested, and never names a

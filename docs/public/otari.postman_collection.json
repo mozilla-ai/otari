@@ -1822,6 +1822,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Match any kind; a model of unknown kind does not match.",
+                  "disabled": true,
+                  "key": "type",
+                  "value": ""
+                },
+                {
                   "description": "Minimum context window; unknown windows do not match.",
                   "disabled": true,
                   "key": "min_context",
@@ -1870,7 +1876,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
             }
           }
         },
