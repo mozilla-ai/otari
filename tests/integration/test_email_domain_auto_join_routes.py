@@ -233,7 +233,8 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
 ) -> None:
     from gateway.models.identity import EmailAssertion, ProviderIdentity
 
-    monkeypatch.setattr(test_config, "public_base_url", ORIGIN)
+    # An OAuth redirect URI must be https or a loopback address.
+    monkeypatch.setattr(test_config, "public_base_url", "https://testserver")
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
 
