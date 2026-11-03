@@ -25,16 +25,13 @@ import { docsSourceHref } from "@/shared/helpers/docs"
 import { RemoveWebToolDialog } from "./RemoveWebToolDialog"
 import { WebSearchSettings } from "./WebSearchSettings"
 import { WebToolDialog } from "./WebToolDialog"
-import {
-  ORGANIZATION_KEY_ROW,
-  WebToolsTable,
-  type WebToolTableRow,
-} from "./WebToolsTable"
+import { WebToolsTable, type WebToolTableRow } from "./WebToolsTable"
 import {
   BUILTIN_FETCH,
   isNoSearch,
   listWebTools,
   ORGANIZATION_KEY_RATE,
+  ORGANIZATION_KEY_ROW,
   oldPriceKey,
   priceOf,
   rateOnly,
@@ -106,6 +103,10 @@ export function WebSearchPage() {
       readOf.get(toRowId({ kind: tool.kind, modelKey: tool.name })),
       readOf.get(toRowId({ kind: "model", modelKey: oldPriceKey(tool) })),
     )
+  const isPricedUnderOldKey = (tool: WebToolRow) => {
+    const price = toolPrice(tool)
+    return price.state === "own" && price.oldKey
+  }
   const organizationKeyPrice = (kind: WebToolKind): ToolPrice =>
     rateOnly(
       readOf.get(
@@ -203,7 +204,8 @@ export function WebSearchPage() {
         The search and fetch tools this deployment runs for every workspace,
         what each call costs, and which tool the model uses. A call is billed at
         its tool&rsquo;s own rate, and a tool with none is unpriced. Each
-        table&rsquo;s last row prices a call on an organization&rsquo;s own key.
+        table&rsquo;s last row prices a call on an organization&rsquo;s own key,
+        and the search table&rsquo;s a search on the legacy settings too.
       </PageIntro>
 
       <ErrorBanner
@@ -274,6 +276,7 @@ export function WebSearchPage() {
             dialog.tool.name ===
             (dialog.tool.kind === "search" ? searchDefault : fetchDefault)
           }
+          isPricedUnderOldKey={isPricedUnderOldKey(dialog.tool)}
           onClose={close}
         />
       ) : null}

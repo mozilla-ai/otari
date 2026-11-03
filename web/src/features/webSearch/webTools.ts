@@ -1,7 +1,7 @@
 /**
  * The rules the Web search page shows, kept apart from the rendering so they
  * can be tested without mounting it: which tools a table lists and in what
- * order, what a tool's price reads as on each door, what a new tool may be
+ * order, what a tool's price reads as, what a new tool may be
  * named, and how a tool's options travel between typed fields and JSON.
  */
 
@@ -145,6 +145,20 @@ export const ORGANIZATION_KEY_RATE: Readonly<Record<WebToolKind, string>> = {
   fetch: "otari:web_fetch",
 }
 
+/** The organization keys' row, by kind; its label also names the rate in the price dialog. */
+export const ORGANIZATION_KEY_ROW: Readonly<
+  Record<WebToolKind, { label: string; role: string }>
+> = {
+  search: {
+    label: "Search on organization keys",
+    role: "A search on an organization's own key, unless the organization sets its own price, and a search on the legacy settings.",
+  },
+  fetch: {
+    label: "Fetch on organization keys",
+    role: "A fetch on an organization's own key, unless the organization sets its own price.",
+  },
+}
+
 /** What a tool's calls are billed at, once its rate read answered. */
 export type ToolPrice =
   /**
@@ -159,8 +173,9 @@ export type ToolPrice =
   | { state: "error" }
 
 /**
- * An `otari:` row's rate. Never marked as config.yml's: a `pricing:` entry is
- * written once, so the page may change it.
+ * A rate read as a price: an `otari:` row's, or a tool's old key's. Never
+ * marked as config.yml's: a `pricing:` entry is written once, so the page may
+ * change it.
  */
 export function rateOnly(read: RateRead | undefined): ToolPrice {
   if (!read || read.isPending) return { state: "pending" }
@@ -202,15 +217,8 @@ export function priceOf(
     }
   }
   // Not unpriced until the old key is known to hold no rate either.
-  if (!old || old.isPending) return { state: "pending" }
-  if (old.isError) return { state: "error" }
-  if (!old.data) return { state: "unpriced" }
-  return {
-    state: "own",
-    perMillion: old.data.input_price_per_million,
-    fromConfig: false,
-    oldKey: true,
-  }
+  const price = rateOnly(old)
+  return price.state === "own" ? { ...price, oldKey: true } : price
 }
 
 /**

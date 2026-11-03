@@ -66,7 +66,7 @@ const PRICE_HELP =
 
 /** What the result step says of a tool added with no price. */
 const UNPRICED_RESULT =
-  "No price was set here, so unless one is already stored for it, require_pricing refuses its calls. Set one with Edit on its row."
+  "No price was set here, so unless one is already stored for it, it is unpriced, which require_pricing refuses. Set one with Edit on its row."
 
 function capitalized(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
@@ -314,7 +314,7 @@ export function WebToolDialog({
               tool.api_base ?? "provider endpoint",
               hasPrice && priceError === null && price !== undefined
                 ? `${formatUnitRate(toPerCall(price))} a call`
-                : "no price of its own",
+                : "no price set",
             ].join(" · ")}
           </p>
         </div>

@@ -535,6 +535,37 @@ describe("WebSearchPage", () => {
     expect(writes(requests, "DELETE", "/pricing/exa")[0].url).toContain(
       "kind=search",
     )
+    // Its price is its own row, so the old key is left alone.
+    expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
+  })
+
+  it("deletes the price under a removed tool's old key when that is its price", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({
+      rates: { "model:exa:exa": rate("exa:exa", 0.004) },
+    })
+    await renderPage()
+
+    const exa = await findRow("Search tools", "exa")
+    expect(
+      await within(exa).findByText("Under its old price key"),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Remove exa" }))
+    const confirm = await screen.findByRole("alertdialog")
+    expect(
+      within(confirm).getByText("Also delete its price, stored under exa:exa"),
+    ).toBeInTheDocument()
+    await user.click(
+      within(confirm).getByRole("button", { name: "Remove permanently" }),
+    )
+
+    await waitFor(() =>
+      expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(1),
+    )
+    expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")[0].url).toContain(
+      "kind=model",
+    )
+    expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1)
   })
 
   it("configures a stored tool by sending only what changed", async () => {
@@ -800,15 +831,23 @@ describe("WebSearchPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("calls a tool unreadable, not unpriced, when its rate could not be read", async () => {
-    mockApi({
-      failingReads: ["search:local"],
-      requirePricing: true,
-    })
-    await renderPage()
+  it.each([
+    ["its own rate", "search:local"],
+    ["the rate under its old key", "model:searxng:local"],
+  ])(
+    "calls a tool unreadable, not unpriced, when %s could not be read",
+    async (_, failing) => {
+      mockApi({
+        failingReads: [failing],
+        requirePricing: true,
+      })
+      await renderPage()
 
-    const local = await findRow("Search tools", "local")
-    expect(await within(local).findByText("Could not read")).toBeInTheDocument()
-    expect(within(local).queryByText("Unpriced")).not.toBeInTheDocument()
-  })
+      const local = await findRow("Search tools", "local")
+      expect(
+        await within(local).findByText("Could not read"),
+      ).toBeInTheDocument()
+      expect(within(local).queryByText("Unpriced")).not.toBeInTheDocument()
+    },
+  )
 })

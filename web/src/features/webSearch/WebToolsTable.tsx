@@ -23,6 +23,7 @@ import { formatUnitRate } from "@/shared/helpers/format"
 import {
   BUILTIN_FETCH,
   describeOptions,
+  ORGANIZATION_KEY_ROW,
   servesTheModel,
   TEST_INPUT,
   type ToolPrice,
@@ -40,20 +41,6 @@ import {
 export type WebToolTableRow =
   | { type: "tool"; tool: WebToolRow; price: ToolPrice }
   | { type: "organization"; price: ToolPrice }
-
-/** The organization keys' row, by kind; its label also names the rate in the price dialog. */
-export const ORGANIZATION_KEY_ROW: Readonly<
-  Record<WebToolKind, { label: string; role: string }>
-> = {
-  search: {
-    label: "Search on organization keys",
-    role: "A search on an organization's own key, unless the organization sets its own price, and a search on the legacy settings.",
-  },
-  fetch: {
-    label: "Fetch on organization keys",
-    role: "A fetch on an organization's own key, unless the organization sets its own price.",
-  },
-}
 
 const COPY: Readonly<
   Record<

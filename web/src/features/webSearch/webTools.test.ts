@@ -37,6 +37,7 @@ const read = (perMillion?: number, origin = "operator"): RateRead => ({
   isError: false,
 })
 const pending: RateRead = { isPending: true, isError: false }
+const failed: RateRead = { isPending: false, isError: true }
 
 const option = (
   name: string,
@@ -175,6 +176,10 @@ describe("priceOf", () => {
   it("leaves a tool with neither rate unpriced, once both are read", () => {
     expect(priceOf(stored, read(), read())).toEqual({ state: "unpriced" })
     expect(priceOf(stored, read(), pending)).toEqual({ state: "pending" })
+  })
+
+  it("calls a tool unreadable when its old key could not be read", () => {
+    expect(priceOf(stored, read(), failed)).toEqual({ state: "error" })
   })
 
   it("never marks an otari: rate as config.yml's", () => {
