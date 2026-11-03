@@ -199,7 +199,7 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # ``add_column`` while rendering as VARCHAR plus a CHECK on SQLite, which the
     # OSS edition ships by default. This matches how the tenancy tables already
     # store their own vocabularies (``role``, ``status``).
-    oauth_provider: str | None = Field(default=None, max_length=50)
+    oauth_provider: str | None = Field(default=None, max_length=255)
     # Unique, like the platform's: two identities holding one verification token
     # would let either confirm the other's address.
     email_verification_token: str | None = Field(default=None, unique=True, index=True)
@@ -1640,7 +1640,7 @@ class OAuthPendingState(SQLModel, table=True):
     # the way ``WebAuthnChallenge.ceremony`` is: a state minted for Google and
     # returned to GitHub's callback is a refusal that should say so, not one
     # that collapses into "unknown state".
-    provider: str = Field(max_length=32)
+    provider: str = Field(max_length=255)
     code_verifier: str | None = Field(default=None, max_length=128)
     # The OpenID nonce the authorization request sent, which the exchange
     # checks the ID token against. Null for GitHub, which is not OpenID.
