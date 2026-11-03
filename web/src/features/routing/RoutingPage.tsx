@@ -23,7 +23,11 @@ import {
 } from "@/shared/api/routing"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
@@ -38,6 +42,9 @@ import {
   rowKeyOf,
 } from "./policyModel"
 import { useRoutingRows } from "./useRoutingRows"
+
+/** What Applies to says for a policy with no user scope, and what finds it. */
+const EVERY_CALLER = "Every caller"
 
 export function RoutingPage() {
   const navigate = useNavigate()
@@ -63,7 +70,7 @@ export function RoutingPage() {
     return matchesSearch(
       search.term,
       row.name,
-      row.user_id ?? "",
+      row.user_id ?? EVERY_CALLER,
       ...selectors,
       ...selectors.map(selectorText),
     )
@@ -130,7 +137,7 @@ export function RoutingPage() {
         header: "Applies to",
         cell: (policy) =>
           (policy.user_id ?? null) === null ? (
-            <span className="text-muted">Every caller</span>
+            <span className="text-muted">{EVERY_CALLER}</span>
           ) : (
             <CopyableValue value={policy.user_id ?? ""} label="user id" />
           ),
@@ -284,6 +291,7 @@ export function RoutingPage() {
               label="Search routing policies"
               placeholder="Search by name or model"
               value={search.value}
+              maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={isListLoading ? undefined : shown.length}
               className="w-full md:w-96"

@@ -115,6 +115,23 @@ describe("RoutingPage", () => {
     expect(screen.getByText("u-bob")).toBeInTheDocument()
   })
 
+  it("finds a global policy by the Every caller its Applies to shows", async () => {
+    mockApi([
+      policy("global", CHAIN),
+      policy("scoped", CHAIN, { user_id: "u-bob" }),
+    ])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+    await screen.findByText("scoped")
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search routing policies" }),
+      "every caller",
+    )
+    await waitFor(() => expect(screen.queryByText("scoped")).toBeNull())
+    expect(screen.getByText("global")).toBeInTheDocument()
+  })
+
   it("finds a policy by the provider name its cells print", async () => {
     mockApi([
       policy("fast", CHAIN),
