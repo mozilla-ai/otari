@@ -10,10 +10,10 @@ import { pricingResponse } from "@/tests/fixtures"
 
 import {
   buildOptions,
-  hasUnpricedCalls,
   isNoSearch,
   listWebTools,
   nameProblem,
+  oldPriceKey,
   perCallText,
   priceOf,
   rateOnly,
@@ -135,56 +135,49 @@ describe("listWebTools", () => {
 })
 
 describe("priceOf", () => {
-  const stored = { kind: "search", source: "stored" } as const
+  const stored = { source: "stored" } as const
 
-  it("takes the tool's own rate first", () => {
-    expect(priceOf(stored, read(5000), read(10000))).toEqual({
+  it("takes the tool's own rate", () => {
+    expect(priceOf(stored, read(5000), read(4000))).toEqual({
       state: "own",
       perMillion: 5000,
       fromConfig: false,
+      oldKey: false,
     })
   })
 
   it("marks a config.yml tool's rate written from its price_per_call", () => {
-    const configured = { kind: "search", source: "config" } as const
-    expect(priceOf(configured, read(3000, "config"), read(10000))).toEqual({
+    const configured = { source: "config" } as const
+    expect(priceOf(configured, read(3000, "config"), read())).toEqual({
       state: "own",
       perMillion: 3000,
       fromConfig: true,
+      oldKey: false,
     })
     // A stored tool's rate is never config.yml's to change.
-    expect(priceOf(stored, read(3000, "config"), read(10000))).toMatchObject({
+    expect(priceOf(stored, read(3000, "config"), read())).toMatchObject({
       fromConfig: false,
     })
   })
 
-  it("leaves a search tool's search API calls unpriced on the fallback alone", () => {
-    const price = priceOf(stored, read(), read(10000))
-    expect(price).toEqual({
-      state: "fallback",
-      perMillion: 10000,
-      fallbackKey: "otari:web_search",
-      direct: "unpriced",
+  it("takes the rate under the tool's old key when it has none of its own", () => {
+    expect(priceOf(stored, read(), read(4000))).toEqual({
+      state: "own",
+      perMillion: 4000,
+      fromConfig: false,
+      oldKey: true,
     })
-    expect(hasUnpricedCalls(price)).toBe(true)
-  })
-
-  it("prices a fetch tool fully on the fallback, since it has no other door", () => {
-    const price = priceOf(
-      { kind: "fetch", source: "stored" },
-      read(),
-      read(1000),
+    expect(oldPriceKey({ provider: "exa", name: "exa-search" })).toBe(
+      "exa:exa-search",
     )
-    expect(price).toMatchObject({ state: "fallback", direct: "none" })
-    expect(hasUnpricedCalls(price)).toBe(false)
   })
 
-  it("is not unpriced until the rate it would inherit is read too", () => {
-    expect(priceOf(stored, read(), pending)).toEqual({ state: "pending" })
+  it("leaves a tool with neither rate unpriced, once both are read", () => {
     expect(priceOf(stored, read(), read())).toEqual({ state: "unpriced" })
+    expect(priceOf(stored, read(), pending)).toEqual({ state: "pending" })
   })
 
-  it("never marks a fallback rate as config.yml's", () => {
+  it("never marks an otari: rate as config.yml's", () => {
     expect(rateOnly(read(10000, "config"))).toMatchObject({
       state: "own",
       fromConfig: false,

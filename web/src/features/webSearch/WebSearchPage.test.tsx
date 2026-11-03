@@ -308,7 +308,7 @@ describe("WebSearchPage", () => {
     ).toBe(false)
   })
 
-  it("lists each kind's tools beside their prices, and the rate each falls back to", async () => {
+  it("lists each kind's tools beside their prices, and the organization keys' rate", async () => {
     mockApi({
       requirePricing: true,
       settings: { web_search_default_tool: "exa" },
@@ -320,15 +320,22 @@ describe("WebSearchPage", () => {
     expect(within(exa).getByText("Default")).toBeInTheDocument()
     expect(within(exa).getByText("••••a1b2")).toBeInTheDocument()
 
-    // No rate of its own: the model's searches take Web search's, while the
-    // search API, which only the tool's own rate prices, goes unpriced.
+    // No rate of its own, so its calls are unpriced, whatever the organization keys' rate.
     const local = await findRow("Search tools", "local")
-    expect(await within(local).findByText("$0.01")).toBeInTheDocument()
-    expect(
-      within(local).getByText("Unpriced on the search API"),
-    ).toBeInTheDocument()
+    expect(await within(local).findByText("Unpriced")).toBeInTheDocument()
+    expect(within(local).queryByText("$0.01")).not.toBeInTheDocument()
     expect(within(local).getByText("config.yml")).toBeInTheDocument()
     expect(within(local).getByText(/Search API only/)).toBeInTheDocument()
+
+    // The kind's otari: rate prices only a call on an organization's own key.
+    const organization = await findRow(
+      "Search tools",
+      "Search on organization keys",
+    )
+    expect(await within(organization).findByText("$0.01")).toBeInTheDocument()
+    expect(
+      within(organization).getByText(/an organization's own key/),
+    ).toBeInTheDocument()
 
     // The built-in fetcher is the fetch default when nothing else is named.
     const builtin = await findRow("Fetch tools", "builtin_fetch")
@@ -779,9 +786,23 @@ describe("WebSearchPage", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("calls a tool unreadable, not unpriced, when the rate it falls back to could not be read", async () => {
+  it("shows the rate a tool is still priced at under its old key", async () => {
     mockApi({
-      failingReads: ["model:otari:web_search"],
+      rates: { "model:searxng:local": rate("searxng:local", 0.002) },
+      requirePricing: true,
+    })
+    await renderPage()
+
+    const local = await findRow("Search tools", "local")
+    expect(await within(local).findByText("$0.002")).toBeInTheDocument()
+    expect(
+      within(local).getByText("Under its old price key"),
+    ).toBeInTheDocument()
+  })
+
+  it("calls a tool unreadable, not unpriced, when its rate could not be read", async () => {
+    mockApi({
+      failingReads: ["search:local"],
       requirePricing: true,
     })
     await renderPage()

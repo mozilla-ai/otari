@@ -199,10 +199,9 @@ gateway process rather than to any organization on it:
 - Web search, the search and fetch tools the deployment runs for every
   workspace and what each call costs. Its two tables list the search tools and
   the fetch tools, `builtin_fetch` first, each with its key's last four and its
-  price per call, and end with the `otari:web_search` or `otari:web_fetch` rate
-  that prices what no tool's own rate does. A search tool with no price of its
-  own takes that rate for the model's searches, while its calls on the search
-  API go unpriced. A row opens its endpoint, enrichment and options; its star
+  price per call, and end with the `otari:web_search` or `otari:web_fetch` rate,
+  which prices a call on an organization's own key. A tool with no price of its
+  own is unpriced. A row opens its endpoint, enrichment and options; its star
   makes it the default the model uses, and Test runs one search or fetch and
   says how many hits or characters came back. Add search tool and Add fetch tool
   pick a provider first, then ask for what it needs (its key, an endpoint when it
