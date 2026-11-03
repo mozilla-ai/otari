@@ -203,11 +203,11 @@ class _DatabaseStateStore:
 
     async def save(self, state: PendingState) -> None:
         """Stage one pending authorization, and sweep whatever has expired."""
-        if state.metadata:
+        if state.context:
             # The row has no column for it, so a caller that starts relying on
             # apron-auth's save/consume round trip finds out at the write rather
             # than by reading an empty ``TokenSet.context`` later.
-            msg = "oauth_pending_state does not carry apron-auth state metadata"
+            msg = "A pending sign-in cannot carry state beyond the fields recorded here"
             raise ValueError(msg)
         now = datetime.now(UTC)
         # The sweep rides here rather than on a scheduler because this is the
@@ -473,7 +473,7 @@ def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret:
     identity_handler = (
         apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
     )
-    provider_config, revocation_handler = preset(
+    provider_config = preset(
         client_id=client_id,
         client_secret=client_secret,
         scopes=list(_PROVIDERS[provider].scopes),
@@ -483,8 +483,6 @@ def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret:
         _as_configured_here(provider_config, provider),
         state_store=_DatabaseStateStore(db, provider, _flow_hash(flow_secret)),
         identity_handler=identity_handler,
-        # Used when apron-auth revokes the tokens of a response it refused.
-        revocation_handler=revocation_handler,
     )
 
 

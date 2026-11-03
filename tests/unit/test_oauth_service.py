@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from apron_auth.errors import IdentityFetchError, TokenExchangeError
+from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
 from pydantic import ValidationError
@@ -420,7 +421,7 @@ class TestAuthorizationUrl:
         # The half that keeps the assertion above from passing vacuously: the
         # parameter really is one apron-auth's preset sets, so not sending it is
         # a choice this module makes rather than a default it inherits.
-        provider_config, _ = apron_google.preset(
+        provider_config = apron_google.preset(
             client_id="id",
             client_secret="secret",  # noqa: S106
             scopes=["openid"],
@@ -525,6 +526,22 @@ class TestState:
         assert all(len(value) >= 32 for value in values)
 
 
+class TestDatabaseStateStore:
+    @pytest.mark.asyncio
+    async def test_database_state_store_refuses_carried_state(self) -> None:
+        """A pending state carrying apron-auth context is refused, because no column holds it."""
+        store = oauth_service._DatabaseStateStore(fake_db(), "google", "flow-hash")
+        state = PendingState(
+            state="s",
+            redirect_uri="https://otari.example.com/auth/google/callback",
+            created_at=0.0,
+            context={"caller": "data"},
+        )
+
+        with pytest.raises(ValueError, match="cannot carry state"):
+            await store.save(state)
+
+
 class TestPkce:
     @pytest.mark.parametrize("provider", OAUTH_PROVIDERS)
     def test_the_preset_asks_for_it_and_this_flow_leaves_that_alone(self, provider: str) -> None:
@@ -532,7 +549,7 @@ class TestPkce:
         # Asserted against the preset rather than the URL so a later release
         # flipping the default cannot pass unnoticed behind a green suite.
         preset = apron_google.preset if provider == "google" else apron_github.preset
-        provider_config, _ = preset(
+        provider_config = preset(
             client_id="id",
             client_secret="secret",  # noqa: S106
             scopes=["openid"],

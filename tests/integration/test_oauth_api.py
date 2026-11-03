@@ -16,6 +16,7 @@ import logging
 import re
 import uuid
 from base64 import urlsafe_b64encode
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -48,11 +49,21 @@ from gateway.services.identity import IdentityService
 from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH
 from gateway.services.tenancy.organization_service import OrganizationService, SignupRegistration
 
-ORIGIN = "http://testserver"
+from .conftest import build_test_client
+
+# https, not http: a redirect URI must be https or a loopback host, and the
+# client fixture below matches it.
+ORIGIN = "https://testserver"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 UNPROVEN_PASSWORD = "set-before-verification"  # pragma: allowlist secret
 
 _TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
+
+
+@pytest.fixture
+def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """A client whose base URL is ``ORIGIN``, so the scheme the server sees matches ``public_base_url``."""
+    yield from build_test_client(test_config, base_url=ORIGIN)
 
 
 @pytest.fixture
@@ -1793,7 +1804,7 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
         response: dict[str, Any] = {"access_token": "an-access-token", "token_type": "Bearer"}
         nonce = id_token_nonce or endpoint.claimed_nonces[-1]
         if nonce is not None:
-            response["id_token"] = _unsigned_id_token(nonce=nonce)
+            response["id_token"] = _unsigned_id_token(nonce=nonce, aud=self._config.client_id)
         return response
 
     async def _fetch_identity(self: Any, _tokens: Any) -> Any:
@@ -1811,12 +1822,20 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
 
 
 def _unsigned_id_token(**claims: Any) -> str:
-    """An ID token for the nonce check, which reads claims only; ``fetch_identity`` is stubbed above."""
+    """An ID token for the nonce and claims checks; ``fetch_identity`` is stubbed above.
+
+    Carries a future ``exp`` by default, so apron-auth's claims check (OpenID Connect
+    Core section 3.1.3.7) accepts it.
+    """
+    base: dict[str, Any] = {
+        "sub": "ada-subject",
+        "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+    }
 
     def segment(value: dict[str, Any]) -> str:
         return urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
 
-    return f"{segment({'alg': 'RS256'})}.{segment({'sub': 'ada-subject', **claims})}.signature"
+    return f"{segment({'alg': 'RS256'})}.{segment({**base, **claims})}.signature"
 
 
 def test_a_code_with_no_authorize_behind_it_is_refused(
