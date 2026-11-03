@@ -5,9 +5,11 @@ from datetime import datetime
 from typing import Any, Never
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import OIDCConnectionConflictError
 from gateway.models.identity import OIDCConnection
 from gateway.repositories.base_repository import BaseRepository
 
@@ -26,8 +28,12 @@ class OIDCConnectionRepository(BaseRepository[OIDCConnection, Never, Never]):
         return result.scalar_one_or_none()
 
     async def get_by_id(self, connection_id: uuid.UUID) -> OIDCConnection | None:
-        """Return the connection by its ID, or None."""
-        return await self.get(connection_id)
+        """Return the connection by its ID, or None.
+
+        NOTE: The row is reloaded from the database, because the caller may have released the
+        connection since it last read it.
+        """
+        return await self.db.get(OIDCConnection, connection_id, populate_existing=True)
 
     async def list_enabled_by_resolved_issuer(self, issuer: str) -> list[OIDCConnection]:
         """Return every enabled connection whose discovery resolved to this issuer.
@@ -59,7 +65,7 @@ class OIDCConnectionRepository(BaseRepository[OIDCConnection, Never, Never]):
         """Stage a new connection for an organization.
 
         Raises:
-            IntegrityError: The organization already holds a connection.
+            OIDCConnectionConflictError: The organization already holds a connection.
 
         """
         connection = OIDCConnection(
@@ -75,8 +81,14 @@ class OIDCConnectionRepository(BaseRepository[OIDCConnection, Never, Never]):
             default_role=default_role,
             enabled=enabled,
         )
-        self.db.add(connection)
-        await self.db.flush()
+        try:
+            # The savepoint rolls back this row alone, so a refused insert leaves the caller's
+            # transaction usable.
+            async with self.db.begin_nested():
+                self.db.add(connection)
+                await self.db.flush()
+        except IntegrityError as error:
+            raise OIDCConnectionConflictError from error
         return connection
 
     def stage(self, connection: OIDCConnection) -> None:
