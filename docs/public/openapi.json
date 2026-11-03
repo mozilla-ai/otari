@@ -10264,7 +10264,12 @@
                 "enum": [
                   "tokens",
                   "requests",
-                  "images"
+                  "images",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
                 ],
                 "type": "string"
               },
@@ -10487,7 +10492,12 @@
                 "enum": [
                   "tokens",
                   "requests",
-                  "images"
+                  "images",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
                 ],
                 "type": "string"
               },
@@ -13273,6 +13283,16 @@
           },
           "unit": {
             "default": "tokens",
+            "enum": [
+              "tokens",
+              "requests",
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
+            ],
             "title": "Unit",
             "type": "string"
           }
@@ -13990,6 +14010,16 @@
           },
           "unit": {
             "default": "tokens",
+            "enum": [
+              "tokens",
+              "requests",
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
+            ],
             "title": "Unit",
             "type": "string"
           },
@@ -15903,11 +15933,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"
@@ -16108,11 +16143,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"
@@ -21522,11 +21562,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).",
+            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"

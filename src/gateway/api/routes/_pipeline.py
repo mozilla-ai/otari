@@ -142,8 +142,6 @@ from gateway.core.error_codes import (
 )
 from gateway.core.metered_pricing import (
     ChargeLine,
-    calculate_metered_cost,
-    price_request,
     priced_per_request,
     quantize_cost,
 )
@@ -277,9 +275,11 @@ from gateway.services.model_access import (
 )
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.policy_store import resolve_effective_policy
+from gateway.services.pricing import estimate_settles, price_completion
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     RequestPrices,
+    ResolvedPricing,
     find_model_pricing,
     gateway_tool_pricing_key,
     is_free_pricing,
@@ -2369,7 +2369,7 @@ async def _grow_reservation(
         )
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=no_pricing_error_detail(f"{instance}:{model}"),
+            detail=no_pricing_error_detail(f"{instance}:{model}", unit=pricing.unit if pricing is not None else None),
             headers=error_headers(PRICING_REQUIRED),
         )
     repriced = estimate_cost(
@@ -3257,6 +3257,7 @@ async def resolve_request_context(
             plan=plan,
             hosted=model_provider,
             organization_id=organization_id,
+            unit=gate_pricing.unit if gate_pricing is not None else None,
         )
         if refusal.code == PRICING_REQUIRED:
             logger.warning(
@@ -4740,8 +4741,12 @@ def _evict_unpriced_warnings(now: float) -> None:
         del _unpriced_warned_at[min(_unpriced_warned_at, key=_unpriced_warned_at.__getitem__)]
 
 
-def _warn_unpriced_model(model_ref: str) -> None:
-    """Warn that ``model_ref`` settled with no price, at most once per interval per model."""
+def _warn_unpriced_model(model_ref: str, *, unit: str | None = None) -> None:
+    """Warn that ``model_ref`` settled with no price, at most once per interval per model.
+
+    ``unit`` names the rate it does have, where that rate is in a unit no
+    completion meter reads yet.
+    """
     now = time.monotonic()
     last = _unpriced_warned_at.get(model_ref)
     if last is not None and now - last < UNPRICED_WARNING_INTERVAL_S:
@@ -4749,6 +4754,17 @@ def _warn_unpriced_model(model_ref: str) -> None:
     if last is None and len(_unpriced_warned_at) >= _UNPRICED_WARNING_MAX_MODELS:
         _evict_unpriced_warnings(now)
     _unpriced_warned_at[model_ref] = now
+    if unit is not None:
+        logger.warning(
+            "'%s' is priced per %s, which no completion meter reads yet. Its tokens are recorded without cost and "
+            "responses carry no inline cost; price it in tokens or per request. Repeats for it are suppressed for "
+            "%d minutes.",
+            # codeql[py/clear-text-logging-sensitive-data]
+            model_ref,
+            unit,
+            int(UNPRICED_WARNING_INTERVAL_S // 60),
+        )
+        return
     logger.warning(
         "No pricing configured for '%s'. Its tokens are recorded without cost and responses carry no inline cost; "
         "set a price for this model. Repeats for it are suppressed for %d minutes.",
@@ -4934,7 +4950,8 @@ async def record_usage(
     # rate is resolved for a success even without usage. A model priced per token
     # is priced only from reported usage, as it always has been.
     succeeded = error is None
-    if usage_data or succeeded:
+    resolved: ResolvedPricing | None = None
+    if usage_data or succeeded or cost_override is not None:
         # The organization comes off the key, via the workspace already resolved
         # for the row above, so a settled cost uses the same rate the admission
         # gate estimated against. Both lookups are memoized on immutable columns,
@@ -4952,14 +4969,12 @@ async def record_usage(
                 deployment_paid=deployment_paid,
             )
         priced: tuple[Decimal, dict[str, int], list[ChargeLine]] | None = None
-        if resolved is not None and priced_per_request(resolved.pricing):
-            if succeeded:
-                priced = price_request(resolved.pricing)
+        if resolved is not None:
+            priced = price_completion(resolved.pricing, usage_data, succeeded=succeeded)
+            if priced is None and usage_data and not priced_per_request(resolved.pricing):
+                _warn_unpriced_model(f"{provider}:{model}" if provider else model, unit=resolved.pricing.unit)
         elif usage_data:
-            if resolved is not None:
-                priced = calculate_metered_cost(resolved.pricing, usage_data)
-            else:
-                _warn_unpriced_model(f"{provider}:{model}" if provider else model)
+            _warn_unpriced_model(f"{provider}:{model}" if provider else model)
         if resolved is not None and priced is not None:
             cost, meters, breakdown = priced
             pricing_source = resolved.source
@@ -4973,8 +4988,9 @@ async def record_usage(
     # When the caller bills a fixed amount without provider usage (e.g. the
     # stream-missing-usage estimate policy), record that amount on the log row
     # so usage_logs.cost stays consistent with the spend that was reconciled.
-    # No rate entry produced that amount, so the row names none.
-    if cost_override is not None:
+    # No rate entry produced that amount, so the row names none. A rate no
+    # completion meter reads held nothing, so the row keeps no cost.
+    if cost_override is not None and estimate_settles(resolved.pricing if resolved is not None else None):
         usage_log.cost = to_usd(cost_override)
         usage_log.pricing_source = None
         usage_log.pricing_reference = None
@@ -5928,28 +5944,35 @@ def build_streaming_response(
         # records the request as errored. status_code stays NULL: the stream
         # itself completed (the caller got a 200), so no HTTP status classifies
         # this, and stamping one would fake a rejection that never happened.
-        logged = await record_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint=adapter.endpoint,
-            user_id=user_id,
-            error="stream completed without usage data" if policy == "fail" else None,
-            cost_override=reservation.estimate,
-            latency_ms=_elapsed_ms(started_at),
-            ttft_ms=_ttft_ms(started_at, first_chunk_at),
-            counts_toward_budget=reservation.counts_toward_budget,
-            attribution=attribution,
-            tool_tally=tool_tally,
-            workspace_id=workspace_id,
-            request_id=request_id,
-            tags=tags,
-            source_label=source_label,
-            safety_identifier=safety_identifier,
-            deployment_paid=deployment_paid,
-        )
+        try:
+            logged = await record_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=provider,
+                endpoint=adapter.endpoint,
+                user_id=user_id,
+                error="stream completed without usage data" if policy == "fail" else None,
+                cost_override=reservation.estimate,
+                latency_ms=_elapsed_ms(started_at),
+                ttft_ms=_ttft_ms(started_at, first_chunk_at),
+                counts_toward_budget=reservation.counts_toward_budget,
+                attribution=attribution,
+                tool_tally=tool_tally,
+                workspace_id=workspace_id,
+                request_id=request_id,
+                tags=tags,
+                source_label=source_label,
+                safety_identifier=safety_identifier,
+                deployment_paid=deployment_paid,
+            )
+        except Exception:
+            # The row resolves its rate before it is written, so a lookup that
+            # fails leaves nothing to settle, and the hold would otherwise wait
+            # for the sweeper.
+            await refund_reservation(db, reservation)
+            raise
         # The estimate covers the unreported tokens; record_usage adds any tool cost on
         # top of it, so reconcile against the row's total rather than the estimate.
         # The token axis settles at its estimate for the same reason: the provider

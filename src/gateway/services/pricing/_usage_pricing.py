@@ -14,11 +14,16 @@ from dataclasses import dataclass
 from decimal import Decimal
 from math import ceil, isfinite
 
+from any_llm.types.completion import CompletionUsage
+
 from gateway.core.metered_pricing import (
     BillableUsage,
     ChargeLine,
+    calculate_metered_cost,
     meter_cost,
     price_billable_usage,
+    price_request,
+    priced_per_request,
     quantize_cost,
     to_decimal,
 )
@@ -98,6 +103,52 @@ def price_usage(
         return None
     cost, meters, lines = price_billable_usage(rate, tokens)
     return UsageCharge(cost, meters, lines)
+
+
+# The rates the token meters read: a rate in ``tokens``, and an ``images`` rate
+# on a completion, which is read in tokens as it always was.
+_TOKEN_METERED_UNITS: frozenset[str] = frozenset({"tokens", "images"})
+
+
+def has_completion_meter(rate: ModelPricing | None) -> bool:
+    """Whether a completion can be settled at ``rate``: per request, or by the token meters.
+
+    A rate in another unit (``second``, ``minute``) is stored ahead of its meter,
+    so a completion at it is unpriced: refused under ``require_pricing``, and
+    otherwise served and recorded with no cost. It is never billed as tokens.
+    """
+    if rate is None:
+        return False
+    return priced_per_request(rate) or (rate.unit or "tokens") in _TOKEN_METERED_UNITS
+
+
+def estimate_settles(rate: ModelPricing | None) -> bool:
+    """Whether a reservation's estimate can settle a completion that reported no usage.
+
+    It can for an unpriced model, whose estimate is zero, and for any rate a
+    completion meter reads. A rate in a unit no completion meter reads held
+    nothing and settles nothing, so the row keeps no cost and the needs-pricing
+    view still lists it.
+    """
+    return rate is None or has_completion_meter(rate)
+
+
+def price_completion(
+    rate: ModelPricing, usage: CompletionUsage | None, *, succeeded: bool
+) -> tuple[Decimal, dict[str, int], list[ChargeLine]] | None:
+    """What one completion costs at ``rate``, or ``None`` when ``rate`` prices nothing it reported.
+
+    A per-request rate settles one request for a call that succeeded, whatever
+    the tokens, and nothing for one that failed. Any other rate the token meters
+    read settles the reported usage, a failed call's included. A rate in a unit
+    no completion meter reads (``second``, ``minute``) prices nothing, so the
+    row records its tokens with no cost rather than billing them as tokens.
+    """
+    if priced_per_request(rate):
+        return price_request(rate) if succeeded else None
+    if usage is None or not has_completion_meter(rate):
+        return None
+    return calculate_metered_cost(rate, usage)
 
 
 def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: bool) -> bool:

@@ -12358,7 +12358,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images") | null;
+            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelPublic
@@ -12434,7 +12434,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images") | null;
+            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelsPublic
@@ -13715,8 +13715,9 @@ export interface components {
             /**
              * Unit
              * @default tokens
+             * @enum {string}
              */
-            unit: string;
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * ModerationRequest
@@ -14075,8 +14076,9 @@ export interface components {
             /**
              * Unit
              * @default tokens
+             * @enum {string}
              */
-            unit: string;
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
             /** Updated At */
             updated_at?: string | null;
         };
@@ -15054,11 +15056,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingPublic
@@ -15173,11 +15175,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingsPublic
@@ -17754,11 +17756,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).
+             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * SignupRequest

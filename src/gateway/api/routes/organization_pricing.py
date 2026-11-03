@@ -21,7 +21,7 @@ order (override, deployment row, models.dev catalog) is
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
@@ -45,6 +45,7 @@ from gateway.services.organization_pricing_service import (
     PricingOverrideInput,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.types.price_unit import PriceUnit
 
 # Master key on the router, as every management router declares it.
 # The role gate is a separate question answered in the service: the credential
@@ -99,12 +100,13 @@ class OrganizationModelPricingRates(BaseModel):
     )
     effective_from: datetime | None = Field(default=None, description=_EFFECTIVE_FROM_DESCRIPTION)
     effective_to: datetime | None = Field(default=None, description=_EFFECTIVE_TO_DESCRIPTION)
-    unit: Literal["tokens", "requests", "images"] = Field(
+    unit: PriceUnit = Field(
         default="tokens",
         description=(
-            "What the rates are per: tokens for a model, requests or images for a non-token endpoint, "
-            "each priced per million. "
+            "What the rates are per: tokens for a model, requests or images for a non-token endpoint. "
             "A completion model priced per requests is charged one request per successful call."
+            " Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored "
+            "and prices nothing."
         ),
     )
 

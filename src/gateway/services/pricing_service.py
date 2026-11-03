@@ -31,6 +31,7 @@ from gateway.services.pricing import (
     active_timeline,
     billed_search_units,
     charge_tool_calls,
+    has_completion_meter,
     paid_by_the_deployment,
     request_rate,
     resolve_as_of,
@@ -874,12 +875,18 @@ class RequestPrices:
         candidates: Sequence[tuple[str, str]],
         estimate: Callable[[ModelPricing], Decimal],
     ) -> dict[str, Decimal | None]:
-        """Estimate each candidate at this request's rates, retaining unknown prices."""
+        """Estimate each candidate at this request's rates, retaining unknown prices.
+
+        A rate in a unit no completion meter reads is an unknown price too: it
+        would estimate at nothing, and an estimate of nothing ranks as the
+        cheapest candidate, which the pricing gate then refuses.
+        """
         await self.prime(candidates)
         costs: dict[str, Decimal | None] = {}
         for provider, model in candidates:
             resolved = self._resolved[provider, model, False]
-            costs[f"{provider}:{model}"] = estimate(resolved.pricing) if resolved is not None else None
+            priced = resolved is not None and has_completion_meter(resolved.pricing)
+            costs[f"{provider}:{model}"] = estimate(resolved.pricing) if priced and resolved is not None else None
         return costs
 
     async def prime(self, candidates: Sequence[tuple[str, str]]) -> None:
@@ -1098,12 +1105,14 @@ def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricin
     user, a blocked user, or an exhausted budget (404/403) take precedence over
     the missing-pricing rejection (402) — and refund the reservation before
     raising. When ``require_pricing`` is False, the legacy behavior is preserved
-    (the request is served and logged without cost).
+    (the request is served and logged without cost). A rate in a unit no
+    completion meter reads yet (``second``, ``minute``) is missing in the same
+    sense: it cannot bill the request either.
     """
-    return pricing is None and require_pricing
+    return require_pricing and not has_completion_meter(pricing)
 
 
-def no_pricing_error_detail(model: str) -> str:
+def no_pricing_error_detail(model: str, *, unit: str | None = None) -> str:
     """The 402 body for an unpriced model: what went wrong, why, and how to fix it.
 
     A new operator adding a provider in the dashboard hits this on their first
@@ -1112,6 +1121,12 @@ def no_pricing_error_detail(model: str) -> str:
     bundled price list missed the name, most often because it is misspelled, so
     that is named first and enabling the fallback is not offered again.
     """
+    if unit is not None:
+        return (
+            f"Model '{model}' is priced per {unit}, which no completion meter reads yet, and require_pricing is on, "
+            f"so it cannot be billed. Price it in tokens or per request (POST {API_ROOT}/pricing, or the pricing "
+            "section of config.yml)."
+        )
     cause = f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
     if default_pricing_enabled():
         return (

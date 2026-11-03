@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
@@ -19,7 +19,11 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
-from gateway.core.settings.pricing import PRICE_PER_REQUEST_DESCRIPTION, price_per_request_shorthand
+from gateway.core.settings.pricing import (
+    PRICE_PER_REQUEST_DESCRIPTION,
+    PRICE_UNIT_DESCRIPTION,
+    price_per_request_shorthand,
+)
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float, to_usd, to_usd_or_none
@@ -53,6 +57,7 @@ from gateway.services.pricing_service import (
     rates_in_force,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
+from gateway.types.price_unit import PriceUnit
 
 # Two routers under one prefix, one per authorization rule, so that adding a
 # route defaults to refusing a caller who is not a deployment operator and
@@ -142,14 +147,7 @@ class SetPricingRequest(PricedKind):
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
-    unit: Literal["tokens", "requests", "images"] = Field(
-        default="tokens",
-        description=(
-            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
-            "moderation call, or a completion model billed per call (USD per million requests), "
-            "'images' for image generation (USD per million images)."
-        ),
-    )
+    unit: PriceUnit = Field(default="tokens", description=PRICE_UNIT_DESCRIPTION)
     price_per_request: float | None = Field(
         default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
     )

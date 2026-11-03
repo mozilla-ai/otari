@@ -25,6 +25,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
+from gateway.types.price_unit import PriceUnit
 
 
 class OrgProviderKeyCreateRequest(SQLModel):
@@ -218,7 +219,7 @@ class OrgProviderKeyModelPublic(SQLModel):
     cache_write_price_per_million: float | None = None
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
-    unit: str = "tokens"
+    unit: PriceUnit = "tokens"
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
@@ -678,7 +679,7 @@ class HostedModelCreateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    unit: Literal["tokens", "requests", "images"] | None = None
+    unit: PriceUnit | None = None
 
     @model_validator(mode="after")
     def _prices_come_as_a_pair(self) -> Self:
@@ -705,7 +706,7 @@ class HostedModelUpdateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    unit: Literal["tokens", "requests", "images"] | None = None
+    unit: PriceUnit | None = None
     enabled: bool | None = None
 
     @model_validator(mode="after")
