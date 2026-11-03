@@ -49,6 +49,8 @@ class ResolvedHostedProvider:
     """The hosted provider's name, an accepted alias folded, for a credential read back from a source."""
     implementation: str | None = None
     """The any-llm implementation serving it, for a credential read back from a source."""
+    supported_countries: tuple[str, ...] | None = None
+    """The countries whose requests it serves, or None for every country."""
 
 
 def last4(api_key: str) -> str | None:
@@ -219,6 +221,7 @@ def credential_of(row: HostedProvider, *, quiet: bool = False) -> ResolvedHosted
         client_args=client_args,
         name=row.name,
         implementation=row.provider,
+        supported_countries=tuple(row.supported_countries) if row.supported_countries is not None else None,
     )
 
 

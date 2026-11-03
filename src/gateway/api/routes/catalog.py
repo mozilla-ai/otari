@@ -28,7 +28,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -54,6 +54,8 @@ from gateway.models.usage import UsageLog
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.schemas.catalog import CatalogCapabilities, CatalogFacets, CatalogModelSummary, CatalogQuery
 from gateway.services.catalog import (
+    ModelType,
+    catalog_model_type,
     current_selector_index,
     model_selector_for_slug,
     query_catalog,
@@ -67,10 +69,7 @@ from gateway.services.merged_catalog_service import (
     viewer_organization,
     viewer_price,
 )
-from gateway.services.model_catalog_service import (
-    ModelCatalogEntry,
-    models_dev_provider_id,
-)
+from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.model_identity import (
     ModelIdentity,
     OfferingSeed,
@@ -90,6 +89,8 @@ from gateway.services.selector_index_service import (
     real_offerings,
     rebuild_selector_index,
 )
+from gateway.types.model_endpoint import ModelEndpoint
+from gateway.types.models_dev import ModelsDevCatalog, models_dev_provider_id
 
 # ``verify_catalog_reader_or_public`` rather than ``verify_catalog_reader``: a
 # visitor reads too while ``public_catalog`` is on, and is answered from what
@@ -192,6 +193,14 @@ class CatalogOffering(BaseModel):
         ),
     )
     metadata_output_price_per_million: float | None = None
+    endpoints: list[ModelEndpoint] = Field(
+        default_factory=list,
+        description=(
+            "The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. "
+            "`/decisions` and `/systemone` take only a `decision_providers` selector, not this one. "
+            "Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves."
+        ),
+    )
     usage_30d: OfferingUsage | None = None
 
 
@@ -236,6 +245,8 @@ class _Offering:
     metadata: ModelCatalogEntry | None
     model_id: str
     """The provider's own id, which a usage row carries beside the instance."""
+    type: ModelType | None
+    """The kind the provider's listing or models.dev gives this offering."""
 
 
 async def _usage_by_selector(
@@ -316,7 +327,7 @@ class _Grouped:
     identities: dict[str, ModelIdentity]
     offerings: dict[str, _Offering]
     """By selector."""
-    catalog: dict[str, Any] | None
+    catalog: ModelsDevCatalog | None
     configured_types: set[str]
     organization_id: uuid.UUID | None
     """Whose overrides priced the offerings; None for a visitor."""
@@ -395,9 +406,11 @@ async def _group(
                 price_reference=reference,
                 metadata_input_price_per_million=metadata.cost_input if metadata else None,
                 metadata_output_price_per_million=metadata.cost_output if metadata else None,
+                endpoints=list(metadata.endpoints) if metadata else [],
             ),
             metadata=metadata,
             model_id=model_id,
+            type=obj.type,
         )
 
     return _Grouped(
@@ -490,6 +503,7 @@ def _summary(
         vendor=identity.vendor,
         description=_first(entry.description for entry in [*winners, *described]),
         family=_first(entry.family for entry in described),
+        type=catalog_model_type([(member.wire.provider_type, member.type) for member in members], identity.vendor),
         capabilities=CatalogCapabilities(
             reasoning=any(entry.reasoning for entry in described),
             tool_call=any(entry.tool_call for entry in described),
@@ -525,23 +539,15 @@ def _elsewhere(grouped: _Grouped, key: str, offered_types: set[str]) -> list[Cat
     that grouped the offerings, so it cannot name a provider that would then
     land in a different group.
     """
-    if not grouped.catalog:
+    if grouped.catalog is None:
         return []
     found: dict[str, str] = {}
-    for provider_type, provider in grouped.catalog.items():
+    for provider_type, provider in grouped.catalog.providers.items():
         if provider_type in offered_types or provider_type in grouped.configured_types:
             continue
-        if not isinstance(provider, dict):
-            continue
-        models = provider.get("models")
-        if not isinstance(models, dict):
-            continue
-        for model_id, model in models.items():
-            if not isinstance(model, dict) or not isinstance(model_id, str):
-                continue
-            name = model.get("name")
-            if identity_key(provider_type, model_id, name if isinstance(name, str) else None) == key:
-                found[provider_type] = str(provider.get("name") or provider_type)
+        for model_id, model in provider.models.items():
+            if identity_key(provider_type, model_id, model.name) == key:
+                found[provider_type] = provider.name or provider_type
                 break
     return [
         CatalogElsewhere(provider_type=pid, name=name)

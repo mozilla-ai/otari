@@ -9,6 +9,7 @@ import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
+import { ExecutorRow } from "@/features/tools/ExecutorRow"
 import {
   ceilingParser,
   type Parse,
@@ -16,18 +17,25 @@ import {
 } from "@/features/tools/PolicyRow"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import { WorkspaceToolStatus } from "@/features/tools/WorkspaceToolStatus"
+import {
+  WorkspaceProviderOptions,
+  WorkspaceWebSearchKeyChoice,
+} from "@/features/tools/WorkspaceWebSearchKeys"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useClearWorkspaceWebSearchConfig,
   useSetWorkspaceWebSearchConfig,
   useWorkspaceWebSearchConfig,
 } from "@/shared/api/tools"
+import { useWorkspaceWebSearchKeys } from "@/shared/api/webSearchKeys"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
 // The stored row has three states (allowed, blocked, none) and can also narrow
-// results and domains. The card shows the switch with the narrowing under
-// Advanced; the purpose hint and provider options are set through the API.
+// results and domains, carry the workspace's provider options, and pin who runs
+// a provider's own search and fetch. The purpose hint is the one field set only
+// through the API. Which organization key the workspace uses is not in this
+// row: the key lists read and write the workspace's key routes.
 //
 // What "none" means is the deployment's `default_enabled`. Switching to that
 // value deletes a row that narrows nothing else, and any other change writes.
@@ -76,6 +84,8 @@ function narrowsAnything(config: WorkspaceWebSearchConfig): boolean {
     config.allowed_domains,
     config.blocked_domains,
     config.provider_options,
+    config.search_executor,
+    config.fetch_executor,
   ].some((value) => value != null)
 }
 
@@ -105,6 +115,9 @@ export function WorkspaceWebSearchCard({
   const manages = canManageWorkspace(context.data, selected?.role)
   const workspaceId = selected && manages ? selected.workspace_id : null
   const query = useWorkspaceWebSearchConfig(workspaceId)
+  // Any member reads which key the workspace uses; a member's status card shows
+  // those rows once the listing answers, so it never shows an empty frame.
+  const keyListing = useWorkspaceWebSearchKeys(selected?.workspace_id ?? null)
   const setConfig = useSetWorkspaceWebSearchConfig()
   const clearConfig = useClearWorkspaceWebSearchConfig()
   const save = useAutosave()
@@ -120,6 +133,8 @@ export function WorkspaceWebSearchCard({
       allowed_domains: stored.allowed_domains,
       blocked_domains: stored.blocked_domains,
       provider_options: stored.provider_options,
+      search_executor: stored.search_executor,
+      fetch_executor: stored.fetch_executor,
     }),
     put: (body: UpdateWorkspaceWebSearchConfigRequest) =>
       setConfig.mutateAsync({
@@ -150,6 +165,14 @@ export function WorkspaceWebSearchCard({
       <WorkspaceToolStatus
         tool="web_search"
         leading={leading}
+        trailing={
+          keyListing.data || keyListing.error ? (
+            <WorkspaceWebSearchKeyChoice
+              workspaceId={selected.workspace_id}
+              canChoose={false}
+            />
+          ) : undefined
+        }
         workspace={selected}
       />
     )
@@ -215,6 +238,30 @@ export function WorkspaceWebSearchCard({
         }
       />
 
+      <WorkspaceWebSearchKeyChoice
+        workspaceId={selected.workspace_id}
+        canChoose
+      />
+
+      <ExecutorRow
+        label="Who runs provider web search"
+        help="For a provider's own search tool (Anthropic and OpenAI web_search)."
+        value={config?.search_executor}
+        onChange={(search_executor) =>
+          void save.run(() => commitField({ search_executor }))
+        }
+        disabled={narrowingDisabled || save.isSaving}
+      />
+      <ExecutorRow
+        label="Who runs provider web fetch"
+        help="For a provider's own fetch tool (Anthropic web_fetch)."
+        value={config?.fetch_executor}
+        onChange={(fetch_executor) =>
+          void save.run(() => commitField({ fetch_executor }))
+        }
+        disabled={narrowingDisabled || save.isSaving}
+      />
+
       <AdvancedRows>
         <PolicyRow
           key={`results-${selected.workspace_id}`}
@@ -250,6 +297,12 @@ export function WorkspaceWebSearchCard({
           parse={parseDomains}
           commit={(blocked_domains) => commitField({ blocked_domains })}
           disabled={narrowingDisabled}
+        />
+        <WorkspaceProviderOptions
+          workspaceId={selected.workspace_id}
+          stored={config?.provider_options}
+          disabled={narrowingDisabled}
+          save={(provider_options) => commitField({ provider_options })}
         />
       </AdvancedRows>
     </SettingsGroup>

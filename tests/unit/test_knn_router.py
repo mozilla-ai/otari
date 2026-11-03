@@ -17,7 +17,6 @@ Each routing-memory record is one example: a prompt embedding plus a
 
 from __future__ import annotations
 
-import time
 import uuid
 from collections.abc import Iterator
 from decimal import Decimal
@@ -560,7 +559,6 @@ def _aliased_workspaces() -> Iterator[None]:
     alias_service._cache[_WORKSPACE] = {_ALIAS: CHEAP}
     alias_service._cache[_DEFAULT_WORKSPACE] = {_ALIAS: STRONG}
     alias_service._default_workspace = _DEFAULT_WORKSPACE
-    alias_service._cached_at = time.monotonic()
     yield
     alias_service.reset_alias_cache()
 

@@ -52,7 +52,8 @@ async def create_org_web_search_key(
 ) -> OrgWebSearchKeyPublic:
     """Add a search or fetch key to the caller's organization. Organization owners and admins only.
 
-    A workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.
+    A new key serves no workspace until the organization makes it its default for the key's kind, or a
+    workspace pins it. Until then each workspace keeps the key it uses, or the deployment's instance.
     """
     return await service.create_key(user=current_identity, request=body)
 
@@ -66,7 +67,10 @@ async def update_org_web_search_key(
 ) -> OrgWebSearchKeyPublic:
     """Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.
 
-    Its kind and provider are fixed.
+    Its kind and provider are fixed. A new api_base on a key that holds a secret
+    needs that secret in the same request, `api_key` and any masked `options`
+    entry, since the next call sends it to the new host. Clearing api_base needs
+    neither.
     """
     return await service.update_key(user=current_identity, key_id=key_id, request=body)
 
@@ -104,6 +108,18 @@ async def set_org_default_web_search_key(
     Organization owners and admins only.
     """
     return await service.set_default(user=current_identity, key_id=key_id)
+
+
+@org_router.delete("/{key_id}/default")
+async def unset_org_default_web_search_key(
+    service: WebSearchKeyServiceDep, current_identity: CurrentIdentity, key_id: uuid.UUID
+) -> OrgWebSearchKeyPublic:
+    """Stop a key being the organization's default of its kind. Organization owners and admins only.
+
+    Idempotent: a key that is not the default is returned unchanged. With no default, a workspace that
+    pinned no key uses the deployment's instance for that kind.
+    """
+    return await service.unset_default(user=current_identity, key_id=key_id)
 
 
 @workspace_router.get("")

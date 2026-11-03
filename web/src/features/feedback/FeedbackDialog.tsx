@@ -5,8 +5,11 @@ import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { RestoreFocus } from "@/design-system/feedback/FormDialog"
 import { useDirtyGuard } from "@/design-system/feedback/useDirtyGuard"
+import { Checkbox } from "@/design-system/forms/Checkbox"
 import { ProductMark } from "@/design-system/ProductMark"
+import { ApiError } from "@/shared/api/client"
 import { useSendFeedback } from "@/shared/api/feedback"
+import { looksLikeAddress } from "@/shared/helpers/addresses"
 
 const NOT_SENT = new Error(
   "That didn’t reach us. Your message is still here; send it again.",
@@ -17,12 +20,24 @@ const MAX_MESSAGE_LENGTH = 4000
 
 const IS_APPLE = /Mac|iPhone|iPad/.test(navigator.platform)
 
+/** The receiver's cap on the address to reply to, which the gateway applies too. */
+const MAX_REPLY_TO_LENGTH = 254
+
+/** Whether the gateway would attach this address: its shape, length and printable-only rules. */
+function canShare(email: string): boolean {
+  return (
+    email.length <= MAX_REPLY_TO_LENGTH &&
+    !/[\s\p{C}]/u.test(email) &&
+    looksLikeAddress(email)
+  )
+}
+
 /**
  * A message to the Otari team, opened from Feedback beside Documentation: in the
  * top bar from `md` up, and in the account menu below it.
  *
  * Not a `FormDialog`: that frame always renders a titled header, a footer rule
- * and Cancel, and this one is a single field and a single action. It wears the
+ * and Cancel, and this one is a message and a single action. It wears the
  * same geometry classes, so it sits at the same offset and becomes the same
  * full-screen sheet below 640px, and it shares the dirty guard.
  *
@@ -33,11 +48,20 @@ export function FeedbackDialog({
   isOpen,
   onOpenChange,
   returnFocusRef,
+  email,
 }: {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
   returnFocusRef?: RefObject<HTMLElement | null>
+  /**
+   * The signed-in account's address, offered so the team can reply. Without
+   * one there is nothing to offer and the message goes alone.
+   */
+  email?: string | null
 }) {
+  // Only an address the gateway will attach: offering one it refuses would be a
+  // box that fails every send.
+  const shareable = email && canShare(email) ? email : null
   const headingId = useId()
   const thanksId = useId()
   const thanksRef = useRef<HTMLDivElement>(null)
@@ -45,7 +69,26 @@ export function FeedbackDialog({
   const [message, setMessage] = useState("")
   const [isEmptySend, setIsEmptySend] = useState(false)
   const [isSent, setIsSent] = useState(false)
+  // What the sent message carried, so the thanks name it even if the shown
+  // address has changed while it was in flight.
+  const [sentTo, setSentTo] = useState<string | null>(null)
+  // The address the tick agreed to. Another one showing (a session changed in
+  // another tab) clears it, and it stays cleared if the first one comes back.
+  const [agreedTo, setAgreedTo] = useState<string | null>(null)
+  const [shownAddress, setShownAddress] = useState(shareable)
+  if (shareable !== shownAddress) {
+    setShownAddress(shareable)
+    setAgreedTo(null)
+  }
+  const repliesTo =
+    agreedTo !== null && agreedTo === shareable ? agreedTo : null
   const { mutate, reset, isPending, error } = useSendFeedback()
+  // A 422 is a refusal the person can act on (untick the email), so it keeps
+  // the gateway's reason; anything else is a delivery a retry may get through.
+  const notSent =
+    error instanceof ApiError && error.status === 422
+      ? error
+      : error && NOT_SENT
   const guard = useDirtyGuard({
     isOpen,
     onOpenChange,
@@ -60,6 +103,9 @@ export function FeedbackDialog({
     setMessage("")
     setIsEmptySend(false)
     setIsSent(false)
+    setSentTo(null)
+    // Opt-in each time: a tick from an earlier message is not consent to this one.
+    setAgreedTo(null)
     reset()
   }, [isOpen, reset])
 
@@ -78,7 +124,17 @@ export function FeedbackDialog({
       setIsEmptySend(true)
       return
     }
-    mutate({ message: trimmed }, { onSuccess: () => setIsSent(true) })
+    mutate(
+      repliesTo
+        ? { message: trimmed, share_email: repliesTo }
+        : { message: trimmed },
+      {
+        onSuccess: () => {
+          setSentTo(repliesTo)
+          setIsSent(true)
+        },
+      },
+    )
   }
 
   return (
@@ -123,7 +179,10 @@ export function FeedbackDialog({
               <div
                 ref={thanksRef}
                 data-feedback-view="sent"
-                className="flex min-h-[16.25rem] flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24"
+                // The compose's height, which the email line adds 40px to.
+                className={`flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 ${
+                  shareable ? "min-h-[18.75rem]" : "min-h-[16.25rem]"
+                }`}
               >
                 {/* The hook is on a wrapper because `ProductMark` passes no
                     attribute but `className` through to its `<svg>`. */}
@@ -143,8 +202,10 @@ export function FeedbackDialog({
                     data-feedback-part="body"
                     className="text-muted max-w-100 text-base text-balance max-sm:max-w-80"
                   >
-                    Every message reaches the people building Otari. We read
-                    them all, and they shape what comes next.
+                    Every message reaches the people building Otari.{" "}
+                    {sentTo
+                      ? `If we have a question, we’ll write to ${sentTo}.`
+                      : "We read them all, and they shape what comes next."}
                   </p>
                 </div>
               </div>
@@ -157,13 +218,21 @@ export function FeedbackDialog({
                   event.preventDefault()
                   send()
                 }}
+                // On the form rather than the field, so the shortcut the button
+                // shows works wherever focus is in the compose.
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return
+                  if (!event.metaKey && !event.ctrlKey) return
+                  event.preventDefault()
+                  send()
+                }}
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <Modal.Heading id={headingId} className="sr-only">
                   Feedback
                 </Modal.Heading>
                 <div className="flex min-h-52 flex-1 flex-col gap-4 px-6 pt-6 pb-4 max-sm:px-4 max-sm:pt-1">
-                  <ErrorBanner error={error ? NOT_SENT : undefined} />
+                  <ErrorBanner error={notSent} />
                   {/* Native, as the playground composer's is: the shared
                       `TextArea` brings a visible label, a caption row and a
                       field edge, and this frame draws none of the three.
@@ -183,12 +252,6 @@ export function FeedbackDialog({
                       setMessage(event.target.value)
                       setIsEmptySend(false)
                     }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return
-                      if (!event.metaKey && !event.ctrlKey) return
-                      event.preventDefault()
-                      send()
-                    }}
                     aria-invalid={isEmptySend || undefined}
                     readOnly={isPending}
                     maxLength={MAX_MESSAGE_LENGTH}
@@ -196,6 +259,25 @@ export function FeedbackDialog({
                     className="text-foreground placeholder:text-subtle min-h-0 w-full flex-1 resize-none bg-transparent text-base focus:outline-none [field-sizing:content]"
                   />
                 </div>
+                {/* Its own line rather than the footer's free lane: the address
+                    is the point of the label, there is no room for it beside
+                    Send, and that lane is the empty-send reason's and the
+                    guard's. */}
+                {shareable ? (
+                  <div className="shrink-0 px-6 pb-5 max-sm:px-4 max-sm:pb-3">
+                    <Checkbox
+                      isSelected={repliesTo !== null}
+                      onChange={(selected) =>
+                        setAgreedTo(selected ? shareable : null)
+                      }
+                      isDisabled={isPending}
+                    >
+                      <span className="min-w-0 break-words">
+                        Share {shareable} so the team can reply
+                      </span>
+                    </Checkbox>
+                  </div>
+                ) : null}
                 <footer
                   data-feedback-footer={guard.isGuarding ? "guard" : "send"}
                   className={`flex shrink-0 items-center gap-4 pr-4 pb-4 max-sm:flex-col max-sm:items-stretch max-sm:gap-2 max-sm:pl-4 ${

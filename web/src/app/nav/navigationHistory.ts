@@ -83,6 +83,7 @@ export interface RememberedLocation {
 function destinationAt(pathname: string): NavPath | undefined {
   return NAV_ITEMS.flatMap((item) => [
     item.to,
+    ...(item.views ?? []),
     ...(item.children ?? []).map((child) => child.to),
   ]).find((to) => to === pathname)
 }

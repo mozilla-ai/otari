@@ -320,3 +320,18 @@ async def test_with_private_hosts_refused_a_private_endpoint_fails_the_start(mon
 @pytest.mark.asyncio
 async def test_by_default_a_private_endpoint_is_accepted() -> None:
     await refuse_unsafe_configured_endpoints(_validated({"vllm": {"api_base": "http://127.0.0.1:8000/v1"}}))
+
+
+def test_an_entry_serves_every_country_by_default() -> None:
+    assert _validated({"openai": {"api_key": KEY}}).hosted_provider_entries()["openai"].supported_countries is None
+
+
+def test_an_entry_normalizes_its_supported_countries() -> None:
+    entry = _validated({"openai": {"api_key": KEY, "supported_countries": ["us", " de ", "US"]}})
+
+    assert entry.hosted_provider_entries()["openai"].supported_countries == ("US", "DE")
+
+
+def test_an_entry_with_a_value_that_is_no_country_code_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"hosted_providers\.openai\.supported_countries"):
+        _validated({"openai": {"api_key": KEY, "supported_countries": ["USA"]}})

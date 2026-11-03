@@ -3,7 +3,7 @@
 from typing import Any
 
 from gateway.core.config import GatewayConfig
-from gateway.services.catalog import metadata_entry
+from gateway.services.catalog import metadata_entry, offering_model_type
 from gateway.services.health_checks._probe import HealthCheckOffering, is_chat_model
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.provider_kwargs import keyless_placeholder_api_key
@@ -27,7 +27,7 @@ async def list_hosted_offerings(hosted: HostedProviderService, config: GatewayCo
     The deployment's own view, so a provider restricted to one organization is
     checked too. Opens its own units of work, so call it before any probe.
     """
-    catalog = cached_models_dev_catalog(config)
+    catalog = cached_models_dev_catalog()
     offerings: list[HealthCheckOffering] = []
     for name, models in sorted((await hosted.serveable_models(organization_id=None)).items()):
         credential = await hosted.resolve(name, organization_id=None)
@@ -42,7 +42,7 @@ async def list_hosted_offerings(hosted: HostedProviderService, config: GatewayCo
                     selector=f"{name}:{model}",
                     provider=name,
                     reasoning=bool(metadata and metadata.reasoning),
-                    chat=is_chat_model(model, metadata.output_modalities if metadata else []),
+                    chat=is_chat_model(offering_model_type(catalog, name, implementation, model)),
                     implementation=implementation,
                     model=model,
                     call_kwargs=kwargs,

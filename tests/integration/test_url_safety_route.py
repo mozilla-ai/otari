@@ -11,6 +11,7 @@ needed since the safety check rejects before any network call to either.
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT
@@ -89,3 +90,34 @@ def test_safe_mcp_server_url_no_longer_validated_at_parse_time() -> None:
     # from `prepare_gateway_tools`, where it can be awaited.
     cfg = McpServerConfig(name="x", url=_UNSAFE_URL)
     assert cfg.url == _UNSAFE_URL
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://2400:8901::1:8787/mcp", "IPv6 address in brackets"),
+        ("http://[::1:8787/mcp", "IPv6 address in brackets"),
+        ("http://example.com:bad/mcp", "port must be a number"),
+    ],
+)
+def test_malformed_mcp_server_url_returns_400(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    url: str,
+    expected: str,
+) -> None:
+    """A URL no client can dial is a 400 naming its shape, not a 500 and not an SSRF refusal."""
+    resp = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anthropic:claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mcp_servers": [{"name": "x", "url": url}],
+        },
+        headers=api_key_header,
+    )
+
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert expected in detail
+    assert "SSRF" not in detail

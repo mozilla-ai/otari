@@ -30,6 +30,16 @@ describe("FilterChips", () => {
     expect(clearModel).toHaveBeenCalledOnce()
   })
 
+  it("shows the pickers with no toggle when always open", () => {
+    render(
+      <FilterChips alwaysOpen chips={[]}>
+        <span>User picker</span>
+      </FilterChips>,
+    )
+    expect(screen.getByText("User picker")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Add filter" })).toBeNull()
+  })
+
   it("keeps the picker row hidden until 'Add filter' is toggled", async () => {
     const user = userEvent.setup()
     render(
@@ -41,6 +51,18 @@ describe("FilterChips", () => {
     expect(region.className).toContain("hidden")
     await user.click(screen.getByRole("button", { name: "Add filter" }))
     expect(region.className).not.toContain("hidden")
+  })
+
+  it("names the toggle as asked, for a page that carries two", () => {
+    render(
+      <FilterChips chips={[]} toggleLabel="More filters">
+        <span>Tool picker</span>
+      </FilterChips>,
+    )
+    expect(
+      screen.getByRole("button", { name: "More filters" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add filter" })).toBeNull()
   })
 
   it("offers 'Clear all' only when filters are active", async () => {

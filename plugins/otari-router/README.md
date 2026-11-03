@@ -48,13 +48,13 @@ One hooks module with two hooks:
    its token counts, so the pick can be checked against what it cost.
 
 Each spawn leaves a dim transcript line such as
-`Explore agent-… starts on claude-haiku-4-5, Otari's choice (jev-1.13.0 chose haiku with 81%)`.
+`Explore agent-… starts on claude-haiku-4-5, Otari's choice (haiku with 81%)`.
 
 ## Requirements
 
 - An Otari gateway. A self-hosted one needs a
-  [decision provider](../../docs/configuration.md#decision-providers)
-  configured, and the recommendation is one decision-model call billed to the
+  [subagent router](../../docs/routing.md#subagent-routers) switched on in its
+  dashboard, and the recommendation is one decision-model call billed to the
   key above; on otari.ai a managed recommender answers, with nothing to
   configure. See [Use with Claude Code](../../docs/use-with-claude-code.md#let-otari-choose-a-subagents-model)
   for what the gateway does with the request.

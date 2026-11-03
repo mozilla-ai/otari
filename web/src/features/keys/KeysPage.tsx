@@ -47,6 +47,10 @@ import {
   useCurrentOwnerId,
   useMemberAttributionLabels,
 } from "@/features/organization/attribution"
+import {
+  canContributeToWorkspace,
+  canManage,
+} from "@/features/organization/roles"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
@@ -452,6 +456,12 @@ function CreateKeyDialog({
   const [toolScopeValid, setToolScopeValid] = useState(true)
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
   const [serviceKey, setServiceKey] = useState(NO_SERVICE_KEY)
+  // An organization's owner or admin may also make the organization a service
+  // key, on its own budgets; a member is refused one, so is not offered it.
+  const organizationContext = useOrganizationContext()
+  const offersServiceKey =
+    isDeploymentWide || canManage(organizationContext.data)
+  const serviceKeyScope = isDeploymentWide ? "deployment" : "organization"
   const [rejectUserMismatch, setRejectUserMismatch] =
     useState<UserMismatchChoice>("inherit")
   const [scopeValid, setScopeValid] = useState(true)
@@ -491,7 +501,7 @@ function CreateKeyDialog({
   // caller belongs to that default, which is the answer this form surfaces
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
-  const serviceKeyReady = useServiceKeyReady(serviceKey)
+  const serviceKeyReady = useServiceKeyReady(serviceKey, serviceKeyScope)
   const budgetIncomplete =
     !excludeFromBudget && keyBudgetIncomplete(budgetDraft)
   const isBlocked =
@@ -579,7 +589,10 @@ function CreateKeyDialog({
           exclude_from_budget: excludeFromBudget,
           ...serviceKeyBody(serviceKey),
         }
-      : shared
+      : {
+          ...shared,
+          ...serviceKeyBody(offersServiceKey ? serviceKey : NO_SERVICE_KEY),
+        }
     // An exempt key is never gated, so a cap on it would never bind.
     const cap = excludeFromBudget ? EMPTY_KEY_BUDGET : budgetDraft
     create.mutate(body, {
@@ -762,8 +775,12 @@ function CreateKeyDialog({
               onChange={setExcludeFromBudget}
             />
           ) : null}
-          {isDeploymentWide ? (
-            <ServiceKeyFields value={serviceKey} onChange={setServiceKey} />
+          {offersServiceKey ? (
+            <ServiceKeyFields
+              value={serviceKey}
+              onChange={setServiceKey}
+              scope={serviceKeyScope}
+            />
           ) : null}
           <UserMismatchPicker
             value={rejectUserMismatch}
@@ -861,9 +878,17 @@ function EditKeyForm({
       userMismatchChoice(apiKey.reject_user_mismatch),
     )
   const [scopeValid, setScopeValid] = useState(true)
-  // Only the deployment-wide form shows the service key fields, so only it waits on the budgets.
+  // The deployment-wide form shows the service key fields for every key; an
+  // organization's form only for the organization's own service keys, which
+  // only an owner or admin reaches, and there whether it is one is fixed. An
+  // operator's service key a member holds is the operator's to change.
+  const showsServiceKey = isDeploymentWide || apiKey.is_organization_service_key
+  const serviceKeyScope = apiKey.is_organization_service_key
+    ? "organization"
+    : "deployment"
   const serviceKeyReady = useServiceKeyReady(
-    isDeploymentWide ? serviceKey : NO_SERVICE_KEY,
+    showsServiceKey ? serviceKey : NO_SERVICE_KEY,
+    serviceKeyScope,
   )
   const { isDirty, reset: reseed } = useDirtySnapshot({
     keyName,
@@ -926,7 +951,9 @@ function EditKeyForm({
           exclude_from_budget: excludeFromBudget,
           ...serviceKeyBody(serviceKey),
         }
-      : shared
+      : apiKey.is_organization_service_key
+        ? { ...shared, ...serviceKeyBody(serviceKey) }
+        : shared
     update.mutate(
       { id: apiKey.id, body },
       {
@@ -1037,8 +1064,13 @@ function EditKeyForm({
           onChange={setExcludeFromBudget}
         />
       ) : null}
-      {isDeploymentWide ? (
-        <ServiceKeyFields value={serviceKey} onChange={setServiceKey} />
+      {showsServiceKey ? (
+        <ServiceKeyFields
+          value={serviceKey}
+          onChange={setServiceKey}
+          scope={serviceKeyScope}
+          isLocked={!isDeploymentWide}
+        />
       ) : null}
       <UserMismatchPicker
         value={rejectUserMismatch}
@@ -1290,11 +1322,17 @@ export function KeysPage() {
 
   const [pendingRegenerate, setPendingRegenerate] = useState<ApiKey>()
   const [federating, setFederating] = useState<ApiKey>()
+  const organizationContext = useOrganizationContext().data
+  const role = organizationContext?.role
+  // A viewer of this workspace reads their keys and changes none: the server
+  // refuses them every write on the member surface.
+  const isReadOnly =
+    !isDeploymentWide &&
+    !canContributeToWorkspace(organizationContext, workspace?.role)
   // Organization owners and admins on their own keys, which are all this
   // surface lists to them, and the operator on any key in the organization.
   // The server enforces the same; this only keeps a member from being offered
   // a form that would answer 403.
-  const role = useOrganizationContext().data?.role
   const canFederate =
     useDeployment().federation_member_rules &&
     (isDeploymentWide || role === "owner" || role === "admin")
@@ -1370,6 +1408,8 @@ export function KeysPage() {
         onWorkloadIdentity={
           canFederate ? () => setFederating(apiKey) : undefined
         }
+        isReadOnly={isReadOnly}
+        isEnableLocked={!isDeploymentWide && apiKey.operator_disabled === true}
       />
     ),
     [
@@ -1382,6 +1422,7 @@ export function KeysPage() {
       rotateKey.isPending,
       setActive,
       canFederate,
+      isReadOnly,
     ],
   )
   // Memoized on what the cells read, so DataTable's per-row cache holds across
@@ -1566,18 +1607,20 @@ export function KeysPage() {
       <PageIntro
         title="API keys"
         action={
-          <Button
-            // Focus returns here when a dialog opened from a row action closes,
-            // so the control has to stay addressable. It also no longer hides
-            // while the create dialog is open: the dialog is over the page, and
-            // a heading that loses its action while you are using it is the
-            // inconsistency this page had.
-            ref={createButtonRef}
-            variant="primary"
-            onPress={openCreate}
-          >
-            Create key
-          </Button>
+          isReadOnly ? undefined : (
+            <Button
+              // Focus returns here when a dialog opened from a row action closes,
+              // so the control has to stay addressable. It also no longer hides
+              // while the create dialog is open: the dialog is over the page, and
+              // a heading that loses its action while you are using it is the
+              // inconsistency this page had.
+              ref={createButtonRef}
+              variant="primary"
+              onPress={openCreate}
+            >
+              Create key
+            </Button>
+          )
         }
       >
         {isDeploymentWide
@@ -1618,6 +1661,9 @@ export function KeysPage() {
         <p className="max-w-[38.75rem] pb-5 text-sm text-muted">
           These are your keys: requests on them are billed to you and spend
           against your budget.
+          {isReadOnly
+            ? " You are a viewer here, so your deployment operator issues and changes them."
+            : null}
         </p>
       )}
 
@@ -1646,9 +1692,13 @@ export function KeysPage() {
       {showOnboarding ? (
         <EmptyState
           title="No API keys yet"
-          description="An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown once, so keep it somewhere safe."
-          actionLabel="Create your first key"
-          onAction={openCreate}
+          description={
+            isReadOnly
+              ? "An API key authenticates callers to this gateway. Ask your deployment operator to issue you one."
+              : "An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown once, so keep it somewhere safe."
+          }
+          actionLabel={isReadOnly ? undefined : "Create your first key"}
+          onAction={isReadOnly ? undefined : openCreate}
         />
       ) : null}
 
@@ -1672,7 +1722,7 @@ export function KeysPage() {
         />
       ) : null}
 
-      {selectedIds.length > 0 ? (
+      {selectedIds.length > 0 && !isReadOnly ? (
         <BulkActionBar
           selectedCount={selectedIds.length}
           allMatching={false}
@@ -1735,18 +1785,22 @@ export function KeysPage() {
           className="otari-keys-list flex flex-col"
         >
           <div className="flex min-h-11 items-center gap-2 border-b border-border-subtle">
-            <Checkbox
-              hasTouchTarget
-              ariaLabel="Select all keys"
-              isSelected={rows.length > 0 && selectedIds.length === rows.length}
-              onChange={(checked) =>
-                selection.onSelectionChange(
-                  checked ? new Set(selectableKeys) : new Set(),
-                )
-              }
-            >
-              <span className="sr-only">Select all keys</span>
-            </Checkbox>
+            {isReadOnly ? null : (
+              <Checkbox
+                hasTouchTarget
+                ariaLabel="Select all keys"
+                isSelected={
+                  rows.length > 0 && selectedIds.length === rows.length
+                }
+                onChange={(checked) =>
+                  selection.onSelectionChange(
+                    checked ? new Set(selectableKeys) : new Set(),
+                  )
+                }
+              >
+                <span className="sr-only">Select all keys</span>
+              </Checkbox>
+            )}
             <span className="flex-1 text-caption">
               {rows.length} {rows.length === 1 ? "key" : "keys"}
             </span>
@@ -1767,21 +1821,23 @@ export function KeysPage() {
                 key={apiKey.id}
                 className={`flex items-start gap-2 border-b border-border-subtle py-3 ${selectedIds.includes(apiKey.id) ? "bg-primary-subtle" : ""}`}
               >
-                <div className="flex min-h-11 shrink-0 items-center">
-                  <Checkbox
-                    hasTouchTarget
-                    ariaLabel={`Select ${label(apiKey)}`}
-                    isSelected={selectedIds.includes(apiKey.id)}
-                    onChange={(checked) => {
-                      const next = new Set(selectedIds)
-                      if (checked) next.add(apiKey.id)
-                      else next.delete(apiKey.id)
-                      selection.onSelectionChange(next)
-                    }}
-                  >
-                    <span className="sr-only">Select {label(apiKey)}</span>
-                  </Checkbox>
-                </div>
+                {isReadOnly ? null : (
+                  <div className="flex min-h-11 shrink-0 items-center">
+                    <Checkbox
+                      hasTouchTarget
+                      ariaLabel={`Select ${label(apiKey)}`}
+                      isSelected={selectedIds.includes(apiKey.id)}
+                      onChange={(checked) => {
+                        const next = new Set(selectedIds)
+                        if (checked) next.add(apiKey.id)
+                        else next.delete(apiKey.id)
+                        selection.onSelectionChange(next)
+                      }}
+                    >
+                      <span className="sr-only">Select {label(apiKey)}</span>
+                    </Checkbox>
+                  </div>
+                )}
                 <div className="flex min-w-0 flex-1 flex-col gap-1 pt-2">
                   <span className="truncate text-base text-foreground">
                     {apiKey.key_name ?? "(unnamed)"}
@@ -1820,8 +1876,12 @@ export function KeysPage() {
             rows={rows}
             getRowKey={getKeyRowKey}
             isLoading={loading}
-            emptyContent="No API keys yet. Create one to authenticate a caller."
-            selectionMode="multiple"
+            emptyContent={
+              isReadOnly
+                ? "No API keys yet. Ask your deployment operator to issue you one."
+                : "No API keys yet. Create one to authenticate a caller."
+            }
+            selectionMode={isReadOnly ? "none" : "multiple"}
             selectedKeys={selection.selectedKeys}
             onSelectionChange={selection.onSelectionChange}
           />

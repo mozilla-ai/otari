@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   CheckWorkspaceMcpServerRequest,
+  CreatedSearchTool,
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
   CreateWorkspaceMcpServerRequest,
@@ -11,7 +12,10 @@ import type {
   SandboxCredentialRequest,
   SearchProviderInfo,
   SearchToolsResponse,
+  SearchToolTestRequest,
+  SearchToolTestResponse,
   StoredSearchTool,
+  StoredSearchToolTestRequest,
   TestOrganizationGuardrailRequest,
   TestServiceResponse,
   ToolSettingsResponse,
@@ -137,26 +141,45 @@ export function useSearchTools(
   })
 }
 
-// Which search providers this build supports, and what each one needs, so the
-// add form asks for a key or a backend URL only when the provider requires it.
-export function useSearchProviders() {
+// Which search or fetch providers this build supports, what each one needs and
+// the options it takes, so the add form asks only for what the provider
+// requires. Keyed by kind under `SEARCH_PROVIDERS`, so `useUpdateToolSettings`'s
+// invalidation reaches both: a `searxng` tool's inherited endpoint follows
+// `web_search_url`.
+export function useSearchProviders(
+  kind: "search" | "fetch" = "search",
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [SEARCH_PROVIDERS],
-    queryFn: () => apiFetch<SearchProviderInfo[]>("/search-tools/providers"),
+    queryKey: [SEARCH_PROVIDERS, kind],
+    queryFn: () =>
+      apiFetch<SearchProviderInfo[]>(
+        kind === "search"
+          ? "/search-tools/providers"
+          : "/search-tools/providers?kind=fetch",
+      ),
     staleTime: 300_000,
+    enabled,
   })
 }
 
+// A create can store `web_search_default_tool` (the pin its `notice` reports)
+// and can turn the model's search on, so the settings and the tool list are
+// read again with the tools; the catalog lists each provider's tools by name.
 export function useCreateSearchTool() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateSearchToolRequest) =>
-      apiFetch<StoredSearchTool>("/search-tools", {
+      apiFetch<CreatedSearchTool>("/search-tools", {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
+      void queryClient.invalidateQueries({ queryKey: [TOOL_SETTINGS] })
+      void queryClient.invalidateQueries({ queryKey: [TOOLS] })
+    },
   })
 }
 
@@ -174,11 +197,15 @@ export function useUpdateSearchTool() {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
+    },
   })
 }
 
+// A default that names the deleted tool reads as unset, so the settings are
+// read again with the tools.
 export function useDeleteSearchTool() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -186,8 +213,42 @@ export function useDeleteSearchTool() {
       apiFetch<void>(`/search-tools/${encodeURIComponent(name)}`, {
         method: "DELETE",
       }),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
+      void queryClient.invalidateQueries({ queryKey: [TOOL_SETTINGS] })
+      void queryClient.invalidateQueries({ queryKey: [TOOLS] })
+    },
+  })
+}
+
+// One search or one fetch through a configuration that is not saved yet.
+// Read-only, so it invalidates nothing.
+export function useTestUnsavedSearchTool() {
+  return useMutation({
+    mutationFn: (body: SearchToolTestRequest) =>
+      apiFetch<SearchToolTestResponse>("/search-tools/test", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  })
+}
+
+// One search or one fetch through a configured or stored tool, `builtin_fetch`
+// included. Read-only, so it invalidates nothing.
+export function useTestSearchTool() {
+  return useMutation({
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: StoredSearchToolTestRequest
+    }) =>
+      apiFetch<SearchToolTestResponse>(
+        `/search-tools/${encodeURIComponent(name)}/test`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 

@@ -67,7 +67,9 @@ is a separate endpoint rather than a relaxation of that rule.
 `POST /api/v1/playground/chat/completions` resolves the caller's own attribution
 user and proves their membership of the workspace it will bill before the
 request reaches the pipeline, so the request is billed to the person who sent it
-in a workspace that is theirs. No credential is minted for the browser and none
+in a workspace that is theirs. A viewer of the organization or of that workspace
+is refused (`403`), because a completion spends as a key would; the same holds
+for a Playground file upload. No credential is minted for the browser and none
 is held there. The usage row it writes carries no `api_key_id` and its own
 endpoint label, which is what keeps in-product traffic separable from a
 customer's integration.
@@ -225,3 +227,32 @@ account an organization and workspace of its own, as [signup](#signup) does.
 account, never another one: an address sent with it is the operator's sign-in
 address, and on an unclaimed deployment it claims the deployment. It refuses an
 address another account holds, and that refusal points to the password link.
+
+#### Blocking email addresses
+
+The Accounts page also keeps the deployment's email blocklist
+(`/api/v1/admin/blocked-emails`). An entry is a whole address
+(`person@example.com`) or a domain (`example.com`, also accepted as
+`@example.com` or `*.example.com`), and a domain entry also blocks every
+subdomain under it. Entries are matched case-insensitively, and an
+internationalized domain matches in either spelling. `*.` and `@` mark a
+domain, so they are refused in front of an address.
+
+A blocked address cannot sign up, be added to or invited into an organization,
+accept an invitation sent before the block, or sign in by password, passkey or
+provider. A verification or reset link mailed before the block is refused as
+invalid, and an operator cannot issue the account a password link. Signup,
+resending a verification link and requesting a password reset answer as they do
+for an unknown address and send nothing, so the block is not revealed to
+whoever asks. A sign-in is refused with 403 once the credential checks out, and
+a first provider sign-in keeps nothing it would have created. A sign-in and a
+new entry never commit around each other, so a sign-in that was in flight when
+the entry was added cannot leave a live session behind it.
+
+Adding an entry ends the dashboard sessions of every existing account it
+matches, and the response says how many there were. The accounts themselves are
+kept, so removing the entry lets them sign in again. API keys are not affected:
+revoke those on Keys.
+
+An operator cannot add an entry that matches their own address or the
+bootstrap operator's, for the same reason neither can be deactivated.

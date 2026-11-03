@@ -18,6 +18,17 @@ def _make_openai_model(model_id: str, owned_by: str = "openai", created: int = 1
     return {"id": model_id, "object": "model", "created": created, "owned_by": owned_by}
 
 
+def _null_paths(value: Any, trail: str = "") -> list[str]:
+    """Every path inside ``value`` whose leaf is null, for a response that should carry none."""
+    if value is None:
+        return [trail or "."]
+    if isinstance(value, dict):
+        return [path for key, item in value.items() for path in _null_paths(item, f"{trail}.{key}")]
+    if isinstance(value, list):
+        return [path for index, item in enumerate(value) for path in _null_paths(item, f"{trail}[{index}]")]
+    return []
+
+
 @pytest.fixture
 def discovery_config(postgres_url: str) -> GatewayConfig:
     """Config with a fake openai provider and discovery enabled."""
@@ -103,8 +114,8 @@ def test_list_models_with_discovery(
     data = resp.json()
     assert data["object"] == "list"
     ids = [m["id"] for m in data["data"]]
-    assert "openai:gpt-4o" in ids
-    assert "openai:gpt-4o-mini" in ids
+    assert "openai/gpt-4o" in ids
+    assert "openai/gpt-4o-mini" in ids
 
 
 def test_list_models_excludes_env_only_provider(
@@ -204,7 +215,7 @@ def test_list_models_includes_keyless_local_provider(
 
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
-    assert "ollama:llama3" in ids
+    assert "meta/llama3" in ids
 
 
 def test_list_models_discovery_disabled(
@@ -253,17 +264,17 @@ def test_list_models_pricing_enrichment(
 
     assert resp.status_code == 200
     models = resp.json()["data"]
-    gpt4 = next(m for m in models if m["id"] == "openai:gpt-4o")
+    gpt4 = next(m for m in models if m["id"] == "openai/gpt-4o")
     assert gpt4["pricing"] is not None
     assert gpt4["pricing"]["input_price_per_million"] == 2.5
     assert gpt4["pricing"]["output_price_per_million"] == 10.0
 
 
-def test_list_models_no_pricing_returns_null(
+def test_list_models_omits_pricing_when_unpriced(
     discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """Discovered models without pricing have pricing=None."""
+    """A discovered model nothing prices has no ``pricing`` key."""
     from any_llm.types.model import Model
 
     fake_models = [Model(**_make_openai_model("gpt-4o-mini"))]
@@ -283,8 +294,66 @@ def test_list_models_no_pricing_returns_null(
 
     assert resp.status_code == 200
     models = resp.json()["data"]
-    gpt4_mini = next(m for m in models if m["id"] == "openai:gpt-4o-mini")
-    assert gpt4_mini["pricing"] is None
+    gpt4_mini = next(m for m in models if m["id"] == "openai/gpt-4o-mini")
+    assert "pricing" not in gpt4_mini
+
+
+def test_model_responses_omit_unknown_fields_rather_than_nulling_them(
+    discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """Neither model response carries a null, at any depth.
+
+    ``pricing_source`` is the one "we do not know" signal that stays, because
+    "none" is a known answer and is what says why ``pricing`` is absent.
+    """
+    from any_llm.types.model import Model
+
+    fake_models = [Model(**_make_openai_model("gpt-4o")), Model(**_make_openai_model("gpt-4o-mini"))]
+
+    priced = discovery_client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o",
+            "input_price_per_million": 2.5,
+            "output_price_per_million": 10.0,
+            # A tier overriding one rate alone, so the other three are unset and
+            # would reach the wire as nulls inside a list of objects.
+            "pricing_tiers": [{"min_input_tokens": 200000, "input_price_per_million": 5.0}],
+        },
+        headers=discovery_master_header,
+    )
+    assert priced.status_code == 200, priced.text
+
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            return_value=fake_models,
+        ),
+    ):
+        listing = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
+        detail = discovery_client.get(f"{API_ROOT}/models/openai:gpt-4o-mini", headers=discovery_master_header)
+
+    assert listing.status_code == 200, listing.text
+    assert _null_paths(listing.json()) == []
+
+    models = {model["id"]: model for model in listing.json()["data"]}
+    assert "pricing" not in models["openai/gpt-4o-mini"]
+    assert models["openai/gpt-4o-mini"]["pricing_source"] == "none"
+    # Omission reaches a nested model, so an unset cache rate is absent too.
+    assert "cache_read_price_per_million" not in models["openai/gpt-4o"]["pricing"]
+    # And a tier, which rides in a list, carries only the rate it overrides.
+    tier = models["openai/gpt-4o"]["pricing"]["pricing_tiers"][0]
+    assert set(tier) == {"min_input_tokens", "input_price_per_million"}
+
+    assert detail.status_code == 200, detail.text
+    assert _null_paths(detail.json()) == []
+    assert "pricing" not in detail.json()
 
 
 def test_list_models_pricing_only_still_appears(
@@ -319,14 +388,15 @@ def test_list_models_pricing_only_still_appears(
 
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
-    assert "openai:legacy-model" in ids
+    # No vendor is known for it, so it is listed by its bare slug.
+    assert "legacy-model" in ids
 
 
 def test_list_models_provider_filter(
     discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """The ?provider= query param filters results to a single provider."""
+    """The ?provider= query param lists only the models that provider serves."""
     from any_llm.types.model import Model
 
     fake_models = [Model(**_make_openai_model("gpt-4o"))]
@@ -358,8 +428,8 @@ def test_list_models_provider_filter(
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
     # OpenAI models should appear; Anthropic should not.
-    assert "openai:gpt-4o" in ids
-    assert all("anthropic:" not in mid for mid in ids)
+    assert "openai/gpt-4o" in ids
+    assert "anthropic/claude-3-opus" not in ids
 
 
 def test_list_models_discovery_error_graceful(
@@ -416,8 +486,8 @@ def test_list_models_tolerates_a_provider_without_created(
 
     assert resp.status_code == 200
     by_id = {m["id"]: m for m in resp.json()["data"]}
-    assert by_id["openai:local-model"]["created"] == 0
-    assert by_id["openai:gpt-4o"]["created"] == 1700000000
+    assert by_id["local-model"]["created"] == 0
+    assert by_id["openai/gpt-4o"]["created"] == 1700000000
 
 
 def test_get_model_tolerates_a_provider_without_created(
@@ -979,7 +1049,7 @@ def test_models_read_serves_an_expired_cache_without_dialing(
         resp = cached_discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
-    assert "openai:gpt-4o" in [model["id"] for model in resp.json()["data"]]
+    assert "openai/gpt-4o" in [model["id"] for model in resp.json()["data"]]
     mock_alist.assert_not_awaited()
 
 
@@ -1095,7 +1165,7 @@ def test_models_read_dials_when_caching_is_disabled(
         resp = uncached_discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
-    assert "openai:fresh-model" in [model["id"] for model in resp.json()["data"]]
+    assert "fresh-model" in [model["id"] for model in resp.json()["data"]]
     assert mock_alist.await_count == 1
 
 
@@ -1119,10 +1189,13 @@ def test_model_detail_agrees_with_the_listing_on_a_stale_entry(
     ) as mock_alist:
         listed = cached_discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
         detail = cached_discovery_client.get(f"{API_ROOT}/models/openai:gpt-4o", headers=discovery_master_header)
+        by_id = cached_discovery_client.get(f"{API_ROOT}/models/openai/gpt-4o", headers=discovery_master_header)
 
-    assert "openai:gpt-4o" in [model["id"] for model in listed.json()["data"]]
+    assert "openai/gpt-4o" in [model["id"] for model in listed.json()["data"]]
     assert detail.status_code == 200
     assert detail.json()["id"] == "openai:gpt-4o"
+    assert by_id.status_code == 200
+    assert by_id.json()["id"] == "openai/gpt-4o"
     # Neither read dialed: the detail endpoint never dials at all, and the
     # listing serves the cache.
     mock_alist.assert_not_awaited()

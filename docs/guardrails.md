@@ -185,6 +185,32 @@ A full end-to-end demo is in `demo/guardrails/`.
 | `monitor` (default) | Forwards to the provider and surfaces the verdict on the `Otari-Guardrails` response header. |
 | `block` | Returns `403` (`guardrail_violation`) and never calls the provider when the input is flagged. |
 
+## Reading the `Otari-Guardrails` header
+
+A served non-streaming request carries one entry per input guardrail. A
+streamed response does not carry the header yet, though a `block` guardrail
+still refuses the request before any bytes are sent.
+
+```json
+[{"profile": "prompt-injection", "mode": "monitor", "valid": null, "score": null, "status": "unavailable", "reason": "not_configured"}]
+```
+
+`valid: null` alone cannot tell a check that did not run from one that ran and
+gave no verdict, so `status` says which:
+
+| `status` | Meaning |
+| --- | --- |
+| `evaluated` | The check ran. `valid` is `true` or `false`. |
+| `inconclusive` | The check ran and the guardrail returned no verdict. |
+| `unavailable` | The check could not run, and the request was served anyway. `reason` says why. |
+
+`reason` appears only on an `unavailable` entry. `not_configured` means the
+deployment has no guardrails service for the profile. `evaluation_failed`
+covers everything else: the service is down, does not serve the profile, or
+answered something malformed. The detail goes to the gateway's log, not to the
+caller. The guardrail's own explanation stays out of the header too, because it
+is free text of any length.
+
 ## When the guardrails service is unreachable
 
 A `block` guardrail that cannot be evaluated at all (service down, no URL
@@ -204,7 +230,7 @@ a `400` naming what was wrong with it.
 | `on_unavailable` | A `block` entry that cannot be evaluated |
 | --- | --- |
 | `block` (default) | Refuses the request with `502`. |
-| `monitor` | Serves the request and records the check as inconclusive, trading enforcement for availability. |
+| `monitor` | Serves the request and records the check as `unavailable`, trading enforcement for availability. |
 
 ## What a guardrails service answers
 
@@ -352,6 +378,11 @@ the dashboard falls back to naming a profile by hand. The same fallback covers
 an entry that points at an endpoint of its own: only `guardrails_url` is read
 here, because a URL taken from an entry would be one a caller chose.
 
+Any API key and any signed-in user can read this list, because a profile name
+is what a caller puts in a request. Each gateway worker keeps the answer for
+30 seconds, so many reads cause at most one request to the guardrails service
+in that time. A changed `guardrails_url` is read at once.
+
 ## The guardrail catalog
 
 `GET /api/v1/tool-settings/guardrails/catalog` lists the guardrails Otari can
@@ -404,7 +435,7 @@ field means one thing.
 **A definition this worker does not hold makes the check unevaluable**, and
 `mode` and `on_unavailable` decide from there: `block` with `on_unavailable:
 block` refuses the request with a 502, and anything else serves it and records
-the check as inconclusive. That covers a definition that is disabled, one that
+the check as `unavailable` with the reason `evaluation_failed`. That covers a definition that is disabled, one that
 was deleted, one that failed to build, and the thirty second window after a write
 in which a sibling worker has not caught up. The request is never quietly sent to
 the deployment's guardrails service instead, which has never heard of that
@@ -493,8 +524,7 @@ is not listed: that second path is chosen by an argument of any-guardrail's own
 factory, not by one of the guardrail's parameters, so a saved configuration has
 no field in which to ask for it and Otari would load the weights instead.
 
-The catalog is also the one of the two reads a tenant reaches: the form that
-defines a guardrail belongs to an organization, and an owner or admin fills it
-without operator standing. What it answers is a property of the installed
-library, so it names nothing about the deployment. The profiles read keeps the
-stricter gate, because that one dials the deployment's own guardrails service.
+A tenant reads the catalog too: the form that defines a guardrail belongs to
+an organization, and an owner or admin fills it without operator standing. What
+it answers is a property of the installed library, so it names nothing about the
+deployment.

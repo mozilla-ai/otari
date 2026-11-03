@@ -44,6 +44,12 @@ describe("ActivityTimeline", () => {
     )
   })
 
+  it("leaves the presets out where they are picked elsewhere", () => {
+    renderTimeline({ hidePresets: true })
+    expect(screen.queryByRole("button", { name: "7d" })).toBeNull()
+    expect(screen.getByText(/Showing/)).toBeInTheDocument()
+  })
+
   it("captions the active window (inclusive end, UTC)", () => {
     renderTimeline()
     // Assert on day numbers, the range separator, and the UTC marker rather than a

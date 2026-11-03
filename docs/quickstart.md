@@ -6,7 +6,7 @@ description: Go from sign-up to your first request in a few minutes.
 
 In this quickstart you send your first request through [otari.ai](https://otari.ai):
 you create an API key in your default workspace, pick a model, send one request,
-and see it in the workspace's usage. It takes about five minutes, and all you
+and see it on the workspace's Overview. It takes about five minutes, and all you
 need is an otari.ai account.
 
 To run Otari on your own machine instead, follow the
@@ -15,8 +15,8 @@ To run Otari on your own machine instead, follow the
 ## 1. Open your workspace
 
 Log in to [otari.ai](https://otari.ai) and open your default workspace from the
-top-left corner. This quickstart uses its **API Keys**, **Models** and **Usage**
-tabs.
+top-left corner. This quickstart uses its **API Keys**, **Models** and **Overview**
+pages.
 
 ## 2. Create an API key
 
@@ -79,10 +79,10 @@ print(response.choices[0].message.content)
 
 It prints the model's reply.
 
-## 6. See it in Usage
+## 6. See it on the Overview
 
-Open the **Usage** tab: your request is listed with its model, its tokens and
-its cost.
+Open the **Overview** and its **Requests** tab: your request is listed with its
+model, its tokens and its cost.
 
 You now have a key your applications can call otari.ai with, and every request
 they send is recorded against your workspace.

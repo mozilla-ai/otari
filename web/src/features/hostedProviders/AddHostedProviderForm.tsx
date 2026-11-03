@@ -31,6 +31,8 @@ import {
 import { useProviderDetail } from "@/shared/api/providers"
 
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
+import { SupportedCountriesField } from "./SupportedCountriesField"
+import { parseCountries } from "./supportedCountries"
 
 // The form that configures a new hosted provider, in the shape of the
 // organization Providers page's key form: the provider picked from the catalog,
@@ -53,6 +55,7 @@ interface ProviderDraft {
   credentials: CredentialFieldValues
   clientArgs: string
   servesUnlistedModels: boolean
+  supportedCountries: string
 }
 
 const EMPTY_DRAFT: ProviderDraft = {
@@ -63,6 +66,7 @@ const EMPTY_DRAFT: ProviderDraft = {
   credentials: {},
   clientArgs: "",
   servesUnlistedModels: false,
+  supportedCountries: "",
 }
 
 export function AddHostedProviderForm({
@@ -88,6 +92,7 @@ export function AddHostedProviderForm({
 
   const spec = credentialSpecFor(draft.provider)
   const parsedClientArgs = parseClientArgs(draft.clientArgs)
+  const countries = parseCountries(draft.supportedCountries)
   const credentialErrors = validateCredentialFields(
     credentialFieldsFor(draft.provider),
     draft.credentials,
@@ -98,6 +103,7 @@ export function AddHostedProviderForm({
     !nameHasDelimiter &&
     (!needsKey || draft.apiKey !== "") &&
     parsedClientArgs.ok &&
+    countries.ok &&
     Object.keys(credentialErrors).length === 0
 
   // One body for the save and the test, so the test tries what would be saved.
@@ -125,9 +131,15 @@ export function AddHostedProviderForm({
 
   const submit = () => {
     const payload = buildPayload()
-    if (!canSubmit || payload === null) return
+    if (!canSubmit || payload === null || !countries.ok) return
     create.mutate(
-      { ...payload, serves_unlisted_models: draft.servesUnlistedModels },
+      {
+        ...payload,
+        serves_unlisted_models: draft.servesUnlistedModels,
+        ...(countries.value === null
+          ? {}
+          : { supported_countries: countries.value }),
+      },
       { onSuccess: onClose },
     )
   }
@@ -210,6 +222,13 @@ export function AddHostedProviderForm({
         isSelected={draft.servesUnlistedModels}
         onChange={(servesUnlistedModels) =>
           setDraft({ ...draft, servesUnlistedModels })
+        }
+      />
+      <SupportedCountriesField
+        value={draft.supportedCountries}
+        parsed={countries}
+        onChange={(supportedCountries) =>
+          setDraft({ ...draft, supportedCountries })
         }
       />
       <ProviderCredentialFields

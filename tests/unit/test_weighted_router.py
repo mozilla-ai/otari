@@ -301,7 +301,8 @@ def test_a_weighted_policy_is_not_a_consumer_of_routing_memory() -> None:
     # memory surfaces must not claim it. `/api/v1/routing/status` would report it under
     # a warmth it never uses, and `rank` would let its pool decide which score keys
     # a user may teach, refusing the examples a learned policy is being prepared with.
-    from gateway.api.routes.routing_memory import ScoredExample, _learned_policies, _validated_scores
+    from gateway.api.routes.routing_memory import _learned_policies, _validated_scores
+    from gateway.schemas.routing import ScoredExample
 
     weighted_config = GatewayConfig(
         master_key="test-master-key",
@@ -322,7 +323,8 @@ def test_a_noop_placeholder_pool_is_still_teachable() -> None:
     # candidates are the very ones an operator is seeding. Excluding it alongside
     # `weighted` would drop the typo guard and hide the pool's warmth for exactly
     # the workflow the backend was added for.
-    from gateway.api.routes.routing_memory import ScoredExample, _learned_policies, _validated_scores
+    from gateway.api.routes.routing_memory import _learned_policies, _validated_scores
+    from gateway.schemas.routing import ScoredExample
 
     placeholder = PolicySpec.model_validate(
         {

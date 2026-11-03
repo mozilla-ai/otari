@@ -161,6 +161,7 @@ skipped because a check once passed.
 - `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`. The last round answers rather than calling Otari's tools (see above)
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` too, but a fixed one that repeats neither name, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check
+- A URL whose host Otari cannot read is refused as invalid with a `400` before any address check, so an IPv6 host needs brackets (`http://[2400:8901::1]:8787/mcp`) and a port has to be a number
 - MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
 - The managed MCP loop follows redirects only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host. Caller-orchestrated discovery and execution do not follow redirects. Configure the final URL when a managed-loop redirect changes host or port
 - `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
@@ -313,7 +314,8 @@ The successful body is the native MCP result:
 {
   "content": [{"type": "text", "text": "Created issue #42"}],
   "structuredContent": {"issue_number": 42},
-  "isError": false
+  "isError": false,
+  "resultType": "complete"
 }
 ```
 

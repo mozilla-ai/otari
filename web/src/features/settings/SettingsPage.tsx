@@ -12,6 +12,7 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { Toolbar } from "@/design-system/layout/Toolbar"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { CountryDatabaseCard } from "@/features/settings/CountryDatabaseCard"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
@@ -722,6 +723,8 @@ export function SettingsPage() {
       <MailDeliveryCard />
 
       <MaintenanceModeCard />
+
+      <CountryDatabaseCard />
 
       {data ? (
         <p className="pt-6 text-xs text-subtle">

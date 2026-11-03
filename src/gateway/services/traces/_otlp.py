@@ -40,7 +40,6 @@ from decimal import Decimal
 from typing import Any
 
 from gateway.log_config import logger
-from gateway.services.secret_box import secret_box_configured
 from gateway.services.traces._collector import call_id_digest, identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
@@ -568,6 +567,8 @@ def _project(
     window: _Window,
     max_traces: int,
     keep_content: bool,
+    content_generation: int | None = None,
+    captured_at: datetime,
 ) -> OtlpProjection:
     by_session: dict[SessionRef, list[SpanRecord]] = {}
     harness: dict[SessionRef, str | None] = {}
@@ -607,6 +608,8 @@ def _project(
             session_source="otlp",
             harness=harness[session],
             spans=tuple(records),
+            content_generation=content_generation if keep_content else None,
+            captured_at=captured_at,
         )
         for session, records in by_session.items()
     )
@@ -623,6 +626,8 @@ def project_otlp_spans(
     now: datetime | None = None,
     max_traces: int = MAX_TRACES_PER_EXPORT,
     keep_content: bool = False,
+    content_generation: int | None = None,
+    captured_at: datetime | None = None,
 ) -> OtlpProjection:
     """Group received spans by session and project each one, attributed to the exporting key.
 
@@ -641,6 +646,8 @@ def project_otlp_spans(
             window=window,
             max_traces=max_traces,
             keep_content=keep_content,
+            content_generation=content_generation,
+            captured_at=captured_at or now,
         )
     except Exception as exc:  # noqa: BLE001 - recording spans never fails the export
         logger.warning("OTLP spans not recorded: %s", type(exc).__name__)
@@ -659,6 +666,8 @@ def record_otlp_export(
     api_key_id: str | None,
     retention: timedelta,
     content_enabled: bool = False,
+    content_generation: int | None = None,
+    admitted_at: datetime | None = None,
 ) -> None:
     """Hand one export's spans to the trace writer, attributed to the exporting key.
 
@@ -668,7 +677,7 @@ def record_otlp_export(
     Only a key that may import is traced (``budget_exempt``), the rule the usage
     import holds it to, whatever the export carries: an export of agent spans
     alone never reaches that import's own check. What a span was about is kept
-    only where the deployment enabled it and can store it encrypted.
+    only where ``content_enabled``, and the writer drops it where no key seals it.
     """
     if not budget_exempt:
         return
@@ -680,7 +689,9 @@ def record_otlp_export(
             user_id=user_id,
             api_key_id=api_key_id,
             retention=retention,
-            keep_content=content_enabled and secret_box_configured(),
+            keep_content=content_enabled,
+            content_generation=content_generation,
+            captured_at=admitted_at,
         )
         truncated = max(0, total - len(kept))
         for index, write in enumerate(projection.writes):

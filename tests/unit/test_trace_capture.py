@@ -458,6 +458,41 @@ async def test_an_unreachable_database_drops_the_batch_without_retrying_each_tra
     assert _dropped("store_error") - before == 6
 
 
+class _Deadlock(Exception):
+    sqlstate = "40P01"
+
+
+@pytest.mark.asyncio
+async def test_a_batch_chosen_as_a_deadlocks_victim_is_written_again_once() -> None:
+    """A workspace deleted as its content is stored can deadlock; losing must not drop every tenant's spans."""
+    deadlock = OperationalError("INSERT", {}, _Deadlock("deadlock detected"))
+    store = AsyncMock()
+    store.write.side_effect = [deadlock, WriteResult(accepted=4)]
+    writer = _writer(store, interval_s=60.0, batch_spans=100)
+    before = _dropped("store_error")
+    writer.submit(_write(2, "a"))
+    writer.submit(_write(2, "b"))
+    await writer.start()
+    await writer.stop()
+
+    assert store.write.await_count == 2
+    assert _dropped("store_error") - before == 0
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_deadlocks_twice_is_dropped() -> None:
+    store = AsyncMock()
+    store.write.side_effect = OperationalError("INSERT", {}, _Deadlock("deadlock detected"))
+    writer = _writer(store, interval_s=60.0, batch_spans=100)
+    before = _dropped("store_error")
+    writer.submit(_write(2, "a"))
+    await writer.start()
+    await writer.stop()
+
+    assert store.write.await_count == 2
+    assert _dropped("store_error") - before == 2
+
+
 @pytest.mark.asyncio
 async def test_shutdown_flushes_within_its_limit_and_drops_the_rest() -> None:
     async def slow(traces: tuple[TraceWrite, ...]) -> WriteResult:

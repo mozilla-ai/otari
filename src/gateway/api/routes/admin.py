@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, IdentityServiceDep, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, IdentityServiceDep, TraceServiceDep, get_db, verify_master_key
 from gateway.core.surface import Surface
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import (
@@ -26,7 +26,13 @@ from gateway.models.tenancy import (
     DeploymentUsersPublic,
     DeploymentUserUpdateRequest,
 )
-from gateway.schemas.identity import PasswordLinkPublic
+from gateway.schemas.identity import (
+    BlockedEmailCreatedPublic,
+    BlockedEmailCreateRequest,
+    BlockedEmailPublic,
+    BlockedEmailsPublic,
+    PasswordLinkPublic,
+)
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 
 # Auth on the router for the reason `routes/organizations.py` declares it there:
@@ -104,6 +110,7 @@ async def list_deployment_users(
 @router.patch("/users/{user_id}")
 async def update_deployment_user(
     service: DeploymentUserServiceDep,
+    traces: TraceServiceDep,
     current_identity: CurrentIdentity,
     user_id: uuid.UUID,
     body: DeploymentUserUpdateRequest,
@@ -113,14 +120,18 @@ async def update_deployment_user(
     Both fields are optional and omitting one leaves it alone; a body naming
     neither is refused rather than treated as a no-op. Deactivating also ends
     that account's dashboard sessions immediately, so a lost laptop stops
-    working now rather than when its cookie is next presented.
+    working now rather than when its cookie is next presented, and ends every
+    share of session content it made, which reactivating does not bring back.
 
     Two changes are refused to keep a deployment reachable: an operator may not
     deactivate their own account or drop their own operator access, and neither
     may be taken from the deployment's bootstrap operator, which is the identity
     master-key sign-in resolves to. Granting either is unguarded.
     """
-    return await service.update_user(actor=current_identity, user_id=user_id, request=body)
+    updated = await service.update_user(actor=current_identity, user_id=user_id, request=body)
+    if body.is_active is False:
+        await traces.end_shares_of(user_id)
+    return updated
 
 
 @router.post(
@@ -143,3 +154,50 @@ async def issue_password_link(identities: IdentityServiceDep, user_id: uuid.UUID
     """
     link = await identities.issue_password_link(user_id)
     return PasswordLinkPublic(mail_sent=link.mail_sent, link=link.link, expires_at=link.expires_at)
+
+
+@router.get("/blocked-emails", dependencies=[Depends(require_deployment_administration)])
+async def list_blocked_emails(
+    identities: IdentityServiceDep,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+) -> BlockedEmailsPublic:
+    """List the addresses and domains blocked from holding an account on this deployment, newest first."""
+    rows, count = await identities.list_blocked_emails(skip=skip, limit=limit)
+    return BlockedEmailsPublic(data=[BlockedEmailPublic.of(row) for row in rows], count=count)
+
+
+@router.post(
+    "/blocked-emails",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_deployment_administration)],
+)
+async def block_email(
+    identities: IdentityServiceDep,
+    current_identity: CurrentIdentity,
+    body: BlockedEmailCreateRequest,
+) -> BlockedEmailCreatedPublic:
+    """Block an address, or a domain and its subdomains, from holding an account on this deployment.
+
+    A blocked address cannot sign up, be added to or invited into an organization, or sign in by password,
+    passkey or provider, and nothing is mailed to it for signup, verification or a password reset. Every
+    existing account the entry matches has its dashboard sessions ended now; the account itself is kept, so
+    removing the entry lets it sign in again. API keys are not affected.
+
+    Refused with 400 for a value that is neither an address nor a domain, or one that would block your own
+    address or the deployment's bootstrap operator's, and with 409 for one already blocked.
+    """
+    block = await identities.block_email(actor=current_identity, value=body.value, reason=body.reason)
+    return BlockedEmailCreatedPublic(
+        **BlockedEmailPublic.of(block.entry).model_dump(), blocked_account_count=block.blocked_account_count
+    )
+
+
+@router.delete(
+    "/blocked-emails/{entry_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_administration)],
+)
+async def unblock_email(identities: IdentityServiceDep, current_identity: CurrentIdentity, entry_id: uuid.UUID) -> None:
+    """Remove a blocklist entry, so the accounts it matched may sign in again."""
+    await identities.unblock_email(actor=current_identity, entry_id=entry_id)

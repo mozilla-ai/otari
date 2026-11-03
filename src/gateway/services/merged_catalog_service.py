@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -30,7 +30,7 @@ from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
-from gateway.services.catalog import ModelArchitecture, apply_model_metadata, load_catalog_metadata
+from gateway.services.catalog import ModelArchitecture, ModelType, apply_model_metadata, load_catalog_metadata
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
 from gateway.services.policy_store import effective_policies
@@ -68,6 +68,8 @@ from gateway.services.workspace_scope import (
     organization_for_key_id,
     organization_for_workspace_id,
 )
+from gateway.types.models_dev import ModelsDevCatalog
+from gateway.types.price_unit import PriceUnit
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -102,11 +104,11 @@ class ModelPricingInfo(BaseModel):
     # pricing_service._pricing_tiers emits (a `min_input_tokens` of 0 fails
     # `gt=0`, and a tier with no rate override fails validate_has_rate_override).
     pricing_tiers: Sequence[PricingTier | dict[str, float | int]] = Field(default_factory=list)
-    # What the rates are per (``PRICING_UNITS``). A gateway-run tool's row is per
-    # million requests, and a reader that assumed tokens would be wrong by the
-    # whole unit; the catalog never lists one, but the field travels with the
-    # price so a caller reading one model is told too.
-    unit: str = "tokens"
+    # What the rates are per. A gateway-run tool's row is per million requests,
+    # and a reader that assumed tokens would be wrong by the whole unit; the
+    # catalog never lists one, but the field travels with the price so a caller
+    # reading one model is told too.
+    unit: PriceUnit = "tokens"
 
 
 def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
@@ -146,6 +148,9 @@ class ModelObject(BaseModel):
     name: str | None = None
     supported_parameters: list[str] | None = None
     architecture: ModelArchitecture | None = None
+    # What kind of model this is (``chat``, ``embedding``, ...; see ``services/catalog/_model_type``), so a
+    # client can offer chat models alone. ``None`` where neither the provider's listing nor models.dev says.
+    type: ModelType | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
@@ -201,7 +206,7 @@ def alias_model(
     target: str,
     pricing_lookup: dict[str, ModelPricing],
     *,
-    models_dev: dict[str, Any] | None,
+    models_dev: ModelsDevCatalog | None,
 ) -> ModelObject:
     """Build a ModelObject for an alias, from config.yml or from storage.
 
@@ -729,8 +734,10 @@ class MergedCatalog:
     """The selectors phase 1 heard from a provider, as opposed to only priced."""
     deployment_key_models: HostedModels = field(default_factory=dict)
     """What the caller reaches on a deployment-owned key; see :attr:`CatalogScope.deployment_key_models`."""
-    models_dev: dict[str, Any] | None = None
+    models_dev: ModelsDevCatalog | None = None
     """The models.dev catalog the limits were read from, for a reader that joins more of it."""
+    alias_targets: set[str] = field(default_factory=set)
+    """Canonical keys of the caller's alias targets, whether or not the listing withheld them."""
 
 
 async def build_merged_catalog(
@@ -824,7 +831,8 @@ async def build_merged_catalog(
     # the models.dev default then vanished from the dashboard along with its
     # rate, and the single-model read served the same model with its price all
     # along, so nothing was actually kept off the wire.
-    alias_targets = alias_target_keys(config, configured_aliases) if withhold_alias_targets else set()
+    targets = alias_target_keys(config, configured_aliases)
+    alias_targets = targets if withhold_alias_targets else set()
     models_dev = await load_catalog_metadata(config, cached_only=cached_only)
 
     merged: dict[str, ModelObject] = {}
@@ -988,6 +996,7 @@ async def build_merged_catalog(
         discovered_keys=discovered_keys,
         deployment_key_models=scope.deployment_key_models,
         models_dev=models_dev,
+        alias_targets=targets,
     )
 
 

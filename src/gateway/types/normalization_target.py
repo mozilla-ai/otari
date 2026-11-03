@@ -27,6 +27,8 @@ class NormalizationTarget:
     ``hosted_credential`` resolves the deployment's hosted provider for the head
     candidate, the rung dispatch falls back to when no stored key serves it, so
     an attachment moved to the provider ahead of the call uses the same key.
+    ``client_country`` is the country the request comes from, None when no source
+    knows it, which keeps such a side-call within ``provider_supported_countries``.
     """
 
     user_id: str
@@ -39,3 +41,4 @@ class NormalizationTarget:
     candidate_providers: tuple[LLMProvider | None, ...]
     upstream_user: str | None
     hosted_credential: Callable[[], Awaitable[ResolvedCredential | None]] | None = None
+    client_country: str | None = None

@@ -49,6 +49,7 @@ from gateway.services.tools import (
     NativeCall,
     ToolUseBudget,
     is_capped_call,
+    mcp_entry,
     native_rendering,
     owning_backend,
 )
@@ -234,10 +235,10 @@ async def _run_owned_calls(
     A call past ``budget`` is refused the same way, as a tool error the model reads.
 
     For a call to one of ``native_tools``, the request's tools announced in
-    ``otari_tool_calls``, this yields ``(False, entries)`` just before the call runs
-    and ``(True, entries)`` right after it returns, so a stream can send each while
-    the call waits or before the next one starts. A refused call yields only its
-    ended entries, since nothing ran.
+    ``otari_tool_calls``, or to an MCP server's tool, this yields ``(False, entries)``
+    just before the call runs and ``(True, entries)`` right after it returns, so a
+    stream can send each while the call waits or before the next one starts. A
+    refused call yields only its ended entries, since nothing ran.
     """
     for tc in mcp_calls:
         name = tc["function"]["name"]
@@ -253,9 +254,12 @@ async def _run_owned_calls(
             if rendering is not None:
                 yield True, rendering.refused(call)
             continue
+        owner = owning_backend(pool, name)
+        server = _mcp_server(owner, name) if rendering is None else None
         if rendering is not None:
             yield False, rendering.started(call)
-        owner = owning_backend(pool, name)
+        elif server is not None:
+            yield False, [mcp_entry(call, server, "in_progress")]
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
@@ -275,6 +279,14 @@ async def _run_owned_calls(
         results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
         if rendering is not None:
             yield True, rendering.ran(replace(call, failed=is_tool_error(text)), owner)
+        elif server is not None:
+            yield True, [mcp_entry(call, server, "failed" if is_tool_error(text) else "completed", text)]
+
+
+def _mcp_server(backend: ToolBackend, name: str) -> str | None:
+    """The MCP server ``backend`` calls ``name`` on, or ``None`` for a tool no MCP server supplied."""
+    server_name_for_tool = getattr(backend, "server_name_for_tool", None)
+    return server_name_for_tool(name) if callable(server_name_for_tool) else None
 
 
 async def _execute_mcp_calls(
@@ -771,6 +783,7 @@ async def mcp_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
     emit_activity: bool = False,
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
@@ -782,8 +795,8 @@ async def mcp_tool_loop_stream(
     is the final answer", and most SDKs stop reading at that point; subsequent
     iterations' content would be silently truncated.
 
-    A call to one of ``native_tools`` is reported in an ``otari_tool_calls`` chunk
-    when it starts and another when it ends.
+    A call to one of ``native_tools`` or to an MCP server's tool is reported in an
+    ``otari_tool_calls`` chunk when it starts and another when it ends.
 
     The terminal chunk is forwarded in three cases:
       * the iteration ended with a non-``tool_calls`` finish_reason (e.g. ``stop``),
@@ -803,6 +816,7 @@ async def mcp_tool_loop_stream(
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            on_first_response=on_first_response,
         )
     ) as inner:
         async for chunk in inner:
@@ -821,7 +835,7 @@ async def mcp_tool_loop(
     """Non-streaming variant. Accumulates usage across iterations into the returned completion.
 
     The completion carries the ended ``otari_tool_calls`` entry of each call to one of
-    ``native_tools``, across every round.
+    ``native_tools`` or to an MCP server's tool, across every round.
 
     ``on_first_response`` follows the provider lock-in contract documented on
     :func:`gateway.services._tool_loop.run_tool_loop`.

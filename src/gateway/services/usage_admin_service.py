@@ -139,13 +139,13 @@ class UsageSetPriceResult(BaseModel):
     unchanged: int = 0
 
 
-def usage_in(workspaces: Select[tuple[uuid.UUID]]) -> ColumnElement[bool]:
+def usage_in(workspaces: Select[uuid.UUID]) -> ColumnElement[bool]:
     """Match the usage rows of these workspaces: the scope of the operator's usage reads."""
     return UsageLog.workspace_id.in_(workspaces)
 
 
 def _selection_conditions(
-    selection: UsageSelection, *, workspace_ids: Collection[uuid.UUID] | Select[tuple[uuid.UUID]]
+    selection: UsageSelection, *, workspace_ids: Collection[uuid.UUID] | Select[uuid.UUID]
 ) -> list[ColumnElement[bool]]:
     """WHERE conditions for a selection, always scoped to imported rows in the caller's workspaces.
 
@@ -218,7 +218,7 @@ def _selection_conditions(
 
 
 async def delete_usage(
-    db: AsyncSession, request: UsageDeleteRequest, *, workspace_ids: Collection[uuid.UUID] | Select[tuple[uuid.UUID]]
+    db: AsyncSession, request: UsageDeleteRequest, *, workspace_ids: Collection[uuid.UUID] | Select[uuid.UUID]
 ) -> UsageDeleteResult:
     """Delete the imported usage rows a selection matches.
 
@@ -282,7 +282,7 @@ def _row_usage(row: UsageLog) -> BillableUsage:
 
 
 async def set_usage_price(
-    db: AsyncSession, request: UsageSetPriceRequest, *, workspace_ids: Collection[uuid.UUID] | Select[tuple[uuid.UUID]]
+    db: AsyncSession, request: UsageSetPriceRequest, *, workspace_ids: Collection[uuid.UUID] | Select[uuid.UUID]
 ) -> UsageSetPriceResult:
     """Recompute cost for matched imported rows from manual per-1M rates.
 

@@ -170,6 +170,59 @@ async def test_monitor_mode_fails_open_when_no_url(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_a_check_that_ran_is_evaluated(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_transport(monkeypatch, _result_handler({"valid": True, "score": 0.02}))
+    verdict = await run_input_guardrails([GuardrailConfig(profile="prompt-injection")], "hello", default_url=_URL)
+    assert verdict.results[0].status == "evaluated"
+    assert verdict.results[0].unavailable is None
+
+
+@pytest.mark.asyncio
+async def test_a_service_that_answers_no_verdict_is_inconclusive(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_transport(monkeypatch, _result_handler({"valid": None, "explanation": "no label", "score": None}))
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="monitor")], "x", default_url=_URL
+    )
+    assert verdict.results[0].status == "inconclusive"
+    assert verdict.results[0].unavailable is None
+
+
+@pytest.mark.asyncio
+async def test_a_check_with_no_service_configured_says_so() -> None:
+    """Otari#2690: an unconfigured service and a failed one must not look alike."""
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="monitor")], "x", default_url=None
+    )
+    assert verdict.results[0].status == "unavailable"
+    assert verdict.results[0].unavailable == "not_configured"
+
+
+@pytest.mark.asyncio
+async def test_a_check_the_service_failed_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_transport(monkeypatch, lambda _request: httpx.Response(404, json={"detail": "unknown profile"}))
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block", on_unavailable="monitor")], "x", default_url=_URL
+    )
+    assert verdict.results[0].status == "unavailable"
+    assert verdict.results[0].unavailable == "evaluation_failed"
+
+
+@pytest.mark.asyncio
+async def test_a_definition_this_worker_does_not_hold_is_a_failed_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not ``not_configured``: the organization configured it, and it did not run."""
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="pi", mode="monitor")],
+        "x",
+        default_url=None,
+        mandated={"pi"},
+        in_process={"pi": None},
+    )
+    assert verdict.results[0].unavailable == "evaluation_failed"
+
+
+@pytest.mark.asyncio
 async def test_malformed_result_block_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     """A result with no usable 'valid' must not silently pass a block guardrail."""
     _patch_transport(monkeypatch, _result_handler({}))  # no 'valid' field

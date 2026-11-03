@@ -17,12 +17,11 @@ import uuid
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import httpx
+import httpx2
 import pytest
 import uvicorn
-from mcp.server.fastmcp import FastMCP
-from mcp.shared.exceptions import McpError
-from mcp.types import ErrorData
+from mcp.server.mcpserver import MCPServer
+from mcp.shared.exceptions import MCPError
 
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.services import mcp_stateless
@@ -79,7 +78,7 @@ def refusing() -> Iterator[str]:
 @pytest.fixture(scope="module", params=[False, True], ids=["sse", "json"])
 def mcp_url(request: pytest.FixtureRequest) -> Iterator[str]:
     """A real streamable HTTP MCP server, answering in both of the transport's response modes."""
-    app = FastMCP("check", json_response=request.param)
+    app = MCPServer("check")
 
     @app.tool()
     def list_issues() -> str:
@@ -92,7 +91,11 @@ def mcp_url(request: pytest.FixtureRequest) -> Iterator[str]:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app.streamable_http_app(), host="127.0.0.1", port=port, log_level="error"))
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app.streamable_http_app(json_response=request.param), host="127.0.0.1", port=port, log_level="error"
+        )
+    )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     for _ in range(100):
@@ -193,25 +196,25 @@ async def test_a_check_with_no_free_slot_raises_rather_than_reporting_the_server
 @pytest.mark.asyncio
 async def test_a_notification_acknowledged_without_a_body_is_not_refused() -> None:
     """Only a request is owed an MCP body; a 200 for a notification may carry none."""
-    notification = httpx.Request(
+    notification = httpx2.Request(
         "POST", "https://mcp.example.com/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}
     )
-    request = httpx.Request("POST", "https://mcp.example.com/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "x"})
+    request = httpx2.Request("POST", "https://mcp.example.com/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "x"})
 
-    await refuse_unusable_answer(httpx.Response(200, request=notification))
+    await refuse_unusable_answer(httpx2.Response(200, request=notification))
     with pytest.raises(Exception) as raised:
-        await refuse_unusable_answer(httpx.Response(200, request=request))
+        await refuse_unusable_answer(httpx2.Response(200, request=request))
     assert classify_check_failure(raised.value) == (CheckFailure.NOT_MCP, None)
 
 
 @pytest.mark.asyncio
 async def test_the_event_stream_get_may_be_refused() -> None:
     """The SDK opens a GET stream after initializing and treats a 405 there as normal."""
-    await refuse_unusable_answer(httpx.Response(405, request=httpx.Request("GET", "https://mcp.example.com/mcp")))
+    await refuse_unusable_answer(httpx2.Response(405, request=httpx2.Request("GET", "https://mcp.example.com/mcp")))
 
 
 def test_a_protocol_error_inside_a_group_is_not_mcp() -> None:
-    group = ExceptionGroup("tg", [ExceptionGroup("inner", [McpError(ErrorData(code=-32600, message="x"))])])
+    group = ExceptionGroup("tg", [ExceptionGroup("inner", [MCPError(-32600, "x")])])
 
     assert classify_check_failure(group) == (CheckFailure.NOT_MCP, None)
 

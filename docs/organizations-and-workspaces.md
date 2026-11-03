@@ -77,7 +77,7 @@ Organization and workspace memberships use four roles:
 | Owner | Full management, including organization administration |
 | Admin | Manage most organization or workspace resources |
 | Member | Use the workspace and read permitted resources |
-| Viewer | Read-only access |
+| Viewer | Read-only: sees the API keys billed to them but cannot create, change, rotate or delete one, and cannot run Playground completions or uploads |
 
 ### Workspace-scoped spend
 

@@ -24,11 +24,12 @@ describe("ActivityPage filter serialization", () => {
       `${API_ROOT}/usage/count`,
       `${API_ROOT}/usage/summary`,
     ]) {
-      const hit = requested.find((url) => url.includes(path))
-      expect(hit, `no request to ${path}`).toBeDefined()
-      expect(hit, `${path} dropped the tool filter`).toContain(
-        "tool=web_search",
-      )
+      expect(
+        requested.some(
+          (url) => url.includes(path) && url.includes("tool=web_search"),
+        ),
+        `${path} dropped the tool filter`,
+      ).toBe(true)
     }
   })
 

@@ -53,7 +53,9 @@ describe("ActivityPage trace link", () => {
     await openRow()
 
     await waitFor(() => expect(lookups(calls)).toHaveLength(1))
-    expect(screen.getByText("Request detail")).toBeInTheDocument()
+    expect(
+      screen.getByRole("complementary", { name: "Request detail" }),
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("link", { name: "View trace" }),
     ).not.toBeInTheDocument()
@@ -68,7 +70,9 @@ describe("ActivityPage trace link", () => {
 
     await openRow()
 
-    expect(await screen.findByText("Request detail")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("complementary", { name: "Request detail" }),
+    ).toBeInTheDocument()
     expect(lookups(calls)).toEqual([])
     expect(
       screen.queryByRole("link", { name: "View trace" }),

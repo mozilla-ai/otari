@@ -1,11 +1,7 @@
-"""Data access for an organization's web search and fetch keys and its workspaces' overrides.
-
-:func:`resolve_web_search_key` decides which key of a kind a workspace uses. It is a pure
-function over rows the repository already loaded, so it is tested without a database.
-"""
+"""Data access for an organization's web search and fetch keys and its workspaces' overrides."""
 
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import Select, func, select, update
@@ -28,28 +24,6 @@ class WebSearchKeyConflict(Exception):
 
 # One live key and this workspace's override of it, ``None`` where the workspace inherits.
 SearchKeyCandidate = tuple[OrgWebSearchKey, WorkspaceWebSearchKeyOverride | None]
-
-
-def resolve_web_search_key(
-    candidates: Sequence[SearchKeyCandidate], usable: Callable[[OrgWebSearchKey], bool]
-) -> OrgWebSearchKey | None:
-    """The key of one kind a workspace uses, or ``None`` where it uses the deployment's instance.
-
-    A request names no provider, so one key is chosen across all of them, among
-    ``candidates`` of a single kind:
-
-    1. The key the workspace pinned.
-    2. Otherwise the organization's default.
-    3. Otherwise the organization's oldest key.
-
-    A key the workspace turned off, or one this deployment cannot decrypt, is passed over.
-    ``usable`` is asked of keys in that order and only until one passes.
-    ``candidates`` must be oldest-first, which is the order the repository returns.
-    """
-    live = [(key, override) for key, override in candidates if override is None or not override.disabled]
-    pinned = [key for key, override in live if override is not None and override.is_default]
-    defaults = [key for key, _ in live if key.is_org_default]
-    return next((key for key in (*pinned, *defaults, *(key for key, _ in live)) if usable(key)), None)
 
 
 class OrgWebSearchKeyRepository(
@@ -180,6 +154,14 @@ class OrgWebSearchKeyRepository(
         await self.db.refresh(key)
         return key
 
+    async def unset_org_default(self, key: OrgWebSearchKey) -> OrgWebSearchKey:
+        """Stop ``key`` being its kind's default. A key that is not the default is returned unchanged."""
+        if key.is_org_default:
+            key.is_org_default = False
+            await self.db.flush()
+            await self.db.refresh(key)
+        return key
+
 
 class WorkspaceWebSearchKeyOverrideRepository:
     """``workspace_web_search_key_overrides`` rows, always addressed by (workspace, key)."""
@@ -248,7 +230,7 @@ class WorkspaceWebSearchKeyOverrideRepository:
 
     def _candidates(
         self, organization_id: uuid.UUID, workspace_id: uuid.UUID, kind: str | None = None
-    ) -> Select[tuple[OrgWebSearchKey, WorkspaceWebSearchKeyOverride]]:
+    ) -> Select[OrgWebSearchKey, WorkspaceWebSearchKeyOverride]:
         """The organization's live keys, of ``kind`` or every kind, each with this workspace's override or ``None``."""
         query = (
             select(OrgWebSearchKey, WorkspaceWebSearchKeyOverride)
@@ -270,7 +252,7 @@ class WorkspaceWebSearchKeyOverrideRepository:
                 WorkspaceWebSearchKeyOverride.is_default.is_(True) | OrgWebSearchKey.is_org_default.is_(True)
             )
         )
-        return [(key, override) for key, override in result.tuples()]
+        return [(key, override) for key, override in result.all()]
 
     async def candidate_page(
         self,
@@ -280,21 +262,13 @@ class WorkspaceWebSearchKeyOverrideRepository:
         skip: int,
         limit: int,
         kind: str | None = None,
-        enabled_only: bool = False,
     ) -> list[SearchKeyCandidate]:
-        """A page of the live keys of ``kind`` or every kind, oldest-first.
-
-        ``enabled_only`` leaves out those the workspace turned off.
-        """
+        """A page of the live keys of ``kind`` or every kind, oldest-first."""
         query = self._candidates(organization_id, workspace_id, kind)
-        if enabled_only:
-            query = query.where(
-                WorkspaceWebSearchKeyOverride.disabled.is_(None) | WorkspaceWebSearchKeyOverride.disabled.is_(False)
-            )
         result = await self.db.execute(
             query.order_by(OrgWebSearchKey.created_at, OrgWebSearchKey.id).offset(skip).limit(limit)
         )
-        return [(key, override) for key, override in result.tuples()]
+        return [(key, override) for key, override in result.all()]
 
     async def count_candidates(self, *, organization_id: uuid.UUID) -> int:
         """How many live keys the organization holds."""

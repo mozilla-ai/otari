@@ -223,15 +223,19 @@ class HostedProvider(Base):
     restricted_to_organization_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("organization.id", ondelete="RESTRICT"), index=True, default=None
     )
+    # The ISO country codes whose requests this provider serves, or None for
+    # every country. Checked as well as ``provider_supported_countries``.
+    supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
     )
 
 
-HostedModelDisabledReason = Literal["unpriced", "operator"]
+HostedModelDisabledReason = Literal["unpriced", "operator", "unavailable"]
 DISABLED_UNPRICED: HostedModelDisabledReason = "unpriced"
 DISABLED_BY_OPERATOR: HostedModelDisabledReason = "operator"
+DISABLED_UNAVAILABLE: HostedModelDisabledReason = "unavailable"
 
 
 class HostedProviderModel(Base):
@@ -249,7 +253,8 @@ class HostedProviderModel(Base):
 
     ``disabled_reason`` says why a row is off, and is null exactly when it is
     on: ``unpriced`` while it waits for a rate, ``operator`` while an operator
-    has switched it off. ``serves_unpriced`` marks a row switched on without a
+    has switched it off, ``unavailable`` since its provider refused to serve it
+    on the deployment's credential. ``serves_unpriced`` marks a row switched on without a
     rate on purpose, so a refresh does not hold it for one.
     """
 

@@ -239,6 +239,58 @@ async def test_search_calls_are_metered_priced_and_spent(
     assert after - before == pytest.approx(float(row.cost), rel=1e-6)
 
 
+def _key_on_budget(client: TestClient, master_key_header: dict[str, str], user_id: str, max_budget: float) -> str:
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": max_budget}, headers=master_key_header).json()
+    client.post(
+        f"{API_ROOT}/users", json={"user_id": user_id, "budget_id": budget["budget_id"]}, headers=master_key_header
+    )
+    key = client.post(
+        f"{API_ROOT}/keys", json={"key_name": f"{user_id}-key", "user_id": user_id}, headers=master_key_header
+    ).json()
+    return str(key["key"])
+
+
+@pytest.mark.asyncio
+async def test_a_search_that_would_pass_the_budget_is_refused_instead_of_run(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    model_pricing: dict[str, Any],
+    search_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Each search is held before it runs, so three asked for on a $0.025 budget run two and settle under it."""
+    key = _key_on_budget(client, master_key_header, "tool-capped-user", 0.025)
+    responses = [_completion(tool_call=True)] * 3 + [_completion(tool_call=False)]
+    search = AsyncMock(return_value="search results for otari")
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "otari_web_search"}],
+                "max_tool_iterations": 4,
+            },
+            headers={API_KEY_HEADER: f"Bearer {key}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert search.await_count == 2, "the third search never reached the search backend"
+    row = _latest_row(db_session_factory, "tool-capped-user")
+    assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"] == {
+        "billed": 2,
+        "errors": 1,
+        "unit_rate": pytest.approx(_SEARCH_UNIT_COST),
+    }
+    assert _spend(db_session_factory, "tool-capped-user") <= 0.025
+    user = client.get(f"{API_ROOT}/users/tool-capped-user", headers=master_key_header).json()
+    assert user["reserved"] == pytest.approx(0.0), "the tool holds were released at settlement"
+
+
 @pytest.mark.asyncio
 async def test_failed_search_is_counted_but_never_billed(
     client: TestClient,

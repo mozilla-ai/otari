@@ -21,6 +21,12 @@ track usage.
 
 </div>
 
+> [!NOTE]
+> **Developers Wilding, our AI hackathon at MozFest, runs until November 11.**
+> Build something with Otari and open-weight models for a chance at the $1,000
+> prize (plus runner-up prizes) and dedicated time with our AI engineers.
+> [Details and submissions](https://otari.ai/devs-wilding).
+
 <p align="center">
   <img src="assets/otari-demo.gif" width="720" alt="Otari dashboard tour: spend overview, usage by model, a request rescued by a routing fallback, two models compared in the Playground, the model catalog, routing policies, API keys, members, budgets, and providers"/>
 </p>

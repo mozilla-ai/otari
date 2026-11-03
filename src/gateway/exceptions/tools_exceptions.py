@@ -111,6 +111,10 @@ class WebSearchInterceptedError(TenancyForbiddenError):
     """A request asked the provider to run a web search this deployment runs on its own backend."""
 
 
+class WebToolExecutorPinnedError(TenancyForbiddenError):
+    """A request's header asked for a different web tool executor than its workspace pinned."""
+
+
 class WebAccessRefusedError(Exception):
     """A workspace's web search policy refuses the web access a request declared."""
 
@@ -251,6 +255,20 @@ class WebSearchKeySettingRefusedError(TenancyValidationError):
         super().__init__(f"{field}: {problem}")
 
 
+class WebSearchKeyCredentialRequiredError(TenancyValidationError):
+    """A new ``api_base`` on a key that holds a credential, sent without the credential.
+
+    The next call would send the stored credential to the new host, and an
+    organization admin only ever reads a key's ``last4``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Changing a key's api_base sends its credentials to the new host: "
+            "send api_key, and any hidden options credential, again in the same request"
+        )
+
+
 class WebSearchKeyNameRequiredError(TenancyValidationError):
     def __init__(self) -> None:
         super().__init__("A web search key needs a name")
@@ -306,6 +324,34 @@ class SearchToolNotFoundError(TenancyNotFoundError):
 
     def __init__(self, name: str):
         super().__init__(f"No search or fetch instance '{name}'.")
+
+
+class StoredSearchToolNotFoundError(TenancyNotFoundError):
+    """No stored search or fetch instance has this name.
+
+    The message says when the name is a config-file instance or the built-in
+    fetcher, which the API cannot change.
+    """
+
+
+class SearchToolAlreadyStoredError(TenancyConflictError):
+    """A create named a stored instance, or collided with a write another create committed first."""
+
+
+class SearchToolChangedError(TenancyError):
+    """An update expected a version of the stored instance other than the one stored."""
+
+    status_code = status.HTTP_412_PRECONDITION_FAILED
+
+    def __init__(self) -> None:
+        super().__init__("This search tool was modified since you loaded it; reload and retry.")
+
+
+class SearchToolKeyUnstorableError(TenancyValidationError):
+    """An API key cannot be stored or re-encrypted, because ``OTARI_SECRET_KEY`` is missing or invalid.
+
+    Its message is the secret box's own, which carries no key material.
+    """
 
 
 class SearchToolMisconfiguredError(TenancyValidationError):
@@ -411,10 +457,14 @@ __all__ = [
     "SandboxCredentialRefusedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
+    "SearchToolAlreadyStoredError",
+    "SearchToolChangedError",
+    "SearchToolKeyUnstorableError",
     "SearchToolMisconfiguredError",
     "SearchToolNotFoundError",
     "SearchToolRefusedError",
     "SearchToolSelectionError",
+    "StoredSearchToolNotFoundError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",

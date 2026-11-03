@@ -28,7 +28,9 @@ Codex appends `/responses`, so `base_url` must include `/api/v1`.
 using its built-in OpenAI provider.
 
 For otari.ai, set `base_url = "https://api.otari.ai/api/v1"` and export an API
-key from otari.ai as `OTARI_API_KEY`; the rest of the block is the same.
+key from otari.ai as `OTARI_API_KEY`; the rest of the block is the same. Accounts in otari.ai's EU region use
+`base_url = "https://eu.api.otari.ai/api/v1"` instead: `api.otari.ai` answers an
+EU key with `421 Misdirected Request`, naming the host to use.
 
 The official [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
 is the source of truth for custom-provider keys and supported options.

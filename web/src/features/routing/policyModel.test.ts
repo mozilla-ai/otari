@@ -11,6 +11,7 @@ import {
   findFallthroughTarget,
   findRouterBackend,
   findWeights,
+  isEditableInForm,
   normalizeBackend,
 } from "./policyModel"
 
@@ -39,6 +40,19 @@ describe("defaultTargetOf", () => {
     expect(findFallthroughTarget({ select: [] } as unknown as PolicySpec)).toBe(
       "",
     )
+  })
+})
+
+describe("isEditableInForm", () => {
+  it.each(["knn", " KNN "])("keeps %s policies read-only", (router) => {
+    expect(
+      isEditableInForm({
+        select: [
+          { router, candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
+          { default: "openai:gpt-5" },
+        ],
+      }),
+    ).toBe(false)
   })
 })
 

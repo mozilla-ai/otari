@@ -20,6 +20,7 @@ const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   metadata: {},
   reject_user_mismatch: null,
   is_service_key: false,
+  is_organization_service_key: false,
   end_user_budget_id: null,
   end_user_budget_ids: [],
   max_end_users: null,

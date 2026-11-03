@@ -199,6 +199,26 @@ def test_a_legacy_spelling_of_an_organizations_own_offering_lists_it_first() -> 
         selectors.reset_selector_index()
 
 
+def test_organization_offerings_name_only_that_organizations_own_keys() -> None:
+    deployment = [selectors.OfferingRow("azure:gpt-4o", "azure", "azureopenai", 2.5)]
+    own = [selectors.OfferingRow("openai:gpt-4o", "openai", "openai", 2.5)]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o", "openai:gpt-4o"))
+    }
+    view = selectors.build_organization_selectors(deployment, own, identities)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment, {"openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o",))}, organizations={_ORG_A: view}
+        )
+    )
+    try:
+        assert selectors.organization_offerings(organization_id=_ORG_A) == frozenset({"openai:gpt-4o"})
+        assert selectors.organization_offerings(organization_id=_ORG_B) == frozenset()
+        assert selectors.organization_offerings() == frozenset()
+    finally:
+        selectors.reset_selector_index()
+
+
 def test_a_vendor_is_matched_to_its_own_provider_by_the_identity_table() -> None:
     """``moonshotai`` is the vendor's id segment; ``moonshot`` is the provider it publishes on."""
     rows = [
@@ -333,6 +353,31 @@ def test_catalog_models_list_each_id_in_the_callers_view_with_its_order_and_name
     assert theirs["z-ai/glm-5.3"].offerings[0] == "nebius:zai-org/GLM-5.3"
     # No name indexed: the catalog ID stands in for one.
     assert theirs["openai/gpt-oss-120b"].name == "openai/gpt-oss-120b"
+
+
+def test_an_offerings_input_rate_is_the_one_the_callers_organization_pays() -> None:
+    """The organization's view answers for the offerings it touches, the deployment's for the rest."""
+    own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", 0.9)]
+    repriced = [selectors.OfferingRow("nebius:zai-org/GLM-5.3", "nebius", "nebius", 0.4), *_ROWS[1:]]
+    identities = {
+        **_IDENTITIES,
+        "z-ai/glm-5.3": ("glm-5.3", (*_IDENTITIES["z-ai/glm-5.3"][1], "together:zai-org/GLM-5.3")),
+    }
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            _ROWS,
+            _IDENTITIES,
+            organizations={_ORG_A: selectors.build_organization_selectors(repriced, own, identities)},
+        )
+    )
+    try:
+        assert selectors.offering_input_rate("nebius:zai-org/GLM-5.3", organization_id=_ORG_A) == 0.4
+        assert selectors.offering_input_rate("together:zai-org/GLM-5.3", organization_id=_ORG_A) == 0.9
+        assert selectors.offering_input_rate("nebius:zai-org/GLM-5.3", organization_id=_ORG_B) == 0.5
+        assert selectors.offering_input_rate("together:zai-org/GLM-5.3", organization_id=_ORG_B) is None
+        assert selectors.offering_input_rate("cerebras:gpt-oss-120b", organization_id=_ORG_A) is None
+    finally:
+        selectors.reset_selector_index()
 
 
 def test_an_organizations_unpriced_key_follows_the_priced_offerings() -> None:

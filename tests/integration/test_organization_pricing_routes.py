@@ -1564,14 +1564,14 @@ def test_the_model_listing_states_the_organizations_own_rate(
         listing = listing_client.get(f"{API_ROOT}/models", headers=header)
         assert listing.status_code == status.HTTP_200_OK, listing.text
         by_id = {model["id"]: model for model in listing.json()["data"]}
-        assert by_id["openai:gpt-4o-mini"]["pricing_source"] == "organization"
-        assert by_id["openai:gpt-4o-mini"]["pricing"]["input_price_per_million"] == 2.5
+        assert by_id["openai/gpt-4o-mini"]["pricing_source"] == "organization"
+        assert by_id["openai/gpt-4o-mini"]["pricing"]["input_price_per_million"] == 2.5
         assert by_id["fast"]["pricing_source"] == "organization"
         assert by_id["fast"]["pricing"]["input_price_per_million"] == 2.5
-        assert by_id["openai:gpt-4.1"]["pricing_source"] == "configured"
-        assert by_id["openai:gpt-4.1"]["pricing"]["input_price_per_million"] == 3.0
+        assert by_id["openai/gpt-4.1"]["pricing_source"] == "configured"
+        assert by_id["openai/gpt-4.1"]["pricing"]["input_price_per_million"] == 3.0
 
-        for model_id in ("fast", "openai:gpt-4o-mini"):
+        for model_id in ("fast", "openai/gpt-4o-mini", "openai:gpt-4o-mini"):
             single = listing_client.get(f"{API_ROOT}/models/{model_id}", headers=header)
             assert single.status_code == status.HTTP_200_OK, single.text
             assert single.json()["pricing_source"] == "organization"

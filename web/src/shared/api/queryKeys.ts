@@ -22,6 +22,7 @@ export const PRICING = "pricing"
 export const SETTINGS = "settings"
 export const MAIL_SETTINGS = "mail-settings"
 export const MAINTENANCE_MODE = "maintenance-mode"
+export const COUNTRY_DATABASE = "country-database"
 export const RATE_LIMIT_RULES = "rate-limit-rules"
 // One indexed single-row read, and only while the settings page is mounted.
 export const MAINTENANCE_MODE_POLL_MS = 30_000
@@ -44,7 +45,6 @@ export const BUILTIN_GUARDRAIL_CATALOG = "builtin-guardrail-catalog"
 // sibling share a head that one invalidation covers. See `useRoutingScope`.
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
-export const ROUTER_STATUS = "router-status"
 export const AUTOMATIC_FALLBACKS = "automatic-fallbacks"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
@@ -92,6 +92,9 @@ export const HOSTED_PROVIDERS = "hosted-providers"
 export const HOSTED_PROVIDER_AVAILABLE_MODELS =
   "hosted-provider-available-models"
 export const HOSTED_CATALOG_UPDATE_PREVIEW = "hosted-catalog-update-preview"
+// The decision models that pick a subagent's model. One root: switching one on
+// switches the others off on the server, so every write refetches the list.
+export const AGENT_RECOMMENDERS = "agent-recommenders"
 // The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
 // the organization context cannot describe because it has no organization. Not
 // a child of ORGANIZATIONS: switching organization does not change who you are.
@@ -115,6 +118,10 @@ export const ORGANIZATION_GUARDRAIL_DEFINITIONS =
 // reason the two above have one: this is read by one page, and a credential
 // edit has no business refetching the organization context every page reads.
 export const ORGANIZATION_PROVIDER_KEYS = "organization-provider-keys"
+// The organization's own search and fetch keys, for the same reason: one page
+// reads them. A write also moves each workspace's view of them, which sits
+// under WORKSPACES, so the hooks invalidate that view by name.
+export const ORGANIZATION_WEB_SEARCH_KEYS = "organization-web-search-keys"
 // The models an organization offers on one of its provider keys. Its own root
 // key rather than a child of ORGANIZATION_PROVIDER_KEYS: making a key default or
 // archiving one does not move a model row, and nesting would refetch every open

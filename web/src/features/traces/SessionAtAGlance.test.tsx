@@ -22,7 +22,7 @@ function stats(overrides: Partial<SessionStats> = {}): SessionStats {
       { tool: "Grep", calls: 1, runningMs: 1 * s },
     ],
     gates: { runs: 9, verdicts: { passed: 8, flagged: 1 } },
-    judges: { calls: 0, models: [], cost: 0, priced: 0 },
+    judges: { calls: 0, cost: 0, priced: 0 },
     time: {
       modelMs: 221 * s,
       toolsMs: 78 * s,
@@ -45,7 +45,7 @@ function stats(overrides: Partial<SessionStats> = {}): SessionStats {
   }
 }
 
-// A row of one of the panel's lists, by the name it leads with.
+// A cell or row of one of the panel's lists, by the name it leads with.
 const row = (name: string) => {
   const item = screen.getByText(name).closest("li")
   if (!item) throw new Error(`no row named ${name}`)
@@ -53,24 +53,37 @@ const row = (name: string) => {
 }
 
 describe("SessionAtAGlance", () => {
-  it("says where the time went, a row a part, idle last", () => {
+  it("leads with how long the session took and what it did, then a cell a part, idle last", () => {
     render(<SessionAtAGlance stats={stats()} cost={1.84} />)
 
-    expect(screen.getByText("6m 12s")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Took 6m 12s" }),
+    ).toBeInTheDocument()
+    expect(screen.getByText("4 turns · 22 tool calls")).toBeInTheDocument()
     expect(
       within(row("Model requests")).getByText("3m 41s"),
     ).toBeInTheDocument()
-    expect(within(row("Model requests")).getByText("59%")).toBeInTheDocument()
     expect(within(row("Idle")).getByText("between turns")).toBeInTheDocument()
     expect(within(row("Idle")).getByText("12.00 s")).toBeInTheDocument()
+    // The bar shows the proportions; the cells give the times alone.
+    expect(screen.queryByText("59%")).not.toBeInTheDocument()
     expect(screen.queryByText(/draws it shorter/)).not.toBeInTheDocument()
   })
 
-  it("keeps the tools closed until the row is opened, by pointer or by keyboard", async () => {
+  it("counts the tool calls subagents made", () => {
+    render(<SessionAtAGlance stats={stats({ inSubagents: 5 })} cost={1.84} />)
+
+    expect(
+      screen.getByText("4 turns · 22 tool calls, 5 in subagents"),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the tools closed until the cell is opened, by pointer or by keyboard", async () => {
     const user = userEvent.setup()
     render(<SessionAtAGlance stats={stats()} cost={1.84} />)
     const tools = screen.getByRole("button", { name: /^Running tools/ })
 
+    expect(tools).toHaveAccessibleName(/4 tools/)
     expect(tools).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByText("Bash")).not.toBeVisible()
 
@@ -85,7 +98,7 @@ describe("SessionAtAGlance", () => {
     expect(screen.getByText("Bash")).not.toBeVisible()
   })
 
-  it("names a lone tool in its row, with nothing to open", () => {
+  it("names a lone tool in its cell, with nothing to open", () => {
     render(
       <SessionAtAGlance
         stats={stats({ tools: [{ tool: "Read", calls: 4, runningMs: 900 }] })}
@@ -97,10 +110,13 @@ describe("SessionAtAGlance", () => {
     expect(
       within(row("Running tools")).getByText("Read, 4 calls"),
     ).toBeInTheDocument()
-    // Layout jsdom cannot compute: a long tool name gives way before the
-    // figures beside it, which only the class can show here.
+    // Layout jsdom cannot compute: in a half-width cell the tool gives way
+    // before the label and the figure beside it, which only the classes show.
     expect(within(row("Running tools")).getByText("Read, 4 calls")).toHaveClass(
       "truncate",
+    )
+    expect(within(row("Running tools")).getByText("Running tools")).toHaveClass(
+      "shrink-0",
     )
   })
 
@@ -128,9 +144,13 @@ describe("SessionAtAGlance", () => {
       />,
     )
 
-    expect(screen.getByText("6d 01h")).toBeInTheDocument()
     expect(
-      screen.getByText(/^Idle is 94% of it, so the bar draws it shorter/),
+      screen.getByRole("heading", { name: "Took 6d 01h" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /^Idle is 94% of the session, so the bar draws it shorter/,
+      ),
     ).toBeInTheDocument()
   })
 
@@ -147,27 +167,28 @@ describe("SessionAtAGlance", () => {
       />,
     )
 
-    expect(within(row("Model requests")).getByText("100%")).toBeInTheDocument()
+    expect(
+      within(row("Model requests")).getByText("40.00 s"),
+    ).toBeInTheDocument()
     expect(screen.getByText(/get a lane of their own/)).toBeInTheDocument()
   })
 
-  it("splits the cost by meter, and says what the cache saved", () => {
+  it("leads with the cost and what it counts, split by meter, and says what the cache saved", () => {
     render(<SessionAtAGlance stats={stats()} cost={1.84} />)
 
-    expect(screen.getByText("$1.84")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Cost $1.84" }),
+    ).toBeInTheDocument()
+    expect(screen.getByText("31 requests · 1.39M tokens")).toBeInTheDocument()
     expect(
       within(row("Writing the cache")).getByText("$0.71"),
     ).toBeInTheDocument()
-    expect(
-      within(row("Writing the cache")).getByText("39%"),
-    ).toBeInTheDocument()
-    expect(
-      within(row("Reading the cache")).getByText("1,240,388 tokens"),
-    ).toBeInTheDocument()
+    expect(screen.queryByText("39%")).not.toBeInTheDocument()
+    expect(screen.queryByText(/1,240,388/)).not.toBeInTheDocument()
     expect(screen.getByText(/saved about \$5\.58/)).toBeInTheDocument()
   })
 
-  it("splits the cost by model when the requests were priced whole, without a 100% for one", () => {
+  it("names no model when the requests were priced whole", () => {
     render(
       <SessionAtAGlance
         stats={stats({
@@ -181,10 +202,10 @@ describe("SessionAtAGlance", () => {
       />,
     )
 
-    const model = row("claude-sonnet-5-5")
-    expect(within(model).getByText("44 requests")).toBeInTheDocument()
-    expect(within(model).getByText("$5.60")).toBeInTheDocument()
-    expect(within(model).queryByText("100%")).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Cost $5.60" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("claude-sonnet-5-5")).not.toBeInTheDocument()
     expect(screen.getByText(/priced whole/)).toBeInTheDocument()
   })
 
@@ -228,26 +249,19 @@ describe("SessionAtAGlance", () => {
   it("says what the judge gates cost apart from the split, and how much of it is priced", () => {
     render(
       <SessionAtAGlance
-        stats={stats({
-          judges: {
-            calls: 3,
-            models: ["claude-haiku-5-5"],
-            cost: 0.01,
-            priced: 1,
-          },
-        })}
+        stats={stats({ judges: { calls: 3, cost: 0.01, priced: 1 } })}
         cost={1.85}
       />,
     )
 
     expect(
       screen.getByText(
-        "Judge gates called claude-haiku-5-5 3 times, for $0.01 the split above leaves out, from the 1 call priced.",
+        "Judge gates made 3 model calls, for $0.01 the split above leaves out, from the 1 call priced.",
       ),
     ).toBeInTheDocument()
   })
 
-  it("keeps a part too small to round to 1% on the panel", () => {
+  it("keeps a part too short to round to 1% on the panel", () => {
     render(
       <SessionAtAGlance
         stats={stats({
@@ -259,6 +273,28 @@ describe("SessionAtAGlance", () => {
       />,
     )
 
-    expect(within(row("Waiting on you")).getByText("<1%")).toBeInTheDocument()
+    expect(within(row("Waiting on you")).getByText("6 ms")).toBeInTheDocument()
+  })
+
+  it("counts the gates the hooks ran by verdict", () => {
+    render(<SessionAtAGlance stats={stats()} cost={1.84} />)
+
+    expect(screen.getByText("ran in hooks").closest("p")).toHaveTextContent(
+      "9 gates ran in hooks",
+    )
+    expect(screen.getByText("8 passed")).toBeInTheDocument()
+    expect(screen.getByText("1 flagged")).toBeInTheDocument()
+    expect(screen.queryByText(/blocked/)).not.toBeInTheDocument()
+  })
+
+  it("leaves the gates out of a session whose hooks ran none", () => {
+    render(
+      <SessionAtAGlance
+        stats={stats({ gates: { runs: 0, verdicts: {} } })}
+        cost={1.84}
+      />,
+    )
+
+    expect(screen.queryByText(/ran in hooks/)).not.toBeInTheDocument()
   })
 })

@@ -28,6 +28,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
+from gateway.types.price_unit import PriceUnit
 
 _CACHE_RATE_FIELDS = (
     "cache_read_price_per_million",
@@ -141,7 +142,7 @@ class DeploymentPricingService:
         input_price_per_million: float,
         output_price_per_million: float,
         cache_rates: Mapping[str, float | None],
-        unit: str | None = None,
+        unit: PriceUnit | None = None,
     ) -> ModelPricing:
         """Record the deployment's rates for ``model_key`` as a new version at the current instant.
 

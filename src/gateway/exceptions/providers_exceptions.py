@@ -61,6 +61,21 @@ class OrgProviderKeyUnsafeApiBaseError(TenancyValidationError):
         super().__init__(message)
 
 
+class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
+    """A new ``api_base`` on a key that holds a credential, sent without the credential.
+
+    The next call would send the stored credential to the new host, and whoever
+    can edit a key only ever reads its ``last4``, so the move has to come from
+    someone who holds the credential.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Changing a key's API base URL sends its credentials to the new host: "
+            "send api_key, and any hidden client_args credential, again in the same request"
+        )
+
+
 class OrgProviderKeyAlreadyExistsError(TenancyConflictError):
     def __init__(self, provider: str, name: str):
         super().__init__(f"A '{provider}' key named '{name}' already exists in this organization")

@@ -28,6 +28,7 @@ from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.providers import ProviderSettings
+from gateway.core.settings.routing import RoutingSettings
 from gateway.core.settings.tools import ToolSettings
 from gateway.core.settings.traces import TraceSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
@@ -128,7 +129,7 @@ OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 # Mapping fields an OTARI_<FIELD> variable sets as a JSON object. The variable
 # replaces the file's block whole, as a top-level key of OTARI_CONFIG_YAML does,
 # rather than merging into it per entry.
-JSON_ENV_FIELDS = ("hosted_providers",)
+JSON_ENV_FIELDS = ("hosted_providers", "provider_supported_countries", "automatic_routing")
 # GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
 # code. The read sites still consult otari_env() (they have no config object in
 # scope), so load_config bridges values set in the YAML config into the process
@@ -201,16 +202,8 @@ MAX_AGENT_MODEL_CANDIDATES = 255
 """The most options a choice question takes, so a longer list fails at startup, not per request."""
 
 
-def validate_agent_recommender(model: str, candidates: dict[str, str | None]) -> None:
-    """Validate the agent recommender's settings, raising ``ValueError`` on any problem.
-
-    The decision provider itself is resolved per request, so a deployment that
-    never asks for a recommendation need not configure one.
-    """
-    provider, _, bare_model = model.partition(":")
-    if not provider.strip() or not bare_model.strip():
-        msg = "agent_recommender_model must name a decision model as '<provider>:<model>'."
-        raise ValueError(msg)
+def validate_agent_recommender_candidates(candidates: dict[str, str | None]) -> None:
+    """Validate ``agent_recommender_candidates``, raising ``ValueError`` on any problem."""
     if len(candidates) < 2:
         msg = "agent_recommender_candidates needs at least two models to choose between."
         raise ValueError(msg)
@@ -563,6 +556,7 @@ def _validate_bedrock_client_config(instance: str, client_args: Any, *, block: s
 
 
 class GatewayConfig(
+    RoutingSettings,
     InferenceSettings,
     BudgetSettings,
     ApiKeySettings,
@@ -1064,14 +1058,6 @@ class GatewayConfig(
             "in seconds."
         ),
     )
-    agent_recommender_model: Annotated[str, OMITTED] = Field(
-        default="typesafe:jev-latest",
-        description=(
-            "The decision model that recommends a subagent's model through POST /api/v1/routing/recommend, "
-            "as a decision_providers selector ('<provider>:<model>'). Resolved per request, so a deployment "
-            "that never asks need not configure the provider."
-        ),
-    )
     agent_recommender_candidates: Annotated[dict[str, str | None], OMITTED] = Field(
         default_factory=lambda: dict(DEFAULT_AGENT_MODEL_CANDIDATES),
         description=(
@@ -1155,22 +1141,21 @@ class GatewayConfig(
     models_dev_metadata: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
         default=True,
         description=(
-            "Enrich the model listing and the dashboard's model detail with metadata "
-            "(token limits, modalities, capabilities, knowledge cutoff) fetched from "
-            "the public models.dev catalog. Set false to disable the outbound call; "
-            "the gateway then reads the context window from the bundled or accepted "
-            "models.dev snapshot and lists no output limit. Pricing does not depend on it."
+            "Fetch the public models.dev catalog for the metadata the model listing and the "
+            "dashboard's model detail show (token limits, modalities, capabilities, knowledge "
+            "cutoff). Set false to disable the outbound call; the gateway then shows the "
+            "metadata of the models.dev catalog bundled with it. Pricing does not depend on it."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(
         default=86400,
         ge=0,
         description=(
-            "TTL in seconds for the cached models.dev catalog, and the interval at which a "
-            "background task refetches it (floored at 5 minutes). Above 0, the model listing, the "
-            "catalog and GET /api/v1/models/metadata answer from the cache instead of waiting on the "
-            "fetch; a failed fetch is held for one minute rather than the refresh interval. 0 "
-            "disables caching, so every read fetches."
+            "How often, in seconds, one worker downloads the models.dev catalog and stores it for "
+            "every worker to serve (floored at 5 minutes). Above 0, the model listing, the catalog "
+            "and GET /api/v1/models/metadata answer from the stored catalog instead of waiting on "
+            "the download; a failed download is tried again after one minute. 0 disables caching, "
+            "so every read fetches."
         ),
     )
     public_catalog: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
@@ -2200,7 +2185,7 @@ class GatewayConfig(
         """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
         for name, entry in self.decision_providers.items():
             validate_decision_provider_entry(name, entry)
-        validate_agent_recommender(self.agent_recommender_model, self.agent_recommender_candidates)
+        validate_agent_recommender_candidates(self.agent_recommender_candidates)
 
     @model_validator(mode="after")
     def _validate_database_timeout_ordering(self) -> "GatewayConfig":

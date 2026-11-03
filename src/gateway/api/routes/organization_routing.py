@@ -226,7 +226,7 @@ def _reject_user_scope(user_id: str | None) -> None:
         )
 
 
-def _visible_workspace_ids(scope: VisibleWorkspaceScope) -> Select[tuple[uuid.UUID]]:
+def _visible_workspace_ids(scope: VisibleWorkspaceScope) -> Select[uuid.UUID]:
     """The workspace ids whose stored rows this caller may be shown.
 
     A subquery rather than a clause over one table, so the policies list and the
@@ -454,9 +454,10 @@ async def list_automatic_fallbacks(
 
     A request that sends a model's catalog ID moves to the model's next offering
     when one fails, with no policy. Each model lists its offerings in the order
-    such a request tries them, priced for this organization, with who runs the
-    built-in tools on each, beside its traffic: how many requests a backup served,
-    and how many named one offering and so had no fallback. The traffic is the
+    such a request tries them before automatic selection reorders it, each with
+    its input price for this organization and who runs the built-in tools on it,
+    beside its traffic: how many requests a backup served, and how many named one
+    offering or a policy instead, by API key and provider. The traffic is the
     workspaces the caller may see in their active organization, by the rule the
     organization's usage reads use.
     """

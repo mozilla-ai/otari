@@ -491,7 +491,7 @@ class ToolSettings(BaseModel):
     )
 
     # The config-file tools as loaded, before any dashboard-stored tool is
-    # overlaid by ``search_tool_store_service``, one baseline per map.
+    # overlaid by ``services/tools/_search_tool_overlay``, one baseline per map.
     _search_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
     _fetch_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 

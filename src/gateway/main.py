@@ -21,12 +21,15 @@ import any_fetch
 import any_search
 from gateway import features
 from gateway.api.deps import (
+    DatabaseSessionOwners,
     build_budget_service,
     build_file_service,
     build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
     build_scheduled_catalog_update,
+    build_search_tool_refresh,
+    build_search_tool_service,
     build_trace_service,
     get_api_key_service,
     get_membership_listener,
@@ -41,19 +44,21 @@ from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
+    CONVERSATION_HEADER,
     TAGS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
 )
-from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
+from gateway.core.database import create_session, describe_database_error, dispose_db, init_db, release_session
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
-from gateway.core.unit_of_work import create_unit_of_work
+from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
@@ -70,17 +75,20 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
-from gateway.services.inference import close_decision_client, run_idempotency_sweeper
+from gateway.services.inference import (
+    close_decision_client,
+    load_stored_country_database_at_startup,
+    open_country_database,
+    reset_stored_country_database,
+    run_idempotency_sweeper,
+    run_stored_country_database_refresher,
+)
 from gateway.services.log_writer import (
     LogWriter,
     TracingLogWriter,
     create_log_writer,
 )
 from gateway.services.master_key_service import ensure_master_key
-from gateway.services.model_catalog_service import (
-    clear_catalog_cache,
-    run_catalog_refresher,
-)
 from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
@@ -91,6 +99,7 @@ from gateway.services.policy_store import (
     reset_policy_cache,
     run_policy_refresher,
 )
+from gateway.services.pricing import load_bundled_index
 from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     initialize_tool_prices_from_config,
@@ -102,6 +111,9 @@ from gateway.services.pricing_init_service import (
 )
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
+    load_stored_models_dev_catalog,
+    reset_catalog_refresh_state,
+    run_catalog_refresher,
     run_price_snapshot_refresher,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
@@ -122,12 +134,12 @@ from gateway.services.providers import (
     run_provider_endpoint_refresher,
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
-from gateway.services.runtime_settings_service import apply_overrides_from_db
-from gateway.services.search_tool_store_service import (
-    load_search_tools_at_startup,
-    reset_search_tool_cache,
-    run_search_tool_refresher,
+from gateway.services.routing import (
+    load_agent_recommenders_at_startup,
+    reset_agent_recommenders,
+    run_agent_recommender_refresher,
 )
+from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.services.secret_box import secret_box_configured, shares_secret_key, validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
 from gateway.services.tenancy.org_provider_key_service import (
@@ -147,11 +159,14 @@ from gateway.services.tools import (
     load_sandbox_credentials_at_startup,
     register_builtin_fetcher,
     reset_sandbox_credential_cache,
+    reset_search_tool_cache,
     run_sandbox_credential_refresher,
+    run_search_tool_refresher,
     warn_about_tool_instances,
 )
-from gateway.services.traces import RequestTraces, TraceWriter, stored_by
+from gateway.services.traces import RequestTraces, SpanContent, TraceWriter
 from gateway.services.workspace_scope import default_workspace_id
+from gateway.types.traces import TraceWrite, WriteResult
 from gateway.version import __version__
 
 if TYPE_CHECKING:
@@ -276,6 +291,35 @@ def _resolve_file_store(config: GatewayConfig, container: Container) -> FileStor
         return None
 
 
+def _resolve_trace_content(config: GatewayConfig, container: Container) -> SpanContent:
+    """The keys trace content is sealed and opened with, built once for every request and the writer.
+
+    Keys that cannot be built stop the boot while content is kept, because none
+    would be. With content off the deployment starts and says so, since a
+    stored span's content then only reads back empty.
+    """
+    try:
+        return SpanContent(container.resolve(ContentKeyPort, None))
+    except (ValueError, ImportError) as exc:
+        if config.trace_content_enabled:
+            raise
+        logger.warning("Trace content keys cannot be built, so stored trace content will read back empty: %s", exc)
+        return SpanContent.disabled()
+
+
+async def _check_trace_content(content: SpanContent) -> None:
+    """Try the trace content keys once, and say plainly if they do not work."""
+    failure = await content.check()
+    if failure is None:
+        logger.info("Trace content keys passed their startup check")
+        return
+    logger.error(
+        "Trace content keys failed their startup check, so no session content is kept until they work (%s: %s)",
+        failure.reason,
+        failure,
+    )
+
+
 def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the file retention sweep, or None when files or the interval disable it.
 
@@ -302,10 +346,16 @@ def _records_traces(enabled_features: tuple[CoreFeature, ...]) -> bool:
     return any(feature.name == "traces" for feature in enabled_features)
 
 
-def _build_trace_writer(config: GatewayConfig) -> TraceWriter:
-    """The writer every request's trace is handed to."""
+def _build_trace_writer(config: GatewayConfig, content: SpanContent) -> TraceWriter:
+    """The writer every request's trace is handed to, sealing what it keeps with ``content``."""
+
+    async def store(batch: tuple[TraceWrite, ...]) -> WriteResult:
+        # On one session: the writer asks it whether each session's user is still a member.
+        async with create_unit_of_work_with_session() as (session, uow):
+            return await build_trace_service(uow, content, DatabaseSessionOwners(session)).write(batch)
+
     return TraceWriter(
-        stored_by(build_trace_service),
+        store,
         max_queued_spans=config.trace_queue_max_spans,
         batch_spans=config.trace_flush_max_spans,
         interval_s=config.trace_flush_interval_s,
@@ -467,6 +517,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "hosted provider name", lambda config, _container: run_hosted_name_refresher(config), reset_hosted_name_index
     ),
+    _LifespanWorker(
+        "subagent router",
+        lambda _config, _container: run_agent_recommender_refresher(),
+        reset_agent_recommenders,
+    ),
     # Not a cache of rows like its neighbours: this holds constructed vendor
     # clients, so its tick rebuilds only what a write moved and its reset gives
     # the threads back as well as dropping what was built.
@@ -476,7 +531,9 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         reset_guardrail_runner,
     ),
     _LifespanWorker(
-        "search tool", lambda config, _container: run_search_tool_refresher(config), reset_search_tool_cache
+        "search tool",
+        lambda config, _container: run_search_tool_refresher(build_search_tool_refresh(config)),
+        reset_search_tool_cache,
     ),
     _LifespanWorker(
         "sandbox credential",
@@ -485,6 +542,14 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     ),
     # No reset: the stored rules live on the config, which the startup load rebuilds.
     _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
+    # Not run where client_country_database is set: that file wins, and the stored one is not read.
+    _LifespanWorker(
+        "stored country file",
+        lambda config, _container: (
+            run_stored_country_database_refresher() if config.client_country_database is None else None
+        ),
+        reset_stored_country_database,
+    ),
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
@@ -501,7 +566,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         reset_discovery_cache,
     ),
     _LifespanWorker(
-        "models.dev catalog", lambda config, _container: run_catalog_refresher(config), clear_catalog_cache
+        "models.dev catalog", lambda config, _container: run_catalog_refresher(config), reset_catalog_refresh_state
     ),
     # The short model spellings, rebuilt from the deployment's catalog view,
     # with the hosted port resolved per tick as a request would resolve it.
@@ -655,6 +720,12 @@ def _validate_metrics_support(config: GatewayConfig) -> None:
             "Install it with: pip install gateway[metrics]"
         )
         raise ValueError(msg)
+
+
+def _validate_client_country_database(config: GatewayConfig) -> None:
+    """Refuse to start on a country file that cannot be read, rather than finding no country for every request."""
+    if config.client_country_database is not None:
+        open_country_database(config.client_country_database)
 
 
 def install_rate_limits(app: FastAPI, config: GatewayConfig) -> None:
@@ -833,6 +904,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # From the app, not a closure: app.state.config is what get_config hands
         # every request, so startup reads the same object.
         config: GatewayConfig = app.state.config
+        app.state.automatic_router = None
         configure_default_pricing(config.default_pricing)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
@@ -859,17 +931,28 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # Persisted dashboard overrides win over config/env; apply them
             # before pricing init so default-pricing behavior is consistent.
             await apply_overrides_from_db(config, session)
+            # The bundled catalog is several MB of JSON: read it here, off the
+            # event loop, so no request waits on it.
+            await asyncio.to_thread(load_bundled_index)
             # After the overrides, so it sees the copy setting this process serves.
             _validate_provider_account_pepper(config)
             await load_persisted_price_snapshot(session)
+            # So the first request after a restart lists the stored model facts.
+            await load_stored_models_dev_catalog(session)
             # Persisted tool/guardrail overrides (service URLs + web-search
             # knobs) win over config/env too; apply them so the running worker
             # reflects a dashboard change made in a prior run.
             await apply_tool_overrides_from_db(config, session)
             # Overlay dashboard-stored search tools before the checks below,
             # so a tool added through the dashboard is one the backend-URL
-            # warning and the flat-pricing warning can see.
-            await load_search_tools_at_startup(session, config)
+            # warning and the flat-pricing warning can see. On a session of its
+            # own, once this one has handed its connection back, so startup
+            # holds one pooled connection at a time.
+            await release_session(session)
+            async with create_unit_of_work_with_session() as (search_tool_session, uow):
+                stored_tools_loaded = await build_search_tool_service(
+                    uow, search_tool_session, config=config
+                ).load_at_startup()
             # Before the first request, so a stored rule never lets a burst through at boot.
             await load_rate_limit_rules_at_startup(config)
             # After the overrides, not at config load: the web-search URL a
@@ -904,7 +987,16 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await load_org_provider_keys_at_startup(session)
             await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
             await initialize_pricing_from_config(config, session)
-            await initialize_tool_prices_from_config(config, session)
+            # Only with the stored tools applied, since the writer reads the
+            # merged instance maps, where a stored instance hides the config
+            # entry of its name and kind, price included.
+            if stored_tools_loaded:
+                await initialize_tool_prices_from_config(config, session)
+            else:
+                logger.warning(
+                    "The stored search and fetch tools did not load, so this start writes no config.yml tool "
+                    "prices; the next start that loads them writes them."
+                )
             await warn_if_require_pricing_without_pricing(config, session)
             await warn_if_search_tools_lack_flat_pricing(config, session)
             await warn_about_legacy_tool_prices(config, session)
@@ -919,11 +1011,13 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # vendor handshake.
         await load_guardrail_runner_at_startup()
         await load_provider_endpoints_at_startup()
+        await load_stored_country_database_at_startup(config)
         if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
             await load_sandbox_credentials_at_startup(config.effective_sandbox_provider())
         await _move_deployment_providers(config)
         await _import_configured_providers(config)
         await load_hosted_names_at_startup(config)
+        await load_agent_recommenders_at_startup()
         # On a Unit of Work of its own, after the session above has closed.
         await _report_hosted_providers_config(config)
         await _warn_about_legacy_tool_grants(config)
@@ -932,6 +1026,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # The retention sweep below resolves this same port, so both it and
         # the request path use whatever store this build bound.
         app.state.file_store = _resolve_file_store(config, container)
+        app.state.trace_content = _resolve_trace_content(config, container)
         app.state.provider_files = container.resolve(ProviderFilePort, None)
         workers = _start_lifespan_workers(config, container)
         # Workers of the enabled features. Same supervisor as the registry
@@ -951,18 +1046,22 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         log_writer_started = False
         trace_writer: TraceWriter | None = None
         trace_writer_started = False
+        content_check: asyncio.Task[None] | None = None
         try:
             # First inside the try, after every step that can refuse to start, so a
             # refused start never leaves one open. One per app: web tools, the search
             # endpoint and the connection tests call their providers through it.
             app.state.web_provider_client = build_web_provider_client()
+            # In the background, so a slow key source never holds the boot.
+            if config.trace_capture_enabled and config.trace_content_enabled:
+                content_check = asyncio.create_task(_check_trace_content(app.state.trace_content))
             # Inside the try, so a failure here still stops the workers started above.
             # Wired only where create_app set up trace capture, which a bare app has not.
             request_traces: RequestTraces | None = getattr(app.state, "request_traces", None)
             if request_traces is not None:
                 # Each usage row a request settles also becomes an LLM span on its trace.
                 log_writer = TracingLogWriter(log_writer, request_traces)
-                trace_writer = _build_trace_writer(config)
+                trace_writer = _build_trace_writer(config, app.state.trace_content)
             await log_writer.start()
             log_writer_started = True
             app.state.log_writer = log_writer
@@ -985,6 +1084,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             if trace_writer is not None and trace_writer_started:
                 app.state.trace_writer = None
                 await trace_writer.stop()
+            # After the writer's last batch, which may still seal with them.
+            if content_check is not None:
+                content_check.cancel()
+            trace_content: SpanContent | None = getattr(app.state, "trace_content", None)
+            if trace_content is not None:
+                trace_content.close()
             # Removed before it closes, so a route served after shutdown fails plainly
             # rather than on a closed client.
             web_provider_client = getattr(app.state, "web_provider_client", None)
@@ -1099,13 +1204,18 @@ def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
     _validate_metrics_support(config)
+    _validate_client_country_database(config)
     _validate_rate_limit_store(config)
     config.validate_declared_access()
     refuse_unusable_declared_secrets(config.api_keys, config.master_key)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
-    if config.trace_content_enabled and not secret_box_configured():
+    if (
+        config.trace_content_enabled
+        and config.trace_content_key_backend == "secret_key"
+        and not secret_box_configured()
+    ):
         logger.warning("OTARI_TRACE_CONTENT_ENABLED is on but OTARI_SECRET_KEY is not set, so no trace content is kept")
     set_config(config)
     # The search and fetch libraries leave their log filters to the host, so a
@@ -1303,6 +1413,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 API_KEY_HEADER,
                 X_API_KEY_HEADER,
                 TAGS_HEADER,
+                CONVERSATION_HEADER,
+                "Otari-Region",
                 *_SDK_CORS_HEADERS,
             ],
         )

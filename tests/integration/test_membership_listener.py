@@ -18,6 +18,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
+    OrganizationMember,
     Workspace,
     WorkspaceAssignmentRequest,
     WorkspaceCreate,
@@ -29,7 +30,14 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
-from .tenancy_helpers import create_budget, create_member, create_organization, create_workspace, membership_writes
+from .tenancy_helpers import (
+    NO_BLOCKED_ADDRESSES,
+    create_budget,
+    create_member,
+    create_organization,
+    create_workspace,
+    membership_writes,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -125,8 +133,19 @@ class RecordingListener:
     async def member_removed(self, member: WorkspaceMember) -> None:
         self.removed.append(member.id)
 
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        return None
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        return None
+
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         self.deleted.append((workspace_id, sorted(member_ids)))
+
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        return None
 
 
 async def _membership_id(db: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
@@ -220,6 +239,7 @@ async def test_workspace_assignment_announces_new_and_revived_members_only(async
                 for workspace_id in (fresh.id, revived.id, already.id)
             ],
         ),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     assert active.id not in listener.joined, "an already-active membership is not a join"
@@ -241,6 +261,7 @@ async def test_an_organization_service_without_a_listener_refuses_membership_cha
                 role="member",
                 workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
             ),
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
 

@@ -15,7 +15,9 @@ import type {
 } from "@/client"
 import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   budget,
   organizationContext,
   organizationMember,
@@ -119,7 +121,11 @@ function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+    </QueryClientProvider>,
+  )
 }
 
 const realMatchMedia = window.matchMedia

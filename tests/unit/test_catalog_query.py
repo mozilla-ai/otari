@@ -45,6 +45,7 @@ GLM = model(
     unpriced_count=0,
     discovered=True,
     open_weights=True,
+    type="chat",
 )
 KIMI = model(
     "moonshotai/kimi-k2.6",
@@ -61,6 +62,7 @@ KIMI = model(
     min_output_price_per_million=2.4,
     unpriced_count=0,
     discovered=True,
+    type="image",
 )
 LOCAL = model("qwen3-32b")
 MODELS = [GLM, KIMI, LOCAL]
@@ -97,6 +99,9 @@ MODELS = [GLM, KIMI, LOCAL]
         ({"source": "custom"}, [LOCAL]),
         ({"source": "discovered"}, [GLM, KIMI]),
         ({"provider": ["nebius"], "capability": ["reasoning"], "max_input": 0.5}, [GLM]),
+        ({"type": ["chat"]}, [GLM]),
+        ({"type": ["chat", "image"]}, [GLM, KIMI]),
+        ({"type": ["embedding"]}, []),
     ],
 )
 def test_filters_preserve_the_dashboard_semantics(filters: dict[str, Any], expected: list[CatalogModelSummary]) -> None:
@@ -151,6 +156,7 @@ def test_facets_list_every_authorized_choice_whatever_the_filters_match() -> Non
     assert facets.providers == ["fireworks", "home_lab", "nebius"]
     assert [facet.value for facet in facets.vendors] == ["", "Moonshot AI", "Z.ai"]
     assert next(facet for facet in facets.vendors if facet.value == "Z.ai").vendor_slug == "z-ai"
+    assert facets.types == ["chat", "image"]
     empty = query_catalog(MODELS, CatalogQuery(search="no-match", include_facets=True)).facets
     assert empty == facets
 
@@ -183,6 +189,8 @@ def test_matches_and_choices_beyond_the_old_thousand_model_window_are_available(
         {"capability": ["invalid"]},
         {"search": "x" * 201},
         {"provider": ["x"] * 101},
+        {"type": ["invalid"]},
+        {"type": ["chat"] * 101},
     ],
 )
 def test_invalid_queries_are_rejected(params: dict[str, Any]) -> None:

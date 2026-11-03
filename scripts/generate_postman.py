@@ -44,6 +44,10 @@ HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 # working example body keyed by (METHOD, path). Everything else stays derived
 # from the schema. Models use the provider-prefixed form Otari expects.
 EXAMPLE_BODY_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
+    # A plain key: the schema-derived bodies carry the service-key fields beside
+    # ``is_service_key: false``, which the routes refuse.
+    ("POST", "/api/v1/organizations/me/keys"): {"key_name": "my-key"},
+    ("PATCH", "/api/v1/organizations/me/keys/{key_id}"): {"key_name": "my-key"},
     ("POST", "/v1/chat/completions"): {
         "model": "openai:gpt-4o-mini",
         "messages": [{"role": "user", "content": "Hello from Otari!"}],
@@ -67,6 +71,15 @@ EXAMPLE_BODY_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
     # prices and so answers 409. Without one, the update refreshes the model
     # lists; the digest is a line the operator copies from the preview.
     ("POST", "/api/v1/hosted-providers/catalog-update"): {"cleanup": False},
+    # A derived ``scores`` is ``{}``, which the routes refuse: score at least one
+    # candidate of a learned policy.
+    ("POST", "/api/v1/routing/preferences/rank"): {
+        "user_id": "my-user",
+        "examples": [{"prompt": "What is 2 plus 2?", "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}}],
+    },
+    ("POST", "/api/v1/routing/me/preferences/rank"): {
+        "examples": [{"prompt": "What is 2 plus 2?", "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}}],
+    },
 }
 
 

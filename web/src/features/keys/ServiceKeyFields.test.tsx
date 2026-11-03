@@ -8,11 +8,17 @@ import {
   NO_SERVICE_KEY,
   type ServiceKeyChoice,
   ServiceKeyFields,
+  type ServiceKeyScope,
   serviceKeyBody,
 } from "@/features/keys/ServiceKeyFields"
 import { API_ROOT } from "@/shared/api/client"
 import { budget } from "@/tests/fixtures"
 import { pickOption } from "@/tests/select"
+
+type ServiceKeyFieldsScope = {
+  scope: ServiceKeyScope
+  isLocked: boolean
+}
 
 const BUDGETS = [
   budget({ budget_id: "eu-ai", name: "AI" }),
@@ -20,9 +26,22 @@ const BUDGETS = [
   budget({ budget_id: "tenant", name: "Tenant's", organization_id: "org-1" }),
 ]
 
+const ORGANIZATION_BUDGETS = [
+  {
+    ...budget({ budget_id: "org-free", name: "Free tier" }),
+    organization_id: "org-1",
+    ceiling_count: 0,
+  },
+]
+
 function stubBudgets() {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const rows = String(input).startsWith(`${API_ROOT}/budgets`) ? BUDGETS : []
+    const url = String(input)
+    const rows = url.startsWith(`${API_ROOT}/budgets`)
+      ? BUDGETS
+      : url.startsWith(`${API_ROOT}/organizations/me/budgets`)
+        ? { data: ORGANIZATION_BUDGETS, count: ORGANIZATION_BUDGETS.length }
+        : []
     return new Response(JSON.stringify(rows), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -30,7 +49,13 @@ function stubBudgets() {
   })
 }
 
-function renderFields(initial: ServiceKeyChoice = NO_SERVICE_KEY) {
+function renderFields(
+  initial: ServiceKeyChoice = NO_SERVICE_KEY,
+  {
+    scope = "deployment",
+    isLocked = false,
+  }: Partial<ServiceKeyFieldsScope> = {},
+) {
   const seen: ServiceKeyChoice[] = []
   function Harness() {
     const [value, setValue] = useState(initial)
@@ -41,6 +66,8 @@ function renderFields(initial: ServiceKeyChoice = NO_SERVICE_KEY) {
           seen.push(next)
           setValue(next)
         }}
+        scope={scope}
+        isLocked={isLocked}
       />
     )
   }
@@ -72,6 +99,27 @@ describe("ServiceKeyFields", () => {
     expect(await screen.findByText("AI")).toBeInTheDocument()
     expect(screen.getByText("Memories")).toBeInTheDocument()
     expect(screen.queryByText("Tenant's")).not.toBeInTheDocument()
+  })
+
+  it("offers an organization's key only that organization's budgets", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    renderFields(NO_SERVICE_KEY, { scope: "organization" })
+
+    await user.click(screen.getByLabelText("Service key"))
+
+    expect(await screen.findByText("Free tier")).toBeInTheDocument()
+    expect(screen.queryByText("AI")).not.toBeInTheDocument()
+  })
+
+  it("keeps an organization's key a service key once it is one", () => {
+    stubBudgets()
+    renderFields(
+      { isServiceKey: true, budgetIds: [], defaultBudgetId: "" },
+      { scope: "organization", isLocked: true },
+    )
+
+    expect(screen.getByLabelText("Service key")).toBeDisabled()
   })
 
   it("says the budgets failed to load, rather than that there are none, and retries", async () => {

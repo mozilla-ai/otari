@@ -15,17 +15,18 @@ from gateway.services.pricing._usage_pricing import (
     UsageCharge,
     billed_search_units,
     can_price,
+    estimate_settles,
+    has_completion_meter,
+    price_completion,
     price_usage,
     request_rate,
     validated_units,
 )
 from gateway.services.pricing.bundled import (
     BUNDLED_SNAPSHOT_NAME,
+    bundled_catalog,
     bundled_generation,
     load_bundled_index,
-)
-from gateway.services.pricing.catalog_trim import (
-    trim_catalog,
 )
 from gateway.services.pricing.generations import (
     MAX_RESIDENT_GENERATIONS,
@@ -69,6 +70,7 @@ __all__ = [
     "active_timeline",
     "add_accepted_generation",
     "billed_search_units",
+    "bundled_catalog",
     "bundled_generation",
     "can_price",
     "charge_tool_calls",
@@ -77,6 +79,9 @@ __all__ = [
     "load_bundled_index",
     "paid_by_the_deployment",
     "parse_rate",
+    "estimate_settles",
+    "has_completion_meter",
+    "price_completion",
     "price_usage",
     "request_rate",
     "reset_generations",
@@ -84,6 +89,5 @@ __all__ = [
     "select_generation",
     "set_accepted_generations",
     "tool_rate_lookup",
-    "trim_catalog",
     "validated_units",
 ]

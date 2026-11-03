@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -29,6 +29,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.services.api_keys import operator_max_end_users, operator_set_active, refuse_service_key_flag_change
 from gateway.services.budgets import BudgetService, check_path_external_id
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
@@ -56,6 +57,7 @@ async def _load_key_in_organization(
     organization_id: uuid.UUID,
     *,
     owner_user_id: str | None = None,
+    or_organization_service_keys: bool = False,
 ) -> APIKey:
     """Load a key by id within one organization, or raise 404.
 
@@ -70,6 +72,8 @@ async def _load_key_in_organization(
     ``owner_user_id`` narrows the load to keys billed to that owner, for the
     member-scoped routes in ``organization_keys.py``: somebody else's key in the
     caller's own organization answers the same 404, for the same reason.
+    ``or_organization_service_keys`` also admits the organization's own service
+    keys, for an owner or admin, who manages them whoever made them.
     """
     statement = (
         select(APIKey)
@@ -80,7 +84,8 @@ async def _load_key_in_organization(
         )
     )
     if owner_user_id is not None:
-        statement = statement.where(col(APIKey.user_id) == owner_user_id)
+        owned = col(APIKey.user_id) == owner_user_id
+        statement = statement.where(or_(owned, _organization_service_key()) if or_organization_service_keys else owned)
     result = await db.execute(statement)
     key = result.scalar_one_or_none()
 
@@ -91,6 +96,11 @@ async def _load_key_in_organization(
         )
 
     return key
+
+
+def _organization_service_key() -> ColumnElement[bool]:
+    """The SQL form of :meth:`APIKey.is_organization_service_key`."""
+    return and_(col(APIKey.is_service_key).is_(True), col(APIKey.self_service).is_(True))
 
 
 class CreateKeyRequest(BaseModel):
@@ -183,6 +193,7 @@ class CreateKeyResponse(BaseModel):
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
     is_service_key: bool
+    is_organization_service_key: bool = False
     end_user_budget_id: str | None
     end_user_budget_ids: list[str]
     max_end_users: int | None
@@ -204,12 +215,18 @@ class KeyInfo(BaseModel):
     last_used_at: str | None
     expires_at: str | None
     is_active: bool
+    # Off because an operator, or a removal from the workspace or organization,
+    # switched it off; only an operator may switch it back on.
+    operator_disabled: bool = False
     allowed_models: list[str] | None
     allowed_tools: list[str] | None
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
     is_service_key: bool
+    # A service key an organization made for itself, whose end users go on that
+    # organization's budgets; an operator's service key uses the deployment's.
+    is_organization_service_key: bool = False
     end_user_budget_id: str | None
     # The budgets a request may start an end user on: the key's list, or its default alone.
     end_user_budget_ids: list[str]
@@ -234,6 +251,7 @@ class KeyInfo(BaseModel):
             last_used_at=key.last_used_at.isoformat() if key.last_used_at else None,
             expires_at=key.expires_at.isoformat() if key.expires_at else None,
             is_active=bool(key.is_active),
+            operator_disabled=bool(key.operator_disabled),
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             allowed_tools=list(key.allowed_tools) if key.allowed_tools is not None else None,
             exclude_from_budget=bool(key.exclude_from_budget),
@@ -242,6 +260,7 @@ class KeyInfo(BaseModel):
                 None if key.capture_agent_telemetry is None else bool(key.capture_agent_telemetry)
             ),
             is_service_key=bool(key.is_service_key),
+            is_organization_service_key=key.is_organization_service_key(),
             end_user_budget_id=key.end_user_budget_id,
             end_user_budget_ids=key.assignable_end_user_budgets(),
             max_end_users=key.max_end_users,
@@ -404,6 +423,7 @@ async def create_key(
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
         is_service_key=request.is_service_key,
+        self_service=False,
         end_user_budget_id=request.end_user_budget_id,
         end_user_budget_ids=end_user_budget_ids,
         max_end_users=request.max_end_users,
@@ -482,6 +502,10 @@ async def update_key(
     Requires master key authentication.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
+    refuse_service_key_flag_change(key, request.is_service_key)
+    max_end_users = (
+        operator_max_end_users(key, request.max_end_users) if "max_end_users" in request.model_fields_set else None
+    )
     # Before the key is changed, for the reason create_key gives. The pair is
     # checked as the key will hold it, so a field left out keeps its stored value.
     fields = request.model_fields_set
@@ -490,6 +514,7 @@ async def update_key(
         request.end_user_budget_id if "end_user_budget_id" in fields else key.end_user_budget_id,
         check_default="end_user_budget_id" in fields,
         check_list="end_user_budget_ids" in fields,
+        organization_id=organization_id if key.is_organization_service_key() else None,
     )
 
     # The access lists the same way. A supplied null clears (models: unrestricted;
@@ -516,7 +541,7 @@ async def update_key(
     if "key_name" in request.model_fields_set:
         key.key_name = request.key_name
     if request.is_active is not None:
-        key.is_active = request.is_active
+        operator_set_active(key, request.is_active)
     if "expires_at" in request.model_fields_set:
         key.expires_at = request.expires_at
     if request.exclude_from_budget is not None:
@@ -534,7 +559,7 @@ async def update_key(
     if "end_user_budget_ids" in request.model_fields_set:
         key.end_user_budget_ids = end_user_budget_ids
     if "max_end_users" in request.model_fields_set:
-        key.max_end_users = request.max_end_users
+        key.max_end_users = max_end_users
     if request.metadata is not None:
         key.metadata_ = request.metadata
 

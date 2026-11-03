@@ -244,6 +244,7 @@ class HostedProviderService:
                     enabled=request.enabled,
                     restricted_to_organization_id=request.restricted_to_organization_id,
                     serves_unlisted_models=request.serves_unlisted_models,
+                    supported_countries=request.supported_countries,
                 )
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
@@ -269,7 +270,7 @@ class HostedProviderService:
         key, where the provider can be served without one. ``client_args``
         omitted is left alone, null clears, and an entry echoed back as the
         mask keeps the stored value. The restriction reads the same way:
-        omitted keeps it, null lifts it.
+        omitted keeps it, null lifts it, and so do the supported countries.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
@@ -321,6 +322,8 @@ class HostedProviderService:
             if "restricted_to_organization_id" in request.model_fields_set:
                 await self._require_organization(request.restricted_to_organization_id)
                 row.restricted_to_organization_id = request.restricted_to_organization_id
+            if "supported_countries" in request.model_fields_set:
+                row.supported_countries = request.supported_countries
             await self.providers.save(row)
             public = self._public(source)
         # The cached listing was made on what this request may just have changed.
@@ -440,6 +443,15 @@ class HostedProviderService:
             return sum(
                 [await self.offers.switch_off_by_operator(provider, names) for provider, names in models.items()]
             )
+
+    async def switch_off_unavailable(self, provider: str, model: str) -> bool:
+        """Stop serving ``model`` under ``provider``, which the provider refused to serve on the deployment's key.
+
+        Returns whether this call switched it off, so the operators are told once
+        however many requests met the refusal. An operator switches it back on.
+        """
+        async with self.uow:
+            return await self.offers.switch_off_unavailable(provider, model)
 
     async def remove_model(self, provider: str, model_id: uuid.UUID) -> None:
         """Stop offering a model. Its pricing history stays.
@@ -766,6 +778,11 @@ class HostedProviderService:
             )
         return dials
 
+    async def names_limited_to_countries(self) -> list[str]:
+        """The enabled hosted providers that serve only some countries, by name."""
+        async with self.uow:
+            return await self.sources.names_limited_to_countries()
+
     async def audit_config(self) -> HostedConfigAudit:
         """What boot reports about the ``hosted_providers:`` block: shadowed entries and unknown restrictions."""
         async with self.uow:
@@ -836,6 +853,7 @@ class HostedProviderService:
             client_args=entry.client_args,
             enabled=entry.enabled,
             restricted_to_organization_id=entry.restricted_to_organization_id,
+            supported_countries=list(entry.supported_countries) if entry.supported_countries is not None else None,
         )
 
     async def _require_organization(self, organization_id: uuid.UUID | None) -> None:

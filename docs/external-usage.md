@@ -1,8 +1,8 @@
 # Importing external usage
 
 Otari can record usage that it did not proxy, such as subscription-backed coding
-agents or another instrumented application. Imported events appear in Activity
-and Usage with their source and an API-equivalent cost estimate.
+agents or another instrumented application. Imported events appear in the
+dashboard's Overview with their source and an API-equivalent cost estimate.
 
 ## Enforcement boundary
 
@@ -190,8 +190,8 @@ source exports.
 ## Reading imported usage
 
 Use the normal usage APIs and filter on `source`, `api_key_id`, user, model,
-or session label. Activity identifies imported rows and Usage separates priced
-and unpriced totals.
+or session label. On the Overview, Requests identifies imported rows and Usage
+separates priced and unpriced totals.
 
 Imported rows do not appear in budget-consumption gauges because those gauges
 read the enforcement ledger.

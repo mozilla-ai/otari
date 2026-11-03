@@ -1,13 +1,13 @@
-"""ORM tables for asynchronous batch jobs and idempotent completion requests."""
+"""ORM tables for asynchronous batch jobs, idempotent completion requests and the stored country file."""
 
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Integer, LargeBinary, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 
 
 class BatchRecord(Base):
@@ -99,3 +99,27 @@ class IdempotencyRecord(Base):
     # Past this, an ``in_progress`` claim is presumed abandoned and a retry may take it over.
     locked_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+COUNTRY_DATABASE_TABLE = "country_database"
+
+
+class StoredCountryDatabase(Base):
+    """The MaxMind DB country file an operator uploaded, which every replica reads.
+
+    One row at most, held to ``id = 1``. A table of its own keeps the file's
+    bytes out of every other query.
+    """
+
+    __tablename__ = COUNTRY_DATABASE_TABLE
+    __table_args__ = (CheckConstraint("id = 1", name="ck_country_database_one_row"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=1)
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    # The file's own metadata: GeoLite2-Country, DBIP-Country-Lite and so on.
+    database_type: Mapped[str] = mapped_column(String(255))
+    built_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    # What a replica compares with the file it has open, so it reads the bytes only when they change.
+    sha256: Mapped[str] = mapped_column(String(64))
+    uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

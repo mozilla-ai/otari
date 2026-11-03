@@ -14,7 +14,12 @@ import { PolicyNameGroup } from "./PolicyNameGroup"
 import { PolicyPreview } from "./PolicyPreview"
 import { PolicyReadOnly } from "./PolicyReadOnly"
 import { draftFromSpec, fallthroughOf, isRouted } from "./policyDraft"
-import { isEditableInForm, rowKeyOf } from "./policyModel"
+import {
+  findRouterBackend,
+  isEditableInForm,
+  KNN_BACKEND,
+  rowKeyOf,
+} from "./policyModel"
 import { TierDownGroup } from "./TierDownGroup"
 import { useRoutingRows } from "./useRoutingRows"
 
@@ -102,6 +107,11 @@ export function PolicyDetailPage({ name }: { name: string }) {
       {isConfig ? (
         <InfoBanner>
           Set in config.yml, so it is read-only here. Change it in the file.
+        </InfoBanner>
+      ) : findRouterBackend(row.spec) === KNN_BACKEND ? (
+        <InfoBanner>
+          Smart router is no longer available in the dashboard. This existing
+          policy continues to run and is shown read-only.
         </InfoBanner>
       ) : !isRepresentable ? (
         <InfoBanner>

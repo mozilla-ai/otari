@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -55,12 +56,14 @@ def _claimed(
     entry: dict[str, Any] | None = ANTHROPIC_FETCH,
 ) -> list[bool]:
     """Whether Otari runs the fetch on each candidate in ``providers``, head first."""
-    declarations = read_web_declarations(
-        [entry] if entry is not None else [],
-        web_search_header=None,
-        web_fetch_header=requested.value if requested is not None else None,
-        config=GatewayConfig(web_fetch_enabled=fetch_enabled),
-        uniform=False,
+    declarations = asyncio.run(
+        read_web_declarations(
+            [entry] if entry is not None else [],
+            web_search_header=None,
+            web_fetch_header=requested.value if requested is not None else None,
+            config=GatewayConfig(web_fetch_enabled=fetch_enabled),
+            uniform=False,
+        )
     )
     decided = decide_candidate_tools(declarations, providers=providers, dialect=Dialect.MESSAGES)
     return [WEB_FETCH_TOOL_NAME in candidate.claimed for candidate in decided]
@@ -126,8 +129,10 @@ def _config() -> GatewayConfig:
 
 
 def _claim(tools: list[dict[str, Any]], *, fetch_header: str | None, provider: str = "gemini") -> WebClaims:
-    declarations = read_web_declarations(
-        tools, web_search_header=None, web_fetch_header=fetch_header, config=_config(), uniform=False
+    declarations = asyncio.run(
+        read_web_declarations(
+            tools, web_search_header=None, web_fetch_header=fetch_header, config=_config(), uniform=False
+        )
     )
     claimed = decide_candidate_tools(declarations, providers=[provider], dialect=Dialect.MESSAGES)[0].claimed
     return WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)

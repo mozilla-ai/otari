@@ -1,13 +1,15 @@
 """An organization's own web search and fetch keys, and which one each of its workspaces uses.
 
-A workspace whose organization holds a usable key of a kind uses it for that kind's calls,
-so the organization's own account pays and its own quota applies: a search key serves the
-search tool, a fetch key the fetch tool and the enrichment of search hits. Any other
-workspace uses the deployment's instance, which these keys never change: the two never merge.
+A workspace that pinned a usable key of a kind, or whose organization made one its default,
+uses it for that kind's calls, so the organization's own account pays and its own quota
+applies: a search key serves the search tool, a fetch key the fetch tool and the enrichment
+of search hits. Any other workspace uses the deployment's instance, which these keys never
+change: the two never merge.
 
-Organization owners and admins manage the keys. A workspace's owners and admins pin one
-key of each kind as the workspace's own or turn a key off for it, and any member can see
-which keys the workspace uses. :func:`resolve_web_search_key` decides each.
+Organization owners and admins manage the keys and choose a default of each kind. A
+workspace's owners and admins pin one key of each kind as the workspace's own or turn a key
+off for it, and any member can see which keys the workspace uses.
+:func:`resolve_web_search_key` decides each.
 """
 
 import uuid
@@ -33,6 +35,7 @@ from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyErro
 from gateway.exceptions.tools_exceptions import (
     WebSearchKeyAlreadyExistsError,
     WebSearchKeyArchivedError,
+    WebSearchKeyCredentialRequiredError,
     WebSearchKeyDefaultConflictError,
     WebSearchKeyIncompleteError,
     WebSearchKeyMalformedError,
@@ -44,7 +47,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceWebSearchKeyOverrideConflictError,
 )
 from gateway.log_config import logger
-from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User
 from gateway.models.tools import (
     OrgWebSearchKey,
@@ -59,7 +62,6 @@ from gateway.repositories.tools import (
     SearchKeyCandidate,
     WebSearchKeyConflict,
     WorkspaceWebSearchKeyOverrideRepository,
-    resolve_web_search_key,
 )
 from gateway.schemas.tools import (
     OrgWebSearchKeyCreateRequest,
@@ -158,8 +160,27 @@ class WorkspaceSearchKeys:
         return (await self.keys_for(workspace_id, search=True, fetch=False)).search is not None
 
 
-# How many of the oldest keys are read at a time when no pin or default is usable.
-_OLDEST_BATCH = 20
+def resolve_web_search_key(
+    candidates: Sequence[SearchKeyCandidate], usable: Callable[[OrgWebSearchKey], bool]
+) -> OrgWebSearchKey | None:
+    """The key of one kind a workspace uses, or ``None`` where it uses the deployment's instance.
+
+    A pure function over rows the repository already loaded, so it is tested without a database.
+
+    A request names no provider, so one key is chosen across all of them, among
+    ``candidates`` of a single kind:
+
+    1. The key the workspace pinned.
+    2. Otherwise the organization's default.
+    3. Otherwise none: the workspace uses the deployment's instance.
+
+    A key the workspace turned off, or one this deployment cannot decrypt, is passed over.
+    ``usable`` is asked of keys in that order and only until one passes.
+    """
+    live = [(key, override) for key, override in candidates if override is None or not override.disabled]
+    pinned = [key for key, override in live if override is not None and override.is_default]
+    defaults = [key for key, _ in live if key.is_org_default]
+    return next((key for key in (*pinned, *defaults) if usable(key)), None)
 
 
 async def _choose_keys(
@@ -169,37 +190,11 @@ async def _choose_keys(
     kinds: Sequence[ToolKind],
     decrypted: _Decrypted,
 ) -> dict[ToolKind, OrgWebSearchKey | None]:
-    """The key of each of ``kinds`` :func:`resolve_web_search_key` picks, reading only the rows it can reach.
-
-    The pins and the defaults are read first, in one read for every kind. Only for a kind none
-    of them serves are the oldest keys read, a batch at a time, so a large organization costs
-    one small read on the common path.
-    """
+    """The key of each of ``kinds`` :func:`resolve_web_search_key` picks, from one read of the pins and defaults."""
     preferred = await overrides.preferred_candidates(
         organization_id=organization_id, workspace_id=workspace_id, kind=kinds[0] if len(kinds) == 1 else None
     )
-    chosen = {kind: resolve_web_search_key(_of_kind(preferred, kind), decrypted.usable) for kind in kinds}
-    pending = [kind for kind in kinds if chosen[kind] is None]
-    # One filter for every page, so the offsets stay those of one ordering.
-    page_kind = pending[0] if len(pending) == 1 else None
-    skip = 0
-    while pending:
-        batch = await overrides.candidate_page(
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-            skip=skip,
-            limit=_OLDEST_BATCH,
-            kind=page_kind,
-            enabled_only=True,
-        )
-        for kind in list(pending):
-            if (found := resolve_web_search_key(_of_kind(batch, kind), decrypted.usable)) is not None:
-                chosen[kind] = found
-                pending.remove(kind)
-        if len(batch) < _OLDEST_BATCH:
-            break
-        skip += _OLDEST_BATCH
-    return chosen
+    return {kind: resolve_web_search_key(_of_kind(preferred, kind), decrypted.usable) for kind in kinds}
 
 
 def _of_kind(candidates: Sequence[SearchKeyCandidate], kind: ToolKind) -> list[SearchKeyCandidate]:
@@ -294,6 +289,13 @@ class WebSearchKeyService:
                 key = await self._live_key(key_id, organization_id)
                 provider, kind = key.provider, _kind(key)
                 adds_a_key = request.api_key is not None and key.encrypted_api_key is None
+                if sets_api_base and api_base is not None and api_base != key.api_base:
+                    # The stored credential would go to the new host on the next call.
+                    stored_options_follow = stored_secrets_survive(
+                        key.options, request.options, sent="options" in request.model_fields_set
+                    )
+                    if (key.encrypted_api_key is not None and request.api_key is None) or stored_options_follow:
+                        raise WebSearchKeyCredentialRequiredError
                 if sets_api_base or adds_a_key:
                     _check_endpoint(
                         kind,
@@ -349,6 +351,13 @@ class WebSearchKeyService:
                 raise WebSearchKeyNotArchivedError(key_id)
             await self.keys.delete_key(key)
 
+    async def unset_default(self, *, user: User, key_id: uuid.UUID) -> OrgWebSearchKeyPublic:
+        """Stop a key being its kind's organization default. Idempotent, archived keys included."""
+        organization_id = await self._managed_organization(user)
+        async with self.uow:
+            key = await self.keys.unset_org_default(await self._key(key_id, organization_id))
+        return _public(key)
+
     async def set_default(self, *, user: User, key_id: uuid.UUID) -> OrgWebSearchKeyPublic:
         """Make a key its kind's organization default, in place of the previous one."""
         organization_id = await self._managed_organization(user)
@@ -386,6 +395,11 @@ class WebSearchKeyService:
             )
         search, fetch = chosen["search"], chosen["fetch"]
         effective = {key.id for key in (search, fetch) if key is not None}
+        # The deployment's own tools, which serve the workspace where no key does. The legacy settings' backend
+        # goes by its provider's name.
+        deployment_search = in_loop_default(self.config)
+        deployment_fetch = resolve_fetch(self.config, None, requested=None, for_search=None)
+        searches_on = search if search is not None else deployment_search
         return WorkspaceWebSearchKeysPublic(
             data=[
                 WorkspaceWebSearchKeyPublic(
@@ -396,6 +410,7 @@ class WebSearchKeyService:
                     name=key.name,
                     last4=key.last4,
                     is_default=override.is_default if override else False,
+                    is_org_default=key.is_org_default,
                     disabled=override.disabled if override else False,
                     is_effective=key.id in effective,
                     usable=decrypted.usable(key),
@@ -403,8 +418,10 @@ class WebSearchKeyService:
                 for key, override in page
             ],
             count=count,
-            search_provider=search.provider if search is not None else self._deployment_search_provider(),
-            fetch_provider=fetch.provider if fetch is not None else self._deployment_fetch_provider(),
+            search_provider=searches_on.provider if searches_on is not None else None,
+            fetch_provider=fetch.provider if fetch is not None else deployment_fetch.provider,
+            deployment_search_tool=deployment_search.name if deployment_search is not None else None,
+            deployment_fetch_tool=deployment_fetch.name,
         )
 
     async def set_workspace_override(
@@ -466,15 +483,6 @@ class WebSearchKeyService:
         return await self.list_workspace_keys(user=user, workspace_id=workspace_id)
 
     # ------------------------------------------------------------------
-
-    def _deployment_search_provider(self) -> str | None:
-        """The provider the deployment's in-loop default searches on, or ``None`` where it has none."""
-        default = in_loop_default(self.config)
-        return default.provider if default is not None else None
-
-    def _deployment_fetch_provider(self) -> str:
-        """The provider the deployment's default fetch instance runs on, ``builtin`` for the built-in fetcher."""
-        return resolve_fetch(self.config, None, requested=None, for_search=None).provider
 
     async def _managed_organization(self, user: User) -> uuid.UUID:
         organization = await self.organizations.get_active_organization_for_user(user)

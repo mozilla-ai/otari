@@ -1,6 +1,5 @@
-import { Button, Disclosure, Popover } from "@heroui/react"
+import { Button, cn, Disclosure, Popover } from "@heroui/react"
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
-import { clsx } from "clsx"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { IconType } from "react-icons"
@@ -58,6 +57,7 @@ import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
+import { useSessionCaller } from "@/shared/api/auth"
 import {
   isNoOrganizationError,
   useOrganizationContext,
@@ -389,7 +389,7 @@ function NavGroup({
     <Disclosure
       isExpanded={open}
       onExpandedChange={setOpen}
-      className={clsx("flex flex-col", open && "gap-0.5")}
+      className={cn("flex flex-col", open && "gap-0.5")}
     >
       {/* A plain wrapper rather than `Disclosure.Heading`: HeroUI renders that
           as an <h3>, which put every group's label ("Routing", "Tools") into the
@@ -547,6 +547,9 @@ function AppShellChrome() {
   const inOrganization = navContext === "organization"
   const inDeployment = navContext === "deployment"
   const organization = useOrganizationContext()
+  // The identity the gateway reads the shared email from, so the address the
+  // dialog offers is the one that is sent.
+  const caller = useSessionCaller()
   const { selected: selectedWorkspace } = useSelectedWorkspace()
   // True for the local operator, who owns the organization the gateway
   // provisioned for itself, and load-bearing for every account that signs in
@@ -859,13 +862,13 @@ function AppShellChrome() {
           // the natural tab order.
           tabIndex={-1}
           inert={isMobile && !mobileNavOpen ? true : undefined}
-          className={clsx(
+          className={cn(
             // `otari-rail`: the rail is a named place, the way the toolbar and
             // the tables already are, and a ghost control inside it drops its
             // edge rather than each of them remembering to.
             "otari-rail flex flex-col border-r border-border bg-background focus:outline-none",
             isMobile
-              ? clsx(
+              ? cn(
                   // Full width, starting below the top bar: `top-14` pairs with
                   // the header's `min-h-14`, which is exact because everything in
                   // that bar truncates rather than wrapping. Absolute within the
@@ -881,7 +884,7 @@ function AppShellChrome() {
                   "absolute inset-x-0 top-14 bottom-0 z-40 w-full transition-transform duration-250 ease-out-fluid motion-reduce:transition-none",
                   mobileNavOpen ? "translate-x-0" : "-translate-x-full",
                 )
-              : clsx(
+              : cn(
                   // 150ms, which is what `otari-ai/frontend`'s shell collapses
                   // its own rail in.
                   "relative shrink-0 transition-[width] duration-150 motion-reduce:transition-none",
@@ -970,7 +973,7 @@ function AppShellChrome() {
               // Expanded, one 2px rhythm runs through rows *and* between groups:
               // the 32px heading block is what separates one group from the next.
               // Collapsed there are no headings, so the gap has to do that work.
-              className={clsx(
+              className={cn(
                 "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden",
                 effectiveCollapsed ? "gap-3" : "gap-0.5",
               )}
@@ -1247,6 +1250,7 @@ function AppShellChrome() {
           // Below `md` the drawer has closed by then, and the menu row inside it
           // with it, so the control that reopens the drawer takes focus.
           returnFocusRef={isMobile ? toggleRef : feedbackTriggerRef}
+          email={caller?.email?.trim() || null}
         />
       ) : null}
     </div>

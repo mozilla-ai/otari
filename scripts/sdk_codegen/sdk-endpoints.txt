@@ -146,6 +146,11 @@ POST /api/v1/hosted-providers/{provider}/models/refresh                  # dashb
 GET /api/v1/hosted-providers/{provider}/available-models                 # dashboard-only
 PATCH /api/v1/hosted-providers/{provider}/models/{model_id}              # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}/models/{model_id}             # dashboard-only
+# Subagent routers (the decision models that pick a subagent's model, operator-only)
+GET /api/v1/routing/recommenders                    # dashboard-only
+POST /api/v1/routing/recommenders                   # dashboard-only
+PATCH /api/v1/routing/recommenders/{recommender_id}  # dashboard-only
+DELETE /api/v1/routing/recommenders/{recommender_id} # dashboard-only
 # Provider credentials (runtime provider management)
 # Providers catalog
 GET /api/v1/providers                               # not yet wrapped
@@ -167,6 +172,9 @@ GET /api/v1/health-checks/settings                  # operator dashboard only
 PATCH /api/v1/health-checks/settings                # operator dashboard only
 GET /api/v1/settings/maintenance-mode               # not yet wrapped
 PATCH /api/v1/settings/maintenance-mode             # not yet wrapped
+GET /api/v1/settings/country-database               # operator dashboard only
+PUT /api/v1/settings/country-database               # operator dashboard only
+DELETE /api/v1/settings/country-database            # operator dashboard only
 # Model discovery / metadata
 GET /api/v1/models/discoverable                     # not yet wrapped
 GET /api/v1/models/metadata                         # not yet wrapped
@@ -176,11 +184,20 @@ GET /api/v1/traces/count                            # not yet wrapped
 GET /api/v1/traces/series                           # not yet wrapped
 GET /api/v1/traces/requests/{request_id}            # not yet wrapped
 GET /api/v1/traces/{trace_id}                       # not yet wrapped
+POST /api/v1/traces/{trace_id}/break-glass          # dashboard-only
+GET /api/v1/traces/audit/break-glass                # dashboard-only
 GET /api/v1/organizations/me/traces                 # not yet wrapped
 GET /api/v1/organizations/me/traces/count           # not yet wrapped
 GET /api/v1/organizations/me/traces/series          # not yet wrapped
 GET /api/v1/organizations/me/traces/requests/{request_id}  # not yet wrapped
 GET /api/v1/organizations/me/traces/{trace_id}      # not yet wrapped
+GET /api/v1/organizations/me/traces/{trace_id}/shares                 # dashboard-only
+POST /api/v1/organizations/me/traces/{trace_id}/break-glass           # dashboard-only
+GET /api/v1/organizations/me/traces/audit/break-glass                 # dashboard-only
+POST /api/v1/organizations/me/traces/{trace_id}/shares                # dashboard-only
+DELETE /api/v1/organizations/me/traces/{trace_id}/shares/{share_id}   # dashboard-only
+GET /api/v1/organizations/me/traces/{trace_id}/shares/{share_id}/reads  # dashboard-only
+GET /api/v1/trace-content/policy                    # dashboard-only
 # Other control-plane extensions of already-covered resources
 GET /api/v1/usage/count                             # not yet wrapped
 GET /api/v1/usage/requests/{request_id}            # not yet wrapped
@@ -283,6 +300,8 @@ DELETE /api/v1/routing/policies/{name}              # not yet wrapped
 POST /api/v1/routing/policies/explain               # not yet wrapped
 POST /api/v1/routing/preferences/rank               # not yet wrapped
 GET /api/v1/routing/status                          # not yet wrapped
+POST /api/v1/routing/me/preferences/rank            # not yet wrapped
+GET /api/v1/routing/me/status                       # not yet wrapped
 POST /api/v1/routing/recommend                      # not yet wrapped
 # Pricing refresh workflow
 POST /api/v1/pricing/refresh/reject                 # not yet wrapped
@@ -308,6 +327,7 @@ GET /api/v1/tool-settings/guardrails/profiles       # not yet wrapped
 GET /api/v1/tool-settings/guardrails/catalog        # not yet wrapped
 POST /api/v1/search                                 # not yet wrapped
 POST /api/v1/search/{search_tool_name}              # not yet wrapped
+POST /api/v1/code/execute                           # not yet wrapped
 # Search tools (runtime search-tool management)
 GET /api/v1/search-tools                            # not yet wrapped
 GET /api/v1/search-tools/providers                  # not yet wrapped
@@ -327,11 +347,14 @@ POST /api/v1/scoped-budgets                                     # not yet wrappe
 GET /api/v1/scoped-budgets/{budget_id}                          # not yet wrapped
 PATCH /api/v1/scoped-budgets/{budget_id}                        # not yet wrapped
 DELETE /api/v1/scoped-budgets/{budget_id}                       # not yet wrapped
-# Deployment administration: the accounts on the whole deployment, and the flags
-# an operator flips on one. Refused with 404 for anyone who is not an operator,
+# Deployment administration: the accounts on the whole deployment, the flags
+# an operator flips on one, and the email blocklist. Refused with 404 for anyone who is not an operator,
 # and an SDK caller holds a workspace key rather than an operator identity, so
 # there is nothing here for a shell to wrap.
 GET /api/v1/admin/access                                        # dashboard-only
+DELETE /api/v1/admin/blocked-emails/{entry_id}                  # dashboard-only
+GET /api/v1/admin/blocked-emails                                # dashboard-only
+POST /api/v1/admin/blocked-emails                               # dashboard-only
 GET /api/v1/admin/users                                         # dashboard-only
 PATCH /api/v1/admin/users/{user_id}                             # dashboard-only
 POST /api/v1/admin/users/{user_id}/password-link                # dashboard-only
@@ -359,6 +382,7 @@ GET /api/v1/workspaces                                          # dashboard-only
 GET /api/v1/workspaces/{workspace_id}                           # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}                         # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}                        # dashboard-only
+DELETE /api/v1/workspaces/{workspace_id}/trace-content          # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/members                   # dashboard-only
 POST /api/v1/workspaces/{workspace_id}/members/{user_id}        # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}/members/{user_id}       # dashboard-only
@@ -502,6 +526,7 @@ DELETE /api/v1/organizations/me/web-search-keys/{key_id}                      # 
 POST /api/v1/organizations/me/web-search-keys/{key_id}/archive                # dashboard-only
 POST /api/v1/organizations/me/web-search-keys/{key_id}/restore                # dashboard-only
 POST /api/v1/organizations/me/web-search-keys/{key_id}/default                # dashboard-only
+DELETE /api/v1/organizations/me/web-search-keys/{key_id}/default              # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/web-search-keys                         # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}              # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}             # dashboard-only

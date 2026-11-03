@@ -17,6 +17,10 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
+Accounts in otari.ai's EU region set
+`ANTHROPIC_BASE_URL="https://eu.api.otari.ai/api"` instead: `api.otari.ai`
+answers an EU key with `421 Misdirected Request`, naming the host to use.
+
 Claude Code puts a telemetry value in `metadata.user_id`; the next section
 says how a key accepts it.
 
@@ -155,12 +159,14 @@ response are in the
 [API reference](api-reference.md#routing-recommendations), and how Otari
 decides is in [Agent model recommendations](routing.md#agent-model-recommendations).
 
-A gateway you run needs a
-[decision provider](configuration.md#decision-providers) that
-`agent_recommender_model` resolves to (`typesafe` with an API key by default).
-Without one, the route answers `400` and every subagent starts on the model it
-would have had anyway. On otari.ai a managed recommender answers, with nothing
-to configure.
+On a gateway you run, an operator stores one or more decision models on the
+**Subagent router** page of the deployment view, each with its key and a price
+per million tokens, and switches one on; a recommendation is charged to the
+caller at that price (see [Subagent routers](routing.md#subagent-routers)). The
+router may be a local model, and both prices at 0 make it free. With no router
+stored, or every stored router switched off, the route answers `400` and every
+subagent starts on the model it would have had anyway. On otari.ai a managed
+router answers, with nothing to configure.
 
 ### Install the plugin
 
@@ -346,7 +352,7 @@ payloads are never opened out of a transcript, and the endpoint rejects them.
 
 Each event carries a `session_label` of `<hostname>:<project>`, where the project
 is the session's working directory with the home-directory prefix dropped, so
-usage can be grouped per repository. Filter on it in Activity and Usage.
+usage can be grouped per repository. Filter on it on the Overview.
 
 Rows are unique on `(source, source_event_id)`, and the source event id here is the
 Anthropic response id, so re-running imports only what is new and reports the rest

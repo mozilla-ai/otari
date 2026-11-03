@@ -33,7 +33,6 @@ benefit.
 """
 
 import asyncio
-import time
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
@@ -53,6 +52,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgDefaultProviderKeyConflictError,
     OrgProviderKeyAlreadyExistsError,
     OrgProviderKeyArchivedError,
+    OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
     OrgProviderKeyNameRequiredError,
     OrgProviderKeyNotArchivedError,
@@ -68,7 +68,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
-from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User, Workspace
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
@@ -122,7 +122,6 @@ _org_model_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}
 # it with its serving switch (``None`` when the key offers no rows), so a
 # refusal can say which of the two narrowings turned the model away.
 _org_key_offers: dict[tuple[uuid.UUID, str], KeyOffer] = {}
-_org_cached_at: float | None = None
 
 
 def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
@@ -202,19 +201,11 @@ def cached_org_model_restriction(workspace_id: uuid.UUID, provider: str) -> list
     return _org_model_restrictions.get((workspace_id, provider))
 
 
-def org_cache_is_stale(ttl: float = ORG_PROVIDER_CACHE_TTL_SECONDS) -> bool:
-    """Whether the cache has never been loaded or has outlived ``ttl``."""
-    return _org_cached_at is None or (time.monotonic() - _org_cached_at) >= ttl
-
-
 def reset_org_provider_cache() -> None:
     """Drop the overlay cache so the next load starts clean (startup, tests)."""
-    global _org_cached_at  # noqa: PLW0603
-
     _org_cache.clear()
     _org_model_restrictions.clear()
     _org_key_offers.clear()
-    _org_cached_at = None
 
 
 async def refresh_org_provider_cache(db: AsyncSession) -> None:
@@ -227,8 +218,6 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     provider) pair that actually has a key, not once per workspace times
     every provider that exists anywhere.
     """
-    global _org_cached_at  # noqa: PLW0603
-
     workspace_orgs = (await db.execute(select(col(Workspace.id), col(Workspace.organization_id)))).all()
     keys = (
         (
@@ -311,7 +300,6 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     _org_model_restrictions.update(new_restrictions)
     _org_key_offers.clear()
     _org_key_offers.update(new_offers)
-    _org_cached_at = time.monotonic()
 
 
 async def load_org_provider_keys_at_startup(db: AsyncSession) -> None:
@@ -542,6 +530,12 @@ class OrgProviderKeyService:
                     raise OrgProviderKeyAlreadyExistsError(key.provider, new_name)
         if "api_base" in update_data:
             await _gate_api_base(update_data["api_base"])
+            if update_data["api_base"] and update_data["api_base"] != key.api_base:
+                stored_args_follow = stored_secrets_survive(
+                    key.client_args, update_data.get("client_args"), sent="client_args" in update_data
+                )
+                if (key.encrypted_api_key is not None and "api_key" not in update_data) or stored_args_follow:
+                    raise OrgProviderKeyCredentialRequiredError
         if "client_args" in update_data:
             # ``from_row`` masks a credential-shaped entry, so an editor
             # resubmitting the whole object sends the mask for the entries it was
@@ -963,7 +957,6 @@ __all__ = [
     "cached_org_provider_kwargs",
     "has_credential",
     "load_org_provider_keys_at_startup",
-    "org_cache_is_stale",
     "refresh_org_provider_cache",
     "reset_org_provider_cache",
     "run_org_provider_refresher",

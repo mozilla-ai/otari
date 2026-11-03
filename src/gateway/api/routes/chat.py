@@ -53,7 +53,7 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage, reasoning_tokens_of
+from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
@@ -92,7 +92,7 @@ from gateway.services.tools import (
     with_typed_code_execution_tool,
     without_otari_tool_calls,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -330,6 +330,7 @@ class _ChatAdapter:
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
             cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
+            cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
         return GatewayUsage(**fields)
@@ -379,7 +380,7 @@ class _ChatAdapter:
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
     ) -> ChatCompletion:
-        # ``native_tools`` names the web tools whose calls the answer reports in
+        # ``native_tools`` names the built-in tools whose calls the answer reports in
         # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
         # Each kwarg is passed only when set, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
@@ -404,8 +405,11 @@ class _ChatAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
         if native_tools:
@@ -601,6 +605,7 @@ async def run_chat_completion(
             credential_workspace_id=target.credential_workspace_id,
             hosted_credential=target.hosted_credential,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
@@ -632,6 +637,7 @@ async def run_chat_completion(
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             session_principal=session_principal,
+            streaming=bool(request.stream),
             routing_signal=lambda: routing_signal_from_messages(
                 request.messages, raw_request, has_tools=bool(request.tools)
             ),
@@ -642,6 +648,7 @@ async def run_chat_completion(
             idempotency=None if request.stream else idempotency,
             tags=resolved_tags(tags_header, request.metadata),
             turn=read_turn("chat", request.messages),
+            context=lambda: read_context("chat", request.messages, tools=request.tools),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:

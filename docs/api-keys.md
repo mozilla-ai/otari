@@ -90,7 +90,30 @@ signed-in member without it manages their own keys at
 `/api/v1/organizations/me/keys`, which derives the owner rather than accepting
 one, so a member's keys are always their own and billed to them. That route
 mints only into a workspace the caller may see, and never issues a
-budget-exempt key.
+budget-exempt key. It refuses a field it does not take, such as `user_id` or
+`exclude_from_budget`, with `422` rather than ignoring it.
+
+A viewer may list their keys there and is refused (`403`) every write:
+creating, editing, rotating or deleting a key takes organization owner or
+admin, or a caller who is a viewer neither of the organization nor of the key's
+workspace. To give a viewer a key, an operator issues it on `/api/v1/keys` and
+owns its changes. An organization owner or admin also makes the organization's
+own service keys on this route; see
+[An organization's own service keys](end-users.md#an-organizations-own-service-keys).
+
+A key records whether its owner minted it on the member surface or an operator
+issued it. Membership changes act on that:
+
+- Removing someone from a workspace, or from the organization, switches off every
+  key billed to them there. So does an operator switching a key off on
+  `/api/v1/keys`. Its owner may then delete it or keep it off, but only an
+  operator can switch it back on.
+- Making someone a viewer, of a workspace or of the organization, switches off
+  the keys they minted for themselves there, and leaves the keys an operator
+  issued them alone. Promoted again, they may switch their own keys back on.
+- A key minted before this was recorded has no origin on file and is left alone
+  by a demotion. An operator who demotes someone to viewer should check the keys
+  billed to them.
 
 ### Model and search tool access
 

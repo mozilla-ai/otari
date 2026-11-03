@@ -12,25 +12,28 @@ from gateway.services.catalog._limits import (
     model_limits,
 )
 from gateway.services.merged_catalog_service import ModelObject
+from gateway.types.models_dev import parse_catalog
 
 # Limits that differ from the pricing snapshot's wherever both know the model, so a test can tell which one answered.
-MODELS_DEV: dict[str, Any] = {
-    "openai": {
-        "models": {
-            "gpt-4o": {
-                "name": "GPT-4o",
-                "tool_call": True,
-                "structured_output": True,
-                "modalities": {"input": ["text", "image"], "output": ["text"]},
-                "limit": {"context": 64000, "output": 16384},
+MODELS_DEV = parse_catalog(
+    {
+        "openai": {
+            "models": {
+                "gpt-4o": {
+                    "name": "GPT-4o",
+                    "tool_call": True,
+                    "structured_output": True,
+                    "modalities": {"input": ["text", "image"], "output": ["text"]},
+                    "limit": {"context": 64000, "output": 16384},
+                },
             },
         },
-    },
-    "nebius": {"models": {"Qwen/Qwen3-30B-A3B-Instruct-2507": {"limit": {"context": 262144, "output": 8192}}}},
-    "google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}},
-    # An entry with no window, so the dataset below it is asked.
-    "anthropic": {"models": {"claude-sonnet-4-5": {"limit": {"output": 64000}}}},
-}
+        "nebius": {"models": {"Qwen/Qwen3-30B-A3B-Instruct-2507": {"limit": {"context": 262144, "output": 8192}}}},
+        "google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}},
+        # An entry with no window, so the dataset below it is asked.
+        "anthropic": {"models": {"claude-sonnet-4-5": {"limit": {"output": 64000}}}},
+    }
+)
 
 
 def _config(**providers: dict[str, Any]) -> GatewayConfig:

@@ -6,7 +6,6 @@ import {
   FiCode,
   FiCpu,
   FiDollarSign,
-  FiGitBranch,
   FiGlobe,
   FiGrid,
   FiHome,
@@ -16,6 +15,7 @@ import {
   FiRepeat,
   FiServer,
   FiShield,
+  FiShuffle,
   FiSliders,
   FiTool,
   FiUserCheck,
@@ -41,12 +41,12 @@ import type {
  *
  * Sections render in this order. The index leads, alone and unlabeled, because
  * it is the rail's destination rather than a member of a category: it is where
- * the sidebar puts you back, not one of the places you go from it. The three
- * below it are the design's: "Observe" is where you look (the request log and
- * the usage rollups over it), "Build" is what the gateway serves (models, the
+ * the sidebar puts you back, not one of the places you go from it, and it is
+ * also where you look (usage, requests and sessions are its tabs). The two
+ * below it are the design's: "Build" is what the gateway serves (models, the
  * policies that route over them, and the tools it can call; the roles matrix's
  * name for the section, otari-ai#1942), and "Access" is who may call it (keys
- * and the workspace's roster).
+ * and the workspace's roster). "Observe" stays declared, empty, for overlays.
  *
  * Each entry declares its own gating, and the two axes are independent:
  * `surface` (does this deployment host it) and `capability` (is it entitled).
@@ -65,47 +65,27 @@ const BASE_NAV_SECTIONS = [
       // Ungated on every axis: the index is the deployment's own front page and
       // reads whatever it is allowed to. The one row a caller with no
       // organization keeps, since it is where they are told how to get in.
+      //
+      // Its tabs (usage, requests and agent sessions over one window and one
+      // set of filters) gate themselves inside the page, on `usage` and
+      // `traces`, and none is `operatorOnly` (otari#837): for a caller who does
+      // not operate the deployment they read `/organizations/me/usage`.
       {
         to: "/",
         label: "Overview",
         icon: FiHome,
         reachableWithoutOrganization: true,
+        views: ["/requests", "/sessions"],
       },
     ],
   },
   {
+    // No base rows: the views it held are the Overview's tabs. Kept for the
+    // rows an overlay contributes by this id; empty, it renders nothing
+    // (`visibleNavSections`).
     id: "observe",
     label: "Observe",
-    items: [
-      // Both read usage, which is why they name the surface rather than
-      // themselves: a deployment that does not host usage loses both.
-      //
-      // Neither declares `operatorOnly` any more, and that is the point of
-      // otari#837 rather than an oversight. They used to, because everything
-      // behind them was `/usage` and a member was refused all of it; now the
-      // pages read `/organizations/me/usage` for a caller who does not
-      // operate the deployment, so both destinations serve every signed-in
-      // identity something true. Tagging them would hide a page that works.
-      {
-        to: "/activity",
-        label: "Activity",
-        surface: "usage",
-        icon: FiActivity,
-      },
-      // Agent sessions, read from the trace API rather than the usage log.
-      {
-        to: "/sessions",
-        label: "Sessions",
-        surface: "traces",
-        icon: FiGitBranch,
-      },
-      {
-        to: "/usage",
-        label: "Usage",
-        surface: "usage",
-        icon: FiBarChart2,
-      },
-    ],
+    items: [],
   },
   {
     // The id stays "gateway" while the label reads "Build": overlay
@@ -332,13 +312,27 @@ const ORGANIZATION_NAV_SECTIONS = [
     id: "org-general",
     label: "General",
     items: [
-      // Where an organization's models are offered, priced and switched. The
-      // deployment's own keys are Hosted providers, on the deployment rail.
+      // The organization's own provider keys: Inference is where its models
+      // are offered, priced and switched, and Web search holds its search and
+      // fetch keys. The deployment's own keys are Hosted providers and Web
+      // search, on the deployment rail.
       {
         to: "/organization/provider-keys",
         label: "Providers",
         surface: "organization_providers",
         icon: FiBox,
+        children: [
+          {
+            to: "/organization/provider-keys",
+            label: "Inference",
+            icon: FiBox,
+          },
+          {
+            to: "/organization/web-search-keys",
+            label: "Web search",
+            icon: FiGlobe,
+          },
+        ],
       },
       // The organization's own guardrails and where each one runs. Not the
       // workspace rail's `/tools/guardrails`, which sets the deployment's own
@@ -405,13 +399,22 @@ const DEPLOYMENT_SECTIONS = [
         operatorOnly: "unlisted",
         icon: FiCpu,
       },
-      // What the deployment charges per call of the tools it runs itself, as
-      // Hosted providers is for its models. Refused rather than unlisted:
-      // `/pricing` answers a non-operator 403.
+      // The decision models that pick a subagent's model, and what a
+      // recommendation costs. Unlisted like Hosted providers: its API refuses
+      // a non-operator with the same 404.
+      {
+        to: "/admin/recommender",
+        label: "Subagent router",
+        surface: "agent_recommenders",
+        operatorOnly: "unlisted",
+        icon: FiShuffle,
+      },
+      // The search and fetch tools the deployment runs for every workspace, and
+      // their prices.
       {
         to: "/admin/web-search",
-        label: "Web search pricing",
-        surface: "pricing",
+        label: "Web search",
+        surface: "tools",
         operatorOnly: "refused",
         icon: FiGlobe,
       },
@@ -727,6 +730,11 @@ export function navItemForPath(pathname: string): NavItem | undefined {
   // is never treated as unregistered (and therefore ungated).
   const child = NAV_CHILD_PARENTS.get(pathname)
   if (child) return child
+  // Another view of one destination (the Overview's tabs) is that destination.
+  const view = NAV_ITEMS.find((item) =>
+    item.views?.some((path) => path === pathname),
+  )
+  if (view) return view
   // Longest prefix, not first: `/organization/members/x` is under both
   // `/organization` and `/organization/members`, and the deeper entry is the
   // one that describes it. Ordering the scan rather than the registry, because

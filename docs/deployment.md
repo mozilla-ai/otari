@@ -35,7 +35,9 @@ addresses or networks, comma-separated, so Otari reads the client address from
 `X-Forwarded-For`. Use `*` only where the proxy is the sole path to the
 container, as on Railway: any peer in the list can set its own client address.
 When it is unset, uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that
-only `127.0.0.1` is trusted.
+only `127.0.0.1` is trusted. A country file
+([Supported countries](configuration.md#supported-countries)) looks up the same
+client address.
 
 ### Watch the connection pool
 
@@ -141,6 +143,43 @@ workspace with no policy of its own.
 A gateway that ran in hybrid mode serves from its own database too: leftover
 `OTARI_MODE`, `OTARI_AI_TOKEN` and `OTARI_DATA_PLANE_URL` are ignored, so
 declare its providers and create its keys and budgets as a new deployment does.
+
+## The country file
+
+A provider that serves only some countries needs the country each request comes
+from ([Supported countries](configuration.md#supported-countries)). Where no
+proxy sets a country header, Otari looks the client address up in a MaxMind DB
+country file, such as GeoLite2 Country or DB-IP Lite Country. The Docker image
+has the reader but not the file. Give it the file one of two ways.
+
+The simpler way is to upload it in the Country file card on the dashboard's
+Settings page. Otari stores the file in its database, so every replica reads
+it and nothing is mounted. Upload a new file each time its provider publishes
+one to keep it current: DB-IP Lite each month, GeoLite2 twice a week.
+
+### A mounted country file
+
+Where you control the containers, mount the folder that holds the file and name
+the file's path. Add this to the `otari` service in Compose, with the file saved
+as `./geoip/countries.mmdb`:
+
+```yaml
+    volumes:
+      - ./geoip:/app/geoip:ro
+    environment:
+      - OTARI_CLIENT_COUNTRY_DATABASE=/app/geoip/countries.mmdb
+```
+
+Otari reads a replaced file again without a restart, so a job that writes a
+new file on its provider's schedule, such as [geoipupdate](https://github.com/maxmind/geoipupdate)
+for GeoLite2, keeps it current. Replace the file in one step (write a new file,
+then rename it over the old one), so Otari never reads a half-written file. Mount
+the folder rather than the file: a mount of one file keeps the old file after a
+rename. Every replica needs its own copy. While `client_country_database` is set, a file
+uploaded on the dashboard is not read.
+
+DB-IP Lite is under CC BY 4.0, which asks you to credit DB-IP where your
+service names its data sources, for example with a link to `https://db-ip.com`.
 
 ## Configuration
 

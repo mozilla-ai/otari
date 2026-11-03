@@ -24,7 +24,7 @@ import httpx
 import pytest
 from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult, PaginatedRequestParams, TextContent
 
 from gateway import log_config
 from gateway.api.deps import get_workspace_mcp_servers, reset_config
@@ -45,8 +45,8 @@ WORKSPACE_ID = uuid.UUID("0b6f3c1e-8d2a-4f7b-9c5e-1a2b3c4d5e6f")
 
 RESULT = CallToolResult(
     content=[TextContent(type="text", text="Created issue #42")],
-    structuredContent={"issue_number": 42},
-    isError=False,
+    structured_content={"issue_number": 42},
+    is_error=False,
 )
 
 
@@ -79,7 +79,7 @@ class _FakeSession:
         self.result = RESULT
         self.call_error: BaseException | None = None
 
-    async def list_tools(self, cursor: str | None = None) -> Any:
+    async def list_tools(self, *, params: PaginatedRequestParams | None = None) -> Any:
         self.listed += 1
         raise AssertionError("execution must never call list_tools")
 
@@ -188,6 +188,7 @@ def test_the_exact_authorized_call_runs_and_the_native_result_comes_back(
         "content": [{"type": "text", "text": "Created issue #42"}],
         "structuredContent": {"issue_number": 42},
         "isError": False,
+        "resultType": "complete",
     }
     assert session.calls == [("create_issue", {"title": "Approved title", "body": "Approved body"})]
     assert session.listed == 0, "authorization comes from the stored allowlist, not live discovery"
@@ -232,7 +233,7 @@ def test_a_server_reported_error_is_a_definitive_two_hundred(
     servers: _Servers,
     session: _FakeSession,
 ) -> None:
-    session.result = CallToolResult(content=[TextContent(type="text", text="denied")], isError=True)
+    session.result = CallToolResult(content=[TextContent(type="text", text="denied")], is_error=True)
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 

@@ -15,12 +15,18 @@ from sqlmodel import col
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.env import otari_env
+from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
-from gateway.services.inference import is_retry_futile
+from gateway.services.guardrails import (
+    GuardrailResult,
+    GuardrailsNotReachableError,
+    InProcessGuardrail,
+    run_input_guardrails,
+)
+from gateway.services.inference import is_retry_futile, request_country_gate
 from gateway.services.routing import RoutingSignal
 from gateway.services.traces import RequestTrace, TraceService, TraceWriter
 from gateway.services.url_safety import UnsafeURLError
@@ -29,6 +35,8 @@ from gateway.services.workspace_scope import default_workspace_id
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
     from gateway.db import APIKey
+    from gateway.services.provider_kwargs import MissingCredential
+    from gateway.services.providers import CountryGate
 
 
 GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
@@ -54,8 +62,9 @@ def resolve_user_id(
        name any user (the master key is trusted to act on behalf of others).
     2. For a non-master key, spend is *always* bound to the key's own user.
        The request may echo the same user_id (e.g. OpenAI's ``user`` field for
-       tracking), but naming a *different* user is rejected — otherwise any key
-       could charge spend to, and exhaust the budget of, another user.
+       tracking). Naming a *different* user is rejected by default. That refusal
+       is a misuse signal, not a budget control: spend binds to the key's own user
+       whether the name is rejected or ignored.
 
     Args:
         user_id_from_request: User identifier extracted from the request body
@@ -387,8 +396,25 @@ async def apply_input_guardrails(
         # Non-blocking: surface the verdict for observability (monitor mode, or
         # a passing block-mode check). Header value is kept compact and free of
         # the freeform `explanation` to avoid oversized / non-ASCII headers.
-        summary = [{"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score} for r in verdict.results]
-        response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(summary, separators=(",", ":"))
+        # `status` and `reason` are fixed words, so a `valid: null` still says
+        # whether the check ran.
+        response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(
+            [_guardrail_summary(r) for r in verdict.results], separators=(",", ":")
+        )
+
+
+def _guardrail_summary(result: GuardrailResult) -> dict[str, object]:
+    """One guardrail's entry in the :data:`GUARDRAILS_RESULT_HEADER` value."""
+    summary: dict[str, object] = {
+        "profile": result.profile,
+        "mode": result.mode,
+        "valid": result.valid,
+        "score": result.score,
+        "status": result.status,
+    }
+    if result.unavailable is not None:
+        summary["reason"] = result.unavailable
+    return summary
 
 
 async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID | None) -> uuid.UUID:
@@ -444,6 +470,11 @@ def database_error(operation: str, exc: BaseException) -> HTTPException:
     """
     logger.error("%s failed: %s", operation, describe_database_error(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+
+
+def missing_credential_error(missing: MissingCredential) -> HTTPException:
+    """The answer for a call refused because no credential resolved for its provider."""
+    return HTTPException(status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code))
 
 
 # The OpenAI and Anthropic SDKs read this header before their own retry rule
@@ -506,3 +537,18 @@ async def erase_user_records(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not erase this user's agent traces; the user was not deleted",
         ) from None
+
+
+def country_gate_for(config: GatewayConfig, raw_request: Request) -> CountryGate:
+    """The country gate for ``raw_request``."""
+    client = raw_request.client
+    return request_country_gate(config, raw_request.headers, client.host if client is not None else None)
+
+
+def country_not_supported(gate: CountryGate, selector: str, *, noun: str = "Model") -> HTTPException:
+    """The 403 for a ``selector`` whose provider ``gate`` closes to the request's country."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=gate.refusal_detail(selector, noun=noun),
+        headers=error_headers(COUNTRY_NOT_SUPPORTED),
+    )

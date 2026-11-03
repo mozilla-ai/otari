@@ -12,32 +12,38 @@ has no sandbox.
 
 1. Select the workspace in the top-left corner.
 2. Go to **Tools**, then **Web search**.
-3. Under **Web access**, choose **Follow the deployment default**, **Allowed** or
-   **Blocked**. Blocked refuses both web search and web fetch for the
-   workspace's requests.
-4. Set **Max results** to cap the results each search returns.
-5. Optionally, add a **Prompt hint** saying when to search, used when a request
-   gives no instructions of its own.
-6. Use **Allowed domains** to limit searches and fetched pages to some sites, or
-   **Blocked domains** to keep them away from some.
+3. Turn **Allow in <workspace>** on or off. Off refuses both web search and
+   web fetch for the workspace's requests, and direct searches too.
+4. Under **Search with** and **Fetch with**, choose which of the organization's
+   keys the workspace uses, or the organization's default, or the deployment's
+   default tool. Only a workspace owner or admin can choose; any other member
+   sees the list read-only.
+5. Under **Who runs provider web search** and **Who runs provider web fetch**,
+   choose whether a provider's own search and fetch tools run on the provider or
+   on Otari, or leave them **Not set** for the request and the deployment to
+   decide.
+6. Under **Advanced**, set **Max results for this workspace** to cap the results
+   each search returns, use **Allowed domains** to limit searches and fetched
+   pages to some sites, or **Blocked domains** to keep them away from some, and
+   set the options of the provider the workspace's searches run on.
 
 The policy these steps set is described in
-[Per-workspace web-access policy](tools.md#per-workspace-web-access-policy).
+[Per-workspace web-access policy](tools.md#per-workspace-web-access-policy), the
+keys in [Organization search keys](tools.md#organization-search-keys), and who
+runs a provider's own tools in
+[Web-search interception](tools.md#web-search-interception). The purpose hint is
+set through the API.
 
 ## Configure code execution
 
 1. Select the workspace in the top-left corner.
 2. Go to **Tools**, then **Code execution**.
-3. Under **Code execution**, choose **Follow the deployment default**,
-   **Allowed** or **Blocked**.
-4. Optionally, add a **Prompt hint** saying when to run code, used when a
-   request gives no instructions of its own.
-5. Set **Max tool-loop iterations** to cap the model-to-tool rounds of one
-   request, and **Execution timeout** to cap how long one run can take.
-6. Under **Who runs provider code tools**, choose whether a provider's own code
+3. Turn **Allow in <workspace>** on or off.
+4. Under **Who runs provider code tools**, choose whether a provider's own code
    tool or Otari's sandbox runs the code.
-7. Where offered, pick the **Sandbox image** from those the deployment approves,
-   and choose which code-execution tools the workspace can use.
+
+The other fields of the policy, such as the iteration cap, the execution timeout
+and the sandbox image, are set through the API.
 
 The policy these steps set is described in
 [Per-workspace code policy](tools.md#per-workspace-code-policy), and who runs the

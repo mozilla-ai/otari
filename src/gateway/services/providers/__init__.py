@@ -8,12 +8,19 @@ are still in the flat modules beside `services/`, and move here when the
 domain's migration reaches them (`DOMAINS.md`).
 """
 
+from gateway.services.providers._country_gate import (
+    CountryGate,
+    CountryNotServedError,
+    ensure_hosted_country,
+    ensure_provider_country,
+)
 from gateway.services.providers._hosted_catalog_update import (
     HostedCatalogUpdate,
     PriceUpdates,
     ScheduledRun,
     run_catalog_updater,
 )
+from gateway.services.providers._hosted_credentials import last4, normalize_api_base, public_api_base
 from gateway.services.providers._hosted_name_index import (
     hosted_implementation,
     load_hosted_names_at_startup,
@@ -58,6 +65,8 @@ from gateway.services.providers._provider_endpoint_cache import (
 from gateway.services.providers._provider_endpoint_service import ProviderEndpointService
 
 __all__ = [
+    "CountryGate",
+    "CountryNotServedError",
     "HostedCatalogUpdate",
     "HostedProviderService",
     "HostedSources",
@@ -75,15 +84,20 @@ __all__ = [
     "aresponses",
     "cached_owned_endpoint",
     "dispatch_on_hosted_credential",
+    "ensure_hosted_country",
+    "ensure_provider_country",
     "hosted_credential_for",
     "hosted_implementation",
+    "last4",
     "hosted_models_for",
     "load_hosted_names_at_startup",
     "load_provider_endpoints_at_startup",
     "missing_provider_credential",
+    "normalize_api_base",
     "organization_to_serve",
     "owned_endpoint_http_client",
     "provider_for",
+    "public_api_base",
     "refresh_provider_endpoint_cache",
     "refuse_unsafe_configured_endpoints",
     "reset_hosted_name_index",

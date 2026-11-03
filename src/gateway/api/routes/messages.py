@@ -118,7 +118,7 @@ from gateway.services.tools import (
     provider_attempt_kwargs,
     with_typed_code_execution_tool,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -862,9 +862,12 @@ class _MessagesAdapter:
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, emit_native_mcp = _split_client_betas(_with_upstream_user(kwargs))
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
         if use_budget is not None:
@@ -972,6 +975,7 @@ async def create_message(
             credential_workspace_id=target.credential_workspace_id,
             hosted_credential=target.hosted_credential,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
@@ -1014,6 +1018,7 @@ async def create_message(
             ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
+            streaming=bool(request.stream),
             routing_signal=lambda: routing_signal_from_messages(
                 request.messages, raw_request, has_tools=bool(request.tools)
             ),
@@ -1024,6 +1029,7 @@ async def create_message(
             idempotency=None if request.stream else idempotency,
             tags=resolved_tags(tags_header, request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
             turn=read_turn("messages", request.messages),
+            context=lambda: read_context("messages", request.messages, tools=request.tools, system=request.system),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:

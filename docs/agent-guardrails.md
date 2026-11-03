@@ -346,8 +346,10 @@ export OTARI_API_KEY="tk-your-import-key"    # budget-exempt, as for an OTLP exp
 
 The server receives each gate's definition, its `message` included, and that
 covers your own gates in `~/.otari/`, so set `OTARI_URL` only for a server you
-would show your guardrails to. A session then shows each gate's message where it
-blocked, and lists the gates the guardrail declares that never ran. When the
+would show your guardrails to. The server keeps each version of the guardrail,
+at most 1,000 per workspace; past that a new version is refused, and its gates
+show by id alone. A session then shows each gate's message where it blocked, and
+lists the gates the guardrail declares that never ran. When the
 agent also exports its own spans, as
 [Claude Code can](use-with-claude-code.md#send-claude-code-sessions-to-otari), a
 gate shows under the tool call it checked, and a `Stop` gate under the turn it

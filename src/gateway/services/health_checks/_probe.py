@@ -5,7 +5,6 @@ writes no usage row, holds no budget and is counted by no rate limit.
 """
 
 import asyncio
-import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -15,13 +14,15 @@ from any_llm.exceptions import ModelNotFoundError
 
 from gateway.services.providers import acompletion
 from gateway.services.upstream_redaction import redact_upstream_message
+from gateway.types.model_type import ModelType
 
 PROBE_TIMEOUT_SECONDS = 60.0
 PROBE_CONCURRENCY = 8
 _ERROR_LIMIT = 300
 _MAX_EXCEPTION_CHAIN = 5
-# The catalog has no field for what a model is for, so the id decides where models.dev is silent.
-_NOT_CHAT_ID = re.compile(r"embed|rerank|bge-|whisper|tts|dall-e|image", re.IGNORECASE)
+# The kinds a tiny chat completion reaches. A model of unknown kind is probed too:
+# a failure then names it, where a skip would hide a chat model nobody described.
+_PROBED_KINDS: frozenset[ModelType | None] = frozenset({"chat", "moderation", "decision", None})
 
 
 @dataclass(frozen=True)
@@ -46,11 +47,9 @@ class ProbeOutcome:
     latency_ms: int
 
 
-def is_chat_model(model_id: str, output_modalities: Sequence[str]) -> bool:
-    """Whether a chat completion is the way to reach this model."""
-    if output_modalities:
-        return "text" in output_modalities and not _NOT_CHAT_ID.search(model_id)
-    return not _NOT_CHAT_ID.search(model_id)
+def is_chat_model(kind: ModelType | None) -> bool:
+    """Whether a chat completion is the way to reach a model of this kind."""
+    return kind in _PROBED_KINDS
 
 
 def _status_code(exc: BaseException) -> int | None:
@@ -78,11 +77,15 @@ def _status_code(exc: BaseException) -> int | None:
     return None
 
 
+def capped_error(text: str) -> str:
+    """``text`` cut to the length a provider error may take on the Health page or in an alert."""
+    return text if len(text) <= _ERROR_LIMIT else text[: _ERROR_LIMIT - 1] + "…"
+
+
 def _describe(exc: BaseException) -> str:
     # Shown on the Health page and mailed to the alert list, so redacted as any provider message is, before the cap.
     text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
-    text = redact_upstream_message(text) or type(exc).__name__
-    return text if len(text) <= _ERROR_LIMIT else text[: _ERROR_LIMIT - 1] + "…"
+    return capped_error(redact_upstream_message(text) or type(exc).__name__)
 
 
 async def probe(

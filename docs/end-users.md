@@ -27,12 +27,17 @@ An id is up to 128 letters, digits, `.`, `_` and `-`, and starts with a letter
 or digit. `POST /api/v1/budgets` generates an id instead, and
 `GET /api/v1/budgets` reports how many users are on each budget in
 `user_count`. Each entry a key may assign must be a deployment budget, not an
-organization's.
+organization's; an organization's own service key lists that organization's
+budgets instead (see
+[An organization's own service keys](#an-organizations-own-service-keys)).
 
 ## 2. Create the service key
 
 Mark the key with `is_service_key` on `POST` or `PATCH /api/v1/keys`; only a
-deployment operator can. List the budgets the key may start its end users on in
+deployment operator can. An organization makes its own on
+`POST /api/v1/organizations/me/keys`: see
+[An organization's own service keys](#an-organizations-own-service-keys). List
+the budgets the key may start its end users on in
 `end_user_budget_ids`, and set `end_user_budget_id` as the default for a request
 that names none:
 
@@ -81,6 +86,37 @@ to hand a freshly minted secret from one to the other, and a restart or a
 second replica does not change it. For the fields, the secret's format and what
 a start writes back, see
 [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+
+### An organization's own service keys
+
+An organization owner or admin creates a service key for the organization's
+app on `POST /api/v1/organizations/me/keys`, or in the dashboard's Create key
+dialog under Advanced, with the same `is_service_key`, `end_user_budget_id` and
+`end_user_budget_ids` fields. A member is refused with 403. Such a key differs
+from an operator's in four ways:
+
+- Its end users go on the organization's own budgets (Spend & budgets), and a
+  budget of the deployment or of another organization is refused with 404.
+- It is owned by a user created for it alone, not by the person who made it.
+  End users belong to their key's user, and a person's own user serves every
+  organization they belong to, so this keeps the key's end users out of reach
+  of any other key or organization. That owner has no member ceiling, which is
+  why only an owner or admin, who sets those ceilings, may create one; cap the
+  key itself to pool its end users.
+- It belongs to the organization: every owner and admin lists, edits, rotates
+  and deletes it on the same routes, and removing its creator from the
+  organization leaves it working. Other members do not see it.
+- It always has a `max_end_users`, 10,000 unless the request sets another, and
+  an update cannot clear it. Whether a key is a service key is fixed when it is
+  created, on the operator's route too.
+
+The key's responses carry `is_organization_service_key: true`, which tells it
+apart from an operator's service key in the same organization.
+
+The organization's app then manages its end users with the key itself, through
+the [end-user routes](#end-user-routes). Deleting one of the organization's
+budgets is refused while a key starts its end users on it by default, or while
+end users are on it; a key that only lists it loses it from the list.
 
 ## 3. Name the end user on each request
 
@@ -212,7 +248,7 @@ live end users never take that lock.
 | `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
 | `DELETE /api/v1/end-users?external_id=...` | Deletes the end user, answering `{"deleted": 1}`, or 404 |
 | `DELETE /api/v1/end-users?created_before=...` | Deletes up to `limit` (default 100, at most 1000) of the oldest end users created before that time, answering `{"deleted": n}`; repeat until `n` is 0 |
-| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
+| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with each one's name, limits and period and how many end users are on it |
 
 - **Authentication.** These routes take only a service key: another API key is
   refused with 403, and the master key and a dashboard session do not

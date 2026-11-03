@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
     admin,
+    agent_recommenders,
     agent_routing,
     agent_telemetry,
     aliases,
@@ -19,6 +20,8 @@ from gateway.api.routes import (
     budgets,
     catalog,
     chat,
+    code_execution,
+    country_database,
     decisions,
     embeddings,
     end_users,
@@ -148,6 +151,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # since the harness dispatches the subagent to its own provider.
     agent_routing.router,
     search.router,
+    code_execution.router,
     batches.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
@@ -166,6 +170,9 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # The deployment's own upstream credentials and the models it offers on
     # them. Operator-only, and answered 404 to anyone else like /admin.
     hosted_providers.router,
+    # The decision models that pick a subagent's model, and their prices.
+    # Operator-only, and answered 404 to anyone else like /admin.
+    agent_recommenders.router,
     keys.router,
     # A service key managing its own end users, rather than the operator gate
     # ``keys.router`` holds over every key's.
@@ -209,7 +216,10 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     aliases.router,
     provider_endpoints.router,
     routing.router,
-    routing_memory.router,
+    # Both under /routing: the operator's teach any user's memory, the key's only
+    # its own user's.
+    routing_memory.operator_router,
+    routing_memory.key_router,
     # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     pricing.operator_router,
@@ -224,6 +234,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     rate_limits.router,
     mail.router,
     maintenance_mode.router,
+    country_database.router,
     # All three prefixed /tool-settings, split by who may call them. Operator
     # first, matching the pairs above, though none ends with a catch-all.
     tool_settings.operator_router,

@@ -11,14 +11,15 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import anyio
-import httpx
+import httpx2
 import pytest
+from mcp.shared._httpx_utils import request_within_origin
 from mcp.types import CallToolResult, TextContent
 
 from conftest import TaskGroupMcpTransport
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.models.mcp import McpServerConfig
-from gateway.services.mcp_client import MCPClientPool, _ConnectedServer
+from gateway.services.mcp_client import MCPClientPool, _ConnectedServer, _origin_bound_http_client
 
 
 @pytest.mark.asyncio
@@ -65,8 +66,8 @@ async def test_empty_allowed_tools_exposes_no_discovered_tools(monkeypatch: pyte
     """An explicit empty allowlist denies every tool; only None means unrestricted."""
 
     @asynccontextmanager
-    async def fake_transport(*args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object, object]]:
-        yield object(), object(), object()
+    async def fake_transport(*args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object]]:
+        yield object(), object()
 
     class FakeSession:
         async def __aenter__(self) -> FakeSession:
@@ -84,12 +85,12 @@ async def test_empty_allowed_tools_exposes_no_discovered_tools(monkeypatch: pyte
                     SimpleNamespace(
                         name="list_issues",
                         description="List issues",
-                        inputSchema={"type": "object"},
+                        input_schema={"type": "object"},
                     )
                 ]
             )
 
-    monkeypatch.setattr("gateway.services.mcp_client.streamablehttp_client", fake_transport)
+    monkeypatch.setattr("gateway.services.mcp_client.streamable_http_client", fake_transport)
     monkeypatch.setattr("gateway.services.mcp_client.ClientSession", lambda *args: FakeSession())
 
     config = McpServerConfig(
@@ -109,7 +110,7 @@ async def test_call_tool_outcome_preserves_server_error_status(is_error: bool) -
         call_tool=AsyncMock(
             return_value=SimpleNamespace(
                 content=[SimpleNamespace(type="text", text="fixture result")],
-                isError=is_error,
+                is_error=is_error,
             )
         )
     )
@@ -159,8 +160,8 @@ async def test_call_tool_sanitizes_transport_failure(
 async def test_call_tool_result_extraction_returns_native_mcp_result() -> None:
     result = CallToolResult(
         content=[TextContent(type="text", text="fixture result")],
-        structuredContent={"issue": 791},
-        isError=True,
+        structured_content={"issue": 791},
+        is_error=True,
     )
     session = SimpleNamespace(call_tool=AsyncMock(return_value=result))
     pool = MCPClientPool([])
@@ -173,8 +174,8 @@ async def test_call_tool_result_extraction_returns_native_mcp_result() -> None:
     returned = await pool._call_tool_result("lookup", {"id": 791})  # noqa: SLF001
 
     assert returned is result
-    assert returned.structuredContent == {"issue": 791}
-    assert returned.isError is True
+    assert returned.structured_content == {"issue": 791}
+    assert returned.is_error is True
     session.call_tool.assert_awaited_once_with("lookup", {"id": 791})
 
 
@@ -203,16 +204,16 @@ class _FakeSession:
 
 
 def _capture_transport(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Substitute the MCP transport and record the kwargs the pool opens it with."""
+    """Substitute the MCP transport and record the arguments the pool opens it with."""
     captured: dict[str, Any] = {}
 
     @asynccontextmanager
     async def fake_transport(url: str, **kwargs: Any) -> Any:
         captured["url"] = url
         captured.update(kwargs)
-        yield (None, None, None)
+        yield (None, None)
 
-    monkeypatch.setattr("gateway.services.mcp_client.streamablehttp_client", fake_transport)
+    monkeypatch.setattr("gateway.services.mcp_client.streamable_http_client", fake_transport)
     monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _FakeSession)
     return captured
 
@@ -222,21 +223,14 @@ async def test_the_transport_keeps_the_sdk_timeout_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured = _capture_transport(monkeypatch)
-    config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp")
+    config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp", authorization_token="ghp_token")
 
     async with MCPClientPool([config]):
-        pass
+        client = captured["http_client"]
+        assert client.timeout == httpx2.Timeout(30.0, read=300.0)
+        assert client.headers["Authorization"] == "Bearer ghp_token"
 
-    factory = captured["httpx_client_factory"]
-    default_client = factory(None, None, None)
-    transport_timeout = httpx.Timeout(30.0, read=300.0)
-    configured_client = factory(None, transport_timeout, None)
-    try:
-        assert default_client.timeout == httpx.Timeout(30.0)
-        assert configured_client.timeout == transport_timeout
-    finally:
-        await default_client.aclose()
-        await configured_client.aclose()
+    assert client.is_closed
 
 
 @pytest.mark.asyncio
@@ -247,29 +241,19 @@ async def test_the_transport_keeps_the_sdk_timeout_defaults(
         ("http://93.184.216.34/mcp", "https://93.184.216.34/mcp/"),
     ],
 )
-async def test_safe_redirect_is_followed(
-    monkeypatch: pytest.MonkeyPatch,
-    base_url: str,
-    location: str,
-) -> None:
-    seen: list[httpx.Request] = []
+async def test_safe_redirect_is_followed(base_url: str, location: str) -> None:
+    seen: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(request)
         if len(seen) == 1:
-            return httpx.Response(307, headers={"location": location})
-        return httpx.Response(200)
+            return httpx2.Response(307, headers={"location": location})
+        return httpx2.Response(200)
 
-    captured = _capture_transport(monkeypatch)
-    config = McpServerConfig(name="tools", url=base_url)
-
-    async with MCPClientPool([config]):
-        pass
-
-    client = captured["httpx_client_factory"](None, None, None)
-    client._transport = httpx.MockTransport(handler)  # noqa: SLF001
+    client = _origin_bound_http_client(base_url)
+    client._transport = httpx2.MockTransport(handler)  # noqa: SLF001
     async with client:
-        response = await client.post(base_url, json={"method": "tools/list"})
+        response = await request_within_origin(client, "POST", base_url, json={"method": "tools/list"})
 
     assert response.status_code == 200
     assert len(seen) == 2
@@ -284,29 +268,23 @@ async def test_safe_redirect_is_followed(
         "https://93.184.216.34:8443/mcp",
     ],
 )
-async def test_unsafe_redirect_is_blocked_before_sending(
-    monkeypatch: pytest.MonkeyPatch,
-    location: str,
-) -> None:
-    seen: list[httpx.Request] = []
+async def test_unsafe_redirect_is_not_followed(location: str) -> None:
+    seen: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(request)
-        return httpx.Response(307, headers={"location": location})
+        return httpx2.Response(307, headers={"location": location})
 
     base_url = "https://93.184.216.34/mcp"
-    captured = _capture_transport(monkeypatch)
-    config = McpServerConfig(name="tools", url=base_url, authorization_token="ghp_token")
-
-    async with MCPClientPool([config]):
-        pass
-
-    client = captured["httpx_client_factory"]({"Authorization": "Bearer ghp_token"}, None, None)
-    client._transport = httpx.MockTransport(handler)  # noqa: SLF001
+    client = _origin_bound_http_client(base_url, {"Authorization": "Bearer ghp_token"})
+    client._transport = httpx2.MockTransport(handler)  # noqa: SLF001
     async with client:
-        with pytest.raises(httpx.RequestError, match="outside the validated origin"):
-            await client.post(base_url, json={"method": "tools/list"})
+        response = await request_within_origin(client, "POST", base_url, json={"method": "tools/list"})
+        # Sent directly, the request is refused before it leaves the client.
+        with pytest.raises(httpx2.RequestError, match="outside the validated origin"):
+            await client.post(location, json={"method": "tools/list"})
 
+    assert response.status_code == 307
     assert len(seen) == 1
     assert seen[0].url.host == "93.184.216.34"
 

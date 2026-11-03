@@ -35,9 +35,13 @@ MODEL_NOT_ALLOWED = "model_not_allowed"
 MODEL_NOT_SERVING = "model_not_serving"
 # A provider key of the organization serves the provider, and none offers the model.
 MODEL_NOT_FOUND = "model_not_found"
+# ``provider_supported_countries`` closes the model's provider to the country the request comes from.
+COUNTRY_NOT_SUPPORTED = "country_not_supported"
 CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
 # The model the request reached does not accept a kind of content the request carries, such as an image.
 UNSUPPORTED_CONTENT = "unsupported_content"
+# The model is a kind the endpoint cannot serve, such as an embedding model sent a chat completion.
+WRONG_MODEL_TYPE = "wrong_model_type"
 PRICING_REQUIRED = "pricing_required"
 # The organization has no funds paid in to cover a request the deployment pays for.
 INSUFFICIENT_FUNDS = "insufficient_funds"

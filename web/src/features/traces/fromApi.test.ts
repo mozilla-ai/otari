@@ -7,7 +7,7 @@ import {
   traceSummary,
 } from "@/tests/traceFixtures"
 
-import { toTrace } from "./fromApi"
+import { PRIVATE_CONTENT, toTrace } from "./fromApi"
 import { summarizeTrace } from "./types"
 
 describe("toTrace", () => {
@@ -41,6 +41,114 @@ describe("toTrace", () => {
       endMs: 60_000,
     })
     expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
+  })
+
+  it("draws a request that made one LLM call and nothing else as that call", () => {
+    const detail = traceDetail()
+    const spans = [
+      ...detail.spans,
+      traceSpan({
+        span_id: "req-3",
+        start_time: "2026-10-07T12:01:10Z",
+        end_time: "2026-10-07T12:01:20Z",
+      }),
+      traceSpan({
+        span_id: "llm-3",
+        parent_span_id: "req-3",
+        kind: "llm",
+        model: "gpt-5",
+        start_time: "2026-10-07T12:01:10Z",
+      }),
+      traceSpan({
+        span_id: "prompt-1",
+        operation: "interaction",
+        start_time: "2026-10-07T12:01:20Z",
+      }),
+      traceSpan({
+        span_id: "llm-4",
+        parent_span_id: "prompt-1",
+        kind: "llm",
+        model: "gpt-5",
+        start_time: "2026-10-07T12:01:20Z",
+      }),
+    ]
+    const turns = [
+      { ...detail.turns[0], step_ids: ["req-1", "req-2", "req-3"] },
+      {
+        ...detail.turns[0],
+        index: 1,
+        started_at: "2026-10-07T12:01:20Z",
+        step_ids: ["prompt-1"],
+      },
+    ]
+    const trace = toTrace(traceSummary(), { ...detail, spans, turns })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    // The lone call takes its request's row, under the request's own parent.
+    expect(byId.has("req-3")).toBe(false)
+    expect(byId.get("llm-3")).toMatchObject({
+      type: "GENERATION",
+      parentObservationId: "turn-0",
+    })
+    // A call beside a tool, or one that failed where its request did not,
+    // keeps the request it belongs to.
+    expect(byId.get("llm-1")?.parentObservationId).toBe("req-1")
+    expect(byId.get("llm-2")?.parentObservationId).toBe("req-2")
+    // An agent's prompt is not a gateway request, so it keeps its row.
+    expect(byId.get("prompt-1")?.name).toBe("Prompt")
+    expect(byId.get("llm-4")?.parentObservationId).toBe("prompt-1")
+  })
+
+  it("keeps a lone call's request when the request carries content of its own", () => {
+    const detail = traceDetail()
+    const spans = [
+      ...detail.spans,
+      traceSpan({
+        span_id: "req-3",
+        start_time: "2026-10-07T12:01:10Z",
+        content: { prompt: "fix the flaky test" },
+      }),
+      traceSpan({
+        span_id: "llm-3",
+        parent_span_id: "req-3",
+        kind: "llm",
+        start_time: "2026-10-07T12:01:10Z",
+      }),
+    ]
+    const turns = [
+      { ...detail.turns[0], step_ids: ["req-1", "req-2", "req-3"] },
+    ]
+    const trace = toTrace(traceSummary(), { ...detail, spans, turns })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.has("req-3")).toBe(true)
+    expect(byId.get("llm-3")?.parentObservationId).toBe("req-3")
+  })
+
+  it("carries a model request's context window and the sizes the gateway kept of it", () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            context_window: 200_000,
+            attributes: {
+              "otari.context.system_chars": 40,
+              "otari.context.user_chars": 60,
+              "otari.context.message_count": 2,
+            },
+          }
+        : span,
+    )
+    const trace = toTrace(traceSummary(), { ...detail, spans })
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("llm-1")).toMatchObject({
+      contextWindow: 200_000,
+      context: { system: 40, user: 60, messageCount: 2, tools: 0 },
+    })
+    expect(byId.get("llm-2")?.contextWindow).toBeUndefined()
+    expect(byId.get("llm-2")?.context).toBeUndefined()
   })
 
   it("carries a call's cache and reasoning counts, and a turn's cached reads", () => {
@@ -396,6 +504,22 @@ describe("toTrace", () => {
       "gate.evidence": "pytest -x",
       "gate.detail": "ok",
     })
+  })
+
+  it("says a span's content is private where the reader may not open it", () => {
+    const trace = toTrace(
+      traceSummary(),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({ span_id: "tool-1", kind: "tool", content_private: true }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("tool-1")?.input).toBe(PRIVATE_CONTENT)
+    expect(byId.get("req-1")?.input).toBeUndefined()
   })
 
   it("gives every gate of a check what the check read, sent on one of them", () => {

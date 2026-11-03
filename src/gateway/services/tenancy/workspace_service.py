@@ -235,6 +235,15 @@ class WorkspaceService:
             count=count,
         )
 
+    async def require_management_access(self, *, user: User, workspace_id: uuid.UUID) -> None:
+        """Refuse unless ``user`` manages this workspace of their active organization.
+
+        Raises the workspace's not-found error for a workspace outside it, and the
+        management error for a member who does not manage it.
+        """
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        await self._require_workspace_management_access(user=user, workspace=workspace)
+
     async def update_workspace(
         self,
         *,
@@ -242,11 +251,13 @@ class WorkspaceService:
         workspace_id: uuid.UUID,
         workspace_update: WorkspaceUpdate,
     ) -> WorkspacePublic:
-        """Rename a workspace or change its description."""
+        """Rename a workspace, change its description, or turn keeping its trace content on or off."""
         workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
+        if update_data.get("trace_content_enabled", False) is None:
+            del update_data["trace_content_enabled"]
         if "name" in update_data:
             new_name = self._validated_name(update_data["name"])
             update_data["name"] = new_name
@@ -393,8 +404,11 @@ class WorkspaceService:
         if member is None:
             raise WorkspaceMemberNotFoundError(workspace_id, user_id)
 
-        updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
-        await self.db.commit()
+        async with self._uow:
+            # As in remove_member: a key minted while a demotion runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
+            updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
+            await self._membership_listener.member_role_changed(updated)
         return WorkspaceMemberPublic.model_validate(updated)
 
     async def remove_member(self, *, user: User, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -407,6 +421,9 @@ class WorkspaceService:
             return
 
         async with self._uow:
+            # The key write routes take the same lock before checking membership,
+            # so a key minted or re-enabled while this runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
             await self._membership_listener.member_removed(member)
             await self.members.delete(member)
 

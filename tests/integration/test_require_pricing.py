@@ -312,6 +312,31 @@ def test_priced_model_passes_the_gate(strict_pricing_client: TestClient) -> None
     assert _chat(strict_pricing_client, model="openai:gpt-4o", user="priced-user") != 402
 
 
+def test_a_model_priced_in_a_unit_with_no_meter_is_pricing_required(strict_pricing_client: TestClient) -> None:
+    """A rate stored ahead of its meter cannot bill a completion, so the gate refuses it and names the unit."""
+    strict_pricing_client.post(f"{API_ROOT}/users", json={"user_id": "per-second-user"}, headers=_MASTER_HEADER)
+    priced = strict_pricing_client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o",
+            "input_price_per_million": 2.5,
+            "output_price_per_million": 10.0,
+            "unit": "second",
+        },
+        headers=_MASTER_HEADER,
+    )
+    assert priced.status_code == 200, priced.text
+
+    resp = strict_pricing_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": _MESSAGES, "user": "per-second-user"},
+        headers=_MASTER_HEADER,
+    )
+
+    assert resp.status_code == 402, resp.text
+    assert "is priced per second, which no completion meter reads yet" in resp.text
+
+
 # An unpriced model, and an unpriced search tool on the direct endpoint.
 _UNPRICED_CALLS = [
     ("chat/completions", {"model": "openai:gpt-4o", "messages": _MESSAGES}),

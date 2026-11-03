@@ -867,7 +867,7 @@ so are these:
   inspected, never run.
 - A glob with an empty, `.` or `..` path segment, which covers a leading `/`
   and a leading `./`. A repo-relative path never has one, so the pattern
-  matches nothing.
+  can never match any path.
 - A phrase carrying a shell separator (`&&`, `||`, `;`, `|`, `&`, `(`, `)`).
   A phrase is matched within one segment, so it never matches, not even the
   command it was copied from. On a `command` gate that is silent
@@ -881,6 +881,7 @@ intended. None blocks on its own, because each has a legitimate exception.
 
 | Code | Drawn by | Meaning |
 | --- | --- | --- |
+| `glob-matches-no-file` | a `when_changed` glob that matches no file Git tracks and no untracked file the ignore rules keep | A `when_changed` glob names paths expected to exist and change, so this is what a typo in a path looks like. A glob naming a file that does not exist yet, such as build output, is the legitimate case, and the gate names this code in its `accept_warnings`. A `forbidden` glob is not checked: it names a path that should not exist, and the gate still refuses an edit that would create the file, so matching nothing is the state you want. A `**` glob and its shallower twin in the same list, such as `.env` beside `**/.env`, count as one unit: a file either one reaches covers both. Only gates from this repo's own files are checked, because a gate in `~/.otari/` is written for every repo; `--guardrail-file` checks its gates too. Skipped when Git cannot list the files. |
 | `glob-misses-shallower-depth` | a `**` glob | Nothing else in the same field covers the shallower depth. `**` consumes at least one segment, so `**/CLAUDE.md` never reaches the root `CLAUDE.md`, and `src/**/conftest.py` never reaches `src/conftest.py`. A list such as `["*.md", "**/CLAUDE.md"]` already covers it and is not warned about, and neither is a trailing `**`. |
 | `backslash-in-glob` | a glob with a backslash | Globs are matched against POSIX paths split on `/`. A warning, not an error, because a POSIX filename may contain one. |
 | `single-token-phrase` | a one-token `forbidden` phrase on a `command` gate | It matches that token in any position, so `npm` also refuses `grep -rn npm web/`. Not drawn by a one-token `require` phrase. |

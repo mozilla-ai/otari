@@ -113,8 +113,8 @@ The answer is an OpenAI-style chat completion, with the model's reply in
 ## 7. See it in the dashboard
 
 Open <http://localhost:8000/> and sign in with your master key (`echo
-$OTARI_MASTER_KEY` prints it). Open **Activity**: your request is listed with
-its model, its tokens and its cost. The OpenAI provider you added is listed
+$OTARI_MASTER_KEY` prints it). On the **Overview**, open the **Requests** tab: your
+request is listed with its model, its tokens and its cost. The OpenAI provider you added is listed
 under **Deployment**, **Hosted providers**, in the account menu.
 
 You now have a gateway that authenticates its callers, holds the provider

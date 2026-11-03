@@ -32,8 +32,8 @@ export interface SessionStats {
   tools: ToolTally[]
   /** Each agent guardrail gate a hook ran, by what it decided. */
   gates: { runs: number; verdicts: Partial<Record<GuardrailVerdict, number>> }
-  /** The judge gates that called a model: what they ran on and what the priced ones cost. */
-  judges: { calls: number; models: string[]; cost: number; priced: number }
+  /** The judge gates that called a model, and what the priced ones cost. */
+  judges: { calls: number; cost: number; priced: number }
   /**
    * Each overlapping span counted once. A tool runs until any subagent it started
    * finishes, and that subagent's requests count as model time too, so these can
@@ -111,17 +111,16 @@ function rates(
   return out as Record<(typeof METERS)[number], number>
 }
 
-// A session at a glance: what it did, where its time went and what its money
-// paid for, read off its spans.
-export function sessionStats(
-  summary: TraceSummary,
-  detail: TraceDetail,
-): SessionStats {
-  const byId = new Map(detail.spans.map((span) => [span.span_id, span]))
-  const inSubagent = (span: TraceSpan): boolean => {
+/** Whether a span of these ran inside a subagent: under a tool call that started one. */
+export function inSubagentOf(
+  spans: readonly TraceSpan[],
+): (spanId: string) => boolean {
+  const byId = new Map(spans.map((span) => [span.span_id, span]))
+  return (spanId) => {
     // Parent ids are as the exporter sent them, so a walk guards against a cycle.
-    const seen = new Set([span.span_id])
-    let parent = span.parent_span_id ? byId.get(span.parent_span_id) : undefined
+    const seen = new Set([spanId])
+    const parentId = byId.get(spanId)?.parent_span_id
+    let parent = parentId ? byId.get(parentId) : undefined
     while (parent && !seen.has(parent.span_id)) {
       seen.add(parent.span_id)
       if (parent.operation === EXECUTION) return true
@@ -131,6 +130,16 @@ export function sessionStats(
     }
     return false
   }
+}
+
+// A session at a glance: what it did, where its time went and what its money
+// paid for, read off its spans.
+export function sessionStats(
+  summary: TraceSummary,
+  detail: TraceDetail,
+): SessionStats {
+  const isInSubagent = inSubagentOf(detail.spans)
+  const inSubagent = (span: TraceSpan) => isInSubagent(span.span_id)
   const tools = detail.spans.filter(
     (span) => span.kind === "tool" && !NOT_A_TOOL.has(span.tool_name ?? ""),
   )
@@ -236,12 +245,7 @@ export function sessionStats(
   // A gateway guardrail is a guardrail span too, but not a hook's.
   const hooks = detail.spans.filter((span) => gateVerdict(span))
   const gates: SessionStats["gates"] = { runs: 0, verdicts: {} }
-  const judges: SessionStats["judges"] = {
-    calls: 0,
-    models: [],
-    cost: 0,
-    priced: 0,
-  }
+  const judges: SessionStats["judges"] = { calls: 0, cost: 0, priced: 0 }
   for (const span of detail.spans) {
     const verdict = gateVerdict(span)
     if (!verdict) continue
@@ -249,7 +253,6 @@ export function sessionStats(
     gates.verdicts[verdict] = (gates.verdicts[verdict] ?? 0) + 1
     if (!span.model) continue
     judges.calls += 1
-    if (!judges.models.includes(span.model)) judges.models.push(span.model)
     if (span.cost != null) {
       judges.cost += span.cost
       judges.priced += 1

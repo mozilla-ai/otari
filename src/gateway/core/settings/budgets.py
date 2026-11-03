@@ -52,9 +52,12 @@ class BudgetSettings(BaseModel):
         default=True,
         description=(
             "When True (default), a non-master key whose request names a 'user' other than its own "
-            "is rejected with 403. When False, the client-supplied 'user' is accepted and ignored "
-            "(it is not sent to the provider) and spend is always bound to the key's own user; "
-            "use this if clients send arbitrary 'user' values for abuse tracking. This setting "
+            "is rejected with 403. When False, that name is accepted and spend is still bound to "
+            "the key's own user. The name never reaches a provider as the client wrote it: where a "
+            "route sends an end-user identifier it is one input to a digest, and elsewhere it is "
+            "dropped. Use False if clients send arbitrary 'user' values for abuse tracking. A "
+            "service key is not governed by this setting at all, because a name other than its own "
+            "user names one of its end users instead. This setting "
             "is the deployment-wide default: an individual key can override it in either "
             "direction with its own reject_user_mismatch (null inherits this setting). The "
             "master key may always bill an arbitrary user regardless of this setting."

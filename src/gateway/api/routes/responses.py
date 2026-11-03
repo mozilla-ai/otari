@@ -82,7 +82,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -389,8 +389,11 @@ class _ResponsesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
         if native_tools:
@@ -480,6 +483,7 @@ async def create_response(
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,
@@ -510,6 +514,7 @@ async def create_response(
             estimate_max_output_tokens=max_output_tokens,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
+            streaming=bool(request_body.stream),
             routing_signal=lambda: routing_signal_from_text(
                 _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
             ),
@@ -520,6 +525,12 @@ async def create_response(
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=resolved_tags(tags_header, request_body.metadata),
             turn=read_turn("responses", request_body.input),
+            context=lambda: read_context(
+                "responses",
+                request_body.input,
+                tools=request_body.tools,
+                system=getattr(request_body, "instructions", None),
+            ),
             session_label=request_body.session_label,
         )
     except IdempotentReplay as replay:

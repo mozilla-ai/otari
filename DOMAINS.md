@@ -140,6 +140,10 @@ short spellings and aliases.
 
 It also owns `services/tenancy/organization_model_access.py`.
 
+The models.dev document is typed in `types/models_dev.py`: catalog reads its
+facts and pricing reads its rates, so it sits below both and neither imports the
+other.
+
 ### routing
 
 Routing policies, their compiled plans and the router backends, and which
@@ -148,10 +152,13 @@ model a coding agent's subagent should start on.
 It owns `ports/agent_model_recommender_port.py` and its adapter in
 `adapters/`, and `exceptions/routing_exceptions.py`. The port names who
 answers a subagent model recommendation and at what price. The core asks the
-decision model the deployment configured, which may be a local one, and an
-overlay may bind a recommender of its own, so the composition root binds
-the implementation and no caller chooses between them. Neither implementation meters
-the call; the decisions scaffold does.
+subagent router switched on in the dashboard (the `agent_recommenders` table,
+administered through `/api/v1/routing/recommenders` and held in memory per
+worker for the quote), at the token rates stored with it; with none switched
+on, nothing answers. An overlay may bind a recommender of its own, or
+wrap the core one, so the composition root binds the implementation and no
+caller chooses between them. The adapter quotes the price where it owns one;
+the decisions scaffold meters the call.
 
 ### files
 
@@ -232,12 +239,17 @@ billing source: usage-and-telemetry keeps the usage rows and their cost.
 Inference, tools and usage-and-telemetry depend on traces; traces depends on
 none of them.
 
+An LLM span also keeps the size of each part of its request (system prompt,
+tool definitions, messages, tool results, files) as integers, and a read adds
+the model's context window from the pricing domain's catalog lookup. Neither
+keeps text.
+
 Built in the target shape from the start.
 
 ### inference
 
-The request path: the completion dialects, the pass-through endpoints, batches
-and the Playground.
+The request path (the completion dialects, the pass-through endpoints, batches
+and the Playground), and the country file a request's address is looked up in.
 
 ### platform
 

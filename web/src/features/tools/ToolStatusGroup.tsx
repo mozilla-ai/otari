@@ -57,6 +57,8 @@ interface ToolStatusProps {
   help?: ReactNode
   /** The setting the "no backend" case sends the operator to, when there is one. */
   urlFieldKey?: string
+  /** A link to where the tool is set up, when that is not a field on this page. */
+  setUp?: ReactNode
   /** The trailing status, for a tool that does not wait on a backend URL. */
   unavailableSummary?: string
   /** What turns that tool on, in place of setting a URL. */
@@ -69,6 +71,7 @@ export function ToolStatusRow({
   docsHref,
   help,
   urlFieldKey,
+  setUp,
   unavailableSummary = "Unavailable · no backend",
   unavailableHelp = "No backend URL is set, so every call is rejected with 400.",
 }: ToolStatusProps) {
@@ -122,7 +125,9 @@ export function ToolStatusRow({
                 >
                   Set backend URL ↓
                 </button>
-              ) : null
+              ) : (
+                (setUp ?? null)
+              )
             }
           />
         )}

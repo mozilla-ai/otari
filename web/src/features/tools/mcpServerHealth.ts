@@ -77,6 +77,19 @@ const FAILURES: Record<
 }
 
 /**
+ * How many tools the allow-list admits, and how many the server offers,
+ * read as the admitted count where the check recorded no names.
+ */
+function toolCounts(health: WorkspaceMcpServerHealth) {
+  const admitted = health.tool_count ?? 0
+  return { admitted, offered: health.tools?.length || admitted }
+}
+
+function toolNoun(count: number) {
+  return count === 1 ? "tool" : "tools"
+}
+
+/**
  * The table's few words for a check, uppercase like the cells beside it. A
  * passing check says only that: the Tools column carries the count.
  */
@@ -96,12 +109,10 @@ export function toolCountLabel(
   hasAllowList: boolean,
 ): string | undefined {
   if (health?.status !== "healthy") return undefined
-  const admitted = health.tool_count ?? 0
-  const offered = health.tools?.length || admitted
-  const noun = offered === 1 ? "tool" : "tools"
+  const { admitted, offered } = toolCounts(health)
   return hasAllowList
-    ? `${admitted} of ${offered} ${noun}`
-    : `${offered} ${noun}`
+    ? `${admitted} of ${offered} ${toolNoun(offered)}`
+    : `${offered} ${toolNoun(offered)}`
 }
 
 /** One sentence saying what the check found and, on a failure, what to fix. */
@@ -113,10 +124,9 @@ export function healthDetail(health: WorkspaceMcpServerHealth): string {
   if (missing.length > 0) {
     return `The server does not offer ${missing.join(", ")}, so the allow-list exposes ${health.tool_count ?? 0} of its names.`
   }
-  const admitted = health.tool_count ?? 0
-  const offered = health.tools?.length || admitted
+  const { admitted, offered } = toolCounts(health)
   return admitted === offered
-    ? `Connected. The server offers ${offered} ${offered === 1 ? "tool" : "tools"}.`
+    ? `Connected. The server offers ${offered} ${toolNoun(offered)}.`
     : `Connected. The allow-list admits ${admitted} of the ${offered} tools the server offers.`
 }
 

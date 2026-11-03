@@ -1,8 +1,10 @@
 """Request and response models of the routing domain."""
 
+import uuid
+from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from gateway.core.config import MAX_AGENT_MODEL_CANDIDATES
 
@@ -86,7 +88,7 @@ class AgentModelRecommendation(BaseModel):
         json_schema_extra={
             "example": {
                 "model": "sonnet",
-                "reason": "jev-1.13.0 chose sonnet with 72%",
+                "reason": "sonnet with 72%",
                 "probabilities": {"haiku": 0.21, "sonnet": 0.72, "opus": 0.07},
             }
         }
@@ -99,6 +101,12 @@ class AgentModelRecommendation(BaseModel):
     )
 
 
+class RecommendationRefusal(BaseModel):
+    """The body of a recommendation request the gateway refuses."""
+
+    detail: str = Field(description="Why the request was refused.")
+
+
 class FallbackOfferingPublic(BaseModel):
     """One offering a catalog ID tries, and who runs the built-in tools on it."""
 
@@ -107,6 +115,10 @@ class FallbackOfferingPublic(BaseModel):
     selector: str = Field(description="The offering, in `instance:model` form.")
     provider: str = Field(description="The provider instance the selector names.")
     provider_type: str = Field(description="The any-llm implementation behind the instance.")
+    input_price: float | None = Field(
+        description="USD per million input tokens at the organization's rates, the price the order ranks by. "
+        "Null where the offering is unpriced."
+    )
     own_tools: list[str] = Field(
         description=(
             "Built-in tools this provider runs itself, for a caller that declares them in the provider's own words "
@@ -114,6 +126,19 @@ class FallbackOfferingPublic(BaseModel):
         )
     )
     otari_tools: list[str] = Field(description="Built-in tools Otari runs in this provider's place, for that caller.")
+
+
+class PinnedTrafficPublic(BaseModel):
+    """The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    api_key_id: str | None = Field(
+        description="The key, or null for requests made without one or whose key was deleted."
+    )
+    key_name: str | None = Field(description="The key's name, or null where it has none.")
+    provider: str = Field(description="The provider instance the requests reached.")
+    requests: int
 
 
 class AutomaticFallbackPublic(BaseModel):
@@ -124,7 +149,10 @@ class AutomaticFallbackPublic(BaseModel):
     id: str = Field(description="The catalog ID a caller sends to get the fallback, e.g. `anthropic/claude-sonnet-5`.")
     name: str
     offerings: list[FallbackOfferingPublic] = Field(
-        description="What a request sent by catalog ID tries, first first. One entry means no backup."
+        description=(
+            "Offerings in baseline catalog order. Automatic selection can reorder them per request "
+            "using cost, recent health, load, region, latency and cache continuity. One entry means no backup."
+        )
     )
     requests: int = Field(description="Requests served in the window, each counted once however many attempts.")
     fell_back: int = Field(description="Of `requests`, the successful ones a later offering served.")
@@ -133,6 +161,10 @@ class AutomaticFallbackPublic(BaseModel):
         "and so got no automatic fallback."
     )
     pinned_provider: str | None = Field(description="The instance most pinned requests reached.")
+    pinned_keys: list[PinnedTrafficPublic] = Field(
+        description="`pinned` by API key and the provider that served it, most first. "
+        "Includes requests that named a policy, which may have fallen back within it."
+    )
 
 
 class AutomaticFallbacksResponse(BaseModel):
@@ -140,3 +172,165 @@ class AutomaticFallbacksResponse(BaseModel):
 
     window_days: int = Field(description="How many days of traffic the counts cover.")
     models: list[AutomaticFallbackPublic] = Field(description="Most requested first.")
+
+
+# Subagent routers: the stored decision models that recommend a subagent's model
+#
+# No shape here carries key material: a stored key is known by whether there is
+# one and its last four characters, which a key of four or fewer goes without.
+# Prices are USD per million of the decision model's tokens, as floats, the way
+# every other rate on the wire is; the store keeps them exact.
+
+Rate = Annotated[float, Field(ge=0, le=1_000_000)]
+"""USD per million tokens. The ceiling keeps a typo inside the stored column."""
+
+
+class AgentRecommenderCreate(BaseModel):
+    """Add a subagent router. The first one added is switched on; a later one waits to be."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(
+        min_length=1, max_length=32, description="The decision provider: typesafe, openrouter or llamacpp."
+    )
+    model: str = Field(min_length=1, max_length=255, description="The decision model, as the provider names it.")
+    api_base: str | None = Field(
+        default=None, max_length=1024, description="Root URL of the provider; blank for its own."
+    )
+    api_key: str | None = Field(
+        default=None, min_length=1, max_length=1024, description="Stored encrypted, never returned."
+    )
+    input_price_per_million: Rate = 0.0
+    output_price_per_million: Rate = 0.0
+
+
+class AgentRecommenderUpdate(BaseModel):
+    """Change a subagent router. An omitted field keeps its stored value.
+
+    Omitting ``api_key`` keeps the stored key while the provider and the API
+    base stay the same, so a price change never has to re-send a secret. A new
+    provider or address needs its own key, unless it is a self-hosted server
+    that takes none. A blank ``api_base`` goes back to the provider's own
+    address. Switching one on switches every other one off.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str | None = Field(default=None, min_length=1, max_length=32)
+    model: str | None = Field(default=None, min_length=1, max_length=255)
+    api_base: str | None = Field(default=None, max_length=1024)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    input_price_per_million: Rate | None = None
+    output_price_per_million: Rate | None = None
+    enabled: bool | None = None
+
+
+class AgentRecommenderPublic(BaseModel):
+    """One stored subagent router, known by its provider, model and the tail of its key."""
+
+    id: uuid.UUID
+    provider: str
+    model: str
+    api_base: str | None
+    api_key_last4: str | None
+    has_api_key: bool
+    input_price_per_million: float
+    output_price_per_million: float
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+
+class AgentRecommendersPublic(BaseModel):
+    """Every stored subagent router, oldest first."""
+
+    data: list[AgentRecommenderPublic]
+
+
+# One request may not teach more than this. Each example costs an embedding call,
+# so a batch is a loop with a bound rather than an unbounded fan-out.
+MAX_EXAMPLES_PER_REQUEST = 100
+
+
+class ScoredExample(BaseModel):
+    """One prompt and how well each candidate answered it."""
+
+    prompt: str = Field(min_length=1, description="The prompt that was tried.")
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt_has_content(cls, value: str) -> str:
+        """Refuse a blank prompt rather than counting it and storing nothing.
+
+        ``record_preference`` returns 0 for a prompt with no content, so a
+        whitespace-only one wrote an audit row, no routing-memory row, and a
+        ``recorded`` count that silently disagreed with both.
+        """
+        if not value.strip():
+            raise ValueError("prompt cannot be blank")
+        return value
+
+    @field_validator("task_id")
+    @classmethod
+    def _normalize_task_id(cls, value: str | None) -> str | None:
+        """Trim the partition label, and treat blank as absent.
+
+        The request side already does this: ``Otari-Router-Task`` is trimmed and a
+        blank header means the default pool. Storing `" support "` verbatim created a
+        partition that ``Otari-Router-Task: support`` could never reach, and
+        ``/status`` listed it as a real pool.
+        """
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+    scores: dict[str, Annotated[float, Field(ge=0.0, le=1.0)]] = Field(
+        min_length=1,
+        description=(
+            "Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and "
+            "meaningful: two models that both answered well is exactly the case where the router "
+            "should take the cheaper one."
+        ),
+    )
+    task_id: str | None = Field(
+        default=None,
+        description=(
+            "Partition this example belongs to, matching the Otari-Router-Task header requests send. "
+            "Omit to file it in the user's default pool."
+        ),
+    )
+    label_source: str = Field(default="human", description="Provenance of the scores: 'human' or 'judge'.")
+
+
+class _ScoredBatch(BaseModel):
+    """Record how well each candidate did, for one or many prompts.
+
+    A batch because of the arithmetic: a pool routes nothing until it holds
+    ``router_seed_count`` examples (20 by default) and the vote reads the ``k``
+    nearest (5 by default), so a useful first teaching pass is dozens of examples
+    across the kinds of prompt you care about.
+    """
+
+    examples: list[ScoredExample] = Field(
+        min_length=1,
+        max_length=MAX_EXAMPLES_PER_REQUEST,
+        description="The scored prompts to record.",
+    )
+
+
+class RankRequest(_ScoredBatch):
+    user_id: str = Field(description="Whose routing memory these examples belong to.")
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Which workspace's routing memory these examples belong to. Omit for the deployment's "
+            "default workspace. Only requests billing to that workspace vote over them."
+        ),
+    )
+
+
+class KeyRankRequest(_ScoredBatch):
+    # Forbidden rather than ignored: a `user_id` copied from the operator route
+    # would otherwise be dropped silently and the examples filed under the key's user.
+    model_config = ConfigDict(extra="forbid")

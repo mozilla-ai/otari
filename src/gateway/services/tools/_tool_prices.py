@@ -16,7 +16,7 @@ from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools._registry import BUILTIN_TOOLS
 from gateway.services.tools._web_admission import AdmittedWebTools
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
-from gateway.services.tools._web_search import InLoopSearch, resolve_fetch, resolve_in_loop_search
+from gateway.services.tools._web_search import InLoopSearch, ResolvedFetch, resolve_fetch, resolve_in_loop_search
 from gateway.types.tool_charges import RateKey, gateway_tool_pricing_key
 
 
@@ -50,6 +50,10 @@ def _priced_search(in_loop: InLoopSearch | None, *, on_credential: bool) -> Pric
     return PricedTool(WEB_SEARCH_TOOL_NAME, search.label, search.rate_keys, not search.on_credential)
 
 
+def _priced_fetch(fetch: ResolvedFetch) -> PricedTool:
+    return PricedTool(WEB_FETCH_TOOL_NAME, fetch.label, fetch.rate_keys, not fetch.on_credential)
+
+
 def admitted_tools(*, code_execution: bool, web: AdmittedWebTools) -> list[PricedTool]:
     """The gateway-run tools one admitted request may call, in the registry's order.
 
@@ -63,9 +67,7 @@ def admitted_tools(*, code_execution: bool, web: AdmittedWebTools) -> list[Price
     if web.search_tool_entry is not None:
         used[WEB_SEARCH_TOOL_NAME] = _priced_search(web.in_loop_search, on_credential=web.search_credential is not None)
     if web.fetch is not None:
-        used[WEB_FETCH_TOOL_NAME] = PricedTool(
-            WEB_FETCH_TOOL_NAME, web.fetch.label, web.fetch.rate_keys, not web.fetch.on_credential
-        )
+        used[WEB_FETCH_TOOL_NAME] = _priced_fetch(web.fetch)
     return [used[tool.name] for tool in BUILTIN_TOOLS if tool.name in used]
 
 
@@ -99,8 +101,7 @@ def configured_tools_to_price(config: GatewayConfig) -> list[PricedTool]:
         if tool.name == WEB_SEARCH_TOOL_NAME:
             priced.append(_priced_search(resolve_in_loop_search(config, None), on_credential=False))
         elif tool.name == WEB_FETCH_TOOL_NAME:
-            fetch = resolve_fetch(config, None, requested=None, for_search=None)
-            priced.append(PricedTool(tool.name, fetch.label, fetch.rate_keys, not fetch.on_credential))
+            priced.append(_priced_fetch(resolve_fetch(config, None, requested=None, for_search=None)))
         else:
             priced.append(_on_its_own_row(tool.name, deployment_paid=True))
     return priced

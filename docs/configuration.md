@@ -67,9 +67,9 @@ default_pricing: true
 
 Precedence from lowest to highest is the config file, structured environment
 config, then `OTARI_<FIELD>` values: the scalar fields, and
-`OTARI_HOSTED_PROVIDERS` as JSON. A top-level key of the structured config, and
-`OTARI_HOSTED_PROVIDERS`, replace the lower layer's value whole rather than
-merging into it. Stored runtime settings override
+`OTARI_HOSTED_PROVIDERS` and `OTARI_PROVIDER_SUPPORTED_COUNTRIES` as JSON. A
+top-level key of the structured config, and those two variables, replace the
+lower layer's value whole rather than merging into it. Stored runtime settings override
 the corresponding startup value after the database is available.
 
 ## Common settings
@@ -97,12 +97,19 @@ the corresponding startup value after the database is available.
 | `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
+| `automatic_routing` | Request-aware ordering of providers for unpinned catalog IDs. Enabled by default. See [Automatic routing](#automatic-routing). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
+| `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
+| `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
+| `client_country_database` | Path to a MaxMind DB country file the client address is looked up in. When set, a country file stored from the Settings page is not read. Needs the `geoip` extra. See [Supported countries](#supported-countries). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long the gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
+| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths. Defaults to `false`. See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about). |
+| `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](traces.md#who-reads-content). |
+| `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](traces.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -427,6 +434,46 @@ are refused in `providers:`.
 `true`, copies the entries onto hosted providers at startup; `false` keeps
 serving every entry from `config.yml`.
 
+### Automatic routing
+
+```yaml
+automatic_routing:
+  enabled: true
+  session_ttl_seconds: 3600
+  # Set only behind an edge that overwrites this header and blocks direct access.
+  country_header: CF-IPCountry
+  offerings:
+    nebius-us: {region: us, capacity: 10}
+    nebius-eu: {region: eu, capacity: 10}
+    # An exact instance:model entry overrides the instance-wide hint.
+    "bedrock:eu.anthropic.claude-sonnet-4-6": {region: eu, capacity: 5}
+```
+
+Offering keys name configured provider instances or exact `instance:model`
+selectors. Declare a region only when that endpoint actually serves it; Otari
+never guesses a provider's location from its brand. `region` accepts `us` or
+`eu`; omitted means unknown. `capacity` is a positive relative concurrency
+weight, default 1, not a limit. Use rate-limit rules for enforced limits, including
+`max_concurrent`. A sticky session falls back when those limits refuse its provider.
+
+Send `Otari-Conversation-Id` to reuse the provider and credential that served the
+conversation. `session_ttl_seconds` sets the inactivity expiry (1–86400 seconds,
+default 3600), refreshed by successful responses. Requests without a conversation
+ID are ranked independently.
+
+Both `country_header` and `default_region` are unset by default. With a trusted
+country header, US visitors prefer US endpoints and visitors in EU member
+countries prefer EU endpoints. Server-to-server traffic reflects the location of
+the calling server; applications that know the end user's preference can send
+`Otari-Region: us` or `eu`, which takes precedence. Other locations use
+`default_region` if set, otherwise there is no region preference. These settings
+allow cross-region fallback and do not enforce data residency.
+
+This is startup configuration, also accepted as JSON in
+`OTARI_AUTOMATIC_ROUTING`. Set `enabled: false` to use the baseline catalog order.
+The [model guide](models.md#automatic-provider-selection) explains cost, load,
+latency, sticky sessions and the limits of local feedback.
+
 ### Provider retries
 
 Most provider SDKs retry a failed call themselves before Otari sees the failure.
@@ -575,15 +622,17 @@ Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
 `otari gen-secret-key`. To rotate it, configure the new key before the old key,
 run the hosted provider and search-tool re-encryption endpoints
 (`POST /api/v1/hosted-providers/reencrypt` and
-`POST /api/v1/search-tools/reencrypt`), then remove the old key. Losing every
-configured encryption key makes stored credentials unrecoverable.
+`POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
+router's key has no re-encryption endpoint yet: re-enter it on the Subagent
+router page after the rotation. Losing every configured encryption key makes
+stored credentials unrecoverable.
 
 ### Hosted providers in config.yml
 
 The `hosted_providers:` block declares [hosted providers](hosted-providers.md),
 keyed by name, with the fields the `/api/v1/hosted-providers` body takes
 (`provider`, `api_key`, `api_base`, `client_args`, `enabled`,
-`restricted_to_organization_id`, `models`). `OTARI_HOSTED_PROVIDERS` sets the
+`restricted_to_organization_id`, `models`, `supported_countries`). `OTARI_HOSTED_PROVIDERS` sets the
 whole block as JSON and replaces the file's block whole. The fields, validation
 and how a configured entry behaves beside a stored one are in
 [The `hosted_providers:` block](hosted-providers.md#the-hosted_providers-block).
@@ -696,6 +745,121 @@ from outside, the pass-through endpoints (embeddings, images, audio,
 moderations, batches), a request refused before Otari resolved its user, and
 every row written before Otari stored it.
 
+### Supported countries
+
+A provider may serve only some countries. OpenAI's partner program for
+gateways, for example, requires a gateway to refuse OpenAI traffic from outside
+OpenAI's [supported countries](https://platform.openai.com/docs/supported-countries).
+`provider_supported_countries` lists, per provider type, the ISO 3166-1 alpha-2
+codes that may reach it:
+
+```yaml
+provider_supported_countries:
+  openai: [US, CA, GB, DE, FR]  # copy the provider's own full list
+client_country_header: CF-IPCountry
+```
+
+OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
+[openai-supported-countries.json](public/openai-supported-countries.json), a
+JSON list the dashboard's Load from JSON file button reads for a hosted
+provider. OpenAI changes the page, so check the file against it before relying
+on it. The page allows Ukraine "with certain exceptions", which a country code
+cannot express, so `UA` allows all of it.
+
+A provider type with no entry serves every country, and an empty list closes
+the provider to all of them. Quote Norway's code, `"NO"`: YAML reads a bare
+`NO` as false, which is refused as no country code. As an environment variable,
+the block is a JSON object:
+`OTARI_PROVIDER_SUPPORTED_COUNTRIES='{"openai": ["US", "DE"]}'`.
+
+A request from a country not on the list, or from one no source knows, is
+treated this way:
+
+- On chat completions, Messages and Responses, a routing policy or a catalog
+  id drops that provider's candidates and falls over to the next one. A plain
+  model is refused with a `403` and the `country_not_supported` code, and so
+  is a plan with no candidate left, without the code.
+- A policy whose `knn` router embeds the prompt with a
+  `router_embedding_model` on such a provider does not embed it: the router
+  declines, and the policy serves its default target.
+- The call that describes an image for a text-only model is skipped, so the
+  image falls back to OCR or is dropped, as when no `vision_describe_model` is
+  set.
+- Embeddings, images, audio, moderations, rerank, decisions and batches are
+  refused with a `403` and the `country_not_supported` code. A batch's status,
+  cancel, list and results calls are checked as its creation is, since they
+  reach the same provider.
+
+Every refusal except a batch's leaves an error row in usage.
+
+The list keys on who serves the call: an instance named for the provider or
+declaring its `provider_type`, a hosted provider of that type, and an
+organization's own key for it. An instance declared `openai-compatible` is a
+server that speaks OpenAI's protocol, such as vLLM or Ollama, so the `openai`
+list does not apply to it.
+
+A hosted provider can also have a list of its own: its `supported_countries`,
+set in the dashboard's Add and Edit dialogs, through `/api/v1/hosted-providers`,
+or in its `hosted_providers:` entry. It is checked when a request would be
+served on that provider's credential, so it never blocks an organization's own
+key for the same provider. Both lists apply: with `openai: [US, DE]` above and
+`supported_countries: [DE]` on a hosted `openai`, only Germany is served on that
+hosted provider. A routing policy or a catalog id skips a hosted candidate its
+list leaves out, and a plain model, a pass-through call or a batch call is
+refused with a `403` and the `country_not_supported` code. Through the API,
+null serves every country and an empty list none; in the dashboard a blank
+field serves every country. A hosted provider's list needs one of the sources below too: without
+one, every request served on it is from an unknown country and is refused.
+
+The country comes from a header or from a country file. With both, the header
+is read first and the file only when the header is absent.
+
+- `client_country_header` names a header that a proxy in front of Otari sets,
+  such as Cloudflare's `CF-IPCountry` or CloudFront's
+  `CloudFront-Viewer-Country`. A header that is present decides alone, so a
+  value that is no country code, such as Cloudflare's `T1` for Tor or `XX`,
+  counts as unknown. Set it only when every request reaches Otari through that proxy and
+  the proxy replaces any value a client sends. Otherwise a client picks its own
+  country.
+- A country file is a MaxMind DB file in which Otari looks up the client
+  address. Behind a proxy that address is the proxy's own unless
+  `forwarded_allow_ips` trusts it (see
+  [Behind a reverse proxy](deployment.md#behind-a-reverse-proxy)). Two files
+  are free:
+  [GeoLite2 Country](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data),
+  which needs a free MaxMind account and is kept current by
+  [geoipupdate](https://github.com/maxmind/geoipupdate), and
+  [DB-IP Lite Country](https://db-ip.com/db/download/ip-to-country-lite), a
+  monthly file that needs no account. DB-IP Lite is under CC BY 4.0, which asks
+  a service that uses it to credit DB-IP, for example with a link to
+  `https://db-ip.com` where the service names its data sources. Reading a file
+  needs the `geoip` extra (`pip install gateway[geoip]`), which the Docker
+  image installs. A file reaches Otari in one of two ways:
+  - Upload it on the dashboard's Settings page, in the Country file card, or
+    with `PUT /api/v1/settings/country-database`. Otari stores it in its
+    database, so every replica reads the same file and nothing is mounted.
+    The replica that took the upload reads the file at once, and every other
+    replica within 30 seconds. Only a country database is accepted, up to
+    32 MiB. A rejected file leaves the stored one in place, and a stored file
+    that a replica cannot open leaves that replica on the file it had. The card
+    shows the stored file's type and build date, so a stale file is plain to
+    see: DB-IP publishes a new one each month, and MaxMind twice a week.
+  - Mount it into the container and set `client_country_database` to its path,
+    as [Deployment](deployment.md#a-mounted-country-file) shows. A replaced file
+    is read again without a restart, and Otari refuses to start on a file it
+    cannot read. While it is set, a stored file is not read.
+
+Otari refuses to start with a `provider_supported_countries` list and no
+source: no header, no `client_country_database` and no stored file. For the
+same reason the stored file cannot be removed while it is the only source for
+that list or for the supported countries of an enabled hosted provider. A
+private address, or one the file does not hold, has no country, and
+a listed provider refuses it.
+
+A VPN changes the country a request appears to come from, so this check does
+not replace the account and billing checks a provider may also ask for, which
+need billing data a self-hosted Otari does not hold.
+
 ## Pricing
 
 Pricing keys use `provider:model` or `instance:model`:
@@ -711,15 +875,20 @@ Config-file prices seed the database. Prices stored through `/api/v1/pricing` ta
 precedence. Rates and settled costs use decimal arithmetic and costs are rounded
 once to a micro-dollar. Use PostgreSQL for durable accounting.
 
+A stored price change, made through the API, the dashboard or a catalog update,
+applies at once in the gateway process that wrote it. Each other worker or
+replica keeps the rates it has read for up to 30 seconds, so it applies the
+change within that window, as it does a rate scheduled to start later.
+
 ### Default pricing
 
 `default_pricing: true` prices from a models.dev snapshot when no stored price
 exists. Explicit database or config pricing always wins. A snapshot ships inside
 the package, so defaults work offline and a fresh deployment needs no network;
 once an operator accepts a newer one (below), that one serves instead. The
-`models_dev_metadata` setting only controls the descriptions and capabilities
-shown beside a model: prices and context windows come from the snapshot whether
-or not it is on.
+`models_dev_metadata` setting only controls whether the gateway fetches the
+descriptions and capabilities shown beside a model; with it off, they come from
+the bundled snapshot. Prices come from the snapshot whether or not it is on.
 
 A model is matched on its provider and id, including a pinned HuggingFace
 backend and Bedrock geo-prefixed ids. A bare id that providers list at different
@@ -746,7 +915,7 @@ a key offers that nothing prices is switched on and served at no cost, where
 [Who is shown which models](models.md#who-is-shown-which-models)). The gateway logs a warning for each unpriced model at most once an
 hour per process, and the dashboard shows operators a banner naming the models
 that served unpriced traffic in the selected workspace in the last 24 hours
-and still have no stored price, linked to those requests in Activity, where
+and still have no stored price, linked to those requests on the Overview, where
 each can be priced.
 
 ### Keeping the defaults current
@@ -775,20 +944,27 @@ serves, with their history; the cleanup never runs on a schedule.
   approval. `GET /api/v1/pricing/refresh/pending` reads what is held; nothing is
   metered differently until it is approved. On a deployment with nobody to make
   that call, prefer `auto`.
-- `auto` runs it and applies changed prices at once, unless they look wrong: an
+- `auto` runs it and applies changed prices without review, unless they look wrong: an
   update that would lose or remove more than a tenth of the priced models is
   held for review as under `review`.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
+
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
+It refuses models.dev data the gateway cannot read: a document that lists
+no models, or one with more than a quarter of its models damaged. When neither
+catalog can be read, the prices in force stay, and the update reports an error.
 
 Each accepted snapshot is kept, and a request or report priced for a past
 instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldest
 one for a time before the first. History therefore starts at the first accepted
 snapshot; models.dev publishes no dated price changes of its own.
 
-To refresh the bundled snapshot, as a maintainer does at release, run
+The bundled snapshot is the whole models.dev catalog, so it also carries the
+model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved `api.json`) and commit `src/gateway/data/models_dev_pricing.json`.
+saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+`src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
@@ -803,7 +979,9 @@ the default it shadows, so a config-file price that has fallen behind the
 provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
-Each stored rate also carries its `unit` (`tokens`, `requests`, or `images`)
+Each stored rate also carries its `unit` (`tokens`, `requests` or `images`, or
+one of the units under
+[Per-request pricing](#per-request-pricing-audio-moderations-rerank-and-completion-models))
 and its `origin` (`config` or `api`), so a rate the config file re-seeds on
 every restart is distinguishable from one set in the dashboard.
 
@@ -883,6 +1061,15 @@ A flat per-image or per-request rate cannot follow what the caller chooses: an
 image's size and quality, or an audio file's length. Set it at the dearest
 option you allow.
 
+A rate can also name `character`, `megapixel`, `second`, `minute` or
+`web_search`, the units models.dev prices some models in (a character or token
+price is per million, a search price per 1,000, and the rest per one). They are
+stored ahead of their meters: a rate in one of them prices nothing yet, so a
+budgeted request on such a rate is refused under `require_pricing` as any
+unpriced request is, and the refusal names the unit. With `require_pricing`
+off, the request is served and its usage row carries no cost. Such a rate is
+never billed as tokens. A later release gives each unit a meter.
+
 An unpriced request on audio or moderations is served at zero cost. Image
 generation, embeddings, rerank and direct search are subject to
 `require_pricing`, which also refuses a rate that cannot price the endpoint,
@@ -907,7 +1094,12 @@ model price can never be read as the tool's. The same row can be set through
 is priced; a `price_per_call` in the file adds a new version at startup only
 when it differs from the rate in force, so a rate set through the API for a tool
 that has a `price_per_call` lasts until the next restart, as a `pricing:` entry
-without `effective_at` does for a model. That rate is what a search reserves
+without `effective_at` does for a model. A tool stored from the dashboard under
+the same name and kind replaces this entry, so its `price_per_call` is not
+written while the stored tool exists; a rate an earlier start wrote stays in
+force until a newer one, such as one set from the dashboard, replaces it. A
+start whose stored tools fail to load writes no `price_per_call` at all, and the
+next start that loads them does. That rate is what a search reserves
 against the caller's budget before it runs. A successful search settles at the
 provider's reported charge when it reports one, and at the rate otherwise. A
 search a workspace's organization search key served is priced under
@@ -989,7 +1181,8 @@ calls use them by name, or the default one (below) when they name none, and the
 in-loop `otari_web_search` tool uses the default one. `fetch_tools` names fetch instances, for the `otari_web_fetch` tool
 and for enriching search results. Both can also be stored at runtime through
 `/api/v1/search-tools`, a fetch instance with `kind: fetch` and listed with
-`?kind=fetch`, and search instances from Tools too. A stored instance wins over
+`?kind=fetch`, or from the dashboard's deployment Web search page, which also
+sets each one's price and the defaults. A stored instance wins over
 a configuration file entry of the same name and kind.
 
 ```yaml
@@ -1061,8 +1254,8 @@ characters came back, never the content. `builtin_fetch` is tested as a fetch to
 call runs it: through the built-in fetcher, with no domain policy and no private
 hosts.
 
-The defaults and the call limit are runtime settings, also set from Tools or
-`/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
+The defaults and the call limit are runtime settings, also set from the
+dashboard's deployment Web search page or `/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
 file or environment, then to the built-in default.
 
 - `web_search_default_tool`: the search instance the in-loop tool uses when no
@@ -1119,23 +1312,24 @@ model like any other, as `<provider>:<model>` in `pricing`.
 
 ### Agent model recommendations
 
-These settings configure `POST /api/v1/routing/recommend` on a gateway you
-run; on otari.ai a managed recommender answers behind the same route, so
-neither applies there. For what the route does, see
-[Agent model recommendations](routing.md#agent-model-recommendations).
+For what `POST /api/v1/routing/recommend` does, see
+[Agent model recommendations](routing.md#agent-model-recommendations). The
+decision model it asks is set only on the
+[Subagent router](routing.md#subagent-routers) page of the dashboard, never in
+`config.yml`. One setting shapes the question:
 
 ```yaml
-agent_recommender_model: typesafe:jev-latest
 agent_recommender_candidates:
   haiku: Simple, well-specified, mechanical work. Little judgment needed.
   sonnet: Moderate reasoning across a few files, contained code changes.
   opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
 ```
 
-| Setting | Meaning |
-| --- | --- |
-| `agent_recommender_model` | The decision model asked, as a `decision_providers` selector. Resolved per request, so a deployment that never asks need not configure the provider. |
-| `agent_recommender_candidates` | Maps each model name, as Claude Code spells it, to what it is for; `null` is allowed when the name says enough. At least two and at most 255 (the limit a choice question has). Defaults to Claude Code's `haiku`, `sonnet` and `opus` aliases with descriptions along the lines above. |
+`agent_recommender_candidates` maps each model name, as Claude Code spells it,
+to what it is for; `null` is allowed when the name says enough. At least two
+are required, and at most 255, the limit a choice question has. The defaults
+are Claude Code's `haiku`, `sonnet` and `opus` aliases with descriptions along
+the lines above.
 
 The candidate list is Claude Code's alone: a pi request sends its own
 `candidates` in the same shape, as Otari model ids (`<provider>:<model>`),
@@ -1189,8 +1383,9 @@ does not. See [Signup](sign-in.md#signup).
 
 ## Built-in tools and guardrails variables
 
-The Tools pages and `GET /api/v1/tool-settings` show effective sandbox, web-search,
-and guardrail configuration. Common startup settings are:
+`GET /api/v1/tool-settings` shows effective sandbox, web-search, and guardrail
+configuration. On the dashboard, the Tools pages show the sandbox and guardrail
+settings, and the deployment's Web search page shows the web-search ones. Common startup settings are:
 
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
@@ -1309,10 +1504,16 @@ boundary.
 
 Signed-in dashboard users can choose **Feedback**, beside Documentation in the
 top bar (in the account menu on a phone), to send a message to the Otari team.
-The team receives it privately in Slack. Only the message is sent: no email,
-screenshot, page URL, account identifier, deployment identifier, or usage
-history is attached. Opening the form, typing, and canceling make no outbound
-request.
+The team receives it privately in Slack. By default only the message is sent:
+no email, screenshot, page URL, account identifier, deployment identifier, or
+usage history is attached. Someone whose account has an email also sees a box
+under the message, **Share _their address_ so the team can reply**. Ticked, the
+gateway adds the signed-in account's email, never an address from the request,
+and only when it is the address the form showed: a page left open while another
+tab signed in as someone else shares nothing. The Slack post shows it as the
+address to reply to. The box starts unticked every time the form opens, and an
+account without an email is not offered it. Opening the form, typing, and
+canceling make no outbound request.
 
 The gateway forwards the message to
 `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the

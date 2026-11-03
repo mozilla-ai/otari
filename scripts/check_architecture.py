@@ -443,7 +443,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/pricing_service.py",
     "gateway/services/routing/knn.py",
     "gateway/services/runtime_settings_service.py",
-    "gateway/services/search_tool_store_service.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tenancy/authorization.py",
     "gateway/services/tenancy/deployment_user_service.py",
@@ -483,6 +482,7 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/budgets.py",
     "gateway/api/routes/catalog.py",
     "gateway/api/routes/chat.py",
+    "gateway/api/routes/code_execution.py",
     "gateway/api/routes/embeddings.py",
     "gateway/api/routes/health.py",
     "gateway/api/routes/hooks.py",
@@ -493,8 +493,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/messages.py",
     "gateway/api/routes/models.py",
     "gateway/api/routes/moderations.py",
-    "gateway/api/routes/org_provider_keys.py",
-    "gateway/api/routes/organization_guardrails.py",
     "gateway/api/routes/organization_keys.py",
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/organization_routing.py",
@@ -508,14 +506,10 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
     "gateway/api/routes/search.py",
-    "gateway/api/routes/search_tools.py",
     "gateway/api/routes/settings.py",
     "gateway/api/routes/tool_settings.py",
     "gateway/api/routes/usage.py",
     "gateway/api/routes/users.py",
-    "gateway/api/routes/workspace_activation.py",
-    "gateway/api/routes/workspace_mcp_servers.py",
-    "gateway/api/routes/workspaces.py",
 )
 
 
@@ -608,7 +602,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/routing.py",
     "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
-    "gateway/api/routes/search_tools.py",
     "gateway/api/routes/settings.py",
     "gateway/api/routes/tool_settings.py",
     "gateway/api/routes/users.py",
@@ -985,7 +978,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/runtime_settings_service.py",
     "gateway/services/sandbox_backend.py",
     "gateway/services/search_backend.py",
-    "gateway/services/search_tool_store_service.py",
     "gateway/services/secret_box.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tool_format.py",
@@ -1434,6 +1426,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": None,
         "baseline": ("gateway/services/tenancy/organization_guardrail_service.py",),
     },
+    "gateway.models.identity.BlockedEmail": {
+        "repository": "gateway/repositories/identity/blocked_email_repository.py",
+        "baseline": (),
+    },
     "gateway.models.identity.OAuthIdentityLink": {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
         "baseline": (),
@@ -1444,6 +1440,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.inference.IdempotencyRecord": {
         "repository": "gateway/repositories/inference/idempotency_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.inference.StoredCountryDatabase": {
+        "repository": "gateway/repositories/inference/country_database_repository.py",
         "baseline": (),
     },
     "gateway.models.platform.RuntimeSetting": {
@@ -1572,6 +1572,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/rate_limits/rate_limit_rule_repository.py",
         "baseline": ("gateway/services/rate_limits/_service.py",),
     },
+    "gateway.models.routing.AgentRecommender": {
+        "repository": "gateway/repositories/routing/agent_recommender_repository.py",
+        "baseline": (),
+    },
     "gateway.models.routing.RouterPreference": {
         "repository": None,
         "baseline": ("gateway/api/routes/routing_memory.py",),
@@ -1692,7 +1696,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.tools.SearchToolCredential": {
         "repository": "gateway/repositories/tools/search_tool_repository.py",
-        "baseline": ("gateway/services/search_tool_store_service.py",),
+        "baseline": (),
     },
     "gateway.models.tools.WorkspaceCodeExecutionPolicy": {
         "repository": "gateway/repositories/tools/workspace_code_execution_policy_repository.py",
@@ -1728,6 +1732,26 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/traces/definition_repository.py",
         "baseline": (),
     },
+    "gateway.models.traces.TraceContentShare": {
+        "repository": "gateway/repositories/traces/share_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceContentRead": {
+        "repository": "gateway/repositories/traces/share_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceContentBarrier": {
+        "repository": "gateway/repositories/traces/barrier_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceUserBarrier": {
+        "repository": "gateway/repositories/traces/barrier_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceBreakGlassRead": {
+        "repository": "gateway/repositories/traces/break_glass_repository.py",
+        "baseline": (),
+    },
     "gateway.models.usage.AgentTelemetry": {
         "repository": None,
         "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),
@@ -1740,6 +1764,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/agent_telemetry.py",
             "gateway/api/routes/batches.py",
             "gateway/api/routes/catalog.py",
+            "gateway/api/routes/code_execution.py",
             "gateway/api/routes/organization_usage.py",
             "gateway/api/routes/search.py",
             "gateway/api/routes/usage.py",

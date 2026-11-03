@@ -20,6 +20,7 @@ import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   ORGANIZATIONS,
+  TRACES,
   WORKSPACES,
   workspaceMeta,
 } from "@/shared/api/queryKeys"
@@ -478,6 +479,36 @@ export function useRemoveWorkspaceMember() {
       // organization context, not from this key, so a roster change that moves
       // the caller in or out of a workspace has to refresh it too.
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// Keeping what a workspace's agent sessions were about. A switch of its own
+// rather than part of the edit form's save: it takes effect when flipped.
+export function useSetWorkspaceTraceContent() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      apiFetch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ trace_content_enabled: enabled }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
+// Deletes what the workspace's sessions were about; the sessions stay.
+export function useDeleteWorkspaceTraceContent() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/workspaces/${encodeURIComponent(id)}/trace-content`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [TRACES] })
     },
   })
 }

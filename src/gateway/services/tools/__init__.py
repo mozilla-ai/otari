@@ -24,6 +24,7 @@ request's gateway-run tools, and for the deployment's at startup, and ``unpriced
 ``web_search_configured`` answers whether the in-loop default yields a search, and ``warn_about_tool_instances``
 logs at startup what the instance rules let load but an operator should fix.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
+``search_resolves`` and ``fetch_resolves`` whether a declared search or fetch finds anything to run on,
 ``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
 and ``builtin_fetch_resolved`` answers ``builtin_fetch``'s without a config. ``WebFetchBackend`` runs the fetch
 tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds one for a request, and
@@ -36,8 +37,8 @@ search endpoint's rules and run its call, ``refuse_unpriced_direct_search`` refu
 cannot bill, and ``SearchQuery`` with the helpers beside it map LiteLLM's
 search fields onto a provider. ``build_web_provider_client`` builds the client the web tools' providers
 are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
-``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's web tool calls, and
-``without_otari_tool_calls`` takes it back off the messages a client sends.
+``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's tool calls, ``mcp_entry``
+is the report of one MCP call, and ``without_otari_tool_calls`` takes the field back off the messages a client sends.
 ``sandbox_api_key`` is the key a hosted sandbox provider's sandboxes are leased with, stored or from the
 environment, ``store_sandbox_api_key`` and ``clear_sandbox_api_key`` change the stored one, and
 ``sandbox_credential_status`` says which one is in use.
@@ -47,7 +48,7 @@ and ``retargeted_tool_choice`` points a forced ``tool_choice`` at the search too
 
 from gateway.services.tools._builtin_tool import BuiltinTool
 from gateway.services.tools._candidate_tools import CandidateTools, ProviderToolDeclaration, decide_candidate_tools
-from gateway.services.tools._chat_tool_calls import OTARI_TOOL_CALLS_FIELD, without_otari_tool_calls
+from gateway.services.tools._chat_tool_calls import OTARI_TOOL_CALLS_FIELD, mcp_entry, without_otari_tool_calls
 from gateway.services.tools._code_execution_admission import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
     AdmittedCodeExecution,
@@ -101,20 +102,9 @@ from gateway.services.tools._sandbox_credential import (
     store_sandbox_api_key,
 )
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
-from gateway.services.tools._search_tool_connection import (
-    check_test_input,
-    instance_to_test,
-    run_connection_test,
-    unsaved_instance_to_test,
-)
-from gateway.services.tools._search_tool_writes import (
-    DefaultPin,
-    check_kind_unchanged,
-    check_tool_entry,
-    check_tool_name_is_free,
-    check_tool_write,
-    default_to_pin,
-)
+from gateway.services.tools._search_tool_connection import check_test_input, run_connection_test
+from gateway.services.tools._search_tool_overlay import reset_search_tool_cache, run_search_tool_refresher
+from gateway.services.tools._search_tool_service import ReadToolSettings, SearchToolService, StageToolSetting
 from gateway.services.tools._tool_prices import (
     PricedTool,
     admitted_tools,
@@ -129,6 +119,7 @@ from gateway.services.tools._web_admission import (
     AdmittedWebTools,
     DeclaredWebTools,
     WebClaims,
+    WorkspaceWebExecutors,
     admit_web_access,
     extract_web_tools,
     read_web_declarations,
@@ -168,6 +159,7 @@ from gateway.services.tools._web_search import (
     SearchQuery,
     WebSearchBackend,
     builtin_fetch_resolved,
+    fetch_resolves,
     filter_hits_by_domain,
     page_budget_chars,
     pick_direct_search_instance,
@@ -177,6 +169,7 @@ from gateway.services.tools._web_search import (
     resolve_in_loop_search,
     resolve_search,
     run_direct_search,
+    search_resolves,
     warn_about_tool_instances,
     web_search_configured,
 )
@@ -222,6 +215,7 @@ __all__ = [
     "unpriced_tool_detail",
     "NO_WEB_TOOLS",
     "WebAccessGrant",
+    "WorkspaceWebExecutors",
     "WebClaims",
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
@@ -237,6 +231,7 @@ __all__ = [
     "extract_web_tools",
     "first_provider_code_execution_tool",
     "is_capped_call",
+    "mcp_entry",
     "native_code_execution_dialect",
     "native_rendering",
     "parse_code_execution_header",
@@ -256,16 +251,13 @@ __all__ = [
     "DEFAULT_MAX_RESULTS",
     "web_search_max_results_baseline",
     "search_provider_catalog",
-    "DefaultPin",
-    "check_kind_unchanged",
+    "ReadToolSettings",
+    "SearchToolService",
+    "StageToolSetting",
     "check_test_input",
-    "check_tool_entry",
-    "check_tool_name_is_free",
-    "check_tool_write",
-    "default_to_pin",
-    "instance_to_test",
+    "reset_search_tool_cache",
     "run_connection_test",
-    "unsaved_instance_to_test",
+    "run_search_tool_refresher",
     "SANDBOX_KEY_ENV",
     "SandboxCredentialStatus",
     "clear_sandbox_api_key",
@@ -311,7 +303,9 @@ __all__ = [
     "pick_direct_search_instance",
     "refuse_unpriced_direct_search",
     "resolve_direct_search",
+    "fetch_resolves",
     "run_direct_search",
+    "search_resolves",
     "warn_about_tool_instances",
     "web_search_configured",
 ]

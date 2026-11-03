@@ -78,6 +78,7 @@ from gateway.services.pricing_service import default_model_pricing, normalize_ef
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.price_unit import PriceUnit
 
 # What a client is told about where a rate came from. The spellings are
 # ``models.pricing.PriceSource``, so the models panel and the Models page name
@@ -109,7 +110,7 @@ class _Price:
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
     pricing_id: uuid.UUID | None = None
-    unit: str = "tokens"
+    unit: PriceUnit = "tokens"
 
 
 def _quantized(value: Decimal | None) -> Decimal | None:

@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, nulls_last, or_, select, update
+from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +31,7 @@ def user_alphabetical_order() -> ColumnElement[str]:
     so an email-less operator would otherwise head the roster on the engine the
     OSS base ships by default.
     """
-    return nulls_last(func.lower(func.coalesce(func.nullif(func.trim(col(User.full_name)), ""), col(User.email))))
+    return func.lower(func.coalesce(func.nullif(func.trim(col(User.full_name)), ""), col(User.email))).nulls_last()
 
 
 def user_matches_search(term: str) -> ColumnElement[bool]:
@@ -198,6 +198,24 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         )
         return list(result.scalars().all()), count
 
+    async def list_with_email_at(
+        self, domains: Collection[str], *, include_subdomains: bool
+    ) -> list[tuple[uuid.UUID, str]]:
+        """Return ``(id, email)`` for every identity whose address is at one of ``domains``, or under one where
+        ``include_subdomains``.
+
+        Matched case-insensitively, as ``get_by_email`` is. ``domains`` are plain host names, so they hold no
+        ``LIKE`` wildcard to escape.
+        """
+        email = func.lower(col(User.email))
+        conditions = [email.like(f"%@{domain.lower()}") for domain in domains]
+        if include_subdomains:
+            conditions.extend(email.like(f"%@%.{domain.lower()}") for domain in domains)
+        if not conditions:
+            return []
+        result = await self.db.execute(select(col(User.id), col(User.email)).where(or_(*conditions)))
+        return [(user_id, email) for user_id, email in result.tuples().all() if email is not None]
+
     async def get_by_verification_token_hash(self, token_hash: str) -> User | None:
         """Return the identity a hashed email-verification token names, or None.
 
@@ -314,6 +332,15 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         """Return the ID of every identity whose active organization is this one, member or not."""
         result = await self.db.execute(select(col(User.id)).where(col(User.active_organization_id) == organization_id))
         return list(result.scalars().all())
+
+    async def get_active_ids(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """Return which of these identities exist and are active, in one query."""
+        if not user_ids:
+            return set()
+        result = await self.db.execute(
+            select(col(User.id)).where(col(User.id).in_(list(user_ids)), col(User.is_active).is_(True))
+        )
+        return set(result.scalars().all())
 
     async def move_active_organization(self, user_ids: Collection[uuid.UUID], organization_id: uuid.UUID) -> None:
         """Stage ``organization_id`` as the active organization of each of these identities."""

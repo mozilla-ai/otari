@@ -22,7 +22,7 @@ function stats(overrides: Partial<SessionStats> = {}): SessionStats {
     inSubagents: 0,
     tools: [],
     gates: { runs: 0, verdicts: {} },
-    judges: { calls: 0, models: [], cost: 0, priced: 0 },
+    judges: { calls: 0, cost: 0, priced: 0 },
     time: { modelMs: 0, toolsMs: 0, waitingMs: 0, hooksMs: 0 },
     activeMs: 0,
     toolsInModelMs: 0,
@@ -196,10 +196,7 @@ describe("costParts", () => {
 
     expect(by).toBe("meter")
     expect(keys(parts)).toEqual(["cacheWrite", "cacheRead", "output", "input"])
-    expect(parts[1]).toMatchObject({
-      label: "Reading the cache",
-      hint: "1,240,388 tokens",
-    })
+    expect(parts[1]).toMatchObject({ label: "Reading the cache" })
     expect(drawnTotal(parts)).toBeCloseTo(1)
   })
 
@@ -224,9 +221,9 @@ describe("costParts", () => {
     )
 
     expect(by).toBe("model")
-    expect(parts.map(({ label, hint }) => [label, hint])).toEqual([
-      ["claude-sonnet-5-5", "44 requests"],
-      ["claude-haiku-5-5", "3 requests"],
+    expect(parts.map(({ label }) => label)).toEqual([
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
     ])
   })
 

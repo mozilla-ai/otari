@@ -30,7 +30,7 @@ run Otari yourself (see [Self-hosted quickstart](self-hosted-quickstart.md)).
 
 Point an agent or a framework at Otari:
 [Claude Code](use-with-claude-code.md), [Codex](use-with-codex.md),
-[OpencCde](use-with-opencode.md), [Pydantic AI](use-with-pydantic-ai.md),
+[Junie](use-with-junie.md), [opencode](use-with-opencode.md), [Pydantic AI](use-with-pydantic-ai.md),
 [LangChain](use-with-langchain.md) and [LangGraph](use-with-langgraph.md)...
 
 Missing an option? Don't hesitate to [open an issue on github](https://github.com/mozilla-ai/otari/issues/new/choose).

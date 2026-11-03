@@ -1236,6 +1236,7 @@ def test_a_service_key_starts_a_search_end_user_on_the_budget_it_names(
 
 
 def _add_org_search_key(client: TestClient, headers: dict[str, str], api_key: str) -> str:
+    """Add a Tavily key and make it the organization's default, so every workspace searches with it."""
     created = client.post(
         f"{API_ROOT}/organizations/me/web-search-keys",
         json={"provider": "tavily", "name": "ours", "api_key": api_key},
@@ -1243,6 +1244,8 @@ def _add_org_search_key(client: TestClient, headers: dict[str, str], api_key: st
     )
     assert created.status_code == 201, created.text
     key_id: str = created.json()["id"]
+    starred = client.post(f"{API_ROOT}/organizations/me/web-search-keys/{key_id}/default", headers=headers)
+    assert starred.status_code == 200, starred.text
     return key_id
 
 
@@ -1289,6 +1292,10 @@ def test_an_unnamed_call_on_an_exa_key_runs_through_any_search_with_the_key(
         headers=master_key_header,
     )
     assert created.status_code == 201, created.text
+    starred = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys/{created.json()['id']}/default", headers=master_key_header
+    )
+    assert starred.status_code == 200, starred.text
     _price(client, master_key_header, "otari:web_search", 5000.0)
     seen: list[httpx.Request] = []
 

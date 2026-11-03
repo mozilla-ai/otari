@@ -64,6 +64,7 @@ def _ctx(
     db: object | None = object(),
     reservation: ReservationHandle | None = None,
     estimate_inputs: object | None = None,
+    tool_hold: Decimal = Decimal(0),
 ) -> Any:
     """A context carrying only what the top-up reads.
 
@@ -96,6 +97,7 @@ def _ctx(
             else EstimateInputs(prompt_chars=400, max_output_tokens=100, default_output_tokens=100)
         ),
         config=GatewayConfig(require_pricing=require_pricing),
+        tool_hold=tool_hold,
     )
 
 
@@ -133,6 +135,14 @@ async def test_a_fallback_grows_the_hold_to_its_own_estimate(increases: list[Dec
     """The candidate's whole estimate, because each leg grows only by what it lacks of it."""
     await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "anthropic", "pricey"))
     assert increases == [Decimal(9)]
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_keeps_the_hold_of_the_tool_calls_already_run(increases: list[Decimal]) -> None:
+    """Tool calls are billed whichever attempt wins, so their hold stays on top of the fallback's estimate."""
+    ctx = _ctx(estimate=Decimal(5), tool_hold=Decimal("0.02"))
+    await pipeline.top_up_reservation_for_attempt(ctx, _attempt(2, "anthropic", "pricey"))
+    assert increases == [Decimal("9.02")]
 
 
 @pytest.mark.asyncio

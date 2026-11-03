@@ -102,6 +102,14 @@ With `serves_unlisted_models` on, every model the provider offers is switched
 on whether or not something prices it, and a model the roster switches off is
 still refused.
 
+A provider can stop serving a model it still lists, as Together does with a
+model it moves to dedicated endpoints. The first request the provider refuses
+that way on the hosted credential switches the model off, with
+`disabled_reason: unavailable`, and emails the Health page's alert list
+([Health checks](health-checks.md#email-alerts)); an operator switches it back
+on if the refusal was wrong. Only a refusal Otari recognizes as being about the
+model itself does this, never one an organization's own key met.
+
 Adding a provider offers every model its key lists:
 
 - A model the deployment price list already prices is switched on at that rate.
@@ -214,6 +222,7 @@ hosted_providers:
 | `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
+| `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](configuration.md#supported-countries). |
 
 A key may be left out for the self-hosted backends `vllm`, `ollama`,
 `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`; for `vertexai` and
@@ -325,6 +334,10 @@ menu, and is listed only for a deployment operator.
   listing them before anything is removed.
 - A provider kept to one organization shows which. That restriction is set
   through `/api/v1/hosted-providers`.
+- The **Countries** column shows the countries a provider serves, set in the
+  add and edit dialogs as two-letter codes, typed or loaded from a JSON file
+  holding a list of them (or one under `supported_countries`), blank for every
+  country (see [Supported countries](configuration.md#supported-countries)).
 - A provider's name opens Models filtered to it. Above the table, a summary
   counts the providers reachable, with **Re-check all** to ask them again.
 - The table also lists the `providers:` instances of `config.yml`, marked
@@ -360,12 +373,12 @@ adapter does nothing, so with no overlay a hosted-provider request is served and
 recorded as deployment-paid on its usage row, and no organization is charged.
 
 This covers every path that calls a provider: Chat Completions, Messages,
-Responses and the Playground, each candidate of a routing policy with
-fallbacks, the pass-through endpoints (embeddings, images, audio, rerank,
-moderations) and batches. A routing policy asks for each candidate as it
-reaches it, so the one that serves is the one that settles, and one the
-organization cannot fund is skipped. A batch is admitted when it is created and
-charged when its results are accounted.
+Responses and the Playground, each candidate of a routing policy or a catalog id
+with fallbacks, the pass-through endpoints (embeddings, images, audio, rerank,
+moderations) and batches. A routing policy or a catalog id asks for each
+candidate as it reaches it, so the one that serves is the one that settles, and
+one the organization cannot fund is skipped. A batch is admitted when it is
+created and charged when its results are accounted.
 
 ## Upgrading
 

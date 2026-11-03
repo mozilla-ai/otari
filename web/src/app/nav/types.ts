@@ -34,6 +34,12 @@ interface NavItemBase {
    */
   icon: IconType
   /**
+   * Other addresses of this same destination: views of one page that each have
+   * a URL (the Overview's tabs) but one row in the rail. The rail remembers them as
+   * it remembers `to`, so coming back to it reopens the view that was open.
+   */
+  views?: readonly NavPath[]
+  /**
    * The management surface this destination needs, from the deployment
    * bootstrap (`GET /v1/bootstrap`). The topology axis: does the process
    * serving this page host the surface at all? A missing one is ungated, which

@@ -20,6 +20,7 @@ vi.mock("@/shared/api/overlayRequestPolicy", () => ({
 afterEach(() => {
   policy.origin = ""
   policy.credentials = "same-origin"
+  policy.publicOrigin = undefined
 })
 
 const INPUT = {
@@ -167,5 +168,21 @@ describe("resolveSnippetBaseUrl", () => {
     policy.credentials = "include"
 
     expect(resolveSnippetBaseUrl()).toBe("https://eu.otari.example")
+  })
+
+  it("prefers the public origin over the page's own", () => {
+    // The dashboard's requests stay on the page's host, whose edge cuts a long
+    // non-streamed request; a program is pointed at the API's own host.
+    policy.publicOrigin = "https://api.otari.example"
+
+    expect(resolveSnippetBaseUrl()).toBe("https://api.otari.example")
+  })
+
+  it("prefers the public origin over the deployment the requests reach", () => {
+    policy.origin = "https://eu.otari.example"
+    policy.credentials = "include"
+    policy.publicOrigin = "https://eu.api.otari.example"
+
+    expect(resolveSnippetBaseUrl()).toBe("https://eu.api.otari.example")
   })
 })
