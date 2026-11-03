@@ -27,6 +27,7 @@ it is deleted.
 
 import hashlib
 import uuid
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -166,6 +167,12 @@ async def revoke_user_dashboard_sessions(
     if keep_token_hash is not None:
         statement = statement.where(DashboardSession.token_hash != keep_token_hash)
     await db.execute(statement)
+
+
+async def revoke_dashboard_sessions_of(db: AsyncSession, user_ids: Collection[uuid.UUID]) -> None:
+    """Stage removal of every session the identities in ``user_ids`` hold, in one statement. The caller commits."""
+    if user_ids:
+        await db.execute(delete(DashboardSession).where(col(DashboardSession.user_id).in_(user_ids)))
 
 
 async def record_session_key_marker(db: AsyncSession, key_hash: str) -> None:

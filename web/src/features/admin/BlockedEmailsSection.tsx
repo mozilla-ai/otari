@@ -172,6 +172,11 @@ export function BlockedEmailsSection() {
           emptyContent="Nothing is blocked."
         />
       </TableScrollFrame>
+      {entries.data && entries.data.count > rows.length ? (
+        <p className="text-caption">
+          Showing the newest {rows.length} of {entries.data.count} entries.
+        </p>
+      ) : null}
     </section>
   )
 }

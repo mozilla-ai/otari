@@ -77,7 +77,10 @@ from gateway.schemas.identity import (
     BlockedEmailPublic,
     BlockedEmailsPublic,
 )
-from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
+from gateway.services.dashboard_session_service import (
+    revoke_dashboard_sessions_of,
+    revoke_user_dashboard_sessions,
+)
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 
 
@@ -239,17 +242,16 @@ class DeploymentUserService:
         is_domain = "@" not in pattern
 
         matched = await self._accounts_matching(pattern, is_domain=is_domain)
-        if any(account.id == actor.id for account in matched):
+        if actor.id in matched:
             raise DeploymentUserSelfChangeError("You cannot block your own email address")
         bootstrap = await load_bootstrap_identity(self.db)
-        if bootstrap is not None and any(account.id == bootstrap.id for account in matched):
+        if bootstrap is not None and bootstrap.id in matched:
             raise BootstrapOperatorProtectedError("The deployment's bootstrap operator's address cannot be blocked")
 
         reason = (request.reason or "").strip() or None
         try:
             entry = await self.blocked_emails.add(pattern=pattern, reason=reason, created_by_user_id=actor.id)
-            for account in matched:
-                await revoke_user_dashboard_sessions(self.db, account.id)
+            await revoke_dashboard_sessions_of(self.db, matched)
             await self.db.commit()
         except SQLAlchemyError:
             # See ``update_user`` for why the session is rolled back here.
@@ -281,8 +283,8 @@ class DeploymentUserService:
             raise
         logger.warning("Email blocklist entry removed by operator: actor=%s entry=%s", actor.id, entry_id)
 
-    async def _accounts_matching(self, pattern: str, *, is_domain: bool) -> list[User]:
-        """Every account whose address the entry ``pattern`` blocks.
+    async def _accounts_matching(self, pattern: str, *, is_domain: bool) -> set[uuid.UUID]:
+        """The ids of every account whose address the entry ``pattern`` blocks.
 
         The query is by domain, in both its punycode and its Unicode spelling since a stored address may
         carry either, and the exact match is ``blocklist_keys``, so the answer is the one sign-in gives.
@@ -294,7 +296,7 @@ class DeploymentUserService:
         except (idna.IDNAError, UnicodeError):
             pass
         candidates = await self.users.list_with_email_at(spellings, include_subdomains=is_domain)
-        return [account for account in candidates if account.email and pattern in blocklist_keys(account.email)]
+        return {user_id for user_id, email in candidates if pattern in blocklist_keys(email)}
 
     async def _require_administration_access(self, actor: User) -> None:
         """Raise the 404 unless this caller operates the deployment."""

@@ -198,8 +198,11 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         )
         return list(result.scalars().all()), count
 
-    async def list_with_email_at(self, domains: Collection[str], *, include_subdomains: bool) -> list[User]:
-        """Return every identity whose address is at one of ``domains``, or under one where ``include_subdomains``.
+    async def list_with_email_at(
+        self, domains: Collection[str], *, include_subdomains: bool
+    ) -> list[tuple[uuid.UUID, str]]:
+        """Return ``(id, email)`` for every identity whose address is at one of ``domains``, or under one where
+        ``include_subdomains``.
 
         Matched case-insensitively, as ``get_by_email`` is. ``domains`` are plain host names, so they hold no
         ``LIKE`` wildcard to escape.
@@ -210,8 +213,8 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
             conditions.extend(email.like(f"%@%.{domain.lower()}") for domain in domains)
         if not conditions:
             return []
-        result = await self.db.execute(select(User).where(or_(*conditions)))
-        return list(result.scalars().all())
+        result = await self.db.execute(select(col(User.id), col(User.email)).where(or_(*conditions)))
+        return [(user_id, email) for user_id, email in result.tuples().all() if email is not None]
 
     async def get_by_verification_token_hash(self, token_hash: str) -> User | None:
         """Return the identity a hashed email-verification token names, or None.

@@ -30,6 +30,7 @@ function mockApi(opts: {
   count?: number
   passwordLink?: PasswordLink
   blocked?: BlockedEmail[]
+  blockedCount?: number
   blockedAccountCount?: number
 }) {
   const granted = opts.granted ?? true
@@ -51,7 +52,10 @@ function mockApi(opts: {
     if (url.includes(`${API_ROOT}/admin/blocked-emails`)) {
       const blocked = opts.blocked ?? []
       if (method === "GET") {
-        return jsonResponse({ data: blocked, count: blocked.length })
+        return jsonResponse({
+          data: blocked,
+          count: opts.blockedCount ?? blocked.length,
+        })
       }
       if (method === "DELETE") {
         return new Response(null, { status: 204 })
@@ -472,6 +476,15 @@ describe("Blocked emails", () => {
     expect(await within(table).findByText("spam.example")).toBeInTheDocument()
     expect(within(table).getByText("DOMAIN AND SUBDOMAINS")).toBeInTheDocument()
     expect(within(table).getByText("throwaway signups")).toBeInTheDocument()
+  })
+
+  it("says so when the list holds more entries than it shows", async () => {
+    mockApi({ blocked: [BLOCKED_DOMAIN], blockedCount: 1500 })
+    await renderPage(<DeploymentAccountsPage />)
+
+    expect(
+      await screen.findByText("Showing the newest 1 of 1500 entries."),
+    ).toBeInTheDocument()
   })
 
   it("blocks what was typed and says how many accounts it caught", async () => {
