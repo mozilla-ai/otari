@@ -42,6 +42,7 @@ from gateway.types.traces import (
     BreakGlassKind,
     BreakGlassRead,
     ContentAccess,
+    ContentCapture,
     ContentRead,
     ContentReader,
     ContentShare,
@@ -196,6 +197,23 @@ class TraceService:
         """The workspace's content generation, to capture content on. Read before whether content is on at all."""
         async with self._uow:
             return await self._barriers.generation(workspace_id)
+
+    async def routed_content(
+        self, workspace_id: uuid.UUID, user_id: str | None, *, tool_output: bool
+    ) -> ContentCapture | None:
+        """What a request routed through the gateway keeps of its content, or None where it keeps none.
+
+        The rule an export is held to: the workspace keeps content for this user, read
+        after the generation, so a workspace that turns it off meanwhile keeps nothing.
+        Tool output only where the deployment (``tool_output``) and the workspace both
+        keep it. In a savepoint, so a failed read raises without undoing the request's step.
+        """
+        async with self._uow.savepoint():
+            generation = await self._barriers.generation(workspace_id)
+            kept = await self._owners.content_kept(workspace_id, user_id)
+        if not kept.keeps:
+            return None
+        return ContentCapture(generation=generation, tool_output=tool_output and kept.tool_output)
 
     async def turn_content_off[T](
         self, workspace_id: uuid.UUID, *, authorize: Callable[[], Awaitable[None]], switch: Callable[[], Awaitable[T]]

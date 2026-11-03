@@ -81,10 +81,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ToolPorts,
+    asks_to_keep_trace_content,
     get_automatic_router,
     get_budget_service,
     get_request_prices,
-    routed_trace_content_generation,
+    routed_trace_content,
     verify_api_key_or_master_key,
 )
 from gateway.api.request_id import set_request_id
@@ -393,11 +394,11 @@ from gateway.services.traces import (
     ContextWeights,
     RequestTrace,
     SessionRef,
-    TurnContent,
     TurnFacts,
     context_of,
     harness_of,
     is_subagent,
+    read_turn_content,
     resolve_session,
 )
 from gateway.services.upstream_redaction import redact_upstream_message
@@ -2735,7 +2736,6 @@ async def resolve_request_context(
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
     context: Callable[[], ContextWeights | None] | None = None,
-    turn_content: Callable[[], TurnContent | None] | None = None,
     session_label: str | None = None,
     safety_identifier: str | None = None,
 ) -> RequestContext:
@@ -2770,8 +2770,8 @@ async def resolve_request_context(
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
 
-    ``turn_content`` reads the prompt and the answered tool calls' content from the
-    body, and runs only for a request that keeps content (``Otari-Trace-Content``).
+    ``turn`` is also where the content of a request that keeps it is read from
+    (``Otari-Trace-Content``): the prompt and the answered tool calls.
 
     ``safety_identifier`` is the caller's tag for the end user, which wins over
     ``user_id_from_request`` as the tag in the provider's end-user identifier.
@@ -3133,12 +3133,14 @@ async def resolve_request_context(
     )
     # Before the rate limit and the reservation, so a read that fails or never finishes holds nothing to give back,
     # and before normalization, so the content is what the client sent and not an attachment rendered as text.
-    content_generation = (
-        await routed_trace_content_generation(raw_request, config, workspace_id, user_id)
-        if config.trace_capture_enabled and turn_content is not None
+    capture = (
+        await routed_trace_content(raw_request, uow, db, config, workspace_id, user_id)
+        if turn is not None and asks_to_keep_trace_content(raw_request) and config.trace_capture_enabled
         else None
     )
-    content = turn_content() if turn_content is not None and content_generation is not None else None
+    content = (
+        read_turn_content(turn, tool_output=capture.tool_output) if turn is not None and capture is not None else None
+    )
     # Before the reservation, so a request the rules refuse holds no budget to refund.
     rate_limit_grant = await admit_rate_limit_rules(
         raw_request,
@@ -3478,8 +3480,8 @@ async def resolve_request_context(
             turn=turn,
             context=context_of(context),
             content=content,
-            content_generation=content_generation,
-            keep_tool_output=config.trace_content_tool_output,
+            content_generation=capture.generation if capture is not None else None,
+            keep_tool_output=capture is not None and capture.tool_output,
             subagent=is_subagent(raw_request.headers),
             request_id=request_id,
             workspace_id=workspace_id,

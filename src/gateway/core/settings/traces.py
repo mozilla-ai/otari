@@ -44,7 +44,8 @@ class TraceSettings(BaseModel):
         default=False,
         description=(
             "Also keep what each tool returned, on a request routed through the gateway that keeps content: the "
-            "results a client hands back and the output of a tool the gateway ran. Off by default."
+            "results a client hands back and the output of a tool the gateway ran. A workspace can still turn it "
+            "off for itself. Off by default."
         ),
     )
     trace_platform_break_glass_enabled: Annotated[bool, OMITTED] = Field(

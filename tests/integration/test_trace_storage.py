@@ -37,7 +37,7 @@ from gateway.services.secret_box import generate_secret_key
 from gateway.services.traces import SpanContent, TraceService
 from gateway.services.traces import _service as trace_service_module
 from gateway.services.traces._collector import call_id_digest
-from gateway.types.traces import BreakGlass, SpanRecord, TraceFilter, TraceScope, TraceWrite
+from gateway.types.traces import BreakGlass, SpanRecord, TraceFilter, TraceScope, TraceWrite, WorkspaceContent
 from otari_agent.domain.definitions import GateDefinition, definition_digest
 
 
@@ -61,6 +61,9 @@ class _Members:
 
     async def members(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
         return {pair for pair in pairs if await self.is_member(*pair)}
+
+    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
+        return WorkspaceContent(keeps=await self.is_member(workspace_id, user_id), tool_output=True)
 
 
 @pytest_asyncio.fixture

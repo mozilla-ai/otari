@@ -50,7 +50,7 @@ def _completion() -> ChatCompletion:
 
 def _member_key(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
-) -> tuple[dict[str, str], Callable[[bool], None]]:
+) -> tuple[dict[str, str], Callable[..., None]]:
     """A key for a person who is an admin of the default workspace's organization, and a switch for its content."""
     with db_session_factory() as session:
         workspace = session.scalars(select(Workspace)).first()
@@ -75,12 +75,13 @@ def _member_key(
     )
     assert resp.status_code == 200, resp.text
 
-    def workspace_keeps(value: bool) -> None:
+    def workspace_keeps(value: bool, *, tool_output: bool = True) -> None:
         with db_session_factory() as session:
             key = session.scalars(select(APIKey).where(APIKey.key_name == _KEY_NAME)).one()
             workspace = session.get(Workspace, key.workspace_id)
             assert workspace is not None
             workspace.trace_content_enabled = value
+            workspace.trace_content_tool_output = tool_output
             session.commit()
 
     return {"Otari-Key": f"Bearer {resp.json()['key']}"}, workspace_keeps
@@ -92,7 +93,7 @@ def routed(
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[_RecordingWriter, dict[str, str], Callable[[bool], None], Any]:
+) -> tuple[_RecordingWriter, dict[str, str], Callable[..., None], Any]:
     app = cast(FastAPI, client.app)
     writer = _RecordingWriter()
     monkeypatch.setattr(app.state, "trace_writer", writer)
@@ -212,3 +213,42 @@ def test_an_answered_call_keeps_its_result_only_where_the_deployment_keeps_tool_
     without, with_output = (next(span for span in write.spans if span.tool_type == "client") for write in writer.writes)
     assert without.content == {"tool.input": '{"p":"."}'}
     assert with_output.content == {"tool.input": '{"p":"."}', "tool.output": "a.txt"}
+
+
+def test_a_workspace_that_turns_tool_output_off_keeps_none_whatever_the_deployment_keeps(
+    client: TestClient, routed: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer, headers, workspace_keeps, config = routed
+    monkeypatch.setattr(config, "trace_content_tool_output", True)
+    workspace_keeps(True, tool_output=False)
+
+    _chat(client, {**headers, TRACE_CONTENT_HEADER: "keep"}, _ANSWER)
+
+    [write] = writer.writes
+    tool = next(span for span in write.spans if span.tool_type == "client")
+    assert tool.content == {"tool.input": '{"p":"."}'}
+
+
+@pytest.mark.parametrize("value", ["true", "yes", "kep"])
+def test_a_trace_content_value_it_cannot_mean_is_refused(client: TestClient, routed: Any, value: str) -> None:
+    writer, headers, _, _ = routed
+
+    with patch("gateway.api.routes.chat.acompletion", return_value=_completion()) as upstream:
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": _PROMPT},
+            headers={**headers, TRACE_CONTENT_HEADER: value},
+        )
+
+    assert response.status_code == 400, response.text
+    assert TRACE_CONTENT_HEADER in response.text
+    upstream.assert_not_called()
+
+
+def test_an_empty_trace_content_header_asks_for_nothing(client: TestClient, routed: Any) -> None:
+    writer, headers, _, _ = routed
+
+    _chat(client, {**headers, TRACE_CONTENT_HEADER: " "}, _PROMPT)
+
+    [write] = writer.writes
+    assert write.content_generation is None

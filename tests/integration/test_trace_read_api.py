@@ -831,6 +831,28 @@ def test_a_workspace_keeps_no_content_until_its_managers_turn_it_on(
         assert barrier is not None and barrier.generation == 2
 
 
+def test_a_workspace_turns_tool_output_off_for_itself_and_ends_the_generation(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    workspace_id = _workspace_id(db_session_factory, "One")
+
+    shown = _as(client, world["admin"], "GET", f"/workspaces/{workspace_id}")
+    assert shown.json()["trace_content_tool_output"] is True
+    refused = _as(
+        client, world["member"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_tool_output": False}
+    )
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    turned_off = _as(
+        client, world["admin"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_tool_output": False}
+    )
+    assert turned_off.status_code == status.HTTP_200_OK, turned_off.text
+    assert turned_off.json()["trace_content_tool_output"] is False
+    # Tool output already captured on the old generation is never stored.
+    with db_session_factory() as session:
+        barrier = session.get(TraceContentBarrier, workspace_id)
+        assert barrier is not None and barrier.generation == 2
+
+
 def test_a_workspaces_managers_delete_its_stored_content_and_keep_its_sessions(
     client: TestClient,
     world: dict[str, str],

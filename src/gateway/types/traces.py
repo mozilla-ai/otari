@@ -370,11 +370,31 @@ class ContentReader:
     """
 
 
+@dataclass(frozen=True)
+class WorkspaceContent:
+    """What a workspace keeps of one member's sessions, as its managers set it."""
+
+    keeps: bool = False
+    tool_output: bool = False
+
+
+@dataclass(frozen=True)
+class ContentCapture:
+    """The generation a request's content is captured on, and whether what its tools returned is kept too."""
+
+    generation: int
+    tool_output: bool = False
+
+
 class SessionOwners(Protocol):
     """Who still belongs where a session was kept, asked before content opens for anyone but its owner."""
 
     async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
         """Whether ``user_id`` names a person who currently sees ``workspace_id``."""
+        ...
+
+    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
+        """What ``workspace_id`` keeps of ``user_id``'s sessions: nothing unless content is on and :meth:`is_member`."""
         ...
 
     async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:

@@ -6811,9 +6811,9 @@ export interface paths {
         head?: never;
         /**
          * Update Workspace
-         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.
          *
-         *     Turning content off keeps nothing new from the next export on; what is already
+         *     Turning either off keeps nothing new of it from the next export on; what is already
          *     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
          */
         patch: operations["workspaces-update_workspace"];
@@ -19728,6 +19728,12 @@ export interface components {
              * @default false
              */
             trace_content_enabled: boolean;
+            /**
+             * Trace Content Tool Output
+             * @description Whether this workspace also keeps what each tool returned, where it keeps content and the deployment keeps tool output.
+             * @default true
+             */
+            trace_content_tool_output: boolean;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -19742,6 +19748,11 @@ export interface components {
              * @description Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.
              */
             trace_content_enabled?: boolean | null;
+            /**
+             * Trace Content Tool Output
+             * @description Also keep what each tool returned, where this workspace keeps content and the deployment keeps tool output. Turning it off keeps none from the next request on, whatever the deployment allows.
+             */
+            trace_content_tool_output?: boolean | null;
         };
         /**
          * WorkspaceWebSearchConfigPublic

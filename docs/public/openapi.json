@@ -26959,6 +26959,12 @@
             "title": "Trace Content Enabled",
             "type": "boolean"
           },
+          "trace_content_tool_output": {
+            "default": true,
+            "description": "Whether this workspace also keeps what each tool returned, where it keeps content and the deployment keeps tool output.",
+            "title": "Trace Content Tool Output",
+            "type": "boolean"
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -27018,6 +27024,18 @@
             ],
             "description": "Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.",
             "title": "Trace Content Enabled"
+          },
+          "trace_content_tool_output": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Also keep what each tool returned, where this workspace keeps content and the deployment keeps tool output. Turning it off keeps none from the next request on, whatever the deployment allows.",
+            "title": "Trace Content Tool Output"
           }
         },
         "title": "WorkspaceUpdate",
@@ -51161,7 +51179,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.\n\nTurning content off keeps nothing new from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
+        "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.\n\nTurning either off keeps nothing new of it from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
         "operationId": "workspaces-update_workspace",
         "parameters": [
           {
