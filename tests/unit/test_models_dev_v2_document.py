@@ -140,6 +140,41 @@ def test_a_price_in_another_unit_has_no_v1_price(catalog: ModelsDevCatalog) -> N
     assert image.output.overrides == (ModelsDevOverride(when={"resolution": {"equals": "2K"}}, price=0.075),)
 
 
+def test_a_price_in_a_unit_not_known_here_is_kept_and_prices_nothing() -> None:
+    """The document's unit is kept, so a stored catalog reads back the same; v1 shows no price for it."""
+    model = _model("p", "m", text={"input": {"price": 1, "unit": "parsec"}, "output": {"price": 2}})
+    assert model.cost is None
+    assert model.pricing is not None
+    assert model.pricing.modalities["text"].input == ModelsDevUnitPrice(price=1, unit="parsec")
+
+
+def test_a_unit_not_known_here_is_named_once_and_is_not_damage() -> None:
+    """A unit models.dev adds is reported, but every model priced in it still reads, so none refuses the document."""
+    parsec = {"cost": {"text": {"input": {"price": 1, "unit": "parsec"}, "output": {"price": 2, "unit": "parsec"}}}}
+    furlong = {"cost": {"video": {"output": {"price": 3, "unit": "furlong"}}}}
+    catalog = parse_catalog_v2({"p": {"models": {"a": parsec, "b": parsec, "c": furlong, "d": {}}}})
+
+    assert catalog.issues == ModelsDevIssues(models=4, unknown_units=("parsec", "furlong"))
+    assert catalog.refusal() is None
+    assert catalog.issues.describe() == (
+        "0 unreadable values in 0 of 4 models; price units not known here: parsec, furlong"
+    )
+
+
+def test_an_odd_unit_is_kept_raw_and_described_bounded_and_quoted() -> None:
+    """The log line carries fetched text: a unit with a line break or no end is quoted and cut.
+
+    A short printable unit stays as written, markup included; the catalog
+    warning is logged with markup off, so the console handler prints it as is.
+    """
+    odd = {"[/]": 1, "a\nb": 2, "x" * 100: 3}
+    models = {f"m{i}": {"cost": {"text": {"input": {"price": p, "unit": u}}}} for i, (u, p) in enumerate(odd.items())}
+    catalog = parse_catalog_v2({"p": {"models": models}})
+
+    assert catalog.issues.unknown_units == tuple(odd)
+    assert catalog.issues.describe().endswith("price units not known here: [/], 'a\\nb', '" + "x" * 64 + "'")
+
+
 def test_a_model_with_no_cost_has_no_prices(catalog: ModelsDevCatalog) -> None:
     model = catalog.providers["openai"].models["gpt-image-1-mini"]
     assert (model.cost, model.pricing) == (None, None)

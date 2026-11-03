@@ -49,6 +49,16 @@ def test_a_stored_catalog_keeps_what_the_download_could_not_read() -> None:
     assert read_catalog_document(_stored(catalog)) == catalog
 
 
+def test_a_stored_catalog_keeps_the_units_it_does_not_know() -> None:
+    catalog = parse_catalog_v2({"p": {"models": {"m": {"cost": {"text": {"input": {"price": 1, "unit": "parsec"}}}}}}})
+    assert catalog.issues.unknown_units == ("parsec",)
+
+    document = _stored(catalog)
+
+    assert document["issues"] == {"models": 1, "unknown_units": ["parsec"]}
+    assert read_catalog_document(document) == catalog
+
+
 def test_a_stored_catalog_carries_its_marker_and_meta_and_leaves_out_defaults() -> None:
     catalog = parse_catalog_v2({"p": {"models": {"m": {}}}})
 
