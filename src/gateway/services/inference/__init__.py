@@ -27,6 +27,7 @@ from gateway.services.inference._deployment_funding import (
     admit_deployment_paid,
     billed_model,
     describe_port_error,
+    organization_slot_key,
 )
 from gateway.services.inference._idempotency import (
     Admission,
@@ -113,6 +114,7 @@ __all__ = [
     "CONVERSATION_CACHE_KEY_FIELD",
     "admit_deployment_paid",
     "billed_model",
+    "organization_slot_key",
     "describe_port_error",
     "EMBEDDINGS_BILLING",
     "IMAGES_BILLING",

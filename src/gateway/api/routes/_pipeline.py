@@ -204,6 +204,7 @@ from gateway.rate_limit import (
     RateLimitInfo,
     admit_rate_limit_rules,
     check_rate_limit,
+    open_rate_limit_grant,
 )
 from gateway.schemas.inference import SettledCost
 from gateway.services.budgets import (
@@ -250,6 +251,7 @@ from gateway.services.inference import (
     is_upstream_connect_failure,
     is_upstream_request_fault,
     is_upstream_stream_interrupted,
+    organization_slot_key,
     provider_failure,
     upstream_body_messages,
     upstream_error_message,
@@ -1724,7 +1726,40 @@ async def _admit_or_refuse(
             ctx.request_id,
         )
         raise await _funding_unavailable(ctx, resolved, adapter=adapter)
+    try:
+        await _hold_organization_slot(ctx, charge)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        await _record_funding_refusal(ctx, resolved, adapter=adapter, detail=detail, status_code=exc.status_code)
+        raise adapter.error(exc.status_code, detail, ErrorKind.RATE_LIMIT, headers=dict(exc.headers or {})) from exc
     ctx.deployment_charge = charge
+
+
+# How long a deployment-paid call waits for one of its organization's slots, and the longest one is held.
+_ORGANIZATION_SLOT_WAIT_SEC = 10.0
+_ORGANIZATION_SLOT_LEASE_SEC = 900.0
+_ORGANIZATION_SLOT_RULE = "organization_concurrency"
+
+
+async def _hold_organization_slot(ctx: RequestContext, charge: DeploymentCharge | None) -> None:
+    """Hold one of the organization's slots for a call its billing port limits, waiting briefly for one.
+
+    Taken after admission has committed, so a call waiting for a slot holds no
+    database connection. The slot is given back when the response ends.
+
+    Raises:
+        HTTPException: 429 when no slot frees in time.
+
+    """
+    if charge is None or charge.concurrency_limit is None or ctx.rate_limit_grant is None:
+        return
+    await ctx.rate_limit_grant.hold_slot(
+        organization_slot_key(charge.organization_id),
+        charge.concurrency_limit,
+        wait_sec=_ORGANIZATION_SLOT_WAIT_SEC,
+        lease_sec=_ORGANIZATION_SLOT_LEASE_SEC,
+        rule=_ORGANIZATION_SLOT_RULE,
+    )
 
 
 async def _funding_unavailable(
@@ -1948,6 +1983,10 @@ def _hosted_candidate(
             raise CandidateCannotServe(
                 HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=FUNDS_CHECK_UNAVAILABLE_DETAIL)
             )
+        try:
+            await _hold_organization_slot(ctx, charge)
+        except HTTPException as exc:
+            raise CandidateCannotServe(exc) from exc
         ctx.deployment_charge = charge
         return hosted
 
@@ -3143,7 +3182,7 @@ async def resolve_request_context(
         budget_limits=None
         if budget_exempt
         else await _budget_minute_limits(adapter, uow, db, user_id, config.budget_strategy),
-    )
+    ) or open_rate_limit_grant(raw_request)
     # Reserve first so user/blocked/budget rejections (404/403) take
     # precedence over the missing-pricing rejection (402); refund if we
     # then reject for missing pricing.

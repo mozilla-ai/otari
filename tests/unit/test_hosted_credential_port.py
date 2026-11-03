@@ -806,6 +806,9 @@ class RecordingBilling:
         if self.refuse is not None:
             raise self.refuse
 
+    async def concurrency_limit(self, *, organization_id: uuid.UUID, billed: BilledModel) -> int | None:
+        return None
+
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
         raise AssertionError("the completion path places no holds")
 

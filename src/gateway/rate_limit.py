@@ -217,6 +217,10 @@ _RULE_WINDOW_SEC = 60.0
 _GRANT_STATE = "rate_limit_grant"
 # A full max_concurrent frees as soon as any request ends, which no window predicts.
 _CONCURRENCY_RETRY_AFTER_SEC = 1.0
+# How often a request waiting for a shared slot asks for one again.
+_SLOT_POLL_SEC = 0.25
+# Requests waiting for a slot on each key, on this worker, so the wait stays a short queue.
+_slot_waiters: defaultdict[str, int] = defaultdict(int)
 
 
 class _Hold:
@@ -296,6 +300,40 @@ class RateLimitGrant:
             leases.extend(hold.leases)
             hold.leases = []
         await asyncio.gather(*(self._store.release(key, lease) for key, lease in leases))
+
+    async def hold_slot(self, key: str, limit: int, *, wait_sec: float, lease_sec: float, rule: str) -> None:
+        """Hold one of ``limit`` slots on ``key`` until the response ends, waiting up to ``wait_sec`` for one.
+
+        A request holds at most one slot on a key however often it asks, so a
+        walk that admits several candidates takes one. At most ``limit`` requests
+        wait on a key per worker; one past that is refused at once.
+
+        Raises:
+            HTTPException: 429 naming ``rule`` when no slot frees in time or the queue is full.
+
+        """
+        if any(held == key for hold in self._holds for held, _ in hold.leases):
+            return
+        lease = await self._store.acquire(key, limit, lease_sec)
+        if lease is None and _slot_waiters.get(key, 0) < limit:
+            _slot_waiters[key] += 1
+            try:
+                deadline = time.monotonic() + wait_sec
+                while lease is None and time.monotonic() < deadline:
+                    await asyncio.sleep(min(_SLOT_POLL_SEC, max(deadline - time.monotonic(), 0)))
+                    lease = await self._store.acquire(key, limit, lease_sec)
+            finally:
+                _slot_waiters[key] -= 1
+                if not _slot_waiters[key]:
+                    del _slot_waiters[key]
+        if lease is None:
+            RATE_LIMIT_HITS.inc()
+            raise _refused(
+                f"Concurrency limit exceeded: {_count(limit, 'request')} in flight", _CONCURRENCY_RETRY_AFTER_SEC, rule
+            )
+        hold = _Hold()
+        hold.leases.append((key, lease))
+        self._holds.append(hold)
 
     async def admit_model(self, instance: str, model: str, *, name_model: bool = True) -> ModelHold | None:
         """Count an attempt on ``instance:model`` against every ``per: model`` rule naming it.
@@ -565,6 +603,23 @@ async def admit_rate_limit_rules(
     return await rules.admit(
         request, key_id=key_id, user_id=user_id, estimated_tokens=estimated_tokens, budget_limits=budget_limits
     )
+
+
+def open_rate_limit_grant(request: Request) -> RateLimitGrant | None:
+    """The request's grant, opening an empty one when no rule counted it; ``None`` where the app counts nothing.
+
+    An empty grant holds nothing until something asks it for a slot, and
+    :class:`RateLimitGrantMiddleware` gives that slot back when the response ends.
+    """
+    existing: RateLimitGrant | None = getattr(request.state, _GRANT_STATE, None)
+    if existing is not None:
+        return existing
+    store: RateLimitStorePort | None = getattr(request.app.state, "rate_limit_store", None)
+    if store is None:
+        return None
+    grant = RateLimitGrant(store)
+    setattr(request.state, _GRANT_STATE, grant)
+    return grant
 
 
 async def _close_grant(grant: RateLimitGrant) -> None:

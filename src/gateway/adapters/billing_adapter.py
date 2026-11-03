@@ -31,6 +31,9 @@ class NullBillingAdapter(BillingPort):
         # ever refused for want of funds.
         return None
 
+    async def concurrency_limit(self, *, organization_id: uuid.UUID, billed: BilledModel) -> int | None:
+        return None
+
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
         return None
 

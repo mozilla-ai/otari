@@ -94,6 +94,15 @@ class BillingPort(Protocol):
         """
         ...
 
+    async def concurrency_limit(self, *, organization_id: uuid.UUID, billed: BilledModel) -> int | None:
+        """How many of the organization's calls on ``billed`` may be in flight at once, or ``None`` for no limit.
+
+        Asked once a call passes :meth:`require_funds_on_deposit`. The caller
+        counts the organization's calls under one limit, whichever models they
+        are on, and a call waits briefly for a slot before it is refused.
+        """
+        ...
+
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
         """Refuse unless the organization has funds no hold has claimed.
 

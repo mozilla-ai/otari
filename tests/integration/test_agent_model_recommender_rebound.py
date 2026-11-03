@@ -56,6 +56,7 @@ RELEASES = []  # Every release_hold call, landed or not.
 SESSIONS = []
 FUNDS = {"available": Decimal("1")}
 FAULTS = set()
+LIMIT = {"concurrency": None}
 
 
 class ProbeRecommender:
@@ -88,6 +89,9 @@ class ProbeBilling:
 
     async def require_funds_on_deposit(self, *, organization_id, billed):
         pass
+
+    async def concurrency_limit(self, *, organization_id, billed):
+        return LIMIT["concurrency"]
 
     async def require_unheld_funds(self, *, organization_id):
         pass

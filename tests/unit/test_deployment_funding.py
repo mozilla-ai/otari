@@ -27,8 +27,9 @@ BILLED = BilledModel(provider="openai", model="gpt-4o", open_weights=False)
 
 
 class _Billing:
-    def __init__(self, *, refuse: bool = False) -> None:
+    def __init__(self, *, refuse: bool = False, limit: int | None = None) -> None:
         self.refuse = refuse
+        self.limit = limit
         self.calls: list[tuple[Any, ...]] = []
 
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
@@ -38,6 +39,10 @@ class _Billing:
         self.calls.append(("require_funds_on_deposit", organization_id, billed))
         if self.refuse:
             raise InsufficientFundsError(Decimal(0))
+
+    async def concurrency_limit(self, *, organization_id: uuid.UUID, billed: BilledModel) -> int | None:
+        self.calls.append(("concurrency_limit", organization_id, billed))
+        return self.limit
 
     async def charge(self, **kwargs: Any) -> None:
         self.calls.append(("charge", kwargs))
@@ -75,6 +80,7 @@ async def test_admission_grants_credit_then_checks_funds() -> None:
     assert billing.calls == [
         ("apply_due_credit", ORGANIZATION_ID),
         ("require_funds_on_deposit", ORGANIZATION_ID, BILLED),
+        ("concurrency_limit", ORGANIZATION_ID, BILLED),
     ]
     assert (charge.organization_id, charge.api_key_id, charge.actor_user_id, charge.request_id, charge.billed) == (
         ORGANIZATION_ID,
@@ -230,6 +236,9 @@ async def test_a_gateway_tools_admission_bills_no_model() -> None:
     )
     assert charge is not None
     assert charge.billed is None
+    # A tool's call is counted under no model's concurrency limit.
+    assert charge.concurrency_limit is None
+    assert all(call[0] != "concurrency_limit" for call in billing.calls)
     await charge.charge(Decimal("0.01"), description="otari_web_search")
     assert billing.calls[1] == ("require_funds_on_deposit", ORGANIZATION_ID, None)
     assert billing.calls[-1][1]["billed"] is None
@@ -265,3 +274,10 @@ def test_a_model_is_open_weight_only_where_the_catalog_says_so(
 
 def test_with_no_catalog_no_model_is_open_weight() -> None:
     assert billed_model("groq", "openai/gpt-oss-120b").open_weights is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [None, 3])
+async def test_a_models_admission_carries_its_organizations_concurrency_limit(limit: int | None) -> None:
+    charge = await _admit(_Billing(limit=limit))
+    assert charge.concurrency_limit == limit

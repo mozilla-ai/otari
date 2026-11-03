@@ -10,6 +10,7 @@ recorded but never committed shows up as missing. A request on the gateway's
 own provider key never reaches the probe at all.
 """
 
+import asyncio
 import itertools
 import logging
 import sys
@@ -18,7 +19,7 @@ from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -38,18 +39,20 @@ from any_llm.types.completion import (
     Function,
     Usage,
 )
-from fastapi import status
+from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.routes import _pipeline as pipeline
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
-from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
+from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, RATE_LIMIT_RULE_HEADER, RATE_LIMITED
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import BilledModel
+from gateway.ports.rate_limit_store_port import RateLimitStorePort
 
 from .conftest import build_test_client
 
@@ -68,6 +71,7 @@ PENDING = {}  # Entries written on a session, by its id, until it commits, rolls
 SESSIONS = []
 FUNDS = {"available": Decimal("10")}
 FAULTS = set()
+LIMIT = {"concurrency": None}
 
 
 class Fleet:
@@ -98,6 +102,9 @@ class ProbeBilling:
             raise RuntimeError("billing down")
         if FUNDS["available"] <= 0:
             raise InsufficientFundsError(FUNDS["available"])
+
+    async def concurrency_limit(self, *, organization_id, billed):
+        return LIMIT["concurrency"]
 
     async def require_unheld_funds(self, *, organization_id):
         raise AssertionError("no holds on the completion path")
@@ -337,6 +344,36 @@ def test_a_deployment_paid_completion_is_gated_then_charged_its_settled_cost(
     assert _deployment_paid_flags(db_session_factory) == [True]
 
 
+def test_a_completion_over_its_organizations_concurrency_limit_waits_then_is_refused(
+    billed: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    key = _key(client)
+    probe.LIMIT["concurrency"] = 1
+    monkeypatch.setattr(pipeline, "_ORGANIZATION_SLOT_WAIT_SEC", 0.05)
+
+    served, _ = _chat(client, key, "openai:gpt-4o")
+    assert served.status_code == status.HTTP_200_OK, served.text
+    (organization,) = {org for _, org in probe.GATES}
+    store: RateLimitStorePort = cast(FastAPI, client.app).state.rate_limit_store
+    slot = f"organization:{organization}:concurrent"
+    # The served request gave its slot back when its response ended, so another request can take it.
+    other = asyncio.run(store.acquire(slot, 1, 60.0))
+    assert other is not None
+
+    refused, provider = _chat(client, key, "openai:gpt-4o")
+
+    assert refused.status_code == status.HTTP_429_TOO_MANY_REQUESTS, refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == RATE_LIMITED
+    assert refused.headers["Retry-After"] == "1"
+    assert refused.headers[RATE_LIMIT_RULE_HEADER] == "organization_concurrency"
+    provider.assert_not_awaited()
+    assert len(probe.LEDGER) == 1
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+    asyncio.run(store.release(slot, other))
+
+
 def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
     billed: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:
@@ -513,6 +550,31 @@ def test_a_policy_skips_a_deployment_paid_candidate_its_organization_cannot_fund
     with db_session_factory() as db:
         served = db.scalars(select(UsageLog.deployment_paid).where(UsageLog.status == "success")).all()
     assert served == [False]
+
+
+def test_a_policy_skips_a_deployment_paid_candidate_with_no_free_slot(
+    billed: tuple[TestClient, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "anthropic:claude-opus-4")
+    key = _key(client)
+    # One served request names the organization whose slot is then taken.
+    assert _chat(client, key, "openai:gpt-4o")[0].status_code == status.HTTP_200_OK
+    (organization,) = {org for _, org in probe.GATES}
+    probe.LIMIT["concurrency"] = 1
+    monkeypatch.setattr(pipeline, "_ORGANIZATION_SLOT_WAIT_SEC", 0.05)
+    store: RateLimitStorePort = cast(FastAPI, client.app).state.rate_limit_store
+    slot = f"organization:{organization}:concurrent"
+    taken = asyncio.run(store.acquire(slot, 1, 60.0))
+    assert taken is not None
+
+    response, provider = _routed(client, key, "fleet_first", failing="none")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert [call.kwargs["api_key"] for call in provider.call_args_list] == ["sk-ant"]
+    assert len(probe.LEDGER) == 1
+    asyncio.run(store.release(slot, taken))
 
 
 def test_embeddings_on_a_deployment_paid_credential_are_gated_then_charged(

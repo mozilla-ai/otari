@@ -65,6 +65,8 @@ class DeploymentCharge:
     request_id: str | None
     billed: BilledModel | None
     """The model the request is served on, or ``None`` for a gateway tool's call."""
+    concurrency_limit: int | None = None
+    """How many of the organization's calls may be in flight at once, as the port answered; ``None`` for no limit."""
 
     def amount_due(self, cost: Decimal | None, *, model: str, expects_cost: bool) -> Decimal | None:
         """What a settled ``cost`` owes, or ``None`` when nothing is charged.
@@ -131,6 +133,11 @@ class DeploymentCharge:
             )
 
 
+def organization_slot_key(organization_id: uuid.UUID) -> str:
+    """Where an organization's deployment-paid calls in flight are counted."""
+    return f"organization:{organization_id}:concurrent"
+
+
 def describe_port_error(exc: Exception) -> str:
     """Name a port failure without the row data a database error's text can carry."""
     if isinstance(exc, DATABASE_ERRORS):
@@ -154,7 +161,7 @@ async def admit_deployment_paid(
     other request is admitted with nothing to charge (``None``). A gated one is
     granted any credit its organization is owed, then refused with nothing paid in
     that can pay for ``billed``, the model it is served on (``None`` for a gateway
-    tool's call).
+    tool's call). A model's call also learns its organization's concurrency limit.
 
     Raises:
         InsufficientFundsError: If the organization has no funds paid in.
@@ -164,6 +171,7 @@ async def admit_deployment_paid(
         return None
     await billing.apply_due_credit(organization_id=organization_id)
     await billing.require_funds_on_deposit(organization_id=organization_id, billed=billed)
+    limit = await billing.concurrency_limit(organization_id=organization_id, billed=billed) if billed else None
     return DeploymentCharge(
         billing=billing,
         organization_id=organization_id,
@@ -171,4 +179,5 @@ async def admit_deployment_paid(
         actor_user_id=_actor_user_id(user_id),
         request_id=request_id,
         billed=billed,
+        concurrency_limit=limit,
     )
