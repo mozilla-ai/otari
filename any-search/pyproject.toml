@@ -38,6 +38,10 @@ any_search = ["py.typed"]
 # package is published on its own.
 [tool.setuptools_scm]
 root = ".."
+# Written at build time, gitignored, and read by any_search/_http.py for the
+# User-Agent. A literal in a generated module, not importlib.metadata, which
+# scripts/check_architecture.py bans under any_search/.
+version_file = "src/any_search/_version.py"
 # The Docker image copies the tree without .git.
 fallback_version = "0.0.0"
 
