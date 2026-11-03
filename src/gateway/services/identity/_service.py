@@ -173,9 +173,6 @@ class IdentityService:
 
         """
         async with self._uow:
-            if account.email is not None and await self.blocked_among([account.email]):
-                logger.info("Refused a sign-in to account %s, whose address is blocked", account.id)
-                raise SignInBlockedError
             await self._sign_in_listener.account_signed_in(account)
             return await self.start_session(account)
 
@@ -183,8 +180,17 @@ class IdentityService:
         """Start a dashboard session for ``account`` without running the sign-in listener.
 
         The session counts as the account's latest sign-in, and acts in the organization the account can act in.
+
+        Raises:
+            SignInBlockedError: If the deployment's email blocklist matches the account's address. The check holds
+                the blocklist lock until the session commits, so a block cannot commit between the two.
+
         """
         async with self._uow:
+            await self._blocked_emails.lock_for_sign_in()
+            if account.email is not None and await self.blocked_among([account.email]):
+                logger.info("Refused a sign-in to account %s, whose address is blocked", account.id)
+                raise SignInBlockedError
             active_organization_id = await self._organizations.active_organization_id_for_sign_in(account)
             now = datetime.now(UTC)
             await self._sessions.prune_expired(now)
@@ -232,6 +238,8 @@ class IdentityService:
         if pattern is None:
             raise InvalidBlockedEmailEntryError(value)
         async with self._uow:
+            # Before matching, so an account a sign-in in flight creates is either matched here or refused there.
+            await self._blocked_emails.lock_for_block()
             matched = await self._accounts_matching(pattern)
             if actor.id in matched:
                 raise DeploymentUserSelfChangeError("You cannot block your own email address")
@@ -289,9 +297,9 @@ class IdentityService:
 
         Raises:
             DeploymentUserNotFoundError: If there is no such account.
-            PasswordLinkUnavailableError: If the account is deactivated, has no address, is verified and has no
-                password, or is unverified and ``unverified_identity_is_claimable`` refuses it, which only
-                happens where ``open_signup`` is off.
+            PasswordLinkUnavailableError: If the account is deactivated, has no address, its address is blocked, is
+                verified and has no password, or is unverified and ``unverified_identity_is_claimable`` refuses it,
+                which only happens where ``open_signup`` is off.
 
         """
         mailed = self._mailer.can_send_links
@@ -328,6 +336,8 @@ class IdentityService:
             raise PasswordLinkUnavailableError("This account is deactivated. Reactivate it first.")
         if account.email is None:
             raise PasswordLinkUnavailableError("This account has no email address to sign in with.")
+        if await self.blocked_among([account.email]):
+            raise PasswordLinkUnavailableError("This account's address is blocked. Unblock it first.")
         if account.hashed_password is None and account.email_verified_at is not None:
             raise PasswordLinkUnavailableError(
                 "This account has no password and signs in with a provider or a passkey. "

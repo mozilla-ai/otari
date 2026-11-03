@@ -269,3 +269,60 @@ def test_a_blocked_address_cannot_be_added_or_invited(
     assert invited.status_code == 400, invited.text
     assert bulk.status_code == 200, bulk.text
     assert [failure["email"] for failure in bulk.json()["failed"]] == ["bob@spam.example"]
+
+
+def test_an_invitation_sent_before_the_block_cannot_be_accepted(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    invited = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "ada@spam.example", "role": "member"},
+        headers=master_key_header,
+    )
+    assert invited.status_code == 201, invited.text
+    token = invited.json()["accept_link"].split("token=")[1]
+    _block(client, master_key_header, "spam.example")
+
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
+
+    assert accepted.status_code == 400, accepted.text
+
+
+def test_a_verification_link_mailed_before_the_block_verifies_nothing(
+    client: TestClient, master_key_header: dict[str, str], mail: None, mail_log: pytest.LogCaptureFixture
+) -> None:
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": "ada@spam.example", "role": "member"},
+        headers=master_key_header,
+    )
+    assert added.status_code == 201, added.text
+    mail_log.clear()
+    assert (
+        client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@spam.example", "password": PASSWORD}).status_code
+        == 200
+    )
+    match = _TOKEN_IN_LINK.search(mail_log.text)
+    assert match, mail_log.text
+    _block(client, master_key_header, "spam.example")
+
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": match.group(1), "password": PASSWORD})
+
+    assert verified.status_code == 400, verified.text
+
+
+def test_an_operator_cannot_send_a_blocked_account_a_password_link(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": "ada@spam.example", "role": "member"},
+        headers=master_key_header,
+    )
+    assert added.status_code == 201, added.text
+    _block(client, master_key_header, "spam.example")
+
+    link = client.post(f"{API_ROOT}/admin/users/{added.json()['user_id']}/password-link", headers=master_key_header)
+
+    assert link.status_code == 409, link.text
+    assert "blocked" in link.json()["detail"]

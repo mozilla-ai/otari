@@ -554,7 +554,9 @@ async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invitation.accept_link is not None
-    await service.accept_invitation(invitation.accept_link.split("token=")[1], claims=NO_TERMS)
+    await service.accept_invitation(
+        invitation.accept_link.split("token=")[1], claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES
+    )
 
     memberships = await service.list_organization_memberships_for_user(user=invitee)
     assert memberships.count == 2

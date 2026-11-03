@@ -101,6 +101,7 @@ async def confirm_reset(
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
     organizations: MembershipOrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> None:
     """Complete a password reset, or choose a first password. Single-use: the token stops working after this.
 
@@ -111,6 +112,7 @@ async def confirm_reset(
         db,
         config,
         organizations=organizations,
+        blocked_addresses=identities,
         token=body.token,
         new_password=body.new_password,
         terms_accepted=body.terms_accepted,

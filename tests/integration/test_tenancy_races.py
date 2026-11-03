@@ -1047,7 +1047,9 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
 
     async def attempt(session: AsyncSession) -> object:
         return await OrganizationService(session, **membership_writes(session)).accept_invitation(
-            token, claims=NO_TERMS
+            token,
+            claims=NO_TERMS,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -1105,7 +1107,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         async with sessions() as session:
             try:
                 return await claim_writes(session)["organizations"].accept_invitation(
-                    token, claims=NO_TERMS, password="accepted-password"
+                    token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES, password="accepted-password"
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1205,7 +1207,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
         async with sessions() as session:
             try:
                 return await claim_writes(session)["organizations"].accept_invitation(
-                    token, claims=NO_TERMS, password="accepted-password"
+                    token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES, password="accepted-password"
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1499,7 +1501,9 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
 
     async def accept(session: AsyncSession) -> object:
         return await OrganizationService(session, **membership_writes(session)).accept_invitation(
-            token, claims=NO_TERMS
+            token,
+            claims=NO_TERMS,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     async def revoke(session: AsyncSession) -> object:
@@ -1575,6 +1579,7 @@ async def test_concurrent_verifications_of_one_token_verify_exactly_once(
             token=token,
             password="vera-password",
             open_signup=True,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -1626,6 +1631,7 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
                     organizations=claim_writes(session)["organizations"],
                     token=token,
                     new_password=f"racer-password-{index}",
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                 )
                 return index
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion

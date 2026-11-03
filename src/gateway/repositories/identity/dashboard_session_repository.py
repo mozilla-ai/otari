@@ -11,6 +11,8 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import DashboardSession
 from gateway.repositories.base_repository import BaseRepository
 
+_DELETE_CHUNK = 1000
+
 
 class DashboardSessionRepository(BaseRepository[DashboardSession, Never, Never]):
     """Stage dashboard session rows."""
@@ -27,9 +29,14 @@ class DashboardSessionRepository(BaseRepository[DashboardSession, Never, Never])
         await self.db.execute(delete(DashboardSession).where(DashboardSession.user_id == user_id))
 
     async def delete_for_users(self, user_ids: Collection[uuid.UUID]) -> None:
-        """Stage the deletion of every session the accounts in ``user_ids`` hold, in one statement."""
-        if user_ids:
-            await self.db.execute(delete(DashboardSession).where(col(DashboardSession.user_id).in_(user_ids)))
+        """Stage the deletion of every session the accounts in ``user_ids`` hold.
+
+        Chunked, so a domain matching many accounts stays under the driver's bind-parameter limit.
+        """
+        ids = list(user_ids)
+        for start in range(0, len(ids), _DELETE_CHUNK):
+            chunk = ids[start : start + _DELETE_CHUNK]
+            await self.db.execute(delete(DashboardSession).where(col(DashboardSession.user_id).in_(chunk)))
 
     async def add(self, *, token_hash: str, user_id: uuid.UUID, created_at: datetime, expires_at: datetime) -> None:
         """Stage a session for an account."""

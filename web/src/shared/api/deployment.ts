@@ -153,17 +153,22 @@ export function useIssuePasswordLink() {
   })
 }
 
-/**
- * The deployment's email blocklist, newest entry first.
- *
- * One page of the largest size the route allows: the list is an operator's
- * hand-kept set rather than a growing log, so it is not paged here.
- */
-export function useBlockedEmails(enabled = true) {
+/** One page of the deployment's email blocklist, newest entry first. */
+export function useBlockedEmails(
+  { page, pageSize }: { page: number; pageSize: number },
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [DEPLOYMENT_ADMIN, "blocked-emails"],
-    queryFn: () => apiFetch<BlockedEmails>("/admin/blocked-emails?limit=1000"),
+    queryKey: [DEPLOYMENT_ADMIN, "blocked-emails", page, pageSize],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        skip: String(page * pageSize),
+        limit: String(pageSize),
+      })
+      return apiFetch<BlockedEmails>(`/admin/blocked-emails?${params}`)
+    },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
     enabled,
   })
 }

@@ -15,13 +15,28 @@ from gateway.core.email_domains import blocklist_entry, blocklist_keys
         ("  Person@Spam.Example ", "person@spam.example"),
         ("person@münchen.de", "person@xn--mnchen-3ya.de"),
         ("münchen.de", "xn--mnchen-3ya.de"),
+        ("example.рф", "example.xn--p1ai"),
+        ("person@example.рф", "person@example.xn--p1ai"),
     ],
 )
 def test_an_entry_is_normalized_to_the_form_it_is_stored_in(typed: str, stored: str) -> None:
     assert blocklist_entry(typed) == stored
 
 
-@pytest.mark.parametrize("typed", ["", "com", "not a domain", "a@@b.com", "@", "pers on@example.com", "http://x.com"])
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "",
+        "com",
+        "not a domain",
+        "a@@b.com",
+        "@",
+        "pers on@example.com",
+        "http://x.com",
+        "*.person@example.com",
+        "@person@example.com",
+    ],
+)
 def test_a_value_that_is_neither_an_address_nor_a_domain_is_refused(typed: str) -> None:
     assert blocklist_entry(typed) is None
 

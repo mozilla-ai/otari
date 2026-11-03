@@ -478,13 +478,42 @@ describe("Blocked emails", () => {
     expect(within(table).getByText("throwaway signups")).toBeInTheDocument()
   })
 
-  it("says so when the list holds more entries than it shows", async () => {
-    mockApi({ blocked: [BLOCKED_DOMAIN], blockedCount: 1500 })
+  it("pages the list rather than stopping at the first page", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ blocked: [BLOCKED_DOMAIN], blockedCount: 30 })
     await renderPage(<DeploymentAccountsPage />)
 
-    expect(
-      await screen.findByText("Showing the newest 1 of 1500 entries."),
-    ).toBeInTheDocument()
+    await user.click(
+      await screen.findByRole("button", { name: "Next page, entries" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.some((request) =>
+          request.url.includes("/admin/blocked-emails?skip=25&limit=25"),
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it("drops the block banner once its entry is unblocked", async () => {
+    const user = userEvent.setup()
+    mockApi({ blocked: [BLOCKED_DOMAIN], blockedAccountCount: 1 })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await user.type(
+      await screen.findByRole("textbox", { name: "Address or domain" }),
+      "spam.example",
+    )
+    await user.click(screen.getByRole("button", { name: "Block" }))
+    const banner = await screen.findByText(/^Blocked spam\.example\./)
+
+    await user.click(
+      screen.getByRole("button", { name: "Unblock spam.example" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Unblock" }))
+
+    await waitFor(() => expect(banner).not.toBeInTheDocument())
   })
 
   it("blocks what was typed and says how many accounts it caught", async () => {

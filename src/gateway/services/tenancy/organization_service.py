@@ -1746,6 +1746,7 @@ class OrganizationService:
         token: str,
         *,
         claims: InvitationClaimSettings,
+        blocked_addresses: BlockedAddresses,
         password: str | None = None,
         full_name: str | None = None,
         terms_accepted: bool = False,
@@ -1778,7 +1779,9 @@ class OrganizationService:
             validate_new_password(password)
             if claims.terms_url is not None and not terms_accepted:
                 raise TermsNotAcceptedError
-        _, _, organization, _ = await self._resolve_pending_invitation(token)
+        pending, _, organization, _ = await self._resolve_pending_invitation(token)
+        if await blocked_addresses.blocked_among([pending.email]):
+            raise BlockedEmailError(pending.email)
         # Locked, then re-resolved, before any write: two concurrent accepts of
         # the same token could otherwise both pass the pending check above
         # (nothing has committed yet to see), both flip the membership, and
@@ -1989,6 +1992,7 @@ class OrganizationService:
         *,
         user: User,
         organization_member_id: uuid.UUID,
+        blocked_addresses: BlockedAddresses,
     ) -> AcceptInvitationResultPublic:
         """Accept an invitation addressed to the caller, from their own inbox.
 
@@ -2024,7 +2028,9 @@ class OrganizationService:
         # Resolved once to learn which organization to lock, then again under
         # it: the first resolve's answer is not yet safe to write against, and
         # the second is what this acts on. Same two-step as accept_invitation.
-        _, _, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
+        pending, _, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
+        if await blocked_addresses.blocked_among([pending.email]):
+            raise BlockedEmailError(pending.email)
         await self.organizations.lock(organization.id)
         # Re-asked under the lock, because the check above raced anything that
         # was already in flight: the accept this one duplicates may have

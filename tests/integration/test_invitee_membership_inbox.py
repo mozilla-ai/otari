@@ -190,6 +190,7 @@ async def test_accepting_from_the_inbox_needs_no_token_and_applies_the_parked_as
     result = await service.accept_pending_membership_for_user(
         user=invitee,
         organization_member_id=issued.organization_member_id,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert result.organization_name == "Inviting"
     assert result.role == "member"
@@ -248,7 +249,7 @@ async def test_declining_cancels_the_invitation_and_kills_the_emailed_link(
     # decline. Refused as already-used rather than not-found: the row is still
     # there and still theirs, it is its `cancelled` status that ends it.
     with pytest.raises(InvitationAlreadyUsedError):
-        await service.accept_invitation(token, claims=NO_TERMS)
+        await service.accept_invitation(token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES)
     assert inviting.id not in {
         row.organization.id for row in (await service.list_organization_memberships_for_user(user=invitee)).data
     }
@@ -324,6 +325,7 @@ async def test_another_identitys_invitation_is_not_found_rather_than_forbidden(
             await service.accept_pending_membership_for_user(
                 user=outsider,
                 organization_member_id=issued.organization_member_id,
+                blocked_addresses=NO_BLOCKED_ADDRESSES,
             )
         else:
             await service.decline_pending_membership_for_user(
@@ -342,7 +344,9 @@ async def test_an_unknown_membership_id_is_not_found(
 
     with pytest.raises(InvitationNotFoundError):
         if action == "accept":
-            await service.accept_pending_membership_for_user(user=invitee, organization_member_id=uuid.uuid4())
+            await service.accept_pending_membership_for_user(
+                user=invitee, organization_member_id=uuid.uuid4(), blocked_addresses=NO_BLOCKED_ADDRESSES
+            )
         else:
             await service.decline_pending_membership_for_user(user=invitee, organization_member_id=uuid.uuid4())
 
@@ -365,10 +369,12 @@ async def test_accepting_twice_answers_the_same_success_rather_than_a_404(
     first = await service.accept_pending_membership_for_user(
         user=invitee,
         organization_member_id=issued.organization_member_id,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     second = await service.accept_pending_membership_for_user(
         user=invitee,
         organization_member_id=issued.organization_member_id,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     assert second == first
@@ -399,6 +405,7 @@ async def test_the_idempotent_branch_is_any_active_membership_and_decline_gets_n
     accepted = await service.accept_pending_membership_for_user(
         user=invitee,
         organization_member_id=own.id,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert accepted.organization_name == home.name
     assert accepted.role == "owner"
@@ -444,6 +451,7 @@ async def test_a_lapsed_invitation_is_omitted_from_the_inbox_and_refused_on_acce
         await service.accept_pending_membership_for_user(
             user=invitee,
             organization_member_id=issued.organization_member_id,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     # Recorded now that a caller has asked, so the roster stops offering a
@@ -473,6 +481,7 @@ async def test_a_revoked_invitation_leaves_nothing_in_the_inbox(
         await service.accept_pending_membership_for_user(
             user=invitee,
             organization_member_id=issued.organization_member_id,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
 
@@ -544,7 +553,7 @@ async def test_declining_cancels_every_live_link_to_the_membership(
         assert cancelled.status == "cancelled"
 
     with pytest.raises(InvitationAlreadyUsedError):
-        await service.accept_invitation(second_token, claims=NO_TERMS)
+        await service.accept_invitation(second_token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES)
 
     membership = await OrganizationMemberRepository(async_db).get(issued.organization_member_id)
     assert membership is not None
@@ -581,6 +590,7 @@ async def test_a_stale_pending_row_alongside_a_live_one_resolves_to_the_live_inv
     result = await service.accept_pending_membership_for_user(
         user=invitee,
         organization_member_id=issued.organization_member_id,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert result.organization_name == "Inviting"
 

@@ -136,6 +136,13 @@ def is_public_email_domain(domain: str) -> bool:
     return any(".".join(labels[start:]) in PUBLIC_EMAIL_DOMAINS for start in range(len(labels) - 1))
 
 
+# ``_DOMAIN_PATTERN`` with a punycoded top-level domain allowed as well, so ``example.рф`` (``example.xn--p1ai``)
+# can be blocked. A claim keeps the stricter pattern.
+_BLOCKABLE_DOMAIN_PATTERN = re.compile(
+    r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,}|xn--[a-z0-9-]{1,59})$"
+)
+
+
 def blocklist_entry(value: str) -> str | None:
     """Normalize an operator's typed blocklist entry, or return ``None`` when it can block nobody.
 
@@ -145,10 +152,15 @@ def blocklist_entry(value: str) -> str | None:
     """
     candidate = value.strip().lower().rstrip(".")
     for prefix in ("*.", "@"):
-        candidate = candidate.removeprefix(prefix)
+        if candidate.startswith(prefix):
+            # A prefix marks a domain, so what follows it must not be an address.
+            candidate = candidate.removeprefix(prefix)
+            if "@" in candidate:
+                return None
+            break
     local, at, domain = candidate.rpartition("@")
     domain = _ascii(domain)
-    if not is_registrable_domain(domain):
+    if not _BLOCKABLE_DOMAIN_PATTERN.match(domain):
         return None
     if not at:
         return domain

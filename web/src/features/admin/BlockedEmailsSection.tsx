@@ -6,6 +6,10 @@ import { Button } from "@/design-system/actions/Button"
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import {
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+} from "@/design-system/data/TablePagination"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
@@ -32,7 +36,9 @@ function blockedSummary(created: BlockedEmailCreated): string {
 }
 
 export function BlockedEmailsSection() {
-  const entries = useBlockedEmails()
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
+  const entries = useBlockedEmails({ page, pageSize })
   const block = useBlockEmail()
   const unblock = useUnblockEmail()
   const [value, setValue] = useState("")
@@ -97,7 +103,12 @@ export function BlockedEmailsSection() {
             label={`Unblock ${entry.pattern}`}
             confirmLabel="Unblock"
             isPending={unblock.isPending}
-            onConfirm={() => unblock.mutate(entry.id)}
+            onConfirm={() =>
+              unblock.mutate(entry.id, {
+                // The banner describes a block that no longer stands.
+                onSuccess: () => setLastBlocked(undefined),
+              })
+            }
           />
         </RowActionRow>
       ),
@@ -172,11 +183,19 @@ export function BlockedEmailsSection() {
           emptyContent="Nothing is blocked."
         />
       </TableScrollFrame>
-      {entries.data && entries.data.count > rows.length ? (
-        <p className="text-caption">
-          Showing the newest {rows.length} of {entries.data.count} entries.
-        </p>
-      ) : null}
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={entries.data?.count ?? null}
+        rowsOnPage={rows.length}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(0)
+        }}
+        isFetching={entries.isFetching}
+        label="entries"
+      />
     </section>
   )
 }

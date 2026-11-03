@@ -340,6 +340,7 @@ async def accept_caller_pending_membership(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
+    identities: IdentityServiceDep,
 ) -> AcceptInvitationResultPublic:
     """Accept an invitation addressed to the caller, resolving it to an active membership.
 
@@ -362,6 +363,7 @@ async def accept_caller_pending_membership(
     return await service.accept_pending_membership_for_user(
         user=current_identity,
         organization_member_id=organization_member_id,
+        blocked_addresses=identities,
     )
 
 

@@ -6,10 +6,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import BlockedEmailEntryExistsError
 from gateway.models.identity import BlockedEmail
 from gateway.repositories.base_repository import BaseRepository
+
+# The advisory lock a sign-in holds shared and a new block holds exclusive, so neither commits around the other.
+_BLOCKLIST_LOCK_CLASS = 0x6F74_626C  # "otbl"
 
 
 class BlockedEmailRepository(BaseRepository[BlockedEmail, Never, Never]):
@@ -25,6 +29,19 @@ class BlockedEmailRepository(BaseRepository[BlockedEmail, Never, Never]):
         )
         count = await self.db.scalar(select(func.count()).select_from(BlockedEmail))
         return list(rows.scalars().all()), int(count or 0)
+
+    async def lock_for_sign_in(self) -> None:
+        """Hold the blocklist lock shared until the transaction ends, so a block cannot commit around a sign-in.
+
+        Sign-ins do not wait for each other. A no-op on SQLite, which admits one writer at a time anyway.
+        """
+        if dialect_name(self.db) == "postgresql":
+            await self.db.execute(select(func.pg_advisory_xact_lock_shared(_BLOCKLIST_LOCK_CLASS, 0)))
+
+    async def lock_for_block(self) -> None:
+        """Hold the blocklist lock exclusive until the transaction ends, waiting out every sign-in in flight."""
+        if dialect_name(self.db) == "postgresql":
+            await self.db.execute(select(func.pg_advisory_xact_lock(_BLOCKLIST_LOCK_CLASS, 0)))
 
     async def patterns_among(self, patterns: Collection[str]) -> set[str]:
         """Return the members of ``patterns`` that are blocked."""

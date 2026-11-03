@@ -175,6 +175,7 @@ async def verify_email_route(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organizations: MembershipOrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> VerifyEmailResponse:
     """Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
 
@@ -186,7 +187,12 @@ async def verify_email_route(
     refuse_exhausted_verification_attempts(request)
     try:
         identity = await verify_email(
-            db, organizations=organizations, token=body.token, password=body.password, open_signup=config.open_signup
+            db,
+            organizations=organizations,
+            blocked_addresses=identities,
+            token=body.token,
+            password=body.password,
+            open_signup=config.open_signup,
         )
     except VerificationTokenInvalidError:
         count_failed_verification(request)

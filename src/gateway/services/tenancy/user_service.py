@@ -476,7 +476,13 @@ async def create_user_for_signup(
 
 
 async def verify_email(
-    db: AsyncSession, *, organizations: OrganizationService, token: str, password: str, open_signup: bool
+    db: AsyncSession,
+    *,
+    organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
+    token: str,
+    password: str,
+    open_signup: bool,
 ) -> User:
     """Confirm an address, lifting the sign-in gate #650 added to ``authenticate``.
 
@@ -519,6 +525,9 @@ async def verify_email(
     users = UserRepository(db)
     identity = await users.get_by_verification_token_hash(hash_token(token))
     if identity is None or identity.email_verification_token_expires_at is None or not identity.is_active:
+        raise VerificationTokenInvalidError
+    # Before the lock: the check reads through its own block, whose commit would release the lock.
+    if identity.email is not None and await blocked_addresses.blocked_among([identity.email]):
         raise VerificationTokenInvalidError
     await users.lock(identity.id)
     identity = await users.get_by_verification_token_hash(hash_token(token))
@@ -679,6 +688,7 @@ async def reset_password(
     config: GatewayConfig,
     *,
     organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
     token: str,
     new_password: str,
     terms_accepted: bool = False,
@@ -728,8 +738,13 @@ async def reset_password(
 
     Where ``open_signup`` is off, an unverified identity is held to signup's
     rule again here, because the roster can drop it after the link was mailed.
+    A link mailed before its address was blocked is refused as invalid.
     """
     users = UserRepository(db)
+    # Before the lock: the check reads through its own block, whose commit would release the lock.
+    pending = await users.get_by_reset_token_hash(hash_token(token))
+    if pending is not None and pending.email is not None and await blocked_addresses.blocked_among([pending.email]):
+        raise ResetTokenInvalidError
     identity = await _locked_reset_identity(users, organizations, token=token, open_signup=config.open_signup)
     validate_new_password(new_password)
     needs_terms = identity.terms_accepted_at is None and config.terms_url is not None
