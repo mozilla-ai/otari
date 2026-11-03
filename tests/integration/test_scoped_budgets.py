@@ -269,10 +269,26 @@ async def test_a_tool_call_hold_grows_the_ceiling_and_the_user_leg(async_db: Asy
     await async_db.commit()
     handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
 
-    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update")
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update") == Decimal("0.5")
 
     assert await _counters(async_db, org_cap.id) == (0.0, 1.5)
     assert handle.scoped_estimate == Decimal("1.5")
+
+
+@pytest.mark.asyncio
+async def test_several_tool_calls_at_one_price_are_one_hold(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """The pages a search reads are held together: three calls at 0.5 grow every leg by 1.5 at once."""
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
+    async_db.add(org_cap)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update", calls=3) == Decimal("1.5")
+
+    assert await _counters(async_db, org_cap.id) == (0.0, 2.5)
+    assert handle.scoped_estimate == Decimal("2.5")
 
 
 @pytest.mark.asyncio
@@ -291,7 +307,7 @@ async def test_a_tool_call_the_user_budget_refuses_gives_the_ceilings_growth_bac
     await async_db.commit()
     handle = await reserve_budget(async_db, tenancy.user_id, 0.8, scope=tenancy.scope())
 
-    assert not await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update")
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update") is None
 
     assert await _counters(async_db, org_cap.id) == (0.0, 0.8)
     assert (handle.estimate, handle.scoped_estimate) == (Decimal("0.8"), Decimal("0.8"))
