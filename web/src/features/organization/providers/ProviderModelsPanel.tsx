@@ -379,7 +379,9 @@ export function ProviderModelsPanel({
               maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={
-                models.isPlaceholderData ? undefined : models.data?.count
+                search.isSettled && !models.isPlaceholderData
+                  ? models.data?.count
+                  : undefined
               }
               className="w-full md:w-96"
             />

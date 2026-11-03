@@ -860,6 +860,13 @@ export function OrganizationMembersPage() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const search = useListSearch()
+  // Page 1 for every new term, however it changed: typed, or by Back and
+  // Forward, which move `q` without passing through the field.
+  const [pagedFor, setPagedFor] = useState(search.term)
+  if (pagedFor !== search.term) {
+    setPagedFor(search.term)
+    setPage(0)
+  }
   // Searched by the endpoint, so a match on a later page is found and the
   // pager's total is the number that matched.
   const members = useOrganizationMembersPage(page, pageSize, search.term)
@@ -1382,7 +1389,9 @@ export function OrganizationMembersPage() {
           // Not a previous term's total, held as placeholder data while the
           // new one is asked for.
           resultCount={
-            members.isPlaceholderData ? undefined : members.data?.count
+            search.isSettled && !members.isPlaceholderData
+              ? members.data?.count
+              : undefined
           }
           className="w-full md:w-96"
         />

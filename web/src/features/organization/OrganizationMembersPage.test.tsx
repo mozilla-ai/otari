@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
@@ -253,6 +254,16 @@ function mockApi(opts: {
   })
 
   return requests
+}
+
+/** Moves `q` the way Back or Forward does: through the router, not the field. */
+function NavigateTo({ q }: { q: string }) {
+  const navigate = useNavigate()
+  return (
+    <button type="button" onClick={() => navigate({ to: ".", search: { q } })}>
+      Go to {q}
+    </button>
+  )
 }
 
 function renderPage(
@@ -1066,6 +1077,32 @@ describe("OrganizationMembersPage", () => {
     expect(
       await screen.findByText("No members match this search."),
     ).toBeInTheDocument()
+  })
+
+  it("starts the roster over when the term changes without the field", async () => {
+    mockApi({
+      members: Array.from({ length: 30 }, (_, index) =>
+        organizationMember({
+          organization_member_id: `member-${index}`,
+          user_id: `user-${index}`,
+          full_name: `Member ${String(index).padStart(2, "0")}`,
+        }),
+      ),
+    })
+    const user = userEvent.setup()
+    await renderPage(
+      <>
+        <OrganizationMembersPage />
+        <NavigateTo q="member" />
+      </>,
+    )
+    await screen.findByText("Member 00")
+    await user.click(screen.getByRole("button", { name: "Next page, members" }))
+    expect(await screen.findByText("Member 25")).toBeInTheDocument()
+
+    // Every member still matches, so only a reset brings page 1 back.
+    await user.click(screen.getByRole("button", { name: "Go to member" }))
+    expect(await screen.findByText("Member 00")).toBeInTheDocument()
   })
 
   it("pages the roster without reading the rest", async () => {

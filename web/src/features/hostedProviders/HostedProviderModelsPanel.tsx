@@ -88,7 +88,8 @@ export function HostedProviderModelsPanel({
   // In component state, not the URL, like the page and the open provider it
   // belongs to: a term in the URL would outlive the panel on a reload.
   const [query, setQuery] = useState("")
-  const term = useDebounced(query.trim().slice(0, SEARCH_MAX_LENGTH))
+  const typed = query.trim().slice(0, SEARCH_MAX_LENGTH)
+  const term = useDebounced(typed)
   const models = useHostedModels(provider.name, page, pageSize, term)
   const update = useUpdateHostedModel(provider.name)
   const refresh = useRefreshHostedModels(provider.name)
@@ -105,6 +106,16 @@ export function HostedProviderModelsPanel({
   }
 
   const rows = models.data?.data ?? []
+  // A removal can leave the panel past the last page of what matches, where
+  // the table would say nothing matches beside a positive count. Adjusted
+  // during render, the way `TablePagination` adjusts its own page box.
+  const lastPage = Math.max(
+    0,
+    Math.ceil((models.data?.count ?? 0) / pageSize) - 1,
+  )
+  if (page > lastPage && models.data && !models.isFetching) {
+    setPage(lastPage)
+  }
   const editing = rows.find((row) => row.id === editingId)
   // The last refresh's outcome, worth a sentence either way: silence after a
   // press reads as a button that did nothing. Cleared by the next change made
@@ -264,7 +275,9 @@ export function HostedProviderModelsPanel({
                 setPage(0)
               }}
               resultCount={
-                models.isPlaceholderData ? undefined : models.data?.count
+                term === typed && !models.isPlaceholderData
+                  ? models.data?.count
+                  : undefined
               }
               className="w-full md:w-96"
             />
