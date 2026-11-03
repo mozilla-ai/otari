@@ -2359,6 +2359,181 @@
         "title": "BlobResourceContents",
         "type": "object"
       },
+      "BlockedEmailCreateRequest": {
+        "description": "An address or a domain to block.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A note for other operators on why the entry exists. Never shown to the blocked person.",
+            "title": "Reason"
+          },
+          "value": {
+            "description": "An address (person@example.com) or a domain (example.com, also accepted as @example.com or *.example.com). A domain also blocks its subdomains.",
+            "maxLength": 257,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "BlockedEmailCreateRequest",
+        "type": "object"
+      },
+      "BlockedEmailCreatedPublic": {
+        "description": "A new entry, and how many existing accounts it now blocks.",
+        "properties": {
+          "blocked_account_count": {
+            "description": "How many existing accounts the entry matches. Their dashboard sessions were ended.",
+            "title": "Blocked Account Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator who added it, or null once removed.",
+            "title": "Created By User Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "address or domain. A domain also blocks its subdomains.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "The normalized address or domain the entry blocks.",
+            "title": "Pattern",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "pattern",
+          "kind",
+          "reason",
+          "created_by_user_id",
+          "created_at",
+          "blocked_account_count"
+        ],
+        "title": "BlockedEmailCreatedPublic",
+        "type": "object"
+      },
+      "BlockedEmailPublic": {
+        "description": "One blocklist entry.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator who added it, or null once removed.",
+            "title": "Created By User Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "address or domain. A domain also blocks its subdomains.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "The normalized address or domain the entry blocks.",
+            "title": "Pattern",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "pattern",
+          "kind",
+          "reason",
+          "created_by_user_id",
+          "created_at"
+        ],
+        "title": "BlockedEmailPublic",
+        "type": "object"
+      },
+      "BlockedEmailsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedEmailPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "BlockedEmailsPublic",
+        "type": "object"
+      },
       "Body_audio-create_transcription": {
         "properties": {
           "file": {
@@ -27670,6 +27845,168 @@
           }
         ],
         "summary": "Get Administration Access",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/blocked-emails": {
+      "get": {
+        "description": "List the addresses and domains blocked from holding an account on this deployment, newest first.",
+        "operationId": "admin-list_blocked_emails",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedEmailsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Blocked Emails",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Block an address, or a domain and its subdomains, from holding an account on this deployment.\n\nA blocked address cannot sign up, be added to or invited into an organization, or sign in by password,\npasskey or provider, and nothing is mailed to it for signup, verification or a password reset. Every\nexisting account the entry matches has its dashboard sessions ended now; the account itself is kept, so\nremoving the entry lets it sign in again. API keys are not affected.\n\nRefused with 400 for a value that is neither an address nor a domain, or one that would block your own\naddress or the deployment's bootstrap operator's, and with 409 for one already blocked.",
+        "operationId": "admin-block_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockedEmailCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedEmailCreatedPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Block Email",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/blocked-emails/{entry_id}": {
+      "delete": {
+        "description": "Remove a blocklist entry, so the accounts it matched may sign in again.",
+        "operationId": "admin-unblock_email",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Unblock Email",
         "tags": [
           "admin"
         ]

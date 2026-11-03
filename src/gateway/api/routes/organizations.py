@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
     CurrentIdentity,
+    IdentityServiceDep,
     InvitationMailLimitDep,
     MembershipOrganizationServiceDep,
     OrganizationDomainServiceDep,
@@ -261,6 +262,7 @@ async def create_active_organization_member(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
     body: ActiveOrganizationMemberCreateRequest,
+    identities: IdentityServiceDep,
 ) -> ActiveOrganizationMemberCreateResultPublic:
     """Add a member to the caller's active organization, by email address.
 
@@ -272,7 +274,9 @@ async def create_active_organization_member(
     an operator's password link, so invite it instead
     (``POST /me/member-invitations``), whose link can set its first password.
     """
-    return await service.create_active_organization_member_for_user(user=current_identity, request=body)
+    return await service.create_active_organization_member_for_user(
+        user=current_identity, request=body, blocked_addresses=identities
+    )
 
 
 @router.patch("/me/members/{organization_member_id}")
@@ -336,6 +340,7 @@ async def accept_caller_pending_membership(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
+    identities: IdentityServiceDep,
 ) -> AcceptInvitationResultPublic:
     """Accept an invitation addressed to the caller, resolving it to an active membership.
 
@@ -358,6 +363,7 @@ async def accept_caller_pending_membership(
     return await service.accept_pending_membership_for_user(
         user=current_identity,
         organization_member_id=organization_member_id,
+        blocked_addresses=identities,
     )
 
 
@@ -388,6 +394,7 @@ async def invite_active_organization_member(
     config: Annotated[GatewayConfig, Depends(get_config)],
     mail_limit: InvitationMailLimitDep,
     body: InviteOrganizationMemberRequest,
+    identities: IdentityServiceDep,
 ) -> InviteOrganizationMemberResultPublic:
     """Invite an address to the caller's active organization by email.
 
@@ -405,6 +412,7 @@ async def invite_active_organization_member(
         request=body,
         config=config,
         mail_limit=mail_limit,
+        blocked_addresses=identities,
     )
 
 
@@ -415,6 +423,7 @@ async def bulk_invite_active_organization_members(
     config: Annotated[GatewayConfig, Depends(get_config)],
     mail_limit: InvitationMailLimitDep,
     body: BulkInviteOrganizationMembersRequest,
+    identities: IdentityServiceDep,
 ) -> BulkInviteOrganizationMembersResultPublic:
     """Invite several addresses to the caller's active organization at once.
 
@@ -430,6 +439,7 @@ async def bulk_invite_active_organization_members(
         request=body,
         config=config,
         mail_limit=mail_limit,
+        blocked_addresses=identities,
     )
 
 
@@ -440,6 +450,7 @@ async def reissue_active_organization_member_invitation(
     config: Annotated[GatewayConfig, Depends(get_config)],
     mail_limit: InvitationMailLimitDep,
     invitation_id: uuid.UUID,
+    identities: IdentityServiceDep,
 ) -> InviteOrganizationMemberResultPublic:
     """Give a pending or expired invitation a new accept link. Organization owners and admins only.
 
@@ -452,6 +463,7 @@ async def reissue_active_organization_member_invitation(
         invitation_id=invitation_id,
         config=config,
         mail_limit=mail_limit,
+        blocked_addresses=identities,
     )
 
 

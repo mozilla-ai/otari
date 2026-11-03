@@ -30,6 +30,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/blocked-emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Blocked Emails
+         * @description List the addresses and domains blocked from holding an account on this deployment, newest first.
+         */
+        get: operations["admin-list_blocked_emails"];
+        put?: never;
+        /**
+         * Block Email
+         * @description Block an address, or a domain and its subdomains, from holding an account on this deployment.
+         *
+         *     A blocked address cannot sign up, be added to or invited into an organization, or sign in by password,
+         *     passkey or provider, and nothing is mailed to it for signup, verification or a password reset. Every
+         *     existing account the entry matches has its dashboard sessions ended now; the account itself is kept, so
+         *     removing the entry lets it sign in again. API keys are not affected.
+         *
+         *     Refused with 400 for a value that is neither an address nor a domain, or one that would block your own
+         *     address or the deployment's bootstrap operator's, and with 409 for one already blocked.
+         */
+        post: operations["admin-block_email"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/blocked-emails/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unblock Email
+         * @description Remove a blocklist entry, so the accounts it matched may sign in again.
+         */
+        delete: operations["admin-unblock_email"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users": {
         parameters: {
             query?: never;
@@ -8646,6 +8698,100 @@ export interface components {
             mimeType?: string | null;
             /** Uri */
             uri: string;
+        };
+        /**
+         * BlockedEmailCreateRequest
+         * @description An address or a domain to block.
+         */
+        BlockedEmailCreateRequest: {
+            /**
+             * Reason
+             * @description A note for other operators on why the entry exists. Never shown to the blocked person.
+             */
+            reason?: string | null;
+            /**
+             * Value
+             * @description An address (person@example.com) or a domain (example.com, also accepted as @example.com or *.example.com). A domain also blocks its subdomains.
+             */
+            value: string;
+        };
+        /**
+         * BlockedEmailCreatedPublic
+         * @description A new entry, and how many existing accounts it now blocks.
+         */
+        BlockedEmailCreatedPublic: {
+            /**
+             * Blocked Account Count
+             * @description How many existing accounts the entry matches. Their dashboard sessions were ended.
+             */
+            blocked_account_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By User Id
+             * @description The operator who added it, or null once removed.
+             */
+            created_by_user_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description address or domain. A domain also blocks its subdomains.
+             */
+            kind: string;
+            /**
+             * Pattern
+             * @description The normalized address or domain the entry blocks.
+             */
+            pattern: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * BlockedEmailPublic
+         * @description One blocklist entry.
+         */
+        BlockedEmailPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By User Id
+             * @description The operator who added it, or null once removed.
+             */
+            created_by_user_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description address or domain. A domain also blocks its subdomains.
+             */
+            kind: string;
+            /**
+             * Pattern
+             * @description The normalized address or domain the entry blocks.
+             */
+            pattern: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /** BlockedEmailsPublic */
+        BlockedEmailsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["BlockedEmailPublic"][];
         };
         /** Body_audio-create_transcription */
         "Body_audio-create_transcription": {
@@ -20086,6 +20232,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentAdminAccessPublic"];
+                };
+            };
+        };
+    };
+    "admin-list_blocked_emails": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedEmailsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-block_email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockedEmailCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedEmailCreatedPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-unblock_email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

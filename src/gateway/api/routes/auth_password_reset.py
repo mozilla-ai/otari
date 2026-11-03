@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
+    IdentityServiceDep,
     MembershipOrganizationServiceDep,
     OrganizationServiceDep,
     get_config,
@@ -74,12 +75,18 @@ async def request_reset(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organizations: OrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> RequestPasswordResetResponse:
     """Mail a password-reset link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
         await request_password_reset(
-            db, config, organizations=organizations, background_tasks=background_tasks, email=body.email
+            db,
+            config,
+            organizations=organizations,
+            blocked_addresses=identities,
+            background_tasks=background_tasks,
+            email=body.email,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
@@ -94,6 +101,7 @@ async def confirm_reset(
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
     organizations: MembershipOrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> None:
     """Complete a password reset, or choose a first password. Single-use: the token stops working after this.
 
@@ -104,6 +112,7 @@ async def confirm_reset(
         db,
         config,
         organizations=organizations,
+        blocked_addresses=identities,
         token=body.token,
         new_password=body.new_password,
         terms_accepted=body.terms_accepted,

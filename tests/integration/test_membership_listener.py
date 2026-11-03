@@ -30,7 +30,14 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
-from .tenancy_helpers import create_budget, create_member, create_organization, create_workspace, membership_writes
+from .tenancy_helpers import (
+    NO_BLOCKED_ADDRESSES,
+    create_budget,
+    create_member,
+    create_organization,
+    create_workspace,
+    membership_writes,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -232,6 +239,7 @@ async def test_workspace_assignment_announces_new_and_revived_members_only(async
                 for workspace_id in (fresh.id, revived.id, already.id)
             ],
         ),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
     assert active.id not in listener.joined, "an already-active membership is not a join"
@@ -253,6 +261,7 @@ async def test_an_organization_service_without_a_listener_refuses_membership_cha
                 role="member",
                 workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
             ),
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
 

@@ -2825,6 +2825,22 @@ main {
   .table__cell[data-column="account"] {
   border-right: 1px solid var(--color-control-border);
 }
+/* The operator's email blocklist, under the accounts table and in its terms. */
+.otari-blocked-emails-table .table__row .table__cell {
+  height: 3.625rem;
+  padding-block: 0;
+}
+.otari-blocked-emails-table .table__column[data-key="added"] {
+  width: 8.75rem;
+  min-width: 8.75rem;
+}
+.otari-blocked-emails-table .table__column[data-key="actions"] {
+  width: 10rem;
+  min-width: 10rem;
+}
+.otari-blocked-emails-table .table__column[data-key="entry"] {
+  min-width: 18.75rem;
+}
 .otari-workspaces-table .table__row .table__cell {
   height: 3.625rem;
   padding-block: 0;

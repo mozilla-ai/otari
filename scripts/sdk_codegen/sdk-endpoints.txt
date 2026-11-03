@@ -347,11 +347,14 @@ POST /api/v1/scoped-budgets                                     # not yet wrappe
 GET /api/v1/scoped-budgets/{budget_id}                          # not yet wrapped
 PATCH /api/v1/scoped-budgets/{budget_id}                        # not yet wrapped
 DELETE /api/v1/scoped-budgets/{budget_id}                       # not yet wrapped
-# Deployment administration: the accounts on the whole deployment, and the flags
-# an operator flips on one. Refused with 404 for anyone who is not an operator,
+# Deployment administration: the accounts on the whole deployment, the flags
+# an operator flips on one, and the email blocklist. Refused with 404 for anyone who is not an operator,
 # and an SDK caller holds a workspace key rather than an operator identity, so
 # there is nothing here for a shell to wrap.
 GET /api/v1/admin/access                                        # dashboard-only
+DELETE /api/v1/admin/blocked-emails/{entry_id}                  # dashboard-only
+GET /api/v1/admin/blocked-emails                                # dashboard-only
+POST /api/v1/admin/blocked-emails                               # dashboard-only
 GET /api/v1/admin/users                                         # dashboard-only
 PATCH /api/v1/admin/users/{user_id}                             # dashboard-only
 POST /api/v1/admin/users/{user_id}/password-link                # dashboard-only

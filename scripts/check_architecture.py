@@ -1426,6 +1426,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": None,
         "baseline": ("gateway/services/tenancy/organization_guardrail_service.py",),
     },
+    "gateway.models.identity.BlockedEmail": {
+        "repository": "gateway/repositories/identity/blocked_email_repository.py",
+        "baseline": (),
+    },
     "gateway.models.identity.OAuthIdentityLink": {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
         "baseline": (),

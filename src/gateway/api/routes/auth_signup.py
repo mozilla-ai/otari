@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
+    IdentityServiceDep,
     MembershipOrganizationServiceDep,
     OrganizationServiceDep,
     UnitOfWorkDep,
@@ -134,6 +135,7 @@ async def signup(
     growth: GrowthSignalPortDep,
     uow: UnitOfWorkDep,
     organizations: MembershipOrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> SignupResponse:
     """Claim a roster identity, register a new one, or do nothing: the response never says which.
 
@@ -156,6 +158,7 @@ async def signup(
             password=body.password,
             uow=uow,
             organizations=organizations,
+            blocked_addresses=identities,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
         )
@@ -172,6 +175,7 @@ async def verify_email_route(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organizations: MembershipOrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> VerifyEmailResponse:
     """Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
 
@@ -183,7 +187,12 @@ async def verify_email_route(
     refuse_exhausted_verification_attempts(request)
     try:
         identity = await verify_email(
-            db, organizations=organizations, token=body.token, password=body.password, open_signup=config.open_signup
+            db,
+            organizations=organizations,
+            blocked_addresses=identities,
+            token=body.token,
+            password=body.password,
+            open_signup=config.open_signup,
         )
     except VerificationTokenInvalidError:
         count_failed_verification(request)
@@ -200,12 +209,18 @@ async def resend_verification(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organizations: OrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> ResendVerificationResponse:
     """Mail a fresh verification link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
         await resend_verification_email(
-            db, config, organizations=organizations, background_tasks=background_tasks, email=body.email
+            db,
+            config,
+            organizations=organizations,
+            blocked_addresses=identities,
+            background_tasks=background_tasks,
+            email=body.email,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None

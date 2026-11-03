@@ -515,7 +515,44 @@ class EmailNotVerifiedError(TenancyForbiddenError):
         super().__init__("Verify your email before signing in; request a new verification email if yours expired")
 
 
+class SignInBlockedError(TenancyForbiddenError):
+    """A sign-in by an account whose address the deployment's operator has blocked.
+
+    Raised only once the account has proven who it is, so it may say what is wrong.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This email address is blocked on this deployment. Contact its operator.")
+
+
+class BlockedEmailError(TenancyValidationError):
+    """An address the deployment's operator has blocked, given to a surface that would add or invite it."""
+
+    def __init__(self, email: str) -> None:
+        super().__init__(f"'{email}' is blocked on this deployment and cannot be added or invited")
+
+
+class InvalidBlockedEmailEntryError(TenancyValidationError):
+    """A blocklist entry that is neither an address nor a domain."""
+
+    def __init__(self, value: str) -> None:
+        super().__init__(f"'{value}' is not an email address or a domain")
+
+
+class BlockedEmailEntryExistsError(TenancyConflictError):
+    def __init__(self, pattern: str) -> None:
+        super().__init__(f"'{pattern}' is already blocked")
+
+
+class BlockedEmailEntryNotFoundError(TenancyNotFoundError):
+    def __init__(self, entry_id: object) -> None:
+        super().__init__(f"Blocked email entry {entry_id} not found")
+
+
 __all__ = [
+    "BlockedEmailEntryExistsError",
+    "BlockedEmailEntryNotFoundError",
+    "BlockedEmailError",
     "BootstrapOperatorProtectedError",
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",
@@ -548,7 +585,9 @@ __all__ = [
     "PasswordNotSetError",
     "PasswordPolicyError",
     "ResetTokenInvalidError",
+    "InvalidBlockedEmailEntryError",
     "SignInAddressRequiredError",
+    "SignInBlockedError",
     "TermsNotAcceptedError",
     "UnmodifiedPasswordError",
     "VerificationPasswordIncorrectError",
