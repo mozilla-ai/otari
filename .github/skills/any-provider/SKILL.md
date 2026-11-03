@@ -248,10 +248,14 @@ provider with no empty page.
 
 ### 2026-11-03, Serply (any-search)
 
-The first search provider with the query in the URL and the key in a header.
+The first search provider with the query in the URL and the key in a header, and the first that
+returns a scraped results page.
 
 - Set `query_in_url` without `key_in_url` when only the query travels in the URL; the real-socket
   log test still applies, since httpx logs the URL with the query in it.
+- A native option can be a request header: Serply's `X-Proxy-Location` and `X-User-Agent` keep
+  the provider's header names and go out as headers, and the key is set after them, so no option
+  replaces it.
 - A provider can pass parameters through that its documentation does not list: Serply forwards
   Google's own `tbs` and `tbm`, which is how `time_range` is mapped. Check each one live before
   offering it, and say in the docstring when it was checked: `tbm=nws` works, `tbm=isch` returned
@@ -259,6 +263,15 @@ The first search provider with the query in the URL and the key in a header.
 - A result can carry a value of the right type that is not what the field promises: Serply
   sometimes returns an opaque Google token in `link` in place of a URL. Drop such an item rather
   than failing the whole search, and fill the count from the items after it.
+- A provider can choose the region a search runs from unless an option pins it. Without `gl`,
+  Serply answered a news query with Swedish relative times, and the same English web result came
+  dated `May 27, 2026` on one call and `27.05.2026` on another. Say in the option's description
+  and in the pricing note which option an operator should set on the instance.
+- A results page shows its dates as text in the language of the region that served it: Serply's
+  come in `metadata.published_time` (`Oct 7, 2026`, `17 hours ago`) or `metadata.attributes`
+  (`27.05.2026`, `vor 23 Stunden`). Such a field stays in `raw`, as Tabstack's PDF dates do: a
+  parser for the one form a fixture shows dates some hits and silently drops the rest. Probe with
+  several queries rather than one repeated, since Serply answered a repeated query identically.
 - A documentation's default can be wrong: Serply documents `desktop` as its `X-User-Agent`
   default, but its answers reported `mobile`. Describe an option by what it does, not by a default
   you have not seen.
