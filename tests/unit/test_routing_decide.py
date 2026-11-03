@@ -214,7 +214,7 @@ async def test_a_config_policy_naming_a_retired_router_serves_its_default(
     assert ordering is None
     plan = compile_policy(config, "smart", retired, router_ordering=ordering)
     assert plan.selection_reason == "default"
-    assert [attempt.model for attempt in plan.attempts][0] == "gpt-5"
+    assert [attempt.model for attempt in plan.attempts] == ["gpt-5"]
     warnings = router_warnings()
     assert len(warnings) == 1
     assert f"'{router}'" in warnings[0]

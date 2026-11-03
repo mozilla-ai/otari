@@ -82,7 +82,7 @@ async def decide_ordering(
     Returns ``None`` when there is nothing to ask: the policy names no router,
     this build has no such backend, or the surface has no request to route. The
     compiler treats all three as "no ordering" and serves the default target; only
-    the unknown-backend case is logged, once per policy.
+    the unknown-backend case is logged, once per policy and workspace.
 
     Returns an *empty* :class:`RouterOrdering` when a router was asked and
     declined or when the caller opted out. That also serves the default target,
@@ -107,8 +107,8 @@ async def decide_ordering(
         if owes_missing_backend_warning(workspace_id, policy_name, backend_name):
             logger.warning(
                 "Routing policy '%s' names router backend '%s', which this build does not have, so the "
-                "policy serves '%s' on every request. Available backends: %s. Logged once per policy per "
-                "process.",
+                "policy serves '%s' on every request. Available backends: %s. Logged once per policy and "
+                "workspace per process.",
                 policy_name,
                 backend_name,
                 spec.default_target,
