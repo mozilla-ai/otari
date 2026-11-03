@@ -199,17 +199,18 @@ gateway process rather than to any organization on it:
 - Web search, the search and fetch tools the deployment runs for every
   workspace and what each call costs. Its two tables list the search tools and
   the fetch tools, `builtin_fetch` first, each with its key's last four and its
-  price per call, and end with the `otari:web_search` or `otari:web_fetch` rate
-  that prices what no tool's own rate does. A search tool with no price of its
-  own takes that rate for the model's searches, while its calls on the search
-  API go unpriced. A row opens its endpoint, enrichment and options; its star
+  price per call, and end with the `otari:web_search` or `otari:web_fetch` rate,
+  which prices a call on an organization's own key, and `otari:web_search` a
+  search on the legacy settings too. A tool is priced at its own
+  rate, or at one stored under its old `<provider>:<name>` model key, and a tool
+  with neither is unpriced. A row opens its endpoint, enrichment and options; its star
   makes it the default the model uses, and Test runs one search or fetch and
   says how many hits or characters came back. Add search tool and Add fetch tool
   pick a provider first, then ask for what it needs (its key, an endpoint when it
   has none of its own) and a price, with the endpoint, timeout, enrichment and
   the provider's options under More settings, typed from the provider catalog or
   written as JSON. Edit and Remove change a stored tool; a `config.yml` tool,
-  `builtin_fetch` and the two fallback rates take only a price, and a rate from
+  `builtin_fetch` and the two `otari:` rates take only a price, and a rate from
   `price_per_call` is changed in `config.yml`. Below the tables, The model's web
   tools turns the model's search off, and sets the calls a request may make, the
   results per search, reading pages for hits without text, and running a
