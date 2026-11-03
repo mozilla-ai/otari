@@ -9,7 +9,6 @@ import type {
   AliasResponse,
   AutomaticFallbacksResponse,
   CreateAliasRequest,
-  RouterStatus,
   RoutingPolicyResponse,
   SetRoutingPolicyRequest,
 } from "@/client"
@@ -20,7 +19,6 @@ import {
   AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
-  ROUTER_STATUS,
   ROUTING_POLICIES,
   workspaceMeta,
 } from "@/shared/api/queryKeys"
@@ -253,27 +251,6 @@ export function useDeleteOrganizationAlias() {
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateRoutingLists(queryClient),
-  })
-}
-
-// --- Learned routing ------------------------------------------------------
-
-/** How warm a user's routing memory is.
- *
- *  Keyed by user because warmth is per user: the records hold that user's
- *  prompts, so a global learned policy warms once per caller. Disabled until a
- *  user is chosen rather than defaulting to one, because "whose memory" has no
- *  sensible default.
- */
-export function useRouterStatus(userId: string | null) {
-  return useQuery({
-    queryKey: [ROUTER_STATUS, userId],
-    queryFn: () =>
-      apiFetch<RouterStatus>(
-        `/routing/status?user_id=${encodeURIComponent(userId ?? "")}`,
-      ),
-    enabled: userId !== null && userId !== "",
-    staleTime: 30_000,
   })
 }
 

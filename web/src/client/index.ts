@@ -425,7 +425,6 @@ export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
 }
 export type AliasResponse = Schemas["AliasResponse"]
 export type CreateAliasRequest = Schemas["AliasRequest"]
-export type RouterStatus = Schemas["RouterStatus"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails
