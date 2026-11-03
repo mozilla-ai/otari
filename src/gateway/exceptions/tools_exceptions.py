@@ -399,17 +399,6 @@ class DirectSearchFailedError(TenancyError):
         self.upstream_status = upstream_status
 
 
-class DirectSearchPricingRequiredError(TenancyError):
-    """A direct search refused because ``require_pricing`` is on and no pricing row prices it.
-
-    ``message`` names the row to add; the route returns it to the caller and
-    writes it on the usage row.
-    """
-
-    status_code = status.HTTP_402_PAYMENT_REQUIRED
-    error_code: str = PRICING_REQUIRED
-
-
 class GatewayToolPricingRequiredError(TenancyError):
     """A request refused because ``require_pricing`` is on and no pricing row prices a gateway-run tool it uses.
 

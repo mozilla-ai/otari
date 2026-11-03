@@ -84,12 +84,11 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.database import release_session
-from gateway.core.error_codes import INSUFFICIENT_FUNDS, error_headers
+from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions.tools_exceptions import (
     DirectSearchFailedError,
     DirectSearchFieldRefusedError,
-    DirectSearchPricingRequiredError,
     SearchToolMisconfiguredError,
     SearchToolNotFoundError,
     SearchToolSelectionError,
@@ -120,9 +119,9 @@ from gateway.services.pricing_service import resolve_tool_rate
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 from gateway.services.tools import (
     pick_direct_search_instance,
-    refuse_unpriced_direct_search,
     resolve_direct_search,
     run_direct_search,
+    unpriced_direct_search_detail,
 )
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
@@ -442,14 +441,16 @@ async def _dispatch_search(
         await log_rejection(detail, row_model=tool.name, row_provider=tool.provider, status_code=status_code)
         return HTTPException(status_code=status_code, detail=detail, headers=headers)
 
-    # After the budget checks, so a missing or exhausted budget answers first.
-    try:
-        refuse_unpriced_direct_search(
-            search, priced=rate is not None, require_pricing=config.require_pricing, budget_exempt=budget_exempt
+    # After the budget checks, so a missing or exhausted budget answers first. The
+    # search is refused when require_pricing is on and no row prices it, even if
+    # the provider reports its own cost; a zero rate is a price. Two calls pass
+    # unpriced: one on a key exempt from budgets, which is never debited, and one
+    # with no rate keys, which this gateway does not settle. The rejection row
+    # shows an operator the searches require_pricing turns away.
+    if rate is None and config.require_pricing and not budget_exempt and search.resolved.rate_keys:
+        raise await refused_after_reservation(
+            unpriced_direct_search_detail(search), status.HTTP_402_PAYMENT_REQUIRED, error_headers(PRICING_REQUIRED)
         )
-    except DirectSearchPricingRequiredError as exc:
-        # The rejection row shows an operator the searches require_pricing turns away.
-        raise await refused_after_reservation(exc.message, exc.status_code, error_headers(exc.error_code)) from exc
     # Last, so a refusal above answers before the organization's funds are read.
     funding: DeploymentCharge | None = None
     if deployment_paid:
