@@ -1009,6 +1009,11 @@ Config-file prices seed the database. Prices stored through `/api/v1/pricing` ta
 precedence. Rates and settled costs use decimal arithmetic and costs are rounded
 once to a micro-dollar. Use PostgreSQL for durable accounting.
 
+A stored price change, made through the API, the dashboard or a catalog update,
+applies at once in the gateway process that wrote it. Each other worker or
+replica keeps the rates it has read for up to 30 seconds, so it applies the
+change within that window, as it does a rate scheduled to start later.
+
 ### Default pricing
 
 `default_pricing: true` prices from a models.dev snapshot when no stored price
@@ -1073,7 +1078,7 @@ serves, with their history; the cleanup never runs on a schedule.
   approval. `GET /api/v1/pricing/refresh/pending` reads what is held; nothing is
   metered differently until it is approved. On a deployment with nobody to make
   that call, prefer `auto`.
-- `auto` runs it and applies changed prices at once, unless they look wrong: an
+- `auto` runs it and applies changed prices without review, unless they look wrong: an
   update that would lose or remove more than a tenth of the priced models is
   held for review as under `review`.
 

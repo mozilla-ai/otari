@@ -33,6 +33,7 @@ _KEY_CHUNK = 500
 # rates (`services.pricing_service`) can tell that what it holds may be stale.
 # The count moves when a session flushes a price change, on an added row, a
 # changed attribute or a bulk statement, and again when that transaction ends.
+_PRICE_MODELS = (ModelPricing, OrganizationModelPricing)
 _PRICE_TABLES = frozenset({ModelPricing.__table__, OrganizationModelPricing.__table__})
 _PRICES_WRITTEN = "gateway.prices_written"
 _price_writes = 0
@@ -44,8 +45,12 @@ def price_write_generation() -> int:
 
 
 def pending_price_writes(db: AsyncSession) -> bool:
-    """Whether ``db`` holds a price change it has not yet committed or rolled back."""
-    return bool(db.info.get(_PRICES_WRITTEN, False))
+    """Whether ``db`` holds a price change it has not yet committed or rolled back, flushed or not."""
+    return bool(db.info.get(_PRICES_WRITTEN, False)) or _holds_price_change(db.sync_session)
+
+
+def _holds_price_change(session: Session) -> bool:
+    return any(isinstance(row, _PRICE_MODELS) for row in (*session.new, *session.dirty, *session.deleted))
 
 
 def _count_price_write(session: Session) -> None:
@@ -56,10 +61,8 @@ def _count_price_write(session: Session) -> None:
 
 @event.listens_for(Session, "after_flush")
 def _count_flushed_price_write(session: Session, _flush_context: object) -> None:
-    for row in (*session.new, *session.dirty, *session.deleted):
-        if isinstance(row, (ModelPricing, OrganizationModelPricing)):
-            _count_price_write(session)
-            return
+    if _holds_price_change(session):
+        _count_price_write(session)
 
 
 @event.listens_for(Session, "do_orm_execute")

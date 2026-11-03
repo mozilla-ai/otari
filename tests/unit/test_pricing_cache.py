@@ -174,6 +174,24 @@ def test_an_uncommitted_rate_is_seen_only_by_its_writer() -> None:
     assert _run(scenario) is None
 
 
+def test_a_writer_sees_its_own_unflushed_change_over_a_cached_rate() -> None:
+    async def scenario(sessions: async_sessionmaker[AsyncSession], _statements: list[str]) -> Decimal | None:
+        async with sessions() as session:
+            session.add(_price(10))
+            await session.commit()
+        assert await _input_rate(sessions) == Decimal("10")
+        async with sessions() as session:
+            row = (await session.execute(select(ModelPricing))).scalar_one()
+            row.input_price_per_million = Decimal("4")
+            resolved = await resolve_model_pricing(session, "openai", "gpt-4o")
+            assert resolved is not None
+            rate = resolved.pricing.input_price_per_million
+            await session.rollback()
+            return rate
+
+    assert _run(scenario) == Decimal("4")
+
+
 def test_a_writer_sees_its_own_change_over_a_rate_another_session_cached() -> None:
     async def scenario(sessions: async_sessionmaker[AsyncSession], _statements: list[str]) -> Decimal | None:
         async with sessions() as session:
