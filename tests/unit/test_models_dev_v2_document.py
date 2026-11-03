@@ -33,7 +33,7 @@ SAMPLE = FIXTURES / "models_dev_v2_sample.json"
 V1_SAMPLE = FIXTURES / "models_dev_v1_sample.json"
 
 # The fields only the v2 reader fills.
-V2_ONLY = ("api", "pricing")
+V2_ONLY = ("type", "api", "pricing")
 
 
 @pytest.fixture(scope="module")
@@ -85,7 +85,8 @@ def test_v2_fills_every_field_v1_fills_with_the_same_values(
 
 
 def test_the_v1_reader_fills_none_of_the_v2_fields(v1_catalog: ModelsDevCatalog) -> None:
-    assert all((model.api, model.pricing) == ((), None) for _provider, model in v1_catalog.models())
+    """v1 gives no type, so a v1 embedding model must not read as a chat model."""
+    assert all((model.type, model.api, model.pricing) == (None, (), None) for _provider, model in v1_catalog.models())
 
 
 def test_media_types_read_as_the_v1_modalities(catalog: ModelsDevCatalog) -> None:
