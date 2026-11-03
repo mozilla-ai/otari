@@ -66,7 +66,11 @@ import { useOrganizationPricing } from "@/shared/api/pricing"
 import { formatRelative } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
@@ -678,6 +682,7 @@ export function OrganizationProvidersPage() {
             label="Search provider keys"
             placeholder="Search by name or provider"
             value={search.value}
+            maxLength={SEARCH_MAX_LENGTH}
             onChange={search.onChange}
             resultCount={keys.isPending ? undefined : shown.length}
             className="w-full md:w-96"

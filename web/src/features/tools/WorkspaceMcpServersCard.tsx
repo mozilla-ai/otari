@@ -36,7 +36,11 @@ import {
 } from "@/shared/api/tools"
 import { formatDateTime } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 // The MCP servers this workspace has registered, which a request reaches by
 // naming their ids in `mcp_server_ids` (see docs/mcp.md).
@@ -375,6 +379,7 @@ export function WorkspaceMcpServersCard({
             label="Search MCP servers"
             placeholder="Search by name or URL"
             value={search.value}
+            maxLength={SEARCH_MAX_LENGTH}
             onChange={search.onChange}
             resultCount={query.isPending ? undefined : rows.length}
             className="w-full md:w-96"

@@ -80,7 +80,11 @@ import {
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 import { ExpiryFields } from "./ExpiryFields"
 import { FederationRulesDialog } from "./FederationRulesDialog"
 import { KeyActionsMenu } from "./KeyActionsMenu"
@@ -1816,6 +1820,7 @@ export function KeysPage() {
                 : "Search by name or prefix"
             }
             value={search.value}
+            maxLength={SEARCH_MAX_LENGTH}
             onChange={search.onChange}
             resultCount={loading ? undefined : rows.length}
             className="w-full md:w-96"

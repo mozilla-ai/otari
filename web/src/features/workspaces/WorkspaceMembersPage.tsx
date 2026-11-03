@@ -24,7 +24,11 @@ import {
 } from "@/shared/api/organizations"
 import { useWorkspaceMembers } from "@/shared/api/workspaces"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 // The roster of the workspace the switcher has selected, which is the one page
 // in the workspace context that is genuinely scoped to it today: the workspace
@@ -156,6 +160,7 @@ export function WorkspaceMembersPage() {
           label="Search members"
           placeholder="Search by name"
           value={search.value}
+          maxLength={SEARCH_MAX_LENGTH}
           onChange={search.onChange}
           resultCount={rostersAnswered ? matched.size : undefined}
           className="w-full md:w-96"

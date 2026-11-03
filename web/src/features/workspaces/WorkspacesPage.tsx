@@ -44,7 +44,11 @@ import {
   useWorkspaces,
 } from "@/shared/api/workspaces"
 import { formatDate } from "@/shared/helpers/format"
-import { matchesSearch, useListSearch } from "@/shared/hooks/useListSearch"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 // Workspaces are the unit inside an organization that work is scoped to. This
 // page lists the ones the caller can see, and opening a row reveals its roster:
@@ -970,6 +974,7 @@ export function WorkspacesPage() {
               label="Search workspaces"
               placeholder="Search by name or description"
               value={search.value}
+              maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={workspaces.isPending ? undefined : shown.length}
               className="w-full md:w-96"
