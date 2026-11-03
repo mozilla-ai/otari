@@ -36,8 +36,8 @@ AnyFetch.get_provider_metadata("fake")
 Every request a provider sends carries `User-Agent: any-fetch/<version>`, the installed package's
 version (`0.0.0` where it was built without the repository's Git tags), so a provider, or a proxy
 that allowlists outbound traffic, can tell the library's requests apart. A `client` that sets a
-`User-Agent` of its own keeps it: only httpx's default is replaced. `builtin` is the host's own
-fetcher, and sends what the host sends.
+`User-Agent` of its own keeps it: httpx's default is replaced, and a client that carries none
+is filled in. `builtin` is the host's own fetcher, and sends what the host sends.
 
 `fetch` takes one shared parameter, which every provider maps onto its own: `max_chars`. Every
 other keyword is a native option, passed to the provider under its own name. An option the

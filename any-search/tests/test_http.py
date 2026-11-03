@@ -114,6 +114,21 @@ async def test_a_hosts_client_with_a_user_agent_of_its_own_keeps_it() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_hosts_client_that_carries_no_user_agent_is_filled_in() -> None:
+    sent: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    del client.headers["User-Agent"]
+    async with client:
+        await ProviderHttp("p", client, 7.5).request("GET", "https://api.example/")
+    assert sent[0].headers["User-Agent"] == USER_AGENT
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("failure", "tag"),
     [(httpx.ConnectTimeout(SENTINEL_URL), "timeout"), (httpx.ConnectError(SENTINEL_URL), "network")],

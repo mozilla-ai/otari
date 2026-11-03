@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from any_search import AnySearch, MissingCredentialError, ProviderError, SearchResult, UnsupportedParameterError
+from any_search._http import USER_AGENT
 from any_search.providers.serply import MAX_RESULTS
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "serply"
@@ -62,7 +63,7 @@ async def test_sends_the_query_as_parameters_of_a_get_and_the_key_as_a_header() 
     _, request = await _search()
     assert (request.method, str(request.url.copy_with(query=None))) == ("GET", "https://api.serply.io/v1/search")
     assert _params(request) == {"q": "latest stable python release", "num": "10"}
-    assert request.headers["X-Api-Key"] == KEY
+    assert (request.headers["X-Api-Key"], request.headers["User-Agent"]) == (KEY, USER_AGENT)
     assert KEY not in str(request.url)
     assert request.content == b""
 

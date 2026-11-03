@@ -16,7 +16,8 @@ except ImportError:
 USER_AGENT = f"any-fetch/{__version__}"
 """Sent with every request, so a provider can tell the library's traffic apart and tie it to a release."""
 
-# What a client sends when its host set no ``User-Agent``: the one value the library replaces.
+# What a client sends when its host set no ``User-Agent``. The library replaces it, and fills in
+# a client that carries none; any other value is the host's own and is kept.
 _HTTPX_USER_AGENT = f"python-httpx/{httpx.__version__}"
 
 
@@ -29,9 +30,9 @@ class ProviderHttp:
     defaults and the provider's timeout is opened on the first request and
     closed by ``aclose``.
 
-    Each request names the library in its ``User-Agent``, in place of httpx's
-    default, so a provider can tell whose traffic it is. A host's client that
-    sets a ``User-Agent`` of its own keeps it.
+    Each request names the library in its ``User-Agent``, so a provider can
+    tell whose traffic it is, unless the host's client carries one of its own:
+    httpx's default is replaced and a missing one filled in, any other kept.
     """
 
     def __init__(self, provider: str, client: httpx.AsyncClient | None, timeout: float) -> None:
@@ -55,7 +56,7 @@ class ProviderHttp:
         try:
             # ``Headers`` encodes eagerly, so a header httpx cannot send fails inside the handler.
             headers = httpx.Headers(kwargs.pop("headers", None))
-            if client.headers.get("User-Agent") == _HTTPX_USER_AGENT:
+            if client.headers.get("User-Agent") in (None, _HTTPX_USER_AGENT):
                 headers["User-Agent"] = USER_AGENT
             return await client.request(method, url, headers=headers, timeout=self._timeout, **kwargs)
         except httpx.TimeoutException:

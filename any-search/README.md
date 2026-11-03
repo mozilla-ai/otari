@@ -36,7 +36,8 @@ AnySearch.get_provider_metadata("fake")
 Every request a provider sends carries `User-Agent: any-search/<version>`, the installed package's
 version (`0.0.0` where it was built without the repository's Git tags), so a provider, or a proxy
 that allowlists outbound traffic, can tell the library's requests apart. A `client` that sets a
-`User-Agent` of its own keeps it: only httpx's default is replaced.
+`User-Agent` of its own keeps it: httpx's default is replaced, and a client that carries none
+is filled in.
 
 `search` takes two shared parameters, which every provider maps onto its own: `max_results` and
 `time_range` (`day`, `week`, `month` or `year`). Every other keyword is a native option, passed to
