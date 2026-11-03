@@ -187,9 +187,10 @@ class ModelsDevOverride:
 class ModelsDevUnitPrice:
     """One v2 price: an input, an output or ``web_search``.
 
-    ``unit`` is ``None`` where the document gives none, which models.dev reads
-    as ``token``. A ``token`` or ``character`` price is per million, and every
-    other unit is per one. ``explicit_cache`` is the document's
+    ``unit`` is the document's, ``None`` where it gives none, which models.dev
+    reads as ``token``. One not in ``MODELS_DEV_UNITS`` is kept and named in the
+    catalog's issues, and ``gateway.types.price_unit`` says what one price buys.
+    ``explicit_cache`` is the document's
     ``cache.explicit``: the prices of explicit caching where a host prices it
     apart from implicit caching. ``malformed`` names each field present but not
     a number, by its path (``price``, ``cache.read``, ``cache.explicit.write``).
@@ -301,19 +302,25 @@ class ModelsDevIssues:
     first few as ``path: expected <type>``. A path names keys and types only,
     never a value, because the document is fetched data. ``models`` counts the
     model entries the document lists, and ``damaged_models`` those left out or
-    read with a field missing.
+    read with a field missing. ``unknown_units`` names each v2 price unit the
+    document uses that ``MODELS_DEV_UNITS`` does not, once, in document order.
+    Such a price keeps its unit and prices nothing here, so it is not damage,
+    and a unit added upstream never refuses the document.
     """
 
     count: int = 0
     examples: tuple[str, ...] = ()
     models: int = 0
     damaged_models: int = 0
+    unknown_units: tuple[str, ...] = ()
 
     def describe(self) -> str:
-        """The issues for a log line: how many, in how many models, and the first few paths."""
-        return "; ".join(
-            (f"{self.count} unreadable values in {self.damaged_models} of {self.models} models", *self.examples)
-        )
+        """The issues for a log line: how many, in how many models, the first few paths, and the units not known."""
+        parts = [f"{self.count} unreadable values in {self.damaged_models} of {self.models} models", *self.examples]
+        if self.unknown_units:
+            # Fetched text, bounded and quoted the way a path segment is.
+            parts.append(f"price units not known here: {', '.join(_segment(unit) for unit in self.unknown_units)}")
+        return "; ".join(parts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,6 +386,7 @@ class _Reader:
     def __init__(self) -> None:
         self.count = 0
         self.examples: list[str] = []
+        self.unknown_units: list[str] = []
 
     def note(self, path: str, expected: str) -> None:
         self.count += 1
@@ -624,9 +632,12 @@ class _Reader:
         reasoning = self.price(entry, "reasoning", path, malformed)
         cache, explicit = self.cache(entry, path, malformed)
         overrides = [self.override(item, at) for at, item in self.objects(entry, "overrides", path)]
+        unit = self.text(entry, "unit", path)
+        if unit is not None and unit not in MODELS_DEV_UNITS and unit not in self.unknown_units:
+            self.unknown_units.append(unit)
         return ModelsDevUnitPrice(
             price=price,
-            unit=self.text(entry, "unit", path),
+            unit=unit,
             reasoning=reasoning,
             cache=cache,
             explicit_cache=explicit,
@@ -839,7 +850,13 @@ def _parse(raw: object, read_model: Callable[[_Reader, str, dict[str, Any], str]
             doc=reader.text(provider, "doc", path),
             models=MappingProxyType(models),
         )
-    issues = ModelsDevIssues(count=reader.count, examples=tuple(reader.examples), models=seen, damaged_models=damaged)
+    issues = ModelsDevIssues(
+        count=reader.count,
+        examples=tuple(reader.examples),
+        models=seen,
+        damaged_models=damaged,
+        unknown_units=tuple(reader.unknown_units),
+    )
     return ModelsDevCatalog(providers=MappingProxyType(providers), issues=issues)
 
 
