@@ -153,6 +153,28 @@ def test_a_provider_missing_its_secret_is_not_published(
 # ---------- starting the flow ----------
 
 
+def test_a_plain_http_base_url_refuses_sign_in_without_naming_the_library(
+    client: TestClient, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployment whose address cannot build an https redirect URI is told which setting to fix."""
+    monkeypatch.setattr(test_config, "public_base_url", "http://example.com")
+    monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
+    monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
+
+    response = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+
+    assert response.status_code == 503, response.text
+    assert "public_base_url" in response.text
+    for leaked in (
+        "apron-auth",
+        "apron_auth",
+        "pydantic",
+        "ValidationError",
+        "must use https, or http on a loopback host",
+    ):
+        assert leaked not in response.text
+
+
 @pytest.mark.parametrize("provider", ["google", "github"])
 def test_authorize_hands_back_a_consent_url_and_a_fresh_state(
     client: TestClient, oauth_configured: None, provider: str

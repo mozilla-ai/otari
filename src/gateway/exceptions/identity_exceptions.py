@@ -192,13 +192,13 @@ class PasskeySignInFailedError(TenancyError):
 
 
 class OAuthNotConfiguredError(TenancyValidationError):
-    """This deployment configures no client credentials for the named provider.
+    """This deployment cannot sign anybody in with the named provider.
 
     503 rather than the 400 its base carries, for the reason
     ``PasskeysNotConfiguredError`` gives: nothing is wrong with the request, the
-    deployment is not set up to answer it. The message names the settings,
+    deployment is not set up to answer it. The message names the setting,
     because the only caller who reaches this meant to offer that provider and
-    needs to know which two lines are missing.
+    needs to know which line to fix.
 
     Reachable at all only because the dashboard hides a provider this deployment
     does not configure: the affordance is absent rather than disabled
@@ -208,10 +208,24 @@ class OAuthNotConfiguredError(TenancyValidationError):
 
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
-    def __init__(self, provider: str) -> None:
+    def __init__(self, provider: str, *, reason: str | None = None) -> None:
         super().__init__(
-            f"{provider} sign-in is not configured on this deployment. "
-            f"Set oauth_{provider}_client_id and oauth_{provider}_client_secret, and public_base_url, then restart."
+            reason
+            or (
+                f"{provider} sign-in is not configured on this deployment. "
+                f"Set oauth_{provider}_client_id and oauth_{provider}_client_secret, and public_base_url, then restart."
+            )
+        )
+
+    @classmethod
+    def insecure_address(cls, provider: str) -> "OAuthNotConfiguredError":
+        """This deployment's own address cannot build a redirect URI for ``provider``."""
+        return cls(
+            provider,
+            reason=(
+                f"{provider} sign-in needs public_base_url to be an https address. "
+                "Set it to the address this deployment's users actually visit, then restart."
+            ),
         )
 
 
