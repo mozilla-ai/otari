@@ -1085,9 +1085,12 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   limit, whatever the plan, and its hits carry a snippet but no page text.
 - **Serply** (`serply`) needs an API key, read from the tool's `api_key`, such as
   `${SERPLY_API_KEY}`. Serply returns Google's results; it takes the key in a
-  header and the query in the request URL, which Otari keeps out of its logs. It
-  reports no cost, so a search is billed at the tool's rate,
-  `serply:<search-tool-name>`. Serply's [pricing](https://serply.io/pricing), read
+  header and the query in the request URL, which Otari keeps out of its logs. Set
+  `gl` in the tool's `options`, such as `gl: us`: without it, the region a search
+  runs from can change between calls, and the results and the language of their
+  dates with it. It reports no cost, so a search is billed at the tool's own rate
+  (its `price_per_call`, or a `search` price set on the dashboard's Web search
+  page or through the API). Serply's [pricing](https://serply.io/pricing), read
   2026-10-15, is prepaid credits, one per search not served from its cache, from
   $2.00 per 1,000 (2,500 for $5) down to $0.75 per 1,000 in the largest packs; a
   new account gets 2,500 credits for its first 30 days. A search returns at most
