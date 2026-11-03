@@ -116,8 +116,25 @@ const BEDROCK: ProviderCredentialSpec = {
   ],
 }
 
+const HUGGINGFACE: ProviderCredentialSpec = {
+  // Hugging Face bills Inference Providers usage to the token's own account
+  // unless a request names an organization; any-llm sends `bill_to` as the
+  // X-HF-Bill-To header.
+  fields: [
+    {
+      key: "bill_to",
+      label: "Bill to organization",
+      isRequired: false,
+      placeholder: "my-org",
+      helpText:
+        "The Hugging Face organization that pays for this key's Inference Providers usage. Leave blank to bill the token's own account. The token's user must belong to the organization.",
+    },
+  ],
+}
+
 const PROVIDER_CREDENTIAL_SPECS: Record<string, ProviderCredentialSpec> = {
   bedrock: BEDROCK,
+  huggingface: HUGGINGFACE,
 }
 
 /** The credential spec for a provider, or undefined where api_key is the whole of it. */
