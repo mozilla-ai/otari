@@ -38,8 +38,11 @@ Open **Deployment → Health** in the dashboard. It shows:
 
 Every chat model is sent the prompt, `Reply with the single word: pong` by
 default, capped at 16 output tokens. Any answer passes, whatever it says. An
-error, or no answer within 60 seconds, fails. Embedding, image, speech and
-rerank models are skipped.
+error, or no answer within 60 seconds, fails. A model is skipped when its kind
+is embedding, rerank, transcription, image, speech, video, realtime or `other`.
+The provider's listing gives the kind when it says one, and models.dev gives it
+only when the listing does not (see `type` in [Models](models.md)). A model of
+no known kind is checked as a chat model.
 
 A check goes straight to the provider with that hosted provider's own key and
 endpoint. It
