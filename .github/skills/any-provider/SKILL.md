@@ -90,7 +90,9 @@ The four cases a fixture can record:
   native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
   `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
 - A hit needs a URL. Drop an item without one only when the provider's documentation allows such
-  an item; otherwise it is `unexpected_response`. `title` and `snippet` are strings, never `None`.
+  an item; otherwise it is `unexpected_response`. When the provider is seen to send a string that
+  is not an http(s) URL with a host, such as Serply's Google redirect tokens, drop that item too
+  and fill the count from the items after it. `title` and `snippet` are strings, never `None`.
   `snippet` is the provider's short text; `text` is page text, when it came back.
 - List the fields the adapter checks in the module's docstring and the README's section on the
   provider.
