@@ -128,12 +128,14 @@ def test_an_unconfigured_tool_says_so_whatever_the_workspace_allows(
 
 
 def _add_org_search_key(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """Store a search key as the organization's default, which every workspace without a pin then uses."""
+    keys = f"{API_ROOT}/organizations/me/web-search-keys"
     created = client.post(
-        f"{API_ROOT}/organizations/me/web-search-keys",
-        json={"provider": "tavily", "name": "ours", "api_key": "tvly-org-secret"},
-        headers=master_key_header,
+        keys, json={"provider": "tavily", "name": "ours", "api_key": "tvly-org-secret"}, headers=master_key_header
     )
     assert created.status_code == 201, created.text
+    made_default = client.post(f"{keys}/{created.json()['id']}/default", headers=master_key_header)
+    assert made_default.status_code == 200, made_default.text
 
 
 def test_an_organization_search_key_serves_where_the_deployment_has_no_search(

@@ -18,7 +18,7 @@ session belongs to no single workspace and gets the deployment's answer.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -43,10 +43,6 @@ from gateway.services.tools import (
     web_search_declaration_forms,
     web_search_tool_definition,
 )
-
-if TYPE_CHECKING:
-    from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
-    from gateway.services.tools import WorkspaceCodeExecutionPolicies
 
 router = APIRouter(
     tags=["tools"],
@@ -117,8 +113,8 @@ class _WorkspaceSwitches:
 async def _workspace_switches(
     config: GatewayConfig,
     api_key: APIKey | None,
-    web_policies: "WorkspaceWebSearchPolicies",
-    code_execution_policies: "WorkspaceCodeExecutionPolicies",
+    web_policies: WorkspaceWebSearchPoliciesDep,
+    code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
 ) -> _WorkspaceSwitches:
     """The switches the request path applies to ``api_key``'s workspace, all on without a key."""
     if api_key is None:
