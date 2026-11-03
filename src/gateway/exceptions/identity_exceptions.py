@@ -373,6 +373,30 @@ class OAuthIdentityLinkConflictError(TenancyConflictError):
         super().__init__(f"Another sign-in with that {provider} account finished first. Sign in again.")
 
 
+class OIDCConnectionConflictError(TenancyConflictError):
+    """Another request stored this organization's own sign-in connection first."""
+
+    def __init__(self) -> None:
+        super().__init__("Another change to this organization's sign-in connection finished first. Try again.")
+
+
+class OIDCConnectionNotFoundError(TenancyNotFoundError):
+    """An organization has not configured its own sign-in connection."""
+
+    def __init__(self) -> None:
+        super().__init__("This organization has not configured its own sign-in connection yet")
+
+
+class OIDCConnectionSecretRequiredError(TenancyValidationError):
+    """A submitted connection left the client secret out where the stored one cannot stand in."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Enter the client secret. The stored one is kept only when the issuer and the client ID both "
+            "stay the same, because a secret belongs to one client at one issuer."
+        )
+
+
 class OIDCDiscoveryError(TenancyValidationError):
     """An organization's own OpenID Connect issuer could not be read into a usable configuration.
 
@@ -602,6 +626,9 @@ __all__ = [
     "OAuthNotConfiguredError",
     "OAuthProviderUnavailableError",
     "OAuthStateError",
+    "OIDCConnectionConflictError",
+    "OIDCConnectionNotFoundError",
+    "OIDCConnectionSecretRequiredError",
     "OIDCDiscoveryError",
     "PasskeyAlreadyRegisteredError",
     "PasskeyCeremonyError",

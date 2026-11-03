@@ -6,6 +6,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from gateway.models.identity import MAX_BLOCK_REASON_LENGTH, MAX_EMAIL_LENGTH, BlockedEmail, MailedLinkStatus
+from gateway.models.tenancy import OrganizationDomainRole
 
 # A generated token is about 43 characters; this bounds the request body, it is not a format.
 _MAX_SUBMITTED_TOKEN = 512
@@ -106,6 +107,64 @@ class BlockedEmailCreatedPublic(BlockedEmailPublic):
     )
 
 
+class OIDCConnectionRequest(BaseModel):
+    """What an organization administrator submits to configure its own sign-in connection."""
+
+    issuer: str = Field(
+        max_length=255, description="The identity provider's issuer URL, as the organization's own claim."
+    )
+    client_id: str = Field(max_length=255, description="The OAuth client ID this deployment authenticates with.")
+    client_secret: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=1024,
+        description=(
+            "The OAuth client secret. Stored encrypted and never served back. Leave it out to keep the "
+            "one already stored, which is refused unless the issuer and the client ID are both unchanged."
+        ),
+    )
+    display_name: str = Field(
+        min_length=1, max_length=100, description="The identity provider's name, as shown to people signing in."
+    )
+    default_role: OrganizationDomainRole = Field(
+        default="member", description="The role given to a person's first sign-in through this connection."
+    )
+    enabled: bool = Field(default=True, description="Whether this connection currently admits sign-in.")
+
+
+class OIDCConnectionDomain(BaseModel):
+    """One of the organization's email domains."""
+
+    domain: str
+    proof_expires_at: datetime | None = Field(
+        description="When the domain's DNS proof stops being acted on, or None when it has never been verified."
+    )
+    enabled: bool = Field(description="Whether the domain's claim is turned on.")
+
+
+class OIDCConnectionPublic(BaseModel):
+    """An organization's own sign-in connection, as its admins see it.
+
+    Carries ``client_secret_last4`` and never the secret itself.
+    """
+
+    id: uuid.UUID
+    issuer: str = Field(description="The organization's own claim.")
+    resolved_issuer: str = Field(description="What discovery confirmed the issuer to be.")
+    client_id: str
+    client_secret_last4: str
+    display_name: str
+    default_role: str
+    enabled: bool
+    discovered_at: datetime = Field(description="When the provider's configuration was last read.")
+    domains: list[OIDCConnectionDomain] = Field(
+        description=(
+            "Every one of the organization's email domains, each with its DNS proof's expiry and whether its "
+            "claim is enabled. Only a domain that is both enabled and has an unexpired proof admits a sign-in."
+        )
+    )
+
+
 __all__ = [
     "BlockedEmailCreateRequest",
     "BlockedEmailCreatedPublic",
@@ -113,5 +172,8 @@ __all__ = [
     "BlockedEmailsPublic",
     "MailedLinkRequest",
     "MailedLinkStatusResponse",
+    "OIDCConnectionDomain",
+    "OIDCConnectionPublic",
+    "OIDCConnectionRequest",
     "PasswordLinkPublic",
 ]

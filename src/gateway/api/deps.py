@@ -136,7 +136,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, reso
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService
-from gateway.services.identity import IdentityService
+from gateway.services.identity import IdentityService, OIDCConnectionService
 from gateway.services.inference import (
     CompletedVideoUsage,
     DeploymentCharge,
@@ -1693,6 +1693,24 @@ def get_identity_service(
 IdentityServiceDep = Annotated[IdentityService, Depends(get_identity_service)]
 
 
+def get_oidc_connection_service(
+    uow: UnitOfWorkDep,
+    organizations: OrganizationServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> OIDCConnectionService:
+    """Build the organization OIDC connection service on the request's Unit of Work."""
+    return OIDCConnectionService(
+        uow,
+        IdentityRepositories.on(uow),
+        organizations=organizations,
+        domains=OrganizationDomainRepository(uow),
+        allow_private_hosts=config.oidc_allow_private_hosts,
+    )
+
+
+OIDCConnectionServiceDep = Annotated[OIDCConnectionService, Depends(get_oidc_connection_service)]
+
+
 def get_org_provider_model_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
@@ -2867,6 +2885,7 @@ __all__ = [
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",
+    "OIDCConnectionServiceDep",
     "ModelProviderPortDep",
     "AgentRecommenderServiceDep",
     "HostedProviderServiceDep",

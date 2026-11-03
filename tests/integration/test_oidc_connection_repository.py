@@ -4,10 +4,10 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import OIDCConnectionConflictError
 from gateway.models.identity import OIDCConnection
 from gateway.repositories.identity import OIDCConnectionRepository
 
@@ -47,7 +47,7 @@ async def test_one_organization_holds_at_most_one_connection(async_db: AsyncSess
     async with uow:
         await _add_connection(connections, organization.id)
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(OIDCConnectionConflictError):
         async with uow:
             await _add_connection(connections, organization.id, issuer="https://other.example.com")
 
