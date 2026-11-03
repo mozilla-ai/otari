@@ -1,16 +1,24 @@
-"""Give each stored search and fetch tool with no price of its own the otari: price in force, and builtin_fetch 0.
+"""Give each search and fetch tool a price of its own.
 
-A search or fetch tool is priced by its own row: a ``search`` or ``fetch`` row
-named after it, or its old ``<provider>:<name>`` model row. Each stored tool,
-and ``builtin_fetch``, with none in force gets the ``otari:web_search`` or
-``otari:web_fetch`` price in force as its own, dated now. ``builtin_fetch``
-with neither gets a price of 0, on a fresh database too. A tool declared in
-config.yml is not in the database, so it gets no copy: its ``price_per_call``,
-or a price set for it through the API, prices it.
+A call on a search or fetch tool is billed at that tool's own price. A tool
+with no price of its own is billed at the general Web search or Web fetch
+price (the `otari:web_search` and `otari:web_fetch` rows). This migration
+copies the general price onto each such tool, so that every tool keeps its
+current price once only its own price counts.
 
-The downgrade deletes the prices this revision wrote, the search and fetch rows
-of origin ``migration``, which the revision that gave prices a kind refuses to
-downgrade over.
+For each search or fetch tool saved in the database, and for `builtin_fetch`
+(the built-in fetcher), it writes:
+- nothing, if the tool already has a price of its own, set under its name
+  or under its older `<provider>:<name>` key;
+- otherwise, the general price of its kind, as a new price starting now;
+- for `builtin_fetch`, a price of 0 if there is no general Web fetch price
+  either.
+
+Tools defined in config.yml are not in the database, so this migration does
+not touch them: their `price_per_call` setting prices them.
+
+Downgrading deletes the prices this migration wrote. It has to, because an
+older migration refuses to downgrade while any search or fetch price exists.
 
 Revision ID: 9964faffc86b
 Revises: 07802ec50d76
