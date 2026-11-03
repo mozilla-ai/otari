@@ -231,9 +231,9 @@ starts, else `http_error`; the detail itself never reaches the error.
 
 Every field read from a successful answer is checked: an answer without `results`, or with an item
 lacking `link`, `title` or `description`, or with any of these of the wrong type, raises
-`ProviderError` with the tag `unexpected_response`. A `link` that is not an http or https URL,
-such as an opaque Google redirect token, which Serply sometimes returns in its place, is dropped
-rather than failing the search, and the count is filled from the items after it. Ads, the
+`ProviderError` with the tag `unexpected_response`. A `link` that is not an http or https URL
+with a host, such as an opaque Google redirect token, which Serply sometimes returns in its place,
+is dropped rather than failing the search, and the count is filled from the items after it. Ads, the
 knowledge graph and Serply's other SERP features come in fields of their own, which the adapter
 does not read, so a field Serply adds breaks nothing.
 

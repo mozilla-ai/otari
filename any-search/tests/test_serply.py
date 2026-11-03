@@ -210,7 +210,18 @@ async def test_only_the_items_within_the_count_are_read() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("link", ["CAESGQoXaHR0cHM6Ly9leGFtcGxlLmNvbS90b2tlbg", "/url?q=x", "ftp://example.com/a", ""])
+@pytest.mark.parametrize(
+    "link",
+    [
+        "CAESGQoXaHR0cHM6Ly9leGFtcGxlLmNvbS90b2tlbg",
+        "/url?q=x",
+        "ftp://example.com/a",
+        "",
+        "https://",
+        "http:///a",
+        "http://[::1",
+    ],
+)
 async def test_a_link_that_is_not_a_web_url_is_dropped_and_the_count_filled_after_it(link: str) -> None:
     body = {"results": [{**_item("token"), "link": link}, _item("b"), _item("c")]}
     result, _ = await _search(httpx.Response(200, json=body), max_results=2)

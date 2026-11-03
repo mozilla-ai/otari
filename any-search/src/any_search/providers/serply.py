@@ -23,9 +23,9 @@ Every field read from a successful answer is checked, so a change on Serply's
 side fails the call rather than degrading it: ``results`` and each item's
 ``link``, ``title`` and ``description``, which Serply documents on every
 result, must be there and be strings. Anything else raises
-``unexpected_response``. A ``link`` that is not an http or https URL, such as
-an opaque Google redirect token, which Serply sometimes returns in its place,
-is dropped rather than failing the search. Ads, places, the knowledge graph
+``unexpected_response``. A ``link`` that is not an http or https URL with a
+host, such as an opaque Google redirect token, which Serply sometimes returns
+in its place, is dropped rather than failing the search. Ads, places, the knowledge graph
 and Serply's other SERP features come in arrays of their own beside
 ``results``, which the adapter does not read, so a field Serply adds breaks
 nothing. Serply dates no hit and reports no cost.
@@ -40,6 +40,7 @@ in its first 30 days.
 """
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -186,14 +187,22 @@ def _unexpected(response: httpx.Response) -> ProviderError:
 def _hit(item: Any, response: httpx.Response) -> SearchHit | None:
     """One result as a hit: ``link``, ``title`` and ``description``, which every result carries.
 
-    ``None`` for a result whose ``link`` is not an http or https URL, such as a
-    Google redirect token, since a hit needs a URL a caller can fetch.
+    ``None`` for a result whose ``link`` is not an http or https URL with a host,
+    such as a Google redirect token, since a hit needs a URL a caller can fetch.
     """
     if not isinstance(item, dict):
         raise _unexpected(response)
     link, title, description = item.get("link"), item.get("title"), item.get("description")
     if not isinstance(link, str) or not isinstance(title, str) or not isinstance(description, str):
         raise _unexpected(response)
-    if not link.startswith(("https://", "http://")):
+    if not _is_web_url(link):
         return None
     return SearchHit(url=link, title=title, snippet=description, raw=item)
+
+
+def _is_web_url(link: str) -> bool:
+    try:
+        parts = urlsplit(link)
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
