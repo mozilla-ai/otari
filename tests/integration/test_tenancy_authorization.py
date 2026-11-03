@@ -878,7 +878,9 @@ async def test_an_admin_can_invite(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
 
-    result = await OrganizationService(async_db, membership_listener=None).invite_active_organization_member_for_user(
+    result = await OrganizationService(
+        async_db, **membership_writes(async_db)
+    ).invite_active_organization_member_for_user(
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com", role="member"),
         config=_TEST_CONFIG,
@@ -910,7 +912,7 @@ async def test_a_viewer_cannot_revoke_an_invitation(async_db: AsyncSession) -> N
     organization = await _organization(async_db)
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
     viewer = await _member(async_db, organization, role="viewer", full_name="Viewer")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, **membership_writes(async_db))
     invitation = await service.invite_active_organization_member_for_user(
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com"),
@@ -931,7 +933,7 @@ async def test_an_admin_cannot_revoke_a_pending_owner_invitation(async_db: Async
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, **membership_writes(async_db))
     invitation = await service.invite_active_organization_member_for_user(
         user=owner,
         request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
@@ -950,7 +952,7 @@ async def test_an_admin_cannot_revoke_a_pending_owner_invitation(async_db: Async
 async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, **membership_writes(async_db))
     await service.invite_active_organization_member_for_user(
         user=admin,
         request=InviteOrganizationMemberRequest(email="ada@example.com"),

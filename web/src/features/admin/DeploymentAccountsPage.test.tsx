@@ -36,6 +36,7 @@ function mockApi(opts: {
   const granted = opts.granted ?? true
   const accounts = opts.accounts ?? [deploymentUser()]
   const requests: Request[] = []
+  let blockedCount = opts.blockedCount ?? (opts.blocked ?? []).length
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
@@ -52,12 +53,10 @@ function mockApi(opts: {
     if (url.includes(`${API_ROOT}/admin/blocked-emails`)) {
       const blocked = opts.blocked ?? []
       if (method === "GET") {
-        return jsonResponse({
-          data: blocked,
-          count: opts.blockedCount ?? blocked.length,
-        })
+        return jsonResponse({ data: blocked, count: blockedCount })
       }
       if (method === "DELETE") {
+        blockedCount -= 1
         return new Response(null, { status: 204 })
       }
       return jsonResponse(
@@ -496,7 +495,7 @@ describe("Blocked emails", () => {
     )
   })
 
-  it("steps back a page when unblocking empties the last one", async () => {
+  it("returns to the last page with rows once an unblock empties its page", async () => {
     const user = userEvent.setup()
     const requests = mockApi({ blocked: [BLOCKED_DOMAIN], blockedCount: 26 })
     await renderPage(<DeploymentAccountsPage />)

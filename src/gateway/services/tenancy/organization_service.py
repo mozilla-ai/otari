@@ -1143,13 +1143,14 @@ class OrganizationService:
         )
 
         email = _validated_email(request.email)
-        if await blocked_addresses.blocked_among([email]):
-            raise BlockedEmailError(email)
         assignments = request.workspace_assignments or []
         await self._require_workspaces_in_organization(organization, assignments)
 
         try:
             async with self._require_unit_of_work():
+                # Inside the block, so the blocklist lock it holds lasts until the membership commits.
+                if await blocked_addresses.blocked_among([email]):
+                    raise BlockedEmailError(email)
                 target = await self._identity_for_address(email, organization)
                 membership = await self.members.get_by_organization_and_user(organization.id, target.id)
                 if membership is not None and membership.status == "active":
@@ -1375,8 +1376,6 @@ class OrganizationService:
         )
 
         email = _validated_email(request.email)
-        if await blocked_addresses.blocked_among([email]):
-            raise BlockedEmailError(email)
         assignments = request.workspace_assignments or []
         await self._require_workspaces_in_organization(organization, assignments)
 
@@ -1384,16 +1383,19 @@ class OrganizationService:
             raise MembershipUpdateError("Only organization owners can grant the owner role")
 
         try:
-            invitation, membership, token = await self._stage_invitation(
-                user=user,
-                organization=organization,
-                actor_membership=actor_membership,
-                email=email,
-                role=request.role,
-                assignments=assignments,
-                config=config,
-            )
-            await self.db.commit()
+            async with self._require_unit_of_work():
+                # Inside the block, so the blocklist lock it holds lasts until the invitation commits.
+                if await blocked_addresses.blocked_among([email]):
+                    raise BlockedEmailError(email)
+                invitation, membership, token = await self._stage_invitation(
+                    user=user,
+                    organization=organization,
+                    actor_membership=actor_membership,
+                    email=email,
+                    role=request.role,
+                    assignments=assignments,
+                    config=config,
+                )
         except IntegrityError:
             # Two admins inviting the same address at once: the unique index on
             # (organization, user) decides which racer's insert wins, and the
@@ -1403,7 +1405,7 @@ class OrganizationService:
             # `Invitation.organization_member_id` itself carries no uniqueness
             # (see its own comment on the model), since a membership can be
             # invited, revoked, and re-invited more than once over its life.
-            await self.db.rollback()
+            # The Unit of Work rolled back on the way out.
             raise OrganizationMemberAlreadyExistsError(email) from None
 
         return await self._mail_invitation(
@@ -1447,41 +1449,43 @@ class OrganizationService:
         staged: list[tuple[Invitation, OrganizationMember, str]] = []
         failed: list[BulkInvitationFailurePublic] = []
         seen: set[str] = set()
-        # One lookup for the whole batch, before anything is staged.
-        blocked = await blocked_addresses.blocked_among(_shaped_addresses(request.emails))
-        for raw in request.emails:
-            try:
-                email = _validated_email(raw)
-                if email in seen:
-                    failed.append(BulkInvitationFailurePublic(email=raw, detail=f"{email} is listed more than once"))
-                    continue
-                seen.add(email)
-                if email in blocked:
-                    raise BlockedEmailError(email)
-                # A savepoint, not a rollback: rolling the whole transaction back
-                # would expire every instance loaded so far, the organization
-                # and the caller's membership included.
-                async with self.db.begin_nested():
-                    staged.append(
-                        await self._stage_invitation(
-                            user=user,
-                            organization=organization,
-                            actor_membership=actor_membership,
-                            email=email,
-                            role=request.role,
-                            assignments=assignments,
-                            config=config,
+        async with self._require_unit_of_work():
+            # One lookup for the whole batch, inside the block, so the blocklist lock lasts until the batch commits.
+            blocked = await blocked_addresses.blocked_among(_shaped_addresses(request.emails))
+            for raw in request.emails:
+                try:
+                    email = _validated_email(raw)
+                    if email in seen:
+                        failed.append(
+                            BulkInvitationFailurePublic(email=raw, detail=f"{email} is listed more than once")
+                        )
+                        continue
+                    seen.add(email)
+                    if email in blocked:
+                        raise BlockedEmailError(email)
+                    # A savepoint, not a rollback: rolling the whole transaction back
+                    # would expire every instance loaded so far, the organization
+                    # and the caller's membership included.
+                    async with self.db.begin_nested():
+                        staged.append(
+                            await self._stage_invitation(
+                                user=user,
+                                organization=organization,
+                                actor_membership=actor_membership,
+                                email=email,
+                                role=request.role,
+                                assignments=assignments,
+                                config=config,
+                            )
+                        )
+                except IntegrityError:
+                    failed.append(
+                        BulkInvitationFailurePublic(
+                            email=raw, detail=str(OrganizationMemberAlreadyExistsError(raw.strip()))
                         )
                     )
-            except IntegrityError:
-                failed.append(
-                    BulkInvitationFailurePublic(
-                        email=raw, detail=str(OrganizationMemberAlreadyExistsError(raw.strip()))
-                    )
-                )
-            except (TenancyConflictError, TenancyValidationError) as exc:
-                failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
-        await self.db.commit()
+                except (TenancyConflictError, TenancyValidationError) as exc:
+                    failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
 
         mailer = Mailer(config)
         # Bounded, so a large batch does not open a hundred SMTP connections at once.

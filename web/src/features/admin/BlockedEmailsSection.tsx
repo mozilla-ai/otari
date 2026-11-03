@@ -46,6 +46,13 @@ export function BlockedEmailsSection() {
   const [lastBlocked, setLastBlocked] = useState<BlockedEmailCreated>()
 
   const rows = entries.data?.data ?? []
+  // Clamped to the refreshed total, so a page emptied by an unblock, here or by another operator, is left for
+  // the last one that still has rows.
+  const lastPage =
+    entries.data === undefined
+      ? page
+      : Math.max(0, Math.ceil(entries.data.count / pageSize) - 1)
+  if (page > lastPage) setPage(lastPage)
 
   const submit = () => {
     const entry = value.trim()
@@ -105,12 +112,8 @@ export function BlockedEmailsSection() {
             isPending={unblock.isPending}
             onConfirm={() =>
               unblock.mutate(entry.id, {
-                onSuccess: () => {
-                  // The banner describes a block that no longer stands.
-                  setLastBlocked(undefined)
-                  // The page's last row is gone, so step back rather than show an empty page.
-                  if (rows.length === 1 && page > 0) setPage(page - 1)
-                },
+                // The banner describes a block that no longer stands.
+                onSuccess: () => setLastBlocked(undefined),
               })
             }
           />

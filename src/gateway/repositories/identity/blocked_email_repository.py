@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, false, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,9 +39,15 @@ class BlockedEmailRepository(BaseRepository[BlockedEmail, Never, Never]):
             await self.db.execute(select(func.pg_advisory_xact_lock_shared(_BLOCKLIST_LOCK_CLASS, 0)))
 
     async def lock_exclusive(self) -> None:
-        """Hold the blocklist lock exclusive until the transaction ends, waiting out every shared holder."""
+        """Hold the blocklist lock exclusive until the transaction ends, waiting out every shared holder.
+
+        On SQLite, a write that matches no row instead: it takes the one write lock, so a sign-in cannot commit
+        an account between this block's lookup and its commit.
+        """
         if dialect_name(self.db) == "postgresql":
             await self.db.execute(select(func.pg_advisory_xact_lock(_BLOCKLIST_LOCK_CLASS, 0)))
+        else:
+            await self.db.execute(delete(BlockedEmail).where(false()))
 
     async def patterns_among(self, patterns: Collection[str]) -> set[str]:
         """Return the members of ``patterns`` that are blocked."""

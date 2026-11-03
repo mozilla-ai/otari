@@ -126,7 +126,7 @@ async def test_the_inbox_lists_an_invitation_the_switcher_deliberately_hides(
     invitee, home = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com", role="admin")
 
@@ -152,7 +152,7 @@ async def test_the_inbox_is_scoped_to_the_caller_and_not_to_the_address(
     second, _ = await _identity_with_a_home(async_db, email="second@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     await _invite(service, admin, email="first@example.com")
 
@@ -262,7 +262,7 @@ async def test_a_declined_address_can_be_invited_again(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     first = await _invite(service, admin, email="invitee@example.com")
     await service.decline_pending_membership_for_user(
@@ -293,7 +293,7 @@ async def test_declining_an_owner_invitation_is_the_invitees_own_to_do(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com", role="owner")
     await service.decline_pending_membership_for_user(
@@ -495,7 +495,7 @@ async def test_the_inbox_pages_over_several_waiting_organizations(
     the walk early.
     """
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, **membership_writes(async_db))
     for index in range(3):
         organization = await _organization(async_db, slug=f"inviting-{index}")
         admin = await _owner(async_db, organization, full_name=f"Admin {index}")
