@@ -634,6 +634,9 @@ export function HostedProvidersPage() {
       <ErrorBanner
         error={
           providers.error ??
+          // The configured half of the table: without it, the list and its
+          // search are missing every provider config.yml defines.
+          configured.error ??
           update.error ??
           remove.error ??
           catalogUpdate.error ??
@@ -683,9 +686,9 @@ export function HostedProvidersPage() {
               maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={
-                providers.isPending || configured.isPending
-                  ? undefined
-                  : shownRows.length
+                search.isSettled && !providers.isPending && configured.isSuccess
+                  ? shownRows.length
+                  : undefined
               }
               className="w-full md:w-96"
             />
@@ -695,13 +698,17 @@ export function HostedProvidersPage() {
               ariaLabel="Hosted providers"
               columns={columns}
               rows={shownRows}
+              // Only once both halves are in: without the configured ones,
+              // "no match" can be wrong about a provider config.yml defines.
               emptyContent={
-                search.term ? "No providers match this search." : undefined
+                search.term && configured.isSuccess
+                  ? "No providers match this search."
+                  : undefined
               }
               // The kind and the name, not the id: a configured provider has no
               // row id, and a hosted provider may share a configured instance's name.
               getRowKey={(row) => `${row.kind}:${row.name}`}
-              isLoading={providers.isLoading}
+              isLoading={providers.isLoading || configured.isPending}
             />
           </TableScrollFrame>
         </>

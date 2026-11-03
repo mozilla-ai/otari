@@ -523,7 +523,11 @@ export function HealthChecksPage() {
                 value={search.value}
                 maxLength={SEARCH_MAX_LENGTH}
                 onChange={search.onChange}
-                resultCount={providerRows.length + results.length}
+                resultCount={
+                  search.isSettled
+                    ? providerRows.length + results.length
+                    : undefined
+                }
                 className="w-full md:w-96"
               />
             </Toolbar>

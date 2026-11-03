@@ -359,7 +359,11 @@ export function OrganizationGuardrailsPage() {
                   value={search.value}
                   maxLength={SEARCH_MAX_LENGTH}
                   onChange={search.onChange}
-                  resultCount={isLoading ? undefined : shownDefined.length}
+                  resultCount={
+                    search.isSettled && !isLoading
+                      ? shownDefined.length
+                      : undefined
+                  }
                   className="w-full md:w-96"
                 />
               </Toolbar>
