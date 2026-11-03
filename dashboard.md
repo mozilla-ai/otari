@@ -84,21 +84,14 @@ The workspace view contains day-to-day gateway operations:
   the gateway three ways, as tabs over one time window and one set of filters:
   Usage (spend, tokens and requests over time, with breakdowns, at `/`),
   Requests (the per-request log, at `/requests`) and Sessions (agent sessions,
-  at `/sessions`). The window and the model, user, API key and status filters
-  live in the URL and travel when you switch tab, and clicking a chart bar
-  narrows the window to that bar. Today, beside the window presets on Usage,
-  starts the window at local midnight. The old `/usage` and `/activity`
-  addresses open the matching tab with their filters.
-
-  A Mine | Everyone switch above the tabs sets whose requests every tab shows,
-  and a line beside it says which one it is ("Your requests in Production",
-  "Everyone in Production"). Mine is the caller's own usage identity, so
-  requests made with a shared key count toward the key's owner; it hides the
-  User filter. Members and viewers open on Mine, owners, admins and deployment
-  operators on Everyone, and the choice is the `scope` key in the URL, carried
-  between tabs. Mine is disabled for an account with no usage identity in the
-  organization yet.
-- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers. Routing lists each policy with its main model, its backups in order, and who it applies to. Automatic fallback lists the models your organization used in the last 30 days with the providers their catalog ID tries in order, how many requests a backup served, and which ones have no backup, including those most requests pin to one provider. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only.
+  at `/sessions`). Below the tabs, the time range and the model, user, API key
+  and status filters are always shown; they live in the URL and travel when you
+  switch tab, and clicking a chart bar narrows the window to that bar. Today, a
+  time range on Usage, starts the window at local midnight. Every tab opens on
+  everyone's requests in the workspace; pick yourself in the User filter to see
+  only your own. The old `/usage` and `/activity` addresses open the matching tab
+  with their filters.
+- Playground, Models, and Routing. Models is the catalog grouped by model: a list of cards with a rail of filters beside it, and a page per model where every offering of it is compared, each with its own limits and the price your organization is charged. Each row shows the provider's own model ID under the provider, which tells apart two offerings on one provider, such as Bedrock's regional inference profiles. It is read-only; a rate is set on Providers > Inference. Routing lists each policy with its main model, its backups in order, and who it applies to. Automatic fallback lists the models your organization used in the last 30 days by catalog ID, the share of requests that sent that ID and so could fall back, and the providers it tries in their baseline order with their prices (automatic routing can reorder them per request); a row opens on the API keys that named a provider or policy instead. The Models guide explains the order. Create policy first asks what the policy is for (a fallback, a traffic split, a smart router, spill-over at rate limits, or a budget tier-down) and then shows only that kind's fields; the empty list offers a fallback directly. Models are chosen by model and then by provider. Each policy has its own page, opened from Edit in the list, where its main selection, fallback chain, budget tier-down and guardrails are combined, each section with its own Save. Policies from `config.yml` open there read-only.
 - Tools
 - API keys and workspace members
 
@@ -108,8 +101,10 @@ The organization view contains tenant-wide administration:
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
 - Spend and budgets
-- General: Providers, followed by Guardrails and Org settings.
-  Providers is the organization's own upstream credentials, the models each one
+- General: Providers, followed by Guardrails and Org settings. Providers
+  groups two pages, Inference and Web search.
+
+  Inference is the organization's own upstream credentials, the models each one
   reaches, and what this organization pays for them: adding a key offers every
   model the provider lists on it, each carrying a switch that decides whether
   the runtime serves it. Each is priced by the first rung that answers, which is
@@ -125,6 +120,21 @@ The organization view contains tenant-wide administration:
   this key" is passed over at every step. The deployment's own provider
   credentials, served to every organization, are managed on Hosted providers
   in the deployment view, or in `config.yml`.
+
+  Web search is the organization's own search and fetch keys, in one table per
+  kind. Adding a key asks for its provider first, from the providers the
+  search and fetch libraries serve, and then for what that provider needs: a
+  name, the API key, and under More settings an endpoint of its own and the
+  provider's options. Editing a key never shows its secret; moving it to
+  another endpoint needs the API key entered again. The star on a key sets it
+  as the workspace default, the key every workspace uses unless it pins
+  another, and clicking a filled star unsets it. A
+  workspace uses the key its owners or admins pinned, otherwise the starred
+  key, otherwise the deployment's own search or fetch tool, so a key added and
+  not starred changes nothing until a workspace pins it. Archiving a key takes
+  it out of use, and an archived key can be restored or deleted. A key this
+  deployment cannot decrypt is marked unreadable. The page sets no prices: the
+  deployment's operator prices an organization's search and fetch calls.
 
 The deployment view, opened from the account menu, holds what belongs to the
 gateway process rather than to any organization on it:
@@ -280,7 +290,7 @@ The Overview's attention strip splits the same way. It appears only when there
 is something to act on, above the tabs on every one of them, and each item links
 to the page that explains it: a high error rate today opens Requests on today's
 failures. It is about what the caller answers for, so it does not follow the
-Mine | Everyone switch: for an organization member it carries their own error
+page's filters: for an organization member it carries their own error
 rate when it is high; an owner or admin sees the organization's error rate and a
 spend ceiling at or near its limit; a deployment operator sees the deployment's
 error rate, provider health and the deployment's own budgets.
@@ -436,4 +446,4 @@ privacy notice live. The account menu links each row it has an address for; see
 
 The dashboard source is under `web/`. The published Docker image includes the
 bundle. A source checkout needs `make dashboard` for the gateway to serve it, or
-`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.35.0/web/README.md).
+`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.36.0/web/README.md).

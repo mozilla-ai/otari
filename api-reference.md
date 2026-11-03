@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.35.0/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.35.0/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.36.0/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.36.0/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 The default server address is `http://localhost:8000`. The API is mounted at
@@ -138,22 +138,33 @@ decided on its own. `auto` keeps the provider's own tool on an attempt whose
 model runs it natively and runs Otari's on one that does not. `otari` always
 runs Otari's. `provider` always forwards the provider's own tool and never uses
 Otari's, so on a fallback to a provider that cannot run it, that attempt fails;
-use `auto` for fallback cover. See [Who runs a tool](tools.md#who-runs-a-tool).
+use `auto` for fallback cover. A workspace may pin the same choice for every
+request billed to it, and then a header that disagrees is refused with a 403.
+See [Who runs a tool](tools.md#who-runs-a-tool).
 
-### Web tool calls on Chat Completions
+### Gateway tool calls on Chat Completions
 
 Chat Completions has no shape for a tool the server runs, so a chat completion
-reports Otari's own web searches and fetches in `otari_tool_calls`, at the top
-level of the response, beside `choices`. Each entry is one call:
+reports the calls Otari ran itself (web searches and fetches, code execution and
+MCP tool calls) in `otari_tool_calls`, at the top level of the response, beside
+`choices`. A caller can read there what a tool really returned rather than rely
+on the model's account of it. Each entry is one call, and a field that does not
+apply to its type is left out:
 
 | Field | Value |
 |---|---|
-| `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch. |
-| `type` | `web_search` or `web_fetch`. |
-| `status` | `in_progress`, `completed` or `failed`. |
+| `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch, `otari_ci_…` for code execution, `otari_mcp_…` for an MCP call. |
+| `type` | `web_search`, `web_fetch`, `code_execution` or `mcp`. |
+| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, and an MCP call that returned a tool error, are `failed`. |
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (an ISO date, or date and time, for a search on a search instance; the provider's own date string on the legacy search settings; or `null`); empty when it found none. Never page text. |
+| `code` | The code a code execution ran. |
+| `stdout`, `stderr`, `exit_code` | What an ended code execution printed and its exit status, absent when the run never reached the sandbox. |
+| `file_ids` | The [Files API](files.md) IDs of the files a code execution produced. |
+| `server`, `name` | The MCP server and the tool the model called on it. |
+| `output` | The text an ended MCP call gave the model. A failed call's is Otari's own `[tool error] …` text, never the server's exception. |
+| `truncated` | `true` when `stdout`, `stderr` or `output` was cut to 64 KiB. The model read it whole. |
 | `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider. Absent when Otari can say no more than that the call failed. |
 
 A response that is not streamed carries the ended entry of every call, across
@@ -197,7 +208,7 @@ behavior](routing.md#failure-behavior)).
 
 A client may keep the entries on the assistant message it sends back: Otari
 removes `otari_tool_calls` from every assistant message before calling the
-provider. Code execution and MCP tool calls are not reported in the field.
+provider.
 
 ### Provider-specific fields
 
@@ -528,6 +539,52 @@ see [Provider failures](#provider-failures).
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
 
+## Code execution
+
+`POST /api/v1/code/execute` runs code in the gateway's sandbox and returns its
+output, with no model involved. It is admitted, priced and budgeted as an
+`otari_code_execution` call; see
+[Running code without a model](tools.md#running-code-without-a-model).
+
+**Request.**
+
+| Field | Type | Description |
+|---|---|---|
+| `code` | string | Python source to run. Required, and sent to the sandbox unchanged. |
+| `container` | string | `auto` to hold the sandbox after the run, or an `otari_cntr_…` id from an earlier `Otari-Container-Id` to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends. |
+| `timeout_seconds` | integer | How long the code may run. Capped at the workspace's `exec_timeout_s`, or 60 seconds when it sets none. |
+| `file_ids` | array of strings | Uploads from `POST /api/v1/files` to put in the working directory before the code runs, each under its own filename. At most 32. |
+| `user` | string | The billed user, as on the completion routes ([the `user` field](#the-user-field)). Required with the master key. |
+
+**Response.**
+
+```json
+{
+  "object": "code_execution.result",
+  "stdout": "2\n",
+  "stderr": "",
+  "return_code": 0,
+  "files": [{"file_id": "file-…", "filename": "chart.png"}]
+}
+```
+
+Code that fails is still a `200`, and is billed: its `return_code` is nonzero,
+or its `stderr` carries the error. `files` lists each file the code wrote,
+stored in the Files API, so `GET /api/v1/files/{file_id}/content` downloads it;
+it is empty where the Files API is off. A held sandbox is named in
+`Otari-Container-Id` and `Otari-Container-Expires-At`.
+
+**Errors.**
+
+| Status | When |
+|---|---|
+| `400` | No sandbox is configured, `container` names a sandbox that has expired or does not exist, or a `file_ids` entry is not an upload the caller can read (or the Files API is off). |
+| `402` | `require_pricing` is on and `otari:code_execution` has no price (`pricing_required`), or the organization's funds are exhausted. |
+| `403` | The workspace's code execution policy is off, or the billed user's budget is spent. |
+| `409` | The named container is running another request. |
+| `502` | The sandbox could not be reached. |
+| `503` | The sandbox is temporarily out of capacity, with `Retry-After` when it gave one. |
+
 ## Decisions
 
 `POST /api/v1/decisions` answers typed questions about a piece of content with
@@ -572,7 +629,9 @@ and any other failure returns 502.
 ## Routing policies
 
 Routing-policy management lives under `/api/v1/routing/policies`; learned-routing
-examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`.
+examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`,
+and an API key teaches and reads its own under `/api/v1/routing/me/preferences/rank` and
+`/api/v1/routing/me/status`.
 A subagent model recommendation is asked at `POST /api/v1/routing/recommend`, and the
 operator manages the subagent routers that answer it under `/api/v1/routing/recommenders`
 (see [Agent model recommendations](routing.md#agent-model-recommendations)).
@@ -682,6 +741,7 @@ Anthropic answers it, whose message names each failing field.
 | `country_not_supported` | 403 | `provider_supported_countries` closes the model's provider to the country the request comes from, or the country is unknown. See [Supported countries](configuration.md#supported-countries) | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. Sent only when Otari recognizes the provider's wording for that refusal; a refusal worded otherwise stays a `400` carrying the provider's message and no code. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate gave a refusal Otari recognizes | |
+| `wrong_model_type` | 400 | The model is a kind the endpoint cannot serve. A chat completion, a message or a response is refused for an embedding model, which the provider's model listing or models.dev may name, or for a rerank model, a transcription model or one that writes no text, which only the listing names; for a routing policy or a catalog ID, only when every candidate is such a kind. `/embeddings` is refused only for a model its provider's listing names as another kind; a listed `other` model, and one only models.dev describes, still reach the provider. `detail` names the kind, except for a model the listing says writes no text, which it calls not a chat model. GET /models carries the kind as `type` | |
 | `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
 | `insufficient_funds` | 402 | The model is served on a credential the deployment pays for, and the organization has no funds paid in to cover it. Nothing was sent upstream | |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, a direct search's pricing row is missing (see [Search](#search)), or a gateway-run tool the request declares has no row to price its calls ([Tools](tools.md#pricing-a-gateway-run-tool)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |

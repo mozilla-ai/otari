@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.35.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.36.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -100,6 +100,7 @@ the corresponding startup value after the database is available.
 | `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
+| `automatic_routing` | Request-aware ordering of providers for unpinned catalog IDs. Enabled by default. See [Automatic routing](#automatic-routing). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
 | `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
@@ -457,6 +458,46 @@ providers:
 
 Call it as `home_lab:qwen3-32b`. The optional `models` list supplies discovery
 for backends without a model-listing endpoint. See [Models](models.md).
+
+### Automatic routing
+
+```yaml
+automatic_routing:
+  enabled: true
+  session_ttl_seconds: 3600
+  # Set only behind an edge that overwrites this header and blocks direct access.
+  country_header: CF-IPCountry
+  offerings:
+    nebius-us: {region: us, capacity: 10}
+    nebius-eu: {region: eu, capacity: 10}
+    # An exact instance:model entry overrides the instance-wide hint.
+    "bedrock:eu.anthropic.claude-sonnet-4-6": {region: eu, capacity: 5}
+```
+
+Offering keys name configured provider instances or exact `instance:model`
+selectors. Declare a region only when that endpoint actually serves it; Otari
+never guesses a provider's location from its brand. `region` accepts `us` or
+`eu`; omitted means unknown. `capacity` is a positive relative concurrency
+weight, default 1, not a limit. Use rate-limit rules for enforced limits, including
+`max_concurrent`. A sticky session falls back when those limits refuse its provider.
+
+Send `Otari-Conversation-Id` to reuse the provider and credential that served the
+conversation. `session_ttl_seconds` sets the inactivity expiry (1–86400 seconds,
+default 3600), refreshed by successful responses. Requests without a conversation
+ID are ranked independently.
+
+Both `country_header` and `default_region` are unset by default. With a trusted
+country header, US visitors prefer US endpoints and visitors in EU member
+countries prefer EU endpoints. Server-to-server traffic reflects the location of
+the calling server; applications that know the end user's preference can send
+`Otari-Region: us` or `eu`, which takes precedence. Other locations use
+`default_region` if set, otherwise there is no region preference. These settings
+allow cross-region fallback and do not enforce data residency.
+
+This is startup configuration, also accepted as JSON in
+`OTARI_AUTOMATIC_ROUTING`. Set `enabled: false` to use the baseline catalog order.
+The [model guide](models.md#automatic-provider-selection) explains cost, load,
+latency, sticky sessions and the limits of local feedback.
 
 ### Provider retries
 
@@ -853,7 +894,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.35.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.36.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -974,9 +1015,9 @@ once to a micro-dollar. Use PostgreSQL for durable accounting.
 exists. Explicit database or config pricing always wins. A snapshot ships inside
 the package, so defaults work offline and a fresh deployment needs no network;
 once an operator accepts a newer one (below), that one serves instead. The
-`models_dev_metadata` setting only controls the descriptions and capabilities
-shown beside a model: prices and context windows come from the snapshot whether
-or not it is on.
+`models_dev_metadata` setting only controls whether the gateway fetches the
+descriptions and capabilities shown beside a model; with it off, they come from
+the bundled snapshot. Prices come from the snapshot whether or not it is on.
 
 A model is matched on its provider and id, including a pinned HuggingFace
 backend and Bedrock geo-prefixed ids. A bare id that providers list at different
@@ -1038,14 +1079,21 @@ serves, with their history; the cleanup never runs on a schedule.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
 
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
+It refuses models.dev data the gateway cannot read: a document that lists
+no models, or one with more than a quarter of its models damaged. When neither
+catalog can be read, the prices in force stay, and the update reports an error.
+
 Each accepted snapshot is kept, and a request or report priced for a past
 instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldest
 one for a time before the first. History therefore starts at the first accepted
 snapshot; models.dev publishes no dated price changes of its own.
 
-To refresh the bundled snapshot, as a maintainer does at release, run
+The bundled snapshot is the whole models.dev catalog, so it also carries the
+model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved `api.json`) and commit `src/gateway/data/models_dev_pricing.json`.
+saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+`src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
@@ -1575,7 +1623,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.35.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.36.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

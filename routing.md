@@ -6,6 +6,12 @@ spill-over past a rate limit, learned selection, or guardrails the caller cannot
 remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
+For provider selection within one model, an unpinned catalog ID already uses
+[automatic routing](models.md#automatic-provider-selection), which keeps an
+organization's own provider key first and otherwise considers estimated cost, load,
+region and latency, with sticky sessions for conversation continuity, without
+scored examples.
+
 ## Failover
 
 ```yaml
@@ -26,7 +32,7 @@ In the dashboard, choose Create policy on Routing, then Fallback: name it, pick
 the main model, and list at least one backup under "If unavailable, use", each a
 model other than the main one and the other backups. The backups are
 `on_failure`, in the order shown. Create policy offers one kind at a time
-(Fallback, Split traffic, Smart router, Spill over at rate limits, Tier down on
+(Fallback, Split traffic, Spill over at rate limits, Tier down on
 budget), each with only its own fields. To combine them, open the policy from
 the list once it exists: its page has a section each for the main selection,
 the fallback chain, a budget tier-down and guardrails, and each section saves on
@@ -169,6 +175,12 @@ Rate limit rules, counted for "Each model". On an existing policy, pick "Spill
 over" in its Main selection section.
 
 
+## Learned routing (API and configuration only)
+
+Smart router is not offered in the dashboard. It requires externally scored
+examples and has not been validated for general use. Existing learned policies
+continue to run and appear read-only in Routing.
+
 The `knn` router uses scored examples to rank candidates for each user's
 traffic:
 
@@ -193,8 +205,25 @@ default target serves.
 
 Teach the router through `POST /api/v1/routing/preferences/rank`. Each example
 contains a prompt and a score from 0 to 1 for each candidate. Read pool status
-through `GET /api/v1/routing/status`. `scripts/seed_routing_demo.py` provides a
-runnable example.
+through `GET /api/v1/routing/status`. Both are operator routes that name the
+user (and optionally the workspace) to teach. `scripts/seed_routing_demo.py`
+provides a runnable example.
+
+An API key teaches its own memory instead, through
+`POST /api/v1/routing/me/preferences/rank` and `GET /api/v1/routing/me/status`.
+The body is the same list of `examples` with no `user_id` or `workspace_id`:
+the memory is the key's user's in the key's workspace, the pool that key's
+requests vote over, so a key cannot teach or read another user's or workspace's
+pool. A service key teaches its own user's pool, not its end users'. Each rank
+call counts against the user's request rate limit, and is refused with 403 where
+the router's embedding provider does not serve the caller's country, because
+embedding an example sends its prompt there; the status read does neither.
+
+```bash
+curl -X POST "$OTARI_URL/api/v1/routing/me/preferences/rank" \
+  -H "Authorization: Bearer $OTARI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"examples": [{"prompt": "Is this claim supported?", "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}}]}'
+```
 
 Learned memory is scoped by user and workspace. Optional task IDs create separate
 pools. It is not learned automatically from live traffic.

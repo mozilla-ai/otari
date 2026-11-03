@@ -21,15 +21,20 @@ curl http://localhost:8000/api/v1/tools \
 ```
 
 Unavailable but recognized tools remain in the response with
-`"available": false`.
+`"available": false` and a `reason`: `not_configured` when nothing is set up
+to run the tool (for web search, an organization search key counts for an API
+key on that organization), or `workspace_disabled` when the API key's workspace does
+not allow it (a workspace admin turns it on under Tools in the dashboard). A
+master key or a dashboard session belongs to no single workspace, so its
+answer reflects the deployment alone.
 
 ## Who runs a tool
 
 An `otari_*` type is executed by Otari. A provider-native web-search type is
-forwarded to the provider unless [interception](#web-search-interception) or the
-request's `Otari-Web-Search` header says otherwise. Anthropic's web-fetch type
-is forwarded unless the request's [`Otari-Web-Fetch`](#anthropics-web-fetch)
-header says otherwise.
+forwarded to the provider unless [interception](#web-search-interception), the
+workspace's pin or the request's `Otari-Web-Search` header says otherwise.
+Anthropic's web-fetch type is forwarded unless the workspace's pin or the
+request's [`Otari-Web-Fetch`](#anthropics-web-fetch) header says otherwise.
 A provider-native code-execution type is decided by the request's
 [executor](#code-execution-executor). Each is decided for every attempt on its
 own, so a fallback can run Otari's tool where the first model ran its own.
@@ -71,10 +76,18 @@ below. One that cannot be served that way (the workspace has search off, or no
 price under `require_pricing`) is skipped and recorded as `Skipped:` in the
 activity log, and the request fails only when no model is left.
 
-The header can add a claim but never remove one: with `web_search_intercept`
-on, every search runs on Otari's backend whatever the header says, and
-`provider` is refused with a 403, because interception is what puts every
-search under the workspace's web-search policy and tool pricing.
+A [workspace web-access policy](#per-workspace-web-access-policy) may pin
+`search_executor` to one of the same three values. The pin wins over the
+header, and a header that disagrees with it is refused with a 403, as for the
+[code-execution executor](#code-execution-executor). This is how a workspace
+takes over the searches of a client it cannot change: an Anthropic SDK app
+declaring `web_search_<date>` keeps working, and gets the same native blocks
+back, while every search runs on Otari.
+
+The header and the pin can add a claim but never remove one: with
+`web_search_intercept` on, every search runs on Otari's backend whatever they
+say, and a `provider` header is refused with a 403, because interception is
+what puts every search under the workspace's web-search policy and tool pricing.
 
 Whenever Otari runs the search, the rules for a gateway-run search apply: the
 workspace's web-search policy and tool pricing. All of this
@@ -104,7 +117,9 @@ it a tool nobody runs. The `Otari-Web-Fetch` header takes it over the same way
 It is a header of its own, not part of `Otari-Web-Search`, because the two
 tools are native in different places and a request may want one taken over and
 not the other. There is no deployment-wide toggle like `web_search_intercept`
-for fetch. A claimed declaration is an [Otari fetch](#web-fetch): it needs
+for fetch; a [workspace web-access policy](#per-workspace-web-access-policy)
+may pin `fetch_executor` instead, which wins over the header the way
+`search_executor` does for search. A claimed declaration is an [Otari fetch](#web-fetch): it needs
 `web_fetch_enabled` (without it the keyword is forwarded unchanged), follows the
 workspace policy and pricing, and honors the declaration's `max_uses`,
 `allowed_domains` and `blocked_domains`. The URL in the returned blocks omits
@@ -319,13 +334,13 @@ the final answer.
 
 Responses and Messages can expose native server-tool result blocks when their
 wire format expects them. Chat Completions has no such blocks, so Otari reports
-its web searches and fetches in a field of its own, `otari_tool_calls`, at the
-top level of the response and of each streamed chunk: a search with its query
-and the sources it found, a fetch with the URL it read, and a failure with what
-may be shown about it. See [Web tool calls on Chat
-Completions](api-reference.md#web-tool-calls-on-chat-completions). Code execution
-and MCP calls are not reported there, so Chat Completions returns only the final
-assistant message for them. Calls for tools the client must execute are preserved.
+the calls it ran in a field of its own, `otari_tool_calls`, at the top level of
+the response and of each streamed chunk: a search with its query and the sources
+it found, a fetch with the URL it read, a code execution with its code, output
+and exit status, an MCP call with its server, tool and the text it returned, and
+a failure with what may be shown about it. See [Gateway tool calls on Chat
+Completions](api-reference.md#gateway-tool-calls-on-chat-completions). Calls for
+tools the client must execute are preserved.
 The dashboard Playground's own completion route is the one exception: its stream
 also reports every gateway-run call and its result in an `otari_tool_activity`
 field, on a chunk of its own before and after each call, so the page can show
@@ -410,6 +425,28 @@ none is stored; clearing the stored key falls back to it. The key is held
 encrypted with `OTARI_SECRET_KEY` and never shown again, only its last four
 characters. With no key in either place the gateway still starts, logs an
 error, and refuses each code-execution call until one is set.
+
+### Running code without a model
+
+`POST /api/v1/code/execute` runs code the caller sends, as
+[direct search](#direct-search) runs a query, for a client whose step needs the
+sandbox but no model, such as rerunning a script to check its output:
+
+```json
+{"code": "print(1 + 1)", "container": "auto"}
+```
+
+The code reaches the sandbox exactly as sent. The run is admitted as an
+`otari_code_execution` call is: the [workspace policy](#per-workspace-code-policy)
+can turn it off, and its `exec_timeout_s` and pinned image apply. It is priced
+under `otari:code_execution` and held against the caller's budgets. Every run
+that reached the sandbox is billed, including code that failed, unlike a model's
+failed call in the tool loop: here the caller asked for the run and reads its
+exit status itself. `file_ids` puts uploads from the [Files API](files.md) in the
+working directory, and each file the code writes comes back in `files` with a
+`file_id` to download. `container` works as on the completion routes (below),
+with the id in `Otari-Container-Id`. The request, the response and the errors
+are in the [API reference](api-reference.md#code-execution).
 
 ### Reusing a sandbox across requests
 
@@ -622,7 +659,7 @@ A workspace policy can disable code execution or narrow the deployment limits:
 
 Manage it under
 `/api/v1/workspaces/{workspace_id}/code-execution-policy`. The dashboard's Code
-execution page sets `enabled`; every other field is set through the API. A policy
+execution page sets `enabled` and `executor`; every other field is set through the API. A policy
 cannot enable a missing deployment backend or exceed the deployment limits.
 Workspace-selected images must come from
 `sandbox_allowed_session_images` or the deployment's own session image.
@@ -865,10 +902,16 @@ A workspace web-access policy can:
   destinations, including redirects
 - provide a default purpose hint
 - supply provider options
+- pin `search_executor` and `fetch_executor`, who runs a provider's own search
+  and fetch keywords (see [Web-search interception](#web-search-interception)
+  and [Anthropic's web fetch](#anthropics-web-fetch)); like the code-execution
+  `executor`, these are choices rather than narrowings
 
 Manage it under `/api/v1/workspaces/{workspace_id}/web-search`. The dashboard's
-Tools > Web search page sets `enabled`, `max_results` and the domain lists; the purpose
-hint and provider options are set through the API.
+Tools > Web search page sets `enabled`, the two executors, `max_results`, the
+domain lists, and the provider options, with a field for each option of the
+provider the workspace's searches run on; the purpose hint is set through the
+API.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
 backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
@@ -898,9 +941,11 @@ than the deployment's. Each key has a kind, fixed when it is added:
 - a `fetch` key serves the fetch tool and the enrichment of search hits. Its
   provider is one `GET /api/v1/search-tools/providers?kind=fetch` lists.
 
-Organization owners and admins manage the keys under
+Organization owners and admins manage the keys on the dashboard's
+organization Providers > Web search page, or under
 `/api/v1/organizations/me/web-search-keys`: add, rename or replace a key,
-archive it, and make one key of each kind the organization's default. Only the
+archive it, and make one key of each kind the organization's default or stop it
+being the default (`POST` or `DELETE` on `/{key_id}/default`). Only the
 last four characters of a key are ever shown. A key carries an API key when its
 provider needs one, and may carry its own `api_base` and provider `options`,
 which are checked against the provider when the key is written. An `api_base`
@@ -922,15 +967,22 @@ Each workspace uses one key of each kind:
 
 1. the key of that kind the workspace pinned as its own, if any;
 2. otherwise the organization's default of that kind;
-3. otherwise the organization's oldest key of that kind.
+3. otherwise none: the workspace uses the deployment's instance exactly as
+   before.
 
-A key the workspace turned off, an archived key, or one this deployment cannot
-decrypt is passed over. A workspace with no usable key of a kind uses the
-deployment's instance exactly as before. A workspace's owners and admins pin or
+So a key the organization adds serves no workspace until the organization makes
+it the default or a workspace pins it. A key the workspace turned off, an
+archived key, or one this deployment cannot decrypt is passed over. A workspace's owners and admins pin or
 turn off keys under `/api/v1/workspaces/{workspace_id}/web-search-keys`, which
 any member of the workspace can read to see which keys it uses and, as
 `search_provider` and `fetch_provider`, the providers its searches and fetches
-run on.
+run on; `deployment_search_tool` and `deployment_fetch_tool` name the
+deployment's own tools it uses when no key serves it. On the dashboard, Tools >
+Web search lists, for each kind, the deployment's default tool and the
+organization's keys, and marks the one the workspace uses; its owners and admins
+choose a key there to pin it, or choose the organization's default or the
+deployment's tool to remove the pin, and any other member sees the list
+read-only.
 
 A workspace with a usable search key serves an explicit `otari_web_search`
 declaration even where the deployment has no search of its own, and the
@@ -954,6 +1006,17 @@ pinned a key nor turned the Brave default off, gets the Brave key pinned, so it
 keeps searching with Brave. One case changes: where this deployment cannot
 decrypt the Tavily default, the workspaces that searched with the Brave default
 in its place now search with the organization's oldest usable key. Check the
+keys' `usable` field before upgrading.
+
+**Upgrading from 0.35.** A workspace with no pin and no usable default used to
+fall to the organization's oldest key, and now uses the deployment's instance.
+The upgrade keeps every workspace on the key it used: where an organization has
+keys of a kind and no default, its oldest key becomes the default, and a
+workspace that turned the default off gets the key it used pinned. One case
+changes, since the upgrade cannot see whether a key decrypts: where the key a
+workspace relies on after it (its pin, or its organization's default, including
+an oldest key the upgrade makes the default) cannot be decrypted here, a
+workspace that used the next key now uses the deployment's instance. Check the
 keys' `usable` field before upgrading.
 
 ## Direct search

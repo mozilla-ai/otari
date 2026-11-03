@@ -2,7 +2,7 @@
 
 Otari separates deployment administration, human identity, workload credentials,
 and spend limits. This page explains how those pieces relate. The generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.35.0/docs/public/openapi.json) is the source of truth for endpoint
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.36.0/docs/public/openapi.json) is the source of truth for endpoint
 schemas.
 
 ## Deployment-wide account administration
@@ -43,6 +43,33 @@ account an organization and workspace of its own, as [signup](#signup) does.
 account, never another one: an address sent with it is the operator's sign-in
 address, and on an unclaimed deployment it claims the deployment. It refuses an
 address another account holds, and that refusal points to the password link.
+
+### Blocking email addresses
+
+The same page keeps the deployment's email blocklist
+(`/api/v1/admin/blocked-emails`). An entry is a whole address
+(`person@example.com`) or a domain (`example.com`, also accepted as
+`@example.com` or `*.example.com`), and a domain entry also blocks every
+subdomain under it. Entries are matched case-insensitively, and an
+internationalized domain matches in either spelling.
+
+A blocked address cannot sign up, be added to or invited into an organization,
+accept an invitation sent before the block, or sign in by password, passkey or
+provider. A verification or reset link mailed before the block is refused as
+invalid, and an operator cannot issue the account a password link. Signup, resending a verification
+link and requesting a password reset answer as they do for an unknown address
+and send nothing, so the block is not revealed to whoever asks. A sign-in is
+refused with 403 once the credential checks out, and a first provider sign-in
+keeps nothing it would have created. A sign-in and a new entry never commit
+around each other, so a sign-in that was in flight when the entry was added
+cannot leave a live session behind it. An entry is either an address or a
+domain: `*.` and `@` mark a domain and are refused in front of an address. Adding an entry ends the dashboard
+sessions of every existing account it matches, and the response says how many
+there were. The accounts themselves are kept, so removing the entry lets them
+sign in again. API keys are not affected: revoke those on Keys.
+
+An operator cannot add an entry that matches their own address or the
+bootstrap operator's, for the same reason neither can be deactivated.
 
 ## Hosted providers
 
@@ -428,7 +455,7 @@ by the id it names it by. It needs neither the master key nor its key's id:
 | `PATCH /api/v1/end-users?external_id=...` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
 | `DELETE /api/v1/end-users?external_id=...` | Deletes the end user, answering `{"deleted": 1}`, or 404 |
 | `DELETE /api/v1/end-users?created_before=...` | Deletes up to `limit` (default 100, at most 1000) of the oldest end users created before that time, answering `{"deleted": n}`; repeat until `n` is 0 |
-| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
+| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with each one's name, limits and period and how many end users are on it |
 
 ```http
 PATCH /api/v1/end-users?external_id=fxa123:memories

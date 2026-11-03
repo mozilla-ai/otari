@@ -35,6 +35,7 @@
   * [Budgets](api-endpoints/budgets.md)
   * [Catalog](api-endpoints/catalog.md)
   * [Chat](api-endpoints/chat.md)
+  * [Code execution](api-endpoints/code-execution.md)
   * [Decisions](api-endpoints/decisions.md)
   * [Embeddings](api-endpoints/embeddings.md)
   * [End users](api-endpoints/end-users.md)

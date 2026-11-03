@@ -4,6 +4,18 @@
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/admin/blocked-emails" method="get" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/admin/blocked-emails" method="post" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/admin/blocked-emails/{entry_id}" method="delete" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/admin/users" method="get" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}

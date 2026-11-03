@@ -2197,7 +2197,7 @@
             "type": "string"
           },
           "offerings": {
-            "description": "What a request sent by catalog ID tries, first first. One entry means no backup.",
+            "description": "Offerings in baseline catalog order. Automatic selection can reorder them per request using cost, recent health, load, region, latency and cache continuity. One entry means no backup.",
             "items": {
               "$ref": "#/components/schemas/FallbackOfferingPublic"
             },
@@ -2208,6 +2208,14 @@
             "description": "Of `requests`, those that named an offering or a policy rather than the catalog ID, and so got no automatic fallback.",
             "title": "Pinned",
             "type": "integer"
+          },
+          "pinned_keys": {
+            "description": "`pinned` by API key and the provider that served it, most first. Includes requests that named a policy, which may have fallen back within it.",
+            "items": {
+              "$ref": "#/components/schemas/PinnedTrafficPublic"
+            },
+            "title": "Pinned Keys",
+            "type": "array"
           },
           "pinned_provider": {
             "anyOf": [
@@ -2234,7 +2242,8 @@
           "requests",
           "fell_back",
           "pinned",
-          "pinned_provider"
+          "pinned_provider",
+          "pinned_keys"
         ],
         "title": "AutomaticFallbackPublic",
         "type": "object"
@@ -2348,6 +2357,181 @@
           "blob"
         ],
         "title": "BlobResourceContents",
+        "type": "object"
+      },
+      "BlockedEmailCreateRequest": {
+        "description": "An address or a domain to block.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A note for other operators on why the entry exists. Never shown to the blocked person.",
+            "title": "Reason"
+          },
+          "value": {
+            "description": "An address (person@example.com) or a domain (example.com, also accepted as @example.com or *.example.com). A domain also blocks its subdomains.",
+            "maxLength": 257,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "BlockedEmailCreateRequest",
+        "type": "object"
+      },
+      "BlockedEmailCreatedPublic": {
+        "description": "A new entry, and how many existing accounts it now blocks.",
+        "properties": {
+          "blocked_account_count": {
+            "description": "How many existing accounts the entry matches. Their dashboard sessions were ended.",
+            "title": "Blocked Account Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator who added it, or null once removed.",
+            "title": "Created By User Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "address or domain. A domain also blocks its subdomains.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "The normalized address or domain the entry blocks.",
+            "title": "Pattern",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "pattern",
+          "kind",
+          "reason",
+          "created_by_user_id",
+          "created_at",
+          "blocked_account_count"
+        ],
+        "title": "BlockedEmailCreatedPublic",
+        "type": "object"
+      },
+      "BlockedEmailPublic": {
+        "description": "One blocklist entry.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator who added it, or null once removed.",
+            "title": "Created By User Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "address or domain. A domain also blocks its subdomains.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "The normalized address or domain the entry blocks.",
+            "title": "Pattern",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "pattern",
+          "kind",
+          "reason",
+          "created_by_user_id",
+          "created_at"
+        ],
+        "title": "BlockedEmailPublic",
+        "type": "object"
+      },
+      "BlockedEmailsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedEmailPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "BlockedEmailsPublic",
         "type": "object"
       },
       "Body_audio-create_transcription": {
@@ -3381,6 +3565,27 @@
             "title": "Total Count",
             "type": "integer"
           },
+          "types": {
+            "description": "Every kind an authorized model has, sorted.",
+            "items": {
+              "enum": [
+                "chat",
+                "embedding",
+                "image",
+                "speech",
+                "transcription",
+                "rerank",
+                "moderation",
+                "video",
+                "decision",
+                "realtime",
+                "other"
+              ],
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          },
           "vendors": {
             "items": {
               "$ref": "#/components/schemas/CatalogVendorFacet"
@@ -3392,7 +3597,8 @@
         "required": [
           "total_count",
           "providers",
-          "vendors"
+          "vendors",
+          "types"
         ],
         "title": "CatalogFacets",
         "type": "object"
@@ -3613,6 +3819,31 @@
             },
             "title": "Selectors",
             "type": "array"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.",
+            "title": "Type"
           },
           "unpriced_count": {
             "description": "How many offerings carry no price for this caller.",
@@ -3850,6 +4081,31 @@
             "title": "Selectors",
             "type": "array"
           },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.",
+            "title": "Type"
+          },
           "unpriced_count": {
             "description": "How many offerings carry no price for this caller.",
             "title": "Unpriced Count",
@@ -3907,6 +4163,27 @@
             "description": "Whether the provider itself reported this model.",
             "title": "Discovered",
             "type": "boolean"
+          },
+          "endpoints": {
+            "description": "The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.",
+            "items": {
+              "enum": [
+                "/chat/completions",
+                "/responses",
+                "/messages",
+                "/images/generations",
+                "/embeddings",
+                "/audio/speech",
+                "/audio/transcriptions",
+                "/systemone",
+                "/rerank",
+                "/decisions",
+                "/moderations"
+              ],
+              "type": "string"
+            },
+            "title": "Endpoints",
+            "type": "array"
           },
           "max_output_tokens": {
             "anyOf": [
@@ -4649,6 +4926,147 @@
           "criteria"
         ],
         "title": "ChoiceQuestion",
+        "type": "object"
+      },
+      "CodeExecuteRequest": {
+        "description": "A direct code execution request: the code to run, and the sandbox to run it in.",
+        "example": {
+          "code": "print(1 + 1)",
+          "container": "auto"
+        },
+        "properties": {
+          "code": {
+            "description": "Python source to run in the sandbox",
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "container": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'auto' to hold the sandbox after the run, or a container id an earlier response named in Otari-Container-Id to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends.",
+            "title": "Container"
+          },
+          "file_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.",
+            "title": "File Ids"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long the code may run. Never more than the workspace's code execution ceiling, or 60 seconds when it sets none.",
+            "title": "Timeout Seconds"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID for usage attribution",
+            "title": "User"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "CodeExecuteRequest",
+        "type": "object"
+      },
+      "CodeExecuteResponse": {
+        "description": "A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``.",
+        "properties": {
+          "files": {
+            "description": "The files the code wrote. Empty when it wrote none, or where the Files API is off.",
+            "items": {
+              "$ref": "#/components/schemas/CodeExecutionOutputFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "object": {
+            "const": "code_execution.result",
+            "default": "code_execution.result",
+            "title": "Object",
+            "type": "string"
+          },
+          "return_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The program's exit status; null when the sandbox did not report one.",
+            "title": "Return Code"
+          },
+          "stderr": {
+            "title": "Stderr",
+            "type": "string"
+          },
+          "stdout": {
+            "title": "Stdout",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stdout",
+          "stderr",
+          "return_code",
+          "files"
+        ],
+        "title": "CodeExecuteResponse",
+        "type": "object"
+      },
+      "CodeExecutionOutputFile": {
+        "description": "A file the code wrote, stored in the Files API.",
+        "properties": {
+          "file_id": {
+            "description": "Download it from GET /api/v1/files/{file_id}/content",
+            "title": "File Id",
+            "type": "string"
+          },
+          "filename": {
+            "description": "The name the code gave it in the working directory",
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id",
+          "filename"
+        ],
+        "title": "CodeExecutionOutputFile",
         "type": "object"
       },
       "CodeExecutor": {
@@ -7456,6 +7874,17 @@
             "title": "Blocked End User Count",
             "type": "integer"
           },
+          "budget_duration_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Duration Sec"
+          },
           "budget_id": {
             "title": "Budget Id",
             "type": "string"
@@ -7469,6 +7898,84 @@
             "description": "Whether a new end user starts here when its request names no budget",
             "title": "Is Default",
             "type": "boolean"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dollars each end user may spend over the period",
+            "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "request_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Limit"
+          },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
+          },
+          "rpm_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rpm Limit"
+          },
+          "token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Limit"
+          },
+          "tpm_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tpm Limit"
           }
         },
         "required": [
@@ -8060,6 +8567,18 @@
       "FallbackOfferingPublic": {
         "description": "One offering a catalog ID tries, and who runs the built-in tools on it.",
         "properties": {
+          "input_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD per million input tokens at the organization's rates, the price the order ranks by. Null where the offering is unpriced.",
+            "title": "Input Price"
+          },
           "otari_tools": {
             "description": "Built-in tools Otari runs in this provider's place, for that caller.",
             "items": {
@@ -8096,6 +8615,7 @@
           "selector",
           "provider",
           "provider_type",
+          "input_price",
           "own_tools",
           "otari_tools"
         ],
@@ -9762,7 +10282,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -9790,6 +10310,22 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unpriced",
+                  "operator",
+                  "unavailable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
           },
           "enabled": {
             "title": "Enabled",
@@ -11254,6 +11790,26 @@
         "title": "KeyInfo",
         "type": "object"
       },
+      "KeyRankRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "examples": {
+            "description": "The scored prompts to record.",
+            "items": {
+              "$ref": "#/components/schemas/ScoredExample"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Examples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "examples"
+        ],
+        "title": "KeyRankRequest",
+        "type": "object"
+      },
       "KnownProviderSchema": {
         "description": "A selected provider's autofill hints for the add-provider form.",
         "properties": {
@@ -11491,7 +12047,7 @@
         "description": "One tool the gateway can run itself.",
         "properties": {
           "accepted_types": {
-            "description": "Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled, and for code execution the provider-named keywords unless the deployment's executor is `provider`.",
+            "description": "Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled and the deployment has a search of its own, and for code execution the provider-named keywords unless the deployment's executor is `provider`.",
             "items": {
               "type": "string"
             },
@@ -11499,7 +12055,7 @@
             "type": "array"
           },
           "available": {
-            "description": "Whether this deployment has enabled and configured the tool. A request declaring an unavailable tool is rejected with 400.",
+            "description": "Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.",
             "title": "Available",
             "type": "boolean"
           },
@@ -11530,6 +12086,22 @@
             "default": "tool",
             "title": "Object",
             "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "not_configured",
+                  "workspace_disabled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.",
+            "title": "Reason"
           }
         },
         "required": [
@@ -12455,6 +13027,31 @@
             "default": false,
             "title": "Tool Call",
             "type": "boolean"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model models.dev says it is. Null where the catalog gives no kind.",
+            "title": "Type"
           }
         },
         "title": "ModelMetadata",
@@ -12464,7 +13061,7 @@
         "description": "models.dev metadata keyed by ``provider:model``.",
         "properties": {
           "available": {
-            "description": "False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+            "description": "False when no models.dev catalog could be read, not even the one bundled with the gateway.",
             "title": "Available",
             "type": "boolean"
           },
@@ -12583,6 +13180,30 @@
               }
             ],
             "title": "Supported Parameters"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
           }
         },
         "required": [
@@ -16121,6 +16742,52 @@
         "title": "PendingOrganizationInvitationsPublic",
         "type": "object"
       },
+      "PinnedTrafficPublic": {
+        "description": "The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached.",
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key, or null for requests made without one or whose key was deleted.",
+            "title": "Api Key Id"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's name, or null where it has none.",
+            "title": "Key Name"
+          },
+          "provider": {
+            "description": "The provider instance the requests reached.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_key_id",
+          "key_name",
+          "provider",
+          "requests"
+        ],
+        "title": "PinnedTrafficPublic",
+        "type": "object"
+      },
       "PlatformBreakGlassCreate": {
         "description": "Why the deployment's operator is opening a session's content, and what asked for it.",
         "properties": {
@@ -17945,7 +18612,6 @@
         "type": "object"
       },
       "RankRequest": {
-        "description": "Record how well each candidate did, for one or many prompts.\n\nA batch because of the arithmetic: a pool routes nothing until it holds\n``router_seed_count`` examples (20 by default) and the vote reads the ``k``\nnearest (5 by default), so a useful first teaching pass is dozens of examples\nacross the kinds of prompt you care about.",
         "properties": {
           "examples": {
             "description": "The scored prompts to record.",
@@ -17977,8 +18643,8 @@
           }
         },
         "required": [
-          "user_id",
-          "examples"
+          "examples",
+          "user_id"
         ],
         "title": "RankRequest",
         "type": "object"
@@ -26664,6 +27330,16 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "fetch_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "max_results": {
             "anyOf": [
               {
@@ -26698,6 +27374,16 @@
             ],
             "title": "Purpose Hint"
           },
+          "search_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -26730,6 +27416,8 @@
           "allowed_domains",
           "blocked_domains",
           "provider_options",
+          "search_executor",
+          "fetch_executor",
           "created_at",
           "updated_at"
         ],
@@ -26774,6 +27462,17 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "fetch_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who runs a provider-native web-fetch declaration (Anthropic's web_fetch_<date>) for this workspace, in search_executor's vocabulary. Pins over the request's Otari-Web-Fetch header; null leaves the header in charge"
+          },
           "max_results": {
             "anyOf": [
               {
@@ -26813,6 +27512,17 @@
             ],
             "description": "Search only: hint used when a request declares otari_web_search without one of its own",
             "title": "Purpose Hint"
+          },
+          "search_executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who runs a provider-native web-search declaration (Anthropic's web_search_<date>, OpenAI's web_search) for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's search), 'otari' or 'provider'. Pins over the request's Otari-Web-Search header; null leaves the header in charge. The deployment's web_search_intercept still claims every search"
           }
         },
         "required": [
@@ -26869,6 +27579,12 @@
           "is_effective": {
             "description": "This is the key the workspace's calls of its kind use.",
             "title": "Is Effective",
+            "type": "boolean"
+          },
+          "is_org_default": {
+            "default": false,
+            "description": "The organization's default of its kind, which a workspace that pinned no key uses unless it turned the key off or this deployment cannot decrypt it; the deployment's instance serves it then.",
+            "title": "Is Org Default",
             "type": "boolean"
           },
           "kind": {
@@ -26940,6 +27656,30 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "deployment_fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the deployment's fetch tool, which the workspace's fetches run on when no key serves them, whether or not one does now: builtin_fetch for the built-in fetcher.",
+            "title": "Deployment Fetch Tool"
+          },
+          "deployment_search_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the deployment's search tool, which the workspace's searches run on when no key serves them, whether or not one does now. Null when the deployment has none.",
+            "title": "Deployment Search Tool"
           },
           "fetch_provider": {
             "anyOf": [
@@ -27076,7 +27816,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
     "title": "otari",
-    "version": "0.35.0"
+    "version": "0.36.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -27105,6 +27845,168 @@
           }
         ],
         "summary": "Get Administration Access",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/blocked-emails": {
+      "get": {
+        "description": "List the addresses and domains blocked from holding an account on this deployment, newest first.",
+        "operationId": "admin-list_blocked_emails",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedEmailsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Blocked Emails",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Block an address, or a domain and its subdomains, from holding an account on this deployment.\n\nA blocked address cannot sign up, be added to or invited into an organization, or sign in by password,\npasskey or provider, and nothing is mailed to it for signup, verification or a password reset. Every\nexisting account the entry matches has its dashboard sessions ended now; the account itself is kept, so\nremoving the entry lets it sign in again. API keys are not affected.\n\nRefused with 400 for a value that is neither an address nor a domain, or one that would block your own\naddress or the deployment's bootstrap operator's, and with 409 for one already blocked.",
+        "operationId": "admin-block_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockedEmailCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedEmailCreatedPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Block Email",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/blocked-emails/{entry_id}": {
+      "delete": {
+        "description": "Remove a blocklist entry, so the accounts it matched may sign in again.",
+        "operationId": "admin-unblock_email",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Unblock Email",
         "tags": [
           "admin"
         ]
@@ -29922,6 +30824,34 @@
             }
           },
           {
+            "description": "Match any kind; a model of unknown kind does not match.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "description": "Match any kind; a model of unknown kind does not match.",
+              "items": {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Type",
+              "type": "array"
+            }
+          },
+          {
             "description": "Minimum context window; unknown windows do not match.",
             "in": "query",
             "name": "min_context",
@@ -30247,6 +31177,56 @@
         ]
       }
     },
+    "/api/v1/code/execute": {
+      "post": {
+        "description": "Run code in the gateway's sandbox and return its output.\n\nThe run is admitted as an ``otari_code_execution`` call is: a workspace whose\ncode execution policy is off is refused, and its execution ceiling and pinned\nimage apply. It is priced under ``otari:code_execution`` and reserved against\nthe caller's budgets. ``file_ids`` puts uploads in the working directory, and\neach file the code writes comes back with a ``file_id``. ``container: \"auto\"``\nholds the sandbox after the run and names it in ``Otari-Container-Id``;\nsending that id back runs in the same sandbox, with its files and\ninterpreter state.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user.",
+        "operationId": "code-execution-execute_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodeExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeExecuteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Execute Code",
+        "tags": [
+          "code-execution"
+        ]
+      }
+    },
     "/api/v1/decisions": {
       "post": {
         "description": "Answer typed questions (noul, choice, score) about a state.\n\n``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``\nentry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user; a ``user`` naming a\n  different user is rejected with 403 unless mismatch rejection is off.",
@@ -30349,7 +31329,7 @@
     },
     "/api/v1/end-user-budgets": {
       "get": {
-        "description": "List the budgets the calling service key may put its end users on, with how many end users each holds.\n\nRequires a service key. The counts cover the end users of the key's user, blocked ones included and deleted\nones not.",
+        "description": "List the budgets the calling service key may put its end users on, with their limits and end user counts.\n\nRequires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The\ncounts cover the end users of the key's user, blocked ones included and deleted ones not.",
         "operationId": "end-users-list_end_user_budgets",
         "responses": {
           "200": {
@@ -34462,7 +35442,7 @@
     },
     "/api/v1/models/metadata": {
       "get": {
-        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
+        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. Until models.dev has been\nfetched, and always when ``models_dev_metadata`` is off, it comes from the\ncatalog bundled with the gateway. ``available`` is false only when no catalog\ncould be read; the response is then empty.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
         "operationId": "models-list_model_metadata",
         "responses": {
           "200": {
@@ -35081,7 +36061,7 @@
     },
     "/api/v1/organizations/me/automatic-fallbacks": {
       "get": {
-        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them, priced for this organization, with who runs the\nbuilt-in tools on each, beside its traffic: how many requests a backup served,\nand how many named one offering and so had no fallback. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
+        "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them before automatic selection reorders it, each with\nits input price for this organization and who runs the built-in tools on it,\nbeside its traffic: how many requests a backup served, and how many named one\noffering or a policy instead, by API key and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
         "operationId": "routing-list_automatic_fallbacks",
         "responses": {
           "200": {
@@ -42046,7 +43026,7 @@
         ]
       },
       "post": {
-        "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.",
+        "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA new key serves no workspace until the organization makes it its default for the key's kind, or a\nworkspace pins it. Until then each workspace keeps the key it uses, or the deployment's instance.",
         "operationId": "web-search-keys-create_org_web_search_key",
         "requestBody": {
           "content": {
@@ -42252,6 +43232,56 @@
       }
     },
     "/api/v1/organizations/me/web-search-keys/{key_id}/default": {
+      "delete": {
+        "description": "Stop a key being the organization's default of its kind. Organization owners and admins only.\n\nIdempotent: a key that is not the default is returned unchanged. With no default, a workspace that\npinned no key uses the deployment's instance for that kind.",
+        "operationId": "web-search-keys-unset_org_default_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Unset Org Default Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      },
       "post": {
         "description": "Make a key the organization's default of its kind, in place of the previous one.\n\nOrganization owners and admins only.",
         "operationId": "web-search-keys-set_org_default_web_search_key",
@@ -44759,6 +45789,86 @@
         ]
       }
     },
+    "/api/v1/routing/me/preferences/rank": {
+      "post": {
+        "description": "Record scored examples into the calling key's own routing memory.\n\nThe memory is the key's user's in the key's workspace, the pool that key's\nrequests vote over; nothing in the body can name another. Validation, storage\nand the response are those of ``POST /api/v1/routing/preferences/rank``.\n\nEach call counts against the user's request rate limit, and is refused (403)\nwhen the router's embedding provider does not serve the caller's country,\nbecause embedding an example sends its prompt there.",
+        "operationId": "routing-rank_own_candidates",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyRankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RankResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Rank Own Candidates",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/routing/me/status": {
+      "get": {
+        "description": "Report how warm the calling key's own routing memory is, per pool.\n\nThe same report as ``GET /api/v1/routing/status``, for the key's user in the\nkey's workspace.",
+        "operationId": "routing-own_routing_memory_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Own Routing Memory Status",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
     "/api/v1/routing/policies": {
       "get": {
         "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
@@ -46703,7 +47813,7 @@
     },
     "/api/v1/tool-settings/guardrails/catalog": {
       "get": {
-        "description": "List the guardrails this gateway can run itself, for the form that defines one.\n\nEvery guardrail ``any_guardrail`` reaches over a hosted API, with the\nconstructor and per-call arguments each one takes, so a guardrail is\nconfigured by picking it and filling typed fields. It is not the whole\nlibrary: a guardrail that works by holding model weights in the process\nrunning it belongs in the guardrails service the profiles read beside this one\ndescribes, not here. A parameter names the environment variable that fills it\nwhere one exists, and ``requirement_groups`` carries the constraints satisfied\nby any of several parameters, which no single required flag can state. This is\nthe counterpart of\n``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather\nthan a provider, and on the same gate that one takes.\n\nReaches no service, so there is no unavailable state to report: the answer is\na property of the installed ``any_guardrail``, not of any deployment's state.\n\nOn the catalog router rather than the operator one beside it, because the\nform this feeds belongs to an organization and is filled by an owner or\nadmin, who reaches no operator route. So it is readable without\ndeployment-wide standing, by a dashboard session and by any API key alike.\nWhat it publishes carries no deployment state to withhold: the same bytes on\nevery deployment of the same build, and a parameter's environment variable is\na name, never whether that name is set.\n\nThe profiles read next door keeps the stricter gate, and the difference is\nreach rather than audience. That one dials ``guardrails_url``, so admitting a\nkey there would let a workspace credential probe the deployment's own\nservice. This one dials nothing.",
+        "description": "List the guardrails this gateway can run itself, for the form that defines one.\n\nEvery guardrail ``any_guardrail`` reaches over a hosted API, with the\nconstructor and per-call arguments each one takes, so a guardrail is\nconfigured by picking it and filling typed fields. It is not the whole\nlibrary: a guardrail that works by holding model weights in the process\nrunning it belongs in the guardrails service the profiles read beside this one\ndescribes, not here. A parameter names the environment variable that fills it\nwhere one exists, and ``requirement_groups`` carries the constraints satisfied\nby any of several parameters, which no single required flag can state. This is\nthe counterpart of\n``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather\nthan a provider, and on the same gate that one takes.\n\nReaches no service, so there is no unavailable state to report: the answer is\na property of the installed ``any_guardrail``, not of any deployment's state.\n\nOn the catalog router rather than the operator one beside it, because the\nform this feeds belongs to an organization and is filled by an owner or\nadmin, who reaches no operator route. So it is readable without\ndeployment-wide standing, by a dashboard session and by any API key alike.\nWhat it publishes carries no deployment state to withhold: the same bytes on\nevery deployment of the same build, and a parameter's environment variable is\na name, never whether that name is set.\n\nThe profiles read next door takes the same gate. It differs in reach: that\none dials ``guardrails_url``, from a short cache, and this one dials nothing.",
         "operationId": "tool-settings-list_builtin_guardrails",
         "responses": {
           "200": {
@@ -46733,7 +47843,7 @@
     },
     "/api/v1/tool-settings/guardrails/profiles": {
       "get": {
-        "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nNot on ``verify_catalog_reader``, despite being a catalog read: that gate\nadmits any API key to the deployment-describing reads, and admitting a key\nhere would let any workspace credential dial the deployment's guardrails\nservice. This is a management read, so it takes the router's own gate.",
+        "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nOn ``verify_catalog_reader``, so any API key reads it: a caller who may send\na profile name may learn which ones exist (otari#2690). The answer is cached\nfor 30 seconds per worker, so however many reads arrive, a worker sends the\ndeployment's guardrails service at most one request in that time.",
         "operationId": "tool-settings-list_guardrail_profiles",
         "responses": {
           "200": {
@@ -46902,7 +48012,7 @@
     },
     "/api/v1/tools": {
       "get": {
-        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nEvery other `tools[]` entry, including provider-native keywords not listed\nhere, is forwarded to the upstream provider untouched.",
+        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. Every other `tools[]` entry, including provider-native keywords\nnot listed here, is forwarded to the upstream provider untouched.",
         "operationId": "tools-list_tools",
         "responses": {
           "200": {
