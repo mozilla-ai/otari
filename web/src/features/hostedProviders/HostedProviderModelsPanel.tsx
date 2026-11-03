@@ -53,7 +53,7 @@ function rate(value: number | null | undefined) {
 function inputRate(row: HostedModel) {
   const unit = pricingUnitOf(row.unit)
   const value = row.input_price_per_million
-  if (unit === "tokens" || value === null || value === undefined) {
+  if (unit === "token" || value === null || value === undefined) {
     return rate(value)
   }
   return (
@@ -65,7 +65,7 @@ function inputRate(row: HostedModel) {
 
 /** A rate that only a token price carries, as a dash on any other unit. */
 function tokenRate(row: HostedModel, value: number | null | undefined) {
-  return rate(pricingUnitOf(row.unit) === "tokens" ? value : undefined)
+  return rate(pricingUnitOf(row.unit) === "token" ? value : undefined)
 }
 
 function PriceSourceBadge({ source }: { source: HostedModel["price_source"] }) {

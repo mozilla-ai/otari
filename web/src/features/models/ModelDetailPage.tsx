@@ -113,7 +113,7 @@ function RateCell({
   /** A rate only a token price has (output), shown as a dash on any other unit. */
   tokenOnly?: boolean
 }) {
-  if (unit !== "tokens") {
+  if (unit !== "token") {
     return (
       <span className="text-mono-caption">
         {tokenOnly || metered == null ? "—" : formatPricedRate(metered, unit)}

@@ -40,7 +40,7 @@ export function ToolRateForm({
         input_price_per_million: stored,
         // A call is one unit; there is no output side of it to price.
         output_price_per_million: 0,
-        unit: "requests",
+        unit: "request",
       },
       { onSuccess: onClose },
     )

@@ -70,7 +70,7 @@ const GLM_DETAIL: CatalogModelDetail = {
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
         pricing_tiers: [],
-        unit: "tokens",
+        unit: "token",
       },
       price_source: "defaults",
       price_reference: "nebius:GLM-5.3",

@@ -167,7 +167,7 @@ export function PricingOverrideDialog({
     unit: seedUnit,
     // A request or image rate is shown per thousand, the way it was entered.
     input: rateToInput(
-      editing === undefined || seedUnit === "tokens"
+      editing === undefined || seedUnit === "token"
         ? editing?.input_price_per_million
         : toEnteredRate(editing.input_price_per_million, seedUnit),
     ),
@@ -230,7 +230,7 @@ export function PricingOverrideDialog({
         })
 
   // A request or image price is one rate: there is no output, and no cache.
-  const isTokens = unit === "tokens"
+  const isTokens = unit === "token"
   const ratesInvalid =
     inputRate === undefined ||
     Number.isNaN(inputRate) ||
