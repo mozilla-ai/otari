@@ -89,4 +89,5 @@ def test_nonempty_scalar_is_validated() -> None:
     assert form_field(FormData([("temperature", "0")]), "temperature", TypeAdapter(float)) == 0.0
     with pytest.raises(RequestValidationError) as raised:
         form_field(FormData([("temperature", "invalid")]), "temperature", TypeAdapter(float))
+    assert raised.value.errors()[0]["type"] == "float_parsing"
     assert raised.value.errors()[0]["loc"] == ("body", "temperature")
