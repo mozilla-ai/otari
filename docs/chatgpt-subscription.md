@@ -8,9 +8,18 @@ through a third-party Codex OAuth proxy that exposes an OpenAI-compatible API.
 application -> Otari -> local OAuth proxy -> ChatGPT subscription
 ```
 
-This is an unofficial integration. OpenAI may change the backend, subscription
-limits still apply, and a third-party proxy may create account or terms-of-service
-risk. Use an OpenAI Platform API key for production workloads.
+This is an unofficial integration. Use an OpenAI Platform API key for
+production workloads (see [Connect OpenAI](providers/openai.md)), and know the
+risks before you start:
+
+- The proxy may break when OpenAI changes the backend behind it.
+- Subscription usage caps remain in force.
+- A third-party proxy may create account or terms-of-service risk.
+- The proxy holds your subscription session, so keep it and its OAuth session
+  private.
+- Model IDs and capabilities come from the proxy, not from Otari.
+- An API price attached to the models is an estimate, not what the
+  subscription charges.
 
 ## Prerequisites
 
@@ -20,7 +29,6 @@ risk. Use an OpenAI Platform API key for production workloads.
   [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
 
 Run the proxy on a private address and follow its authentication instructions.
-It holds your subscription session and should not be exposed publicly.
 
 ## Verify the proxy
 
@@ -87,14 +95,3 @@ print(response.choices[0].message.content)
 
 Provider routing, API-key access, usage logging, and configured budgets work as
 they do for any other named instance.
-
-## Caveats
-
-- The proxy may break when its upstream backend changes.
-- Subscription usage caps remain in force.
-- Keep the proxy and its OAuth session private.
-- Model IDs and capabilities come from the proxy, not from Otari.
-- API pricing attached to the instance is an estimate, not the subscription's
-  actual charge.
-
-For the supported API-key path, use the [OpenAI provider guide](providers/openai.md).
