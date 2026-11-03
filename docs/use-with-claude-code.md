@@ -96,7 +96,7 @@ It takes the place of Claude Code's own session id for grouping. See
 
 A routed session can also keep what it was about: the prompt that opened each
 turn and each tool call's arguments, and what each tool returned where the
-deployment keeps tool output. The deployment and the workspace have to keep
+deployment and the workspace keep tool output. The deployment and the workspace have to keep
 content, and Claude Code asks with a header:
 
 ```bash

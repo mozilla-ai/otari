@@ -79,7 +79,10 @@ it names more than one, the first in the table wins.
 A harness's own id and an OTLP session id name one session when they are the
 same id, so a Claude Code session routed through Otari and the spans exported
 for it (its own, or the gates `otari hook` reported) land on one trace. A
-client's chosen key never joins either.
+client's chosen key never joins either. Such a joined trace's source is the one
+that reached Otari first: `harness` when a routed request did, `otlp` when an
+export did. Filtering the Sessions list by either source therefore misses a
+joined session the other one started.
 
 A session belongs to the user whose API key sent it: two people who choose the
 same label get two sessions, and a session id never reaches another workspace.
@@ -280,7 +283,7 @@ is already stored, and the sessions stay. Either one also covers content the
 gateway accepted before and had not stored yet, on every replica: it is never
 stored. `GET /api/v1/trace-content/policy`, for any signed-in caller, reports
 `content_available` (whether the deployment allows content at all),
-`platform_break_glass`, and the retention a session's content is kept for. It is
+`tool_output` (whether it also keeps what tools returned), `platform_break_glass`, and the retention a session's content is kept for. It is
 not on the public bootstrap: whether a deployment keeps prompts, and whether its
 operator can open them, is nothing to tell an anonymous visitor.
 
@@ -299,8 +302,14 @@ Content is kept only when the client sends it too:
   answers, the call's arguments. The prompt is the text of the user message as
   the client sent it, so it includes whatever the harness put there besides what
   was typed: Claude Code adds `<system-reminder>` blocks and hook feedback. The
-  replayed history, the system prompt and attachments are never kept. The client that sends the header answers for its
-  own users' consent.
+  replayed history, the system prompt and attachments are never kept. A tool
+  call's arguments come from the history that asked for it, so a Responses
+  request that continues with `previous_response_id`, and so replays no
+  `function_call` item, keeps no arguments for the calls it answers: only the
+  prompt, and the output where tool output is kept. Any value of the header
+  other than `keep` is refused with a 400, so a misspelled header is not
+  mistaken for one that asks for nothing. The client that sends the header
+  answers for its own users' consent.
 - Claude Code sends the prompt that opened a turn with `OTEL_LOG_USER_PROMPTS=1`,
   and each tool's command or file path with `OTEL_LOG_TOOL_DETAILS=1`.
 - `otari hook` sends the command or paths a gate checked, and the gate's own
@@ -310,7 +319,11 @@ What a tool returned is kept only where the deployment also sets
 `OTARI_TRACE_CONTENT_TOOL_OUTPUT=true`, and only from a routed request: the
 results the client hands back, and the output of a tool Otari ran itself (web
 search, web fetch, code execution, an MCP tool), whose arguments a routed
-request keeps either way. Otari never keeps tool output an agent exports over
+request keeps either way. A workspace that keeps content can still stop keeping
+tool output, with **Keep what tools returned** in its settings or
+`{"trace_content_tool_output": false}` on the same `PATCH`. It is on by default,
+so it narrows what the deployment keeps and never widens it. Turning it off
+covers tool output accepted and not yet stored, as turning content off does. Otari never keeps tool output an agent exports over
 OTLP (Claude Code's `OTEL_LOG_TOOL_CONTENT=1`), nor a model's own output.
 
 A span shows what it was about as its input, and what a tool returned as its
@@ -585,6 +598,7 @@ Deleting a user erases their traces, as it erases their telemetry.
 | `trace_retention_days` | `30` | Delete a trace once it has had no activity for this long. |
 | `trace_session_max_age_days` | `90` | Delete a session's trace this long after it started, even while it is active, so a reused session id starts a new trace. |
 | `trace_content_enabled` | `false` | Let workspaces keep what an instrumented agent says a span was about; see [Keeping what a span was about](#keeping-what-a-span-was-about). |
+| `trace_content_tool_output` | `false` | Also keep what each tool returned on a routed request that keeps content, unless the workspace turned it off. |
 | `trace_platform_break_glass_enabled` | `false` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. |
 
 Retention runs whether or not traces are captured, so a deployment that stops
