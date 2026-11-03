@@ -370,7 +370,7 @@ provider or billing again.
 | Aspect | Behavior |
 |---|---|
 | Scope | A key belongs to the API key that sent it (or, for the master key, to the billed user), so two callers never see each other's responses. |
-| Same request | The same body, and the same `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`, `Otari-Router-Task`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers, since those change what the request does. Key order and whitespace in the JSON body do not count as a difference. |
+| Same request | The same body, and the same `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers, since those change what the request does. Key order and whitespace in the JSON body do not count as a difference. |
 | Different request, same key | `422`. |
 | Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer. |
 | Original failed | The next retry runs in its place. Only a successful response is kept. |
@@ -638,10 +638,7 @@ and any other failure returns 502.
 
 ## Routing policies
 
-Routing-policy management lives under `/api/v1/routing/policies`; learned-routing
-examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`,
-and an API key teaches and reads its own under `/api/v1/routing/me/preferences/rank` and
-`/api/v1/routing/me/status`.
+Routing-policy management lives under `/api/v1/routing/policies`.
 A subagent model recommendation is asked at `POST /api/v1/routing/recommend`, and the
 operator manages the subagent routers that answer it under `/api/v1/routing/recommenders`
 (see [Routing recommendations](#routing-recommendations)).

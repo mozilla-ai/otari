@@ -50,7 +50,6 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/agent-telemetry/summary"),
     ("GET", f"{API_ROOT}/aliases"),
     ("GET", f"{API_ROOT}/routing/policies"),
-    ("GET", f"{API_ROOT}/routing/status"),
     ("GET", f"{API_ROOT}/models/discoverable"),
     ("GET", f"{API_ROOT}/search-tools"),
     ("GET", f"{API_ROOT}/settings"),

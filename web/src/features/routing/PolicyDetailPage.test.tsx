@@ -8,12 +8,12 @@ import { API_ROOT } from "@/shared/api/client"
 import {
   adminContext,
   CHAIN,
-  LEARNED,
   mockApi,
   policy,
   policyWrites,
   renderInWorkspace,
   renderPage,
+  UNKNOWN_ROUTER,
   WEIGHTED,
 } from "@/tests/routing"
 
@@ -67,15 +67,17 @@ function lastWrite(calls: { url: string; method: string; body: unknown }[]) {
 }
 
 describe("PolicyDetailPage", () => {
-  it("opens an existing learned policy read-only without rewriting it", async () => {
-    const { calls } = mockApi([policy("smart", LEARNED, { is_dynamic: true })])
+  it("opens a policy naming an unknown router read-only", async () => {
+    const { calls } = mockApi([
+      policy("smart", UNKNOWN_ROUTER, { is_dynamic: true }),
+    ])
     renderPolicy("smart")
 
     expect(
-      await screen.findByText(/Smart router is no longer available/),
+      await screen.findByText(/Uses options this page cannot show yet/),
     ).toBeInTheDocument()
     const spec = await section("Stored spec")
-    expect(spec.getByText(/"knn"/)).toBeInTheDocument()
+    expect(spec.getByText(/"cheapest"/)).toBeInTheDocument()
     expect(screen.queryByRole("radio")).not.toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: /^Save / }),

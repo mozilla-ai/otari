@@ -26,9 +26,7 @@ from gateway.log_config import logger
 from gateway.models.routing import PolicySpec
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.providers import CountryGate
 from gateway.services.routing.backends import (
-    KNN_BACKEND,
     RoutingContext,
     backend_is_priority,
     backend_is_weighted,
@@ -48,11 +46,9 @@ __all__ = [
     "usable_candidates",
 ]
 
-# A ranking that has not answered by now is not worth the caller's latency. The
-# work behind it is an outbound embedding call plus a read of the stored examples,
-# both on the request path and neither with a deadline of its own, so a hung
-# embedding provider would otherwise hold the request open for as long as its own
-# client allows. Expiring here costs the cheaper model, not the request.
+# A ranking that has not answered by now is not worth the caller's latency, so a
+# backend that blocks cannot hold the request open. Expiring here serves the
+# policy's default target, not an error.
 ROUTER_DEADLINE_SECONDS = 5.0
 
 
@@ -65,36 +61,10 @@ class RoutingSignal:
     serving.
     """
 
-    task_signal: str = ""
-    """This turn's prompt text."""
-    trace_signal: str = ""
-    """The conversation's opening prompt text, stable across its turns."""
-    trace_anchor: str = ""
-    """Text identifying the conversation when the client sends no id."""
     conversation_id: str | None = None
-    """The client's ``Otari-Conversation-Id``, the explicit trace identity."""
-    task_id: str | None = None
-    """The client's ``Otari-Router-Task``: which partition to vote over."""
-    has_tools: bool = False
-    is_continuation: bool = False
-    """Whether the conversation already has an assistant turn, i.e. this is not
-    the request that makes the trace-sticky decision."""
+    """The client's ``Otari-Conversation-Id``, which automatic routing keeps a conversation on."""
     opted_out: bool = False
     """The client sent ``Otari-Router: off`` for this request."""
-
-
-def _embedding_refused(config: GatewayConfig, backend_name: str, gate: CountryGate) -> bool:
-    return backend_name.strip().lower() == KNN_BACKEND and embedding_refused(config, gate)
-
-
-def embedding_refused(config: GatewayConfig, gate: CountryGate) -> bool:
-    """Whether the router's embedding provider is closed to ``gate``'s country, so a prompt may not be embedded."""
-    try:
-        resolved = resolve_provider_selector(config, config.router_embedding_model)
-    except (ValueError, AnyLLMError):
-        # The backend declines on its own when it cannot embed.
-        return False
-    return gate.refuses(config, resolved.instance)
 
 
 async def decide_ordering(
@@ -106,19 +76,16 @@ async def decide_ordering(
     allowlist: list[str] | None,
     signal: RoutingSignal | None,
     workspace_id: uuid.UUID | None = None,
-    country_gate: CountryGate | None = None,
 ) -> RouterOrdering | None:
     """Ask the policy's router to rank its candidates for this request.
 
     Returns ``None`` when there is nothing to ask: the policy names no router,
     this build has no such backend, or the surface has no request to route. The
     compiler treats all three as "no ordering" and serves the default target; only
-    the unknown-backend case is logged, once per policy.
+    the unknown-backend case is logged, once per policy and workspace.
 
     Returns an *empty* :class:`RouterOrdering` when a router was asked and
-    declined, when the caller opted out, or when ``country_gate`` closes the
-    kNN router's embedding provider to the request's country, since embedding
-    the prompt sends it there. That also serves the default target,
+    declined or when the caller opted out. That also serves the default target,
     but deliberately without the warning: a decline is normal operation.
     """
     backend_name = spec.router_backend
@@ -137,20 +104,17 @@ async def decide_ordering(
         # a log line. Warned here rather than in the compiler because the compiler
         # also runs where there is no request at all (`explain`, the CLI), and
         # warning there reported a problem that did not exist.
-        if owes_missing_backend_warning(policy_name, backend_name):
+        if owes_missing_backend_warning(workspace_id, policy_name, backend_name):
             logger.warning(
                 "Routing policy '%s' names router backend '%s', which this build does not have, so the "
-                "policy serves '%s' on every request. Available backends: %s. Logged once per policy per "
-                "process.",
+                "policy serves '%s' on every request. Available backends: %s. Logged once per policy and "
+                "workspace per process.",
                 policy_name,
                 backend_name,
                 spec.default_target,
                 ", ".join(known_backends()),
             )
         return None
-    if country_gate is not None and _embedding_refused(config, backend_name, country_gate):
-        return RouterOrdering([], rationale="the router's embedding provider does not serve this request's country")
-
     pool = usable_candidates(
         config, spec.router_candidates, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id
     )
@@ -163,13 +127,6 @@ async def decide_ordering(
         default_model=default_model,
         candidate_pool=pool,
         workspace_id=workspace_id,
-        task_signal=signal.task_signal,
-        trace_signal=signal.trace_signal,
-        trace_anchor=signal.trace_anchor,
-        task_id=signal.task_id,
-        has_tools=signal.has_tools,
-        is_trace_continuation=signal.is_continuation,
-        trace_key=signal.conversation_id,
         weights=spec.router_weights,
     )
     try:
@@ -177,12 +134,9 @@ async def decide_ordering(
             decision = await backend.rank(context)
     except Exception as exc:
         # A router is an optimization, so it must never be the reason a request
-        # cannot be served, or the reason it hangs. Backends already decline on the
-        # failures they can name
-        # (cold pool, embedding error, missing pricing), but ranking also reads the
-        # database, and a broad guard here is what makes the claim true for every
-        # backend and every failure rather than for the ones each backend thought
-        # of. Declining costs the caller the cheaper model, not the request.
+        # cannot be served, or the reason it hangs. A broad guard here is what makes
+        # that true for every backend and every failure rather than for the ones
+        # each backend thought of. Declining serves the default target, not an error.
         logger.warning(
             "Router '%s' on policy '%s' failed or timed out (%s); serving '%s'",
             backend_name,
@@ -191,12 +145,9 @@ async def decide_ordering(
             spec.default_target,
         )
         return RouterOrdering([], rationale=f"router error ({type(exc).__name__})")
-    # One line per routed request, at info: which model the money went to and why
-    # is the first thing an operator asks when a bill or a quality complaint
-    # arrives, and the decision is not otherwise reconstructable. A backend whose
-    # decision *is* reconstructable (the weighted split is written in the policy,
-    # and the usage row names what served) opts down to debug, because at load
-    # balancer volume this line would be the log.
+    # One line per routed request, at info, unless the backend's decision is
+    # reconstructable (the weighted split is written in the policy, and the usage
+    # row names what served): at load balancer volume this line would be the log.
     logger.log(
         logging.INFO if decision.log_decision else logging.DEBUG,
         "Router '%s' on policy '%s': %s (confidence=%.2f) -> %s",
@@ -238,9 +189,9 @@ def explain_router_ordering(
 ) -> tuple[RouterOrdering | None, list[WeightedShare]]:
     """The ordering to show on a surface that has no request to route.
 
-    Returns ``(None, [])`` for a policy whose router needs request state: kNN has
-    no prompt to embed here, so the compiler falls through to the default target,
-    and that decline path is what ``explain`` documents.
+    Returns ``(None, [])`` for a backend this build does not have: the compiler
+    falls through to the default target, and that decline path is what
+    ``explain`` documents.
 
     The priority backend's order is the declared one, so it is shown as declared;
     which candidate has room is a request-time fact this surface does not read.

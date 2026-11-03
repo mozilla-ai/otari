@@ -62,20 +62,13 @@ X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here
 # ``IdentityProviderPort`` can record a connection this tuple never named, and
 # a closed enum here would make that value unrepresentable.
 OAUTH_PROVIDERS: tuple[str, ...] = ("github", "google")
-# Per-request opt-out for a policy's learned router: "off" serves the policy's
-# default target and skips the router entirely. There is no "force on": the
-# router is enabled by the policy, not by the caller.
+# Per-request opt-out for a policy's router: "off" serves the policy's default
+# target and skips the router entirely. There is no "force on": the router is
+# enabled by the policy, not by the caller.
 ROUTER_HEADER = "Otari-Router"
-# Stable per-conversation id for trace-sticky routing. When set, it is the trace
-# identity (namespaced per user); absent, the router falls back to hashing the
-# conversation's opening messages, which cannot tell apart two conversations that
-# open identically. See docs/routing.md#per-request-control.
+# Stable per-conversation id: the trace session a request belongs to, and what
+# automatic routing keeps a conversation on.
 CONVERSATION_HEADER = "Otari-Conversation-Id"
-# Routing-memory partition (use case / category) for this request. When set, the
-# router votes only over records carrying the same task label and stays in
-# pass-through until that partition alone is warm; records from other tasks never
-# influence it. Submit the matching label via the /rank task_id.
-ROUTER_TASK_HEADER = "Otari-Router-Task"
 # Response header naming one inference request, minted by the gateway. Clients use
 # it to correlate a response with its usage record.
 REQUEST_ID_HEADER = "Otari-Request-ID"
@@ -162,7 +155,6 @@ ENV_BRIDGED_FIELDS = (
 
 
 VISION_STRATEGIES = ("describe", "ocr", "off")
-ROUTER_GRANULARITIES = ("trace_sticky", "step")
 # Selectable mail transports, plus the two states that are not a transport:
 # "auto" derives one from whether SMTP is configured, "none" turns mail off
 # even when it is. See GatewayConfig.mail_transport.
@@ -983,69 +975,6 @@ class GatewayConfig(
             "decides which real model serves the request ('select'), what is tried after a retryable "
             "failure ('on_failure'), and which guardrails always run. A one-target policy is an alias, "
             "so 'aliases:' remains its shorthand."
-        ),
-    )
-    # Tuning for the learned (kNN) router a policy can name via `select: [{router: knn}]`.
-    # There is no on/off switch here on purpose: a policy naming the router is the
-    # switch, so the router cannot be enabled globally behind an operator's back,
-    # and two policies can never disagree about whether routing is on.
-    router_alpha: Annotated[float, OMITTED] = Field(
-        default=0.3,
-        ge=0.0,
-        description=(
-            "Learned router's cost-vs-quality dial: score(model) = predicted_quality - alpha * "
-            "normalized_cost. 0 ignores cost (always the best-predicted model); higher prefers "
-            "cheaper candidates more aggressively."
-        ),
-    )
-    router_k: Annotated[int, OMITTED] = Field(
-        default=5,
-        ge=1,
-        description=(
-            "Neighbor count for the learned router's vote. A request whose partition holds fewer "
-            "than k comparable examples stays on the policy's default target."
-        ),
-    )
-    router_embedding_model: Annotated[str, OMITTED] = Field(
-        default="openai:text-embedding-3-small",
-        description=(
-            "provider:model used to embed the task signal. Changing it invalidates existing "
-            "routing-memory records rather than mixing incomparable vector spaces, so the router "
-            "returns to pass-through until the new space is re-taught."
-        ),
-    )
-    router_confidence_floor: Annotated[float, OMITTED] = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Minimum share of the k neighbors that must agree on the winning candidate. Below it, "
-            "the policy's default target leads and the router's order becomes the failover chain."
-        ),
-    )
-    router_seed_count: Annotated[int, OMITTED] = Field(
-        default=20,
-        ge=0,
-        description=(
-            "Routing-memory records a pool needs before the router routes at all. Under it, every "
-            "request through the policy serves the default target."
-        ),
-    )
-    router_granularity: Annotated[str, OMITTED] = Field(
-        default="trace_sticky",
-        description=(
-            "'trace_sticky' (default) decides once per conversation and reuses that decision on "
-            "later turns; 'step' re-decides on every call."
-        ),
-    )
-    router_max_records_per_user: Annotated[int, OMITTED] = Field(
-        default=5000,
-        ge=0,
-        description=(
-            "Cap on stored routing-memory records per user; the oldest are evicted past it. The "
-            "store is scanned linearly, so this also bounds per-request routing latency. 0 disables "
-            "eviction rather than storing nothing, and the per-request read falls back to the default "
-            "bound, so the store grows without limit while each decision stays bounded."
         ),
     )
     decision_providers: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
@@ -2334,15 +2263,6 @@ class GatewayConfig(
         normalized = value.strip().lower()
         if normalized not in VISION_STRATEGIES:
             msg = f"vision_strategy must be one of {sorted(VISION_STRATEGIES)}, got '{value}'"
-            raise ValueError(msg)
-        return normalized
-
-    @field_validator("router_granularity")
-    @classmethod
-    def _validate_router_granularity(cls, value: str) -> str:
-        normalized = value.strip().lower()
-        if normalized not in ROUTER_GRANULARITIES:
-            msg = f"router_granularity must be one of {sorted(ROUTER_GRANULARITIES)}, got '{value}'"
             raise ValueError(msg)
         return normalized
 

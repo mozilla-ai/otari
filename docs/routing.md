@@ -2,8 +2,7 @@
 
 A routing policy is a caller-facing model name that resolves to one or more real
 models. Use a policy for failover, conditional selection, traffic splitting,
-spill-over past a rate limit, learned selection, or guardrails the caller cannot
-remove. Use an
+spill-over past a rate limit, or guardrails the caller cannot remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
 ![Your application sends one request to Otari, which routes it to OpenAI, Anthropic, or another provider.](assets/routing-overview.webp)
@@ -11,8 +10,7 @@ remove. Use an
 For provider selection within one model, an unpinned catalog ID already uses
 [automatic routing](models.md#automatic-provider-selection), which keeps an
 organization's own provider key first and otherwise considers estimated cost, load,
-region and latency, with sticky sessions for conversation continuity, without
-scored examples.
+region and latency, with sticky sessions for conversation continuity.
 
 ## Failover
 
@@ -161,82 +159,11 @@ The policy says which is which: `candidates` handles "full", `on_failure`
 handles "broke". `Otari-Router: off` skips the order and starts from the
 default.
 
-## Learned routing (knn router)
-
-Smart router is not offered in the dashboard. It requires externally scored
-examples and has not been validated for general use. Existing learned policies
-continue to run and appear read-only in Routing.
-
-The `knn` router uses scored examples to rank candidates for each user's
-traffic:
-
-```yaml
-routing:
-  policies:
-    smart:
-      select:
-        - router: knn
-          candidates:
-            - openai:gpt-5-nano
-            - openai:gpt-5
-        - default: openai:gpt-5
-      on_failure:
-        - anthropic:claude-haiku-4-5
-```
-
-It embeds the request, finds similar scored prompts, and balances predicted
-quality against configured model cost. Every candidate therefore needs pricing.
-Until a user's pool is warm, or when the router cannot decide confidently, the
-default target serves.
-
-Teach the router through `POST /api/v1/routing/preferences/rank`. Each example
-contains a prompt and a score from 0 to 1 for each candidate. Read pool status
-through `GET /api/v1/routing/status`. Both are operator routes that name the
-user (and optionally the workspace) to teach. `scripts/seed_routing_demo.py`
-provides a runnable example.
-
-An API key teaches its own memory instead, through
-`POST /api/v1/routing/me/preferences/rank` and `GET /api/v1/routing/me/status`.
-The body is the same list of `examples` with no `user_id` or `workspace_id`:
-the memory is the key's user's in the key's workspace, the pool that key's
-requests vote over, so a key cannot teach or read another user's or workspace's
-pool. A service key teaches its own user's pool, not its end users'. Each rank
-call counts against the user's request rate limit, and is refused with 403 where
-the router's embedding provider does not serve the caller's country, because
-embedding an example sends its prompt there; the status read does neither.
-
-```bash
-curl -X POST "$OTARI_URL/api/v1/routing/me/preferences/rank" \
-  -H "Authorization: Bearer $OTARI_API_KEY" -H "Content-Type: application/json" \
-  -d '{"examples": [{"prompt": "Is this claim supported?", "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}}]}'
-```
-
-Learned memory is scoped by user and workspace. Optional task IDs create separate
-pools. It is not learned automatically from live traffic.
-
-### Learned-routing settings
-
-The default learned-routing settings are `k=5`, a 20-example warm-up, and
-`trace_sticky` granularity. They are deployment settings named
-`router_k`, `router_seed_count`, `router_alpha`,
-`router_confidence_floor`, `router_embedding_model`, `router_granularity`, and
-`router_max_records_per_user`.
-
-Trace stickiness is process-local. A restart or request routed to another replica
-may choose again. The result is still valid, but prompt-cache locality is not
-guaranteed across replicas.
-
 ## Per-request control
 
-These request headers change how a policy selects. `Otari-Router: off` applies to
-learned, weighted and priority routers alike; the other two apply to learned
-routing only.
-
-| Header | Effect |
-| --- | --- |
-| `Otari-Router: off` | Skip learned, weighted or priority selection and use the policy default. |
-| `Otari-Conversation-Id` | Reuse a learned decision for a conversation when granularity is `trace_sticky`. |
-| `Otari-Router-Task` | Use examples from one task partition. |
+Send `Otari-Router: off` to skip weighted or priority selection for one request
+and use the policy default. There is no header that forces a router on: the
+policy decides that.
 
 ## Mandatory guardrails
 
@@ -430,9 +357,7 @@ If every candidate of a plan with more than one candidate fails, Otari returns a
 The Routing page manages stored policies.
 
 - **Create policy** offers one kind at a time (Fallback, Split traffic, Spill
-  over at rate limits, Tier down on budget), each with only its own fields. A
-  [learned router](#learned-routing-knn-router) is set through the API or
-  `config.yml` only.
+  over at rate limits, Tier down on budget), each with only its own fields.
 - **Fallback** ([Failover](#failover)): name the policy, pick the main model,
   and list at least one backup under "If unavailable, use", each a model other
   than the main one and the other backups. The backups are `on_failure`, in the

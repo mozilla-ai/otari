@@ -14,12 +14,12 @@ import {
   ADMIN_WORKSPACE,
   adminContext,
   CHAIN,
-  LEARNED,
   MEMBERS,
   mockApi,
   policy,
   renderInWorkspace,
   renderPage,
+  UNKNOWN_ROUTER,
   WEIGHTED,
 } from "@/tests/routing"
 
@@ -289,9 +289,14 @@ describe("RoutingPage", () => {
     // The mutation holds its error until the next call, and the dialog reads it,
     // so without clearing it on close the second row opens already reporting a
     // failure that was about the first.
-    mockApi([policy("fast", CHAIN), policy("smart", LEARNED)], undefined, [], {
-      deleteBody: { status: 409, detail: "fast is referenced by an alias" },
-    })
+    mockApi(
+      [policy("fast", CHAIN), policy("smart", UNKNOWN_ROUTER)],
+      undefined,
+      [],
+      {
+        deleteBody: { status: 409, detail: "fast is referenced by an alias" },
+      },
+    )
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
@@ -339,18 +344,15 @@ describe("RoutingPage", () => {
     expect(deletes[0].url).toContain(`${API_ROOT}/aliases/legacy`)
   })
 
-  it("summarises a learned policy by its pool rather than as an opaque dynamic row", async () => {
-    // "Chosen per request" is true of a tier-down too. What an operator needs to
-    // see here is that a router picks between named models, and which one serves
-    // when it declines.
-    mockApi([policy("smart", LEARNED, { is_dynamic: true })])
+  it("summarizes an unknown router's policy by its pool under the neutral label", async () => {
+    // The gateway has no such backend, so the policy serves its default target;
+    // the row names the pool and that default rather than a router kind.
+    mockApi([policy("smart", UNKNOWN_ROUTER, { is_dynamic: true })])
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
     expect(
-      within(row).getByText(
-        /Learned . 2 candidates, gpt-5 · OpenAI by default/,
-      ),
+      within(row).getByText(/Routed . 2 candidates, gpt-5 · OpenAI by default/),
     ).toBeInTheDocument()
   })
 
@@ -367,9 +369,7 @@ describe("RoutingPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("names a router backend it does not know without claiming it learns", async () => {
-    // Only "knn" learns. Labelling every other backend "Learned" would make the table
-    // lie about the first backend added after this line was written.
+  it("names a router backend it does not know with the neutral label", async () => {
     mockApi([
       policy("future", {
         select: [
@@ -385,17 +385,13 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("future")).closest("tr")!
     expect(within(row).getByText("ROUTED")).toBeInTheDocument()
-    expect(within(row).queryByText("Learned")).not.toBeInTheDocument()
   })
 
-  it("does not offer the examples panel for a weighted policy, which learns nothing", async () => {
+  it("offers Edit for a weighted policy", async () => {
     mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })])
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(
-      within(row).queryByRole("button", { name: "Examples" }),
-    ).not.toBeInTheDocument()
     expect(
       within(row).getByRole("button", { name: "Edit" }),
     ).toBeInTheDocument()
@@ -444,11 +440,9 @@ describe("RoutingPage", () => {
   })
 
   it.each(["stored", "config"] as const)(
-    "shows an existing learned policy from %s without editing or examples",
+    "shows an unknown router's policy from %s read-only",
     async (source) => {
-      const { calls } = mockApi([
-        policy("smart", LEARNED, { is_dynamic: true, source }),
-      ])
+      mockApi([policy("smart", UNKNOWN_ROUTER, { is_dynamic: true, source })])
       renderPage(<RoutingPage />)
 
       const row = (await screen.findByText("smart")).closest("tr")!
@@ -458,12 +452,6 @@ describe("RoutingPage", () => {
       expect(
         within(row).queryByRole("button", { name: "Edit" }),
       ).not.toBeInTheDocument()
-      expect(
-        within(row).queryByRole("button", { name: "Examples" }),
-      ).not.toBeInTheDocument()
-      expect(calls.some((call) => call.url.includes("/routing/status"))).toBe(
-        false,
-      )
     },
   )
 
@@ -518,9 +506,6 @@ describe("RoutingPage", () => {
     ).not.toBeInTheDocument()
     expect(
       within(row).queryByRole("button", { name: "Delete" }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(row).queryByRole("button", { name: "Examples" }),
     ).not.toBeInTheDocument()
   })
 

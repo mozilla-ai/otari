@@ -779,9 +779,6 @@ treated this way:
   id drops that provider's candidates and falls over to the next one. A plain
   model is refused with a `403` and the `country_not_supported` code, and so
   is a plan with no candidate left, without the code.
-- A policy whose `knn` router embeds the prompt with a
-  `router_embedding_model` on such a provider does not embed it: the router
-  declines, and the policy serves its default target.
 - The call that describes an image for a text-only model is skipped, so the
   image falls back to OCR or is dropped, as when no `vision_describe_model` is
   set.
