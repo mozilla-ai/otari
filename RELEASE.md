@@ -225,7 +225,9 @@ SDK's release.
 
 The flow, end to end:
 
-1. A spec change regenerates the typed core and opens PRs in the SDK repos
+1. A published release, or a push to `main` that changes
+   `docs/public/openapi.json`, `scripts/sdk_codegen/**`, `openapitools.json` or
+   the workflow itself, regenerates the typed core and opens PRs in the SDK repos
    (`.github/workflows/otari-sdk-codegen.yml`; see
    [`scripts/sdk_codegen/README.md`](scripts/sdk_codegen/README.md#automation)).
 2. A maintainer reviews and merges the regeneration PR.

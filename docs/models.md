@@ -217,7 +217,8 @@ advertises a model that would be refused at inference. A dashboard session is
 answered the same way, from its membership: a caller who operates the deployment
 sees the whole catalog, and anyone else sees every `providers:` instance, which
 is deployment-wide, plus the models their own organization's provider keys
-reach, narrowed by any workspace model restriction. A deployment whose providers
+reach, plus the models a hosted provider serves where no workspace key of theirs
+supplies that provider, narrowed by any workspace model restriction. A deployment whose providers
 all come from `config.yml` therefore shows every tenant the same catalog it
 always did.
 

@@ -473,8 +473,9 @@ Otari builds every enabled definition when it starts. A built guardrail is a
 vendor client held in memory by each worker, so a request that needs one never
 waits for a vendor handshake and never builds anything itself.
 
-A definition it does not hold is one that is disabled, one that was deleted, or
-one that would not build. Nothing is built lazily: a request cannot tell those
+A definition it does not hold is one that is disabled, one that was deleted,
+one that would not build, or one this worker has not caught up with yet (its
+`build_state` is `pending`). Nothing is built lazily: a request cannot tell those
 three apart, and building while a request waits is what holding them ready
 avoids.
 

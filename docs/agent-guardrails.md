@@ -71,7 +71,8 @@ check that enforces it. A guardrail file names the intent under `policy.id` and
 lists its gates under `gates`.
 
 Each gate has an `enforcement`: a `required` gate blocks (the tool call is
-refused, or the turn does not end), and an `advisory` gate warns while the work
+refused, or the turn does not end, within the harness's limits listed under
+[Known gaps](#known-gaps)), and an `advisory` gate warns while the work
 continues. Each gate also has a `runs` list, which says at which moment it
 fires and what it can see there: before a tool call, or at the end of the turn.
 

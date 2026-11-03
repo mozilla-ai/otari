@@ -166,8 +166,8 @@ include every one of them.
 ## Instrumented agents
 
 An agent that exports OpenTelemetry spans to `/otlp/v1/traces` (see
-[Importing external usage](external-usage.md#opentelemetry)) has every span kept,
-while `trace_capture_enabled` is on, on the agent trace of the exporting key's
+[Importing external usage](external-usage.md#opentelemetry)) has its spans kept,
+while `trace_capture_enabled` is on and within the limits under [Settings](#settings), on the agent trace of the exporting key's
 user, including its own `invoke_agent` and `execute_tool` spans, with the span
 tree it sent. Its sessions are grouped by the OTLP attributes in
 [What makes a session](#what-makes-a-session). Span names and attribute values are kept only when they are

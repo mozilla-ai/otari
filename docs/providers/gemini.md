@@ -25,7 +25,7 @@ curl -X POST http://localhost:8000/api/v1/hosted-providers \
 ```
 
 Otari stores the key encrypted and offers every model Gemini lists on it; each
-model with a price is switched on, and one nothing prices arrives switched off.
+model with a price is switched on, and an unpriced model arrives switched off.
 To keep the provider in configuration instead, declare it under
 `hosted_providers:` in `config.yml` (see
 [Hosted providers in config.yml](../configuration.md#hosted-providers-in-configyml)).
@@ -78,7 +78,7 @@ Hello there, how are you?
 | Symptom | Likely cause |
 |---------|--------------|
 | HTTP 424 (code `provider_not_configured`) | Nothing serves the model: no Gemini provider is configured, it is switched off, or the model is not switched on under it. Switch the model on under Gemini on the Hosted providers page. |
-| HTTP 400 `API key not valid. Please pass a valid API key.` | Gemini rejected the key Otari sent. Replace the key on the Hosted providers page. |
+| HTTP 400 `API key not valid. Please pass a valid API key.` | Gemini rejected the key Otari sent. Replace it where the provider is configured: on the Hosted providers page, or in its `hosted_providers:` entry (or the variable that entry names, such as `GEMINI_API_KEY`) in `config.yml`. |
 | HTTP 404 `This model ... is no longer available to new users` | Google has retired that model for new keys. Use the model the message suggests. |
 | HTTP 429 `You exceeded your current quota` (code `upstream_rate_limited`) | Your key's quota for that model is used up or is zero, which is common for Pro models on the free tier. Wait, pick another model, or enable billing in Google AI Studio. |
 | HTTP 502 `The provider failed the request with HTTP 503` | Gemini is overloaded or failed on its side. These are retryable. |

@@ -57,7 +57,7 @@ A rule belongs to one API key and has an `issuer`, an `audience`, and a
 `subject`, an `email`, or both:
 
 - The issuer must be on `federation_issuers`.
-- The audience is any string you choose; the token's `aud` must equal it.
+- The audience is any string you choose; it must be one of the token's `aud` values.
 - A rule with only an issuer and an audience is refused, because anyone with a
   Google account can mint a token for any audience.
 - One identity cannot be given to two keys: a rule that shares a subject or an

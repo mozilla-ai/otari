@@ -24,7 +24,7 @@ curl -X POST http://localhost:8000/api/v1/hosted-providers \
 ```
 
 Otari stores the key encrypted and offers every model OpenAI lists on it; each
-model with a price is switched on, and one nothing prices arrives switched off.
+model with a price is switched on, and an unpriced model arrives switched off.
 To keep the provider in configuration instead, declare it under
 `hosted_providers:` in `config.yml` (see
 [Hosted providers in config.yml](../configuration.md#hosted-providers-in-configyml)).
@@ -89,7 +89,7 @@ Hello, nice to meet you!
 |---------|--------------|
 | HTTP 401 `Invalid master key` when adding the provider | You sent an API key (`tk-...`) or the wrong master key. `/api/v1/hosted-providers` takes the master key. |
 | HTTP 424 (code `provider_not_configured`) | Nothing serves the model: no OpenAI provider is configured, it is switched off, or the model is not switched on under it. Switch the model on under OpenAI on the Hosted providers page. |
-| HTTP 424 `The provider rejected the gateway's credentials` (code `provider_credential_rejected`) | OpenAI rejected the key Otari sent as invalid or lacking access. Replace the key on the Hosted providers page. |
+| HTTP 424 `The provider rejected the gateway's credentials` (code `provider_credential_rejected`) | OpenAI rejected the key Otari sent as invalid or lacking access. Replace it where the provider is configured: on the Hosted providers page, or in its `hosted_providers:` entry (or the variable that entry names, such as `OPENAI_API_KEY`) in `config.yml`. |
 | HTTP 404 with OpenAI's own "model not found" text | The name after `openai:` is misspelled or not a model your key can access; the detail carries OpenAI's message. `The requested model was not found on the provider` appears instead when OpenAI sent no message. |
 | HTTP 502 `The upstream provider account is out of credit or over its billing limit.` | The OpenAI account has no credit left or hit its billing hard limit. Top it up, or point the model at a provider that has credit. The usage log keeps the status OpenAI returned. |
 | HTTP 502 `The provider failed the request with HTTP 5xx`, `The provider closed the connection before answering`, or `The gateway could not connect to the provider` | OpenAI failed on its side or the connection broke. These are retryable. `LLM provider error` is the same answer for a failure Otari could not place. |
