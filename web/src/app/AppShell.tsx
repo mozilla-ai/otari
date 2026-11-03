@@ -795,11 +795,9 @@ function AppShellChrome() {
   const backgroundInert = isMobile && mobileNavOpen ? true : undefined
 
   return (
-    // `overflow-clip`, not `overflow-hidden`: hidden makes this a scroll
-    // container, and react-aria positions each control's real input absolutely
-    // against this box, so an input below the fold gives it a scroll range that
-    // focus then scrolls. It has no scrollbar and takes no wheel, so the whole
-    // shell stays off screen. Clip keeps the clipping without the scrolling.
+    // NOTE: This clips rather than hides. `overflow: hidden` makes a box a
+    // scroll container, and a control's real input is positioned against this
+    // box, so one past the fold gives it a scroll range that focus scrolls.
     <div className="relative flex h-full flex-col overflow-clip">
       {/* The first tab stop: a keyboard user can jump straight to the page body
           instead of tabbing through the whole nav on every route. Visually hidden

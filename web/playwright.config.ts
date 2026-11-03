@@ -151,6 +151,19 @@ export default defineConfig({
       dependencies: ["seed"],
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      // The models spec covers a scroll container that focus can scroll
+      // irrecoverably, and whether focus scrolls a given ancestor is engine
+      // behavior rather than layout, so one engine cannot speak for the others.
+      // It is the only behavioral spec that runs twice: it reads the page and
+      // writes nothing to the gateway, which is what makes a second pass over
+      // the same database safe, the same property the screenshot projects below
+      // rely on.
+      name: "parity-webkit",
+      testMatch: /parity\.models\.spec\.ts/,
+      dependencies: ["seed"],
+      use: { ...devices["Desktop Safari"] },
+    },
     ...screenshotProjects,
   ],
   webServer: [
