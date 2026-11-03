@@ -86,6 +86,7 @@ from gateway.services.inference import DeploymentCharge, admit_deployment_paid, 
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import resolve_tool_rate
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, DEFAULT_EXEC_TIMEOUT_S, SandboxBackend
+from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 from gateway.services.tools import CONTAINER_GONE_DETAIL_TEMPLATE, declare_code_execution, unpriced_tool_detail
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 from gateway.types.tool_charges import GATEWAY_TOOL_PRICING_PROVIDER, gateway_tool_pricing_key
@@ -349,22 +350,42 @@ async def execute_code(
             execution = backend.take_executions()[-1]
     except SandboxNotReachableError as exc:
         error = _sandbox_failure(exc, claimed)
-        await log_writer.put(usage_row(status="error", error_message=type(exc).__name__, status_code=error.status_code))
+        await log_writer.put(
+            usage_row(
+                status="error",
+                error_message=type(exc).__name__,
+                status_code=error.status_code,
+                billing_meters=_tool_meters(billed=0, errors=1),
+            )
+        )
         await refund_reservation(db, reservation)
         if isinstance(exc, SandboxSessionGoneError) and claimed is not None and containers is not None:
             try:
                 await containers.forget(claimed.container_id)
             except Exception:  # noqa: BLE001 - the next resume refuses it anyway
                 logger.warning("could not drop gone container %s", claimed.container_id, exc_info=True)
+        else:
+            # A session that never opened never reached the backend's exit, which is what gives a claim back.
+            await give_back_claim()
         logger.error("Direct code execution failed on %s: %s", port.label, exc)
         raise error from exc
     except BaseException:
         await refund_reservation(db, reservation)
+        await give_back_claim()
         raise
 
     assert execution.result is not None  # a call that returned produced a result block
     cost = quantize_cost(unit_rate)
-    await log_writer.put(usage_row(status="success", prompt_tokens=0, completion_tokens=0, total_tokens=0, cost=cost))
+    await log_writer.put(
+        usage_row(
+            status="success",
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            cost=cost,
+            billing_meters=_tool_meters(billed=1, errors=0, unit_rate=unit_rate if rate is not None else None),
+        )
+    )
     if funding is not None:
         await funding.settle(
             cost,
@@ -391,6 +412,14 @@ async def execute_code(
             for filename, file_id in execution.file_ids.items()
         ],
     )
+
+
+def _tool_meters(*, billed: int, errors: int, unit_rate: Decimal | None = None) -> dict[str, Any]:
+    """The run as the tool loop records its calls, so the usage views' tool filter and breakdown count it."""
+    meter: dict[str, float] = {"billed": billed, "errors": errors}
+    if unit_rate is not None:
+        meter["unit_rate"] = float(unit_rate)
+    return {TOOL_METER_NAMESPACE: {CODE_EXECUTION_TOOL_NAME: meter}}
 
 
 def _named_for_the_sandbox(staged: StagedFile, taken: list[StagedFile]) -> StagedFile:

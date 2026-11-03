@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.ports.code_execution_port import SandboxFileEntry, SandboxNotReachableError, SandboxSessionGoneError
 from gateway.services.code_execution import CONTAINER_ID_PREFIX
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
@@ -64,6 +64,8 @@ class _FakePort:
         self.executed: list[dict[str, Any]] = []
         self.gone: set[str] = set()
         self.unreachable = False
+        # The provider down before a session opens, as against one that fails a run.
+        self.unreachable_on_open = False
         self.result = CodeExecutionResult(stdout="2\n", stderr="", return_code=0)
         # What uploads were put in the working directory, what is in it, and what the next run writes there.
         self.seeded: dict[str, bytes] = {}
@@ -84,6 +86,8 @@ class _FakePort:
         self.opened.append({"image": image, "timeout_s": timeout_s, "resume": resume, "keep_alive_s": keep_alive_s})
         if resume is not None and resume in self.gone:
             raise SandboxSessionGoneError(f"{resume} is gone")
+        if self.unreachable_on_open:
+            raise SandboxNotReachableError("connect failed")
         yield _FakeSession(self, resume or f"sbx-{len(self.opened)}")
 
 
@@ -351,3 +355,83 @@ def test_empty_code_is_a_422(client: TestClient, api_key_header: dict[str, str])
     resp = client.post(_ENDPOINT, json={"code": ""}, headers=api_key_header)
 
     assert resp.status_code == 422, resp.text
+
+
+def test_a_resume_the_sandbox_cannot_take_gives_its_claim_back(
+    client: TestClient, port: _FakePort, api_key_header: dict[str, str]
+) -> None:
+    """A session that never opened leaves no claim behind, so the container is not busy once the provider is back."""
+    first = client.post(_ENDPOINT, json={"code": "x = 2", "container": "auto"}, headers=api_key_header)
+    container_id = first.headers["Otari-Container-Id"]
+    body = {"code": "print(x)", "container": container_id}
+
+    port.unreachable_on_open = True
+    down = client.post(_ENDPOINT, json=body, headers=api_key_header)
+    port.unreachable_on_open = False
+    back = client.post(_ENDPOINT, json=body, headers=api_key_header)
+
+    assert down.status_code == 502, down.text
+    assert back.status_code == 200, back.text
+    assert back.headers["Otari-Container-Id"] == container_id
+
+
+def test_runs_are_counted_by_the_usage_views_tool_filter_and_breakdown(
+    client: TestClient,
+    port: _FakePort,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    _price(client, master_key_header, 5000.0)
+    client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
+    port.unreachable = True
+    client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
+    user_id = api_key_obj["user_id"]
+
+    filtered = client.get(
+        f"{API_ROOT}/usage", params={"user_id": user_id, "tool": "code_execution"}, headers=master_key_header
+    )
+    summary = client.get(
+        f"{API_ROOT}/usage/summary", params={"dimensions": "tool", "user_id": user_id}, headers=master_key_header
+    )
+
+    assert filtered.status_code == 200, filtered.text
+    assert len(filtered.json()) == 2
+    assert summary.status_code == 200, summary.text
+    (row,) = summary.json()["by_tool"]
+    assert (row["tool"], row["calls"], row["errors"]) == ("code_execution", 1, 1)
+    assert row["cost"] == pytest.approx(0.005)
+
+
+def test_a_service_key_bills_the_end_user_it_names(
+    client: TestClient, port: _FakePort, master_key_header: dict[str, str]
+) -> None:
+    """``user`` on a service key's run names an end user, created with the key's end-user budget."""
+    budget = client.post(
+        f"{API_ROOT}/budgets", json={"request_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+    ).json()
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "code-service",
+            "user_id": "code-service",
+            "is_service_key": True,
+            "end_user_budget_id": budget["budget_id"],
+        },
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
+
+    first = client.post(_ENDPOINT, json={"code": "print(1)", "user": "fxa-123"}, headers=headers)
+    second = client.post(_ENDPOINT, json={"code": "print(1)", "user": "fxa-123"}, headers=headers)
+    other = client.post(_ENDPOINT, json={"code": "print(1)", "user": "fxa-456"}, headers=headers)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 403, second.text
+    assert other.status_code == 200, other.text
+    users = client.get(f"{API_ROOT}/users", params={"parent_user_id": "code-service"}, headers=master_key_header).json()
+    end_user = next(user for user in users if user["external_id"] == "fxa-123")
+    assert end_user["budget_id"] == budget["budget_id"]
+    (row,) = _rows(client, master_key_header, end_user["user_id"])
+    assert row["status"] == "success"
+    assert _rows(client, master_key_header, "code-service") == [], "the key's owner is billed for nothing"
