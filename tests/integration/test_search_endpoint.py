@@ -698,7 +698,7 @@ def test_an_unrelated_edit_resends_a_tool_list_naming_a_deleted_tool(
 def test_a_tool_list_names_a_configured_tool(client: TestClient, master_key_header: dict[str, str]) -> None:
     unknown = _key_with(client, master_key_header, {"user_id": "typo-user"}, allowed_tools=["fake-serch"])
     assert unknown.status_code == 400
-    assert "'fake-serch' is not a search tool" in unknown.json()["detail"]
+    assert "'fake-serch' is not a search or fetch tool" in unknown.json()["detail"]
     user = client.post(
         f"{API_ROOT}/users", json={"user_id": "typo-default", "allowed_tools": ["nope"]}, headers=master_key_header
     )

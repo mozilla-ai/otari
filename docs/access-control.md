@@ -144,20 +144,21 @@ A user's `allowed_models` is inherited by newly created keys unless the key
 defines its own list. A missing list allows any model, an empty list allows none,
 and entries may use provider wildcards such as `openai:*`.
 
-Search tools have a list of their own, `allowed_tools`, which governs
-`POST /api/v1/search`; the in-loop `otari_web_search` tool, which runs on the same
-search tools, does not read it. Its entries are search tool names, as `search_tools` or the
-dashboard names them, or `*` for every search tool, and no wildcard in
-`allowed_models` reaches a tool: a search provider can share its name with a model
-provider, as DeepSeek does, and `deepseek:*` is for DeepSeek's models. A key's own
-`allowed_tools` wins over its user's, and a key may narrow its user's list but never
-broaden it. An empty list allows no tool.
+Search and fetch tools have a list of their own, `allowed_tools`, which governs
+`POST /api/v1/search` and `POST /api/v1/fetch`; the in-loop `otari_web_search` and
+`otari_web_fetch` tools, which run on the same tools, do not read it. Its entries
+are search or fetch tool names, as `search_tools`, `fetch_tools` or the dashboard
+names them, `builtin_fetch` for the gateway's own fetcher, or `*` for every tool,
+and no wildcard in `allowed_models` reaches a tool: a search provider can share
+its name with a model provider, as DeepSeek does, and `deepseek:*` is for
+DeepSeek's models. A key's own `allowed_tools` wins over its user's, and a key may
+narrow its user's list but never broaden it. An empty list allows no tool.
 
 With no `allowed_tools` on the key or its user, the search tools are read off the
-model list as before: a key unrestricted for models may run any search tool, and a
-key restricted for models may run only the tools its `allowed_models` names whole
-as `<provider>:<tool>`, such as `exa:exa-search`, and that its user's model list
-grants too. That form is deprecated: startup counts the keys and users that still
+model list as before: a key unrestricted for models may run any search or fetch
+tool, and a key restricted for models may run only the search tools its
+`allowed_models` names whole as `<provider>:<tool>`, such as `exa:exa-search`,
+and that its user's model list grants too; no model list grants a fetch tool. That form is deprecated: startup counts the keys and users that still
 rely on it, names the tools some reached only through a wildcard, which no longer
 grants them, and a later release removes it. A model list no longer takes a
 wildcard or another name under a provider that serves only search tools, such as
