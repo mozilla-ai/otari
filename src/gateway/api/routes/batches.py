@@ -66,6 +66,7 @@ from gateway.services.budgets import (
 from gateway.services.inference import (
     DeploymentCharge,
     admit_deployment_paid,
+    billed_model,
     describe_port_error,
     is_provider_credential_rejection,
     is_upstream_request_fault,
@@ -553,6 +554,7 @@ async def create_batch(
                 billing_port_on(raw_request, db),
                 deployment_paid=True,
                 organization_id=organization_id,
+                billed=billed_model(served.provider, served.model),
                 api_key_id=api_key_id,
                 user_id=user_id,
                 request_id=None,
@@ -1044,6 +1046,7 @@ async def retrieve_batch_results(
                 api_key_id=record.api_key_id if record is not None else api_key_id,
                 actor_user_id=None,
                 request_id=None,
+                billed=billed_model(provider_enum, batch_model),
             )
             await charge.settle(
                 cost,

@@ -40,7 +40,7 @@ from gateway.container import build_container
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, PROVIDER_NOT_CONFIGURED
 from gateway.log_config import logger as gateway_logger
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import BilledModel, BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import (
     NO_ORGANIZATION,
     HostedAccessDeniedError,
@@ -795,12 +795,14 @@ class RecordingBilling:
         self.refuse = refuse
         self.charge_error = charge_error
         self.calls: list[tuple[Any, ...]] = []
+        self.billed: list[BilledModel | None] = []
 
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
         self.calls.append(("apply_due_credit", organization_id))
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
+    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID, billed: BilledModel | None) -> None:
         self.calls.append(("require_funds_on_deposit", organization_id))
+        self.billed.append(billed)
         if self.refuse is not None:
             raise self.refuse
 
@@ -818,11 +820,13 @@ class RecordingBilling:
         *,
         organization_id: uuid.UUID,
         amount: Decimal,
+        billed: BilledModel | None,
         description: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         api_key_id: str | None = None,
     ) -> None:
         self.calls.append(("charge", organization_id, amount, description, actor_user_id, api_key_id))
+        self.billed.append(billed)
         if self.charge_error is not None:
             raise self.charge_error
 
@@ -860,6 +864,10 @@ async def test_a_hosted_credential_is_gated_on_funds_and_armed_for_a_charge() ->
     assert ctx.deployment_charge is not None
     assert ctx.deployment_charge.organization_id == ORGANIZATION_ID
     assert ctx.deployment_charge.billing is billing
+    # The gate and the charge both learn the model the request is served on.
+    served = BilledModel(provider="openai", model="gpt-4o", open_weights=False)
+    assert billing.billed == [served]
+    assert ctx.deployment_charge.billed == served
 
 
 @pytest.mark.asyncio
@@ -999,6 +1007,7 @@ def _charge(billing: RecordingBilling) -> DeploymentCharge:
         api_key_id="key-1",
         actor_user_id=WORKSPACE_ID,
         request_id="req-1",
+        billed=None,
     )
 
 

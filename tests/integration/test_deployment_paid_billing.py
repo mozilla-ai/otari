@@ -49,6 +49,7 @@ from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
+from gateway.ports.billing_port import BilledModel
 
 from .conftest import build_test_client
 
@@ -61,6 +62,7 @@ from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedCredential, ModelProviderPort
 
 GATES = []  # Every gate call, landed or not.
+BILLED = []  # The model each gate and charge was told it pays for.
 LEDGER = []  # What landed: a session's entries move here when it commits.
 PENDING = {}  # Entries written on a session, by its id, until it commits, rolls back or closes.
 SESSIONS = []
@@ -89,8 +91,9 @@ class ProbeBilling:
     async def apply_due_credit(self, *, organization_id):
         GATES.append(("apply_due_credit", str(organization_id)))
 
-    async def require_funds_on_deposit(self, *, organization_id):
+    async def require_funds_on_deposit(self, *, organization_id, billed):
         GATES.append(("require_funds_on_deposit", str(organization_id)))
+        BILLED.append(("gate", billed))
         if "funds" in FAULTS:
             raise RuntimeError("billing down")
         if FUNDS["available"] <= 0:
@@ -105,9 +108,10 @@ class ProbeBilling:
     async def release_hold(self, *, organization_id, amount):
         raise AssertionError("no holds on the completion path")
 
-    async def charge(self, *, organization_id, amount, description=None, actor_user_id=None, api_key_id=None):
+    async def charge(self, *, organization_id, amount, billed, description=None, actor_user_id=None, api_key_id=None):
         if "charge" in FAULTS:
             raise RuntimeError("ledger down")
+        BILLED.append(("charge", billed))
         entry = ("charge", str(organization_id), amount, description, api_key_id)
         PENDING.setdefault(id(self.session), []).append(entry)
 
@@ -325,6 +329,8 @@ def test_a_deployment_paid_completion_is_gated_then_charged_its_settled_cost(
     assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
     # Landed with the settlement's commit, once, on the organization that was gated.
     assert probe.LEDGER == [("charge", organization, COST, "openai:gpt-4o", key["id"])]
+    served = BilledModel(provider="openai", model="gpt-4o", open_weights=False)
+    assert probe.BILLED == [("gate", served), ("charge", served)]
     user = _user(client)
     assert user["spend"] == pytest.approx(float(COST))
     assert user["reserved"] == pytest.approx(0.0)
@@ -696,6 +702,8 @@ def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_i
     assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [
         ("charge", Decimal("0.007"), "fake:fake-search")
     ]
+    # A search is no model's call, so nothing funded per model may pay for it.
+    assert probe.BILLED == [("gate", None), ("charge", None)]
     user = _user(client)
     assert user["spend"] == pytest.approx(0.007)
     assert user["reserved"] == pytest.approx(0.0)

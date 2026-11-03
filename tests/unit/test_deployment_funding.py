@@ -13,13 +13,17 @@ from decimal import Decimal
 from typing import Any, cast
 
 import pytest
+from any_llm import LLMProvider
 
 from gateway.log_config import logger as gateway_logger
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
-from gateway.services.inference import DeploymentCharge, admit_deployment_paid
+from gateway.ports.billing_port import BilledModel, BillingPort, InsufficientFundsError
+from gateway.services import model_catalog_service
+from gateway.services.inference import DeploymentCharge, admit_deployment_paid, billed_model
+from gateway.types.models_dev import parse_catalog
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 IDENTITY_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
+BILLED = BilledModel(provider="openai", model="gpt-4o", open_weights=False)
 
 
 class _Billing:
@@ -30,8 +34,8 @@ class _Billing:
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
         self.calls.append(("apply_due_credit", organization_id))
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
-        self.calls.append(("require_funds_on_deposit", organization_id))
+    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID, billed: BilledModel | None) -> None:
+        self.calls.append(("require_funds_on_deposit", organization_id, billed))
         if self.refuse:
             raise InsufficientFundsError(Decimal(0))
 
@@ -55,6 +59,7 @@ async def _admit(billing: _Billing, user_id: str | None = str(IDENTITY_ID)) -> D
         cast(BillingPort, billing),
         deployment_paid=True,
         organization_id=ORGANIZATION_ID,
+        billed=BILLED,
         api_key_id="key-1",
         user_id=user_id,
         request_id="req-1",
@@ -67,12 +72,16 @@ async def _admit(billing: _Billing, user_id: str | None = str(IDENTITY_ID)) -> D
 async def test_admission_grants_credit_then_checks_funds() -> None:
     billing = _Billing()
     charge = await _admit(billing)
-    assert billing.calls == [("apply_due_credit", ORGANIZATION_ID), ("require_funds_on_deposit", ORGANIZATION_ID)]
-    assert (charge.organization_id, charge.api_key_id, charge.actor_user_id, charge.request_id) == (
+    assert billing.calls == [
+        ("apply_due_credit", ORGANIZATION_ID),
+        ("require_funds_on_deposit", ORGANIZATION_ID, BILLED),
+    ]
+    assert (charge.organization_id, charge.api_key_id, charge.actor_user_id, charge.request_id, charge.billed) == (
         ORGANIZATION_ID,
         "key-1",
         IDENTITY_ID,
         "req-1",
+        BILLED,
     )
 
 
@@ -120,6 +129,7 @@ async def test_a_charge_is_attributed_to_the_request() -> None:
         {
             "organization_id": ORGANIZATION_ID,
             "amount": Decimal("0.25"),
+            "billed": BILLED,
             "description": "openai:gpt-4o",
             "actor_user_id": IDENTITY_ID,
             "api_key_id": "key-1",
@@ -137,6 +147,7 @@ async def test_a_request_the_deployment_does_not_pay_for_is_admitted_with_nothin
         cast(BillingPort, billing),
         deployment_paid=deployment_paid,
         organization_id=organization_id,
+        billed=BILLED,
         api_key_id="key-1",
         user_id=None,
         request_id="req-1",
@@ -203,3 +214,54 @@ async def test_a_failed_charge_is_rolled_back_and_logged_without_its_text(
     assert "RuntimeError" in message
     assert "secret row data" not in message
     assert record.exc_info is None
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_tools_admission_bills_no_model() -> None:
+    billing = _Billing()
+    charge = await admit_deployment_paid(
+        cast(BillingPort, billing),
+        deployment_paid=True,
+        organization_id=ORGANIZATION_ID,
+        billed=None,
+        api_key_id="key-1",
+        user_id=None,
+        request_id="req-1",
+    )
+    assert charge is not None
+    assert charge.billed is None
+    await charge.charge(Decimal("0.01"), description="otari_web_search")
+    assert billing.calls[1] == ("require_funds_on_deposit", ORGANIZATION_ID, None)
+    assert billing.calls[-1][1]["billed"] is None
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "open_weights"),
+    [
+        ("groq", "openai/gpt-oss-120b", True),
+        (LLMProvider.GROQ, "openai/gpt-oss-120b", True),
+        ("openai", "gpt-4o", False),
+        ("openai", "a-model-no-catalog-lists", False),
+        ("mistral", "a-provider-no-catalog-lists", False),
+    ],
+)
+def test_a_model_is_open_weight_only_where_the_catalog_says_so(
+    provider: str | LLMProvider, model: str, open_weights: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = parse_catalog(
+        {
+            "groq": {
+                "id": "groq",
+                "models": {"openai/gpt-oss-120b": {"id": "openai/gpt-oss-120b", "open_weights": True}},
+            },
+            "openai": {"id": "openai", "models": {"gpt-4o": {"id": "gpt-4o", "open_weights": False}}},
+        }
+    )
+    monkeypatch.setattr(model_catalog_service, "_fallback", lambda: catalog)
+    assert billed_model(provider, model) == BilledModel(
+        provider=LLMProvider(provider).value, model=model, open_weights=open_weights
+    )
+
+
+def test_with_no_catalog_no_model_is_open_weight() -> None:
+    assert billed_model("groq", "openai/gpt-oss-120b").open_weights is False

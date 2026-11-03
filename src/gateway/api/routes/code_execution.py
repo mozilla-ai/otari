@@ -278,6 +278,7 @@ async def execute_code(
         funding = await admit_deployment_paid(
             billing,
             deployment_paid=True,
+            billed=None,
             organization_id=organization_id,
             api_key_id=api_key_id,
             user_id=user_id,

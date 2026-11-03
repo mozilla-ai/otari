@@ -24,8 +24,24 @@ cannot be confused at a call site.
 """
 
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
+
+
+@dataclass(frozen=True)
+class BilledModel:
+    """The model a deployment-paid call is served on, so an adapter can fund models differently.
+
+    ``open_weights`` is the model catalog's answer, and ``False`` where the
+    catalog does not know the model.
+    """
+
+    provider: str
+    """The any-llm implementation serving the call, by its wire name."""
+    model: str
+    """The model as that provider names it."""
+    open_weights: bool
 
 
 class InsufficientFundsError(Exception):
@@ -60,14 +76,17 @@ class BillingPort(Protocol):
         """
         ...
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
-        """Refuse unless the organization has funds paid in.
+    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID, billed: BilledModel | None) -> None:
+        """Refuse unless the organization has funds paid in that can pay for ``billed``.
 
         Counts what the organization has paid in and disregards holds, so it
         answers "may this organization be served at all", a question about the
         account rather than about what is currently in flight. It claims
         nothing: two callers can pass this gate on the same funds, and
         :meth:`hold` is what settles between them.
+
+        ``billed`` is the model the call is served on, or ``None`` for a call
+        that is not a model's, such as a gateway tool.
 
         Raises:
             InsufficientFundsError: If the organization has no funds paid in.
@@ -119,17 +138,20 @@ class BillingPort(Protocol):
         *,
         organization_id: uuid.UUID,
         amount: Decimal,
+        billed: BilledModel | None,
         description: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         api_key_id: str | None = None,
     ) -> None:
-        """Charge ``amount`` for a request already served.
+        """Charge ``amount`` for a request already served on ``billed``.
 
         Records the charge even when the organization cannot cover it: the
         deployment has already paid for that request upstream, so dropping the
         charge would give the compute away. What is charged is bounded by the
         hold taken beforehand, and the gates above refuse the next request.
 
+        ``billed`` is the model the request was served on, or ``None`` for a
+        charge that is not a model's, as at :meth:`require_funds_on_deposit`.
         ``description``, ``actor_user_id`` and ``api_key_id`` attribute the
         charge, so an adapter that keeps a ledger can trace it back to the
         request that incurred it.

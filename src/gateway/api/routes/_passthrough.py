@@ -117,6 +117,7 @@ from gateway.services.inference import (
     ReportedUsage,
     UnknownDecisionProviderError,
     admit_deployment_paid,
+    billed_model,
     decision_body,
     describe_port_error,
     reported_charge,
@@ -463,6 +464,7 @@ async def run_passthrough(
                 billing_port_on(raw_request, db),
                 deployment_paid=True,
                 organization_id=organization_id,
+                billed=billed_model(served.provider, served.model),
                 api_key_id=api_key_id,
                 user_id=user_id,
                 request_id=request_id,
@@ -1353,6 +1355,8 @@ async def run_decision(
                 await billing.charge(
                     organization_id=funding.organization_id,
                     amount=cost,
+                    # A decision is priced by the service that answers it, not by a model's rates.
+                    billed=None,
                     description=f"{provider_name}:{model}",
                     api_key_id=api_key_id,
                 )

@@ -25,6 +25,7 @@ from gateway.services.inference._decisions import (
 from gateway.services.inference._deployment_funding import (
     DeploymentCharge,
     admit_deployment_paid,
+    billed_model,
     describe_port_error,
 )
 from gateway.services.inference._idempotency import (
@@ -111,6 +112,7 @@ from gateway.services.inference._upstream_user import (
 __all__ = [
     "CONVERSATION_CACHE_KEY_FIELD",
     "admit_deployment_paid",
+    "billed_model",
     "describe_port_error",
     "EMBEDDINGS_BILLING",
     "IMAGES_BILLING",

@@ -11,11 +11,16 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.log_config import logger
-from gateway.ports.billing_port import BillingPort
+from gateway.ports.billing_port import BilledModel, BillingPort
+from gateway.services.model_catalog_service import cached_models_dev_catalog
+from gateway.services.provider_kwargs import provider_key
+
+if TYPE_CHECKING:
+    from any_llm import LLMProvider
 
 
 def _actor_user_id(user_id: str | None) -> uuid.UUID | None:
@@ -32,6 +37,19 @@ def _actor_user_id(user_id: str | None) -> uuid.UUID | None:
         return None
 
 
+def billed_model(provider: "str | LLMProvider", model: str) -> BilledModel:
+    """The model a deployment-paid call on ``provider`` is billed as, with the catalog's open-weights answer.
+
+    Read from the catalog the worker already holds, so it costs no I/O. A model
+    the catalog does not list is not open-weight, which keeps an unknown model
+    off anything an adapter funds for open-weight models only.
+    """
+    wire_name = provider_key(provider)
+    catalog = cached_models_dev_catalog()
+    listed = catalog.model_for(wire_name, model) if catalog is not None else None
+    return BilledModel(provider=wire_name, model=model, open_weights=listed is not None and listed.open_weights)
+
+
 @dataclass(frozen=True)
 class DeploymentCharge:
     """Who an admitted deployment-paid request is charged to, and the port that charges them.
@@ -45,6 +63,8 @@ class DeploymentCharge:
     api_key_id: str | None
     actor_user_id: uuid.UUID | None
     request_id: str | None
+    billed: BilledModel | None
+    """The model the request is served on, or ``None`` for a gateway tool's call."""
 
     def amount_due(self, cost: Decimal | None, *, model: str, expects_cost: bool) -> Decimal | None:
         """What a settled ``cost`` owes, or ``None`` when nothing is charged.
@@ -72,6 +92,7 @@ class DeploymentCharge:
         await self.billing.charge(
             organization_id=self.organization_id,
             amount=amount,
+            billed=self.billed,
             description=description,
             actor_user_id=self.actor_user_id,
             api_key_id=self.api_key_id,
@@ -122,6 +143,7 @@ async def admit_deployment_paid(
     *,
     deployment_paid: bool,
     organization_id: uuid.UUID | None,
+    billed: BilledModel | None,
     api_key_id: str | None,
     user_id: str | None,
     request_id: str | None,
@@ -130,7 +152,9 @@ async def admit_deployment_paid(
 
     Only a deployment-paid request with an organization is gated and charged; any
     other request is admitted with nothing to charge (``None``). A gated one is
-    granted any credit its organization is owed, then refused with nothing paid in.
+    granted any credit its organization is owed, then refused with nothing paid in
+    that can pay for ``billed``, the model it is served on (``None`` for a gateway
+    tool's call).
 
     Raises:
         InsufficientFundsError: If the organization has no funds paid in.
@@ -139,11 +163,12 @@ async def admit_deployment_paid(
     if not deployment_paid or organization_id is None:
         return None
     await billing.apply_due_credit(organization_id=organization_id)
-    await billing.require_funds_on_deposit(organization_id=organization_id)
+    await billing.require_funds_on_deposit(organization_id=organization_id, billed=billed)
     return DeploymentCharge(
         billing=billing,
         organization_id=organization_id,
         api_key_id=api_key_id,
         actor_user_id=_actor_user_id(user_id),
         request_id=request_id,
+        billed=billed,
     )
