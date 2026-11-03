@@ -128,11 +128,13 @@ describe("WorkspaceMembersPage", () => {
       context: organizationContext({ role: "member" }),
       orgMembers: [
         organizationMember({
+          organization_member_id: "alex-membership",
           user_id: USER,
           full_name: "Alex Avery",
           email: "alex@example.com",
         }),
         organizationMember({
+          organization_member_id: "blair-membership",
           user_id: SECOND_USER,
           full_name: "Blair Bell",
           email: "blair@example.com",
@@ -187,7 +189,8 @@ describe("WorkspaceMembersPage", () => {
     expect(
       await screen.findByRole("searchbox", { name: "Search members" }),
     ).toHaveValue("alex")
-    expect(screen.queryByText(/\bmatch(es)?\b/)).toBeNull()
+    // A count, not the panel's own "no members match" line, which can be up.
+    expect(screen.queryByText(/^\d+ match(es)?$/)).toBeNull()
 
     release()
     expect(await screen.findByText("1 match")).toBeInTheDocument()
@@ -198,11 +201,16 @@ describe("WorkspaceMembersPage", () => {
       context: organizationContext({ role: "member" }),
       orgMembers: [
         organizationMember({
+          organization_member_id: "alex-membership",
           user_id: USER,
           full_name: "Alex Avery",
           email: "alex@example.com",
         }),
-        organizationMember({ user_id: SECOND_USER, full_name: "Blair Bell" }),
+        organizationMember({
+          organization_member_id: "blair-membership",
+          user_id: SECOND_USER,
+          full_name: "Blair Bell",
+        }),
       ],
     })
     const user = userEvent.setup()
