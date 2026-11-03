@@ -2,8 +2,8 @@ import { expect, type Page, test } from "@playwright/test"
 
 import { gotoRoute, login, pageHeading } from "./helpers"
 
-// Read-only, and the suite runs one worker against one gateway either way (see
-// web/playwright.config.ts).
+// Read-only, which is what lets this file run in two engine projects over one
+// gateway (see web/playwright.config.ts).
 test.describe.configure({ mode: "serial" })
 
 /** Open every collapsed group, so the rail is taller than the viewport. */
@@ -24,7 +24,9 @@ async function openEveryFilterGroup(page: Page): Promise<void> {
 test.describe("models catalog filter rail", () => {
   // The rail runs past the fold once its groups are open, so a control low in
   // it is reached by scrolling the page. These cover what reaching it must not
-  // do to the shell around it.
+  // do to the shell around it. Whether focus scrolls a clipped ancestor is
+  // engine behavior rather than layout, so this file runs in Chrome and in
+  // WebKit.
 
   test("the shell's outer box cannot be scrolled", async ({ page }) => {
     await login(page)

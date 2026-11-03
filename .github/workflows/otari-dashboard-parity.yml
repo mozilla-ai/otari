@@ -79,9 +79,12 @@ jobs:
       working-directory: web
       run: pnpm install --frozen-lockfile
 
-    - name: Install Playwright Chromium
+    # Two engines: the models spec runs in WebKit as well, because whether focus
+    # scrolls a clipped ancestor is engine behavior (see the `parity-webkit`
+    # project in web/playwright.config.ts).
+    - name: Install Playwright browsers
       working-directory: web
-      run: pnpm exec playwright install --with-deps chromium
+      run: pnpm exec playwright install --with-deps chromium webkit
 
     # `pnpm run e2e` builds the bundle first (see web/package.json), so a local run
     # and CI serve the same freshly built dashboard. It names every project it
