@@ -143,7 +143,7 @@ class PriorityRouterBackend:
 # (policy, backend name) pairs already warned about. Unbounded in principle,
 # bounded in practice: the pairs come from policy documents, so the set is the
 # size of the config rather than of the traffic.
-_warned_missing: set[tuple[str, str]] = set()
+_warned_missing: set[tuple[uuid.UUID | None, str, str]] = set()
 
 
 def clear_router_backend_cache() -> None:
@@ -171,15 +171,16 @@ def backend_is_priority(name: str | None) -> bool:
     return name is not None and name.strip().lower() == PRIORITY_BACKEND
 
 
-def owes_missing_backend_warning(policy_name: str, name: str) -> bool:
-    """Whether this ``(policy, backend)`` pair still owes its one warning.
+def owes_missing_backend_warning(workspace_id: uuid.UUID | None, policy_name: str, name: str) -> bool:
+    """Whether this policy and backend still owe their one warning.
 
     A policy naming a backend this build does not have is a misconfiguration worth
     saying once. Once, because the condition is static config and the policy
     compiles on every request through it: an unconditional warning would be one log
-    line per request forever, which buries the real ones.
+    line per request forever, which buries the real ones. Keyed by workspace too,
+    since two workspaces may each store a policy of one name.
     """
-    key = (policy_name, name)
+    key = (workspace_id, policy_name, name)
     if key in _warned_missing:
         return False
     _warned_missing.add(key)

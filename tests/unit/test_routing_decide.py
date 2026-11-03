@@ -9,6 +9,7 @@ exist, or asking at all when the caller said not to.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable, Iterator
 
 import pytest
@@ -233,6 +234,25 @@ async def test_a_policy_naming_the_removed_knn_router_serves_its_default(
     assert len(warnings) == 1
     assert "'knn'" in warnings[0]
     assert "knn," not in warnings[0].split("Available backends:")[1]
+
+
+@pytest.mark.asyncio
+async def test_same_named_policies_in_two_workspaces_each_warn_once(
+    config: GatewayConfig, router_warnings: Callable[[], list[str]]
+) -> None:
+    retired = _spec(backend="knn")
+    for workspace_id in (uuid.uuid4(), uuid.uuid4()):
+        for _ in range(2):
+            await decide_ordering(
+                config,
+                retired,
+                policy_name="smart",
+                user_id="u",
+                allowlist=None,
+                signal=_signal(),
+                workspace_id=workspace_id,
+            )
+    assert len(router_warnings()) == 2
 
 
 # -- the decision layer ----------------------------------------------------

@@ -90,6 +90,9 @@ describe("PolicyDetailPage", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "fast" }),
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("radio", { name: "Smart router" }),
+    ).not.toBeInTheDocument()
     for (const title of [
       "Name",
       "Main selection",

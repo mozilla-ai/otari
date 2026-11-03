@@ -254,7 +254,8 @@ def test_reusing_a_key_with_different_tool_headers_is_refused(
     assert provider.await_count == 1
 
 
-@pytest.mark.parametrize("header", [CONVERSATION_HEADER])
+# The Otari-Router-Task case pins that slot in the fingerprint, which no feature reads.
+@pytest.mark.parametrize("header", ["Otari-Router-Task", CONVERSATION_HEADER])
 def test_reusing_a_key_with_different_routing_headers_is_refused(
     client: TestClient, master_key_header: dict[str, str], user: None, header: str
 ) -> None:

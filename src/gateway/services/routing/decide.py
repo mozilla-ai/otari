@@ -104,7 +104,7 @@ async def decide_ordering(
         # a log line. Warned here rather than in the compiler because the compiler
         # also runs where there is no request at all (`explain`, the CLI), and
         # warning there reported a problem that did not exist.
-        if owes_missing_backend_warning(policy_name, backend_name):
+        if owes_missing_backend_warning(workspace_id, policy_name, backend_name):
             logger.warning(
                 "Routing policy '%s' names router backend '%s', which this build does not have, so the "
                 "policy serves '%s' on every request. Available backends: %s. Logged once per policy per "
