@@ -82,8 +82,10 @@ async def test_max_results_sets_num_and_cuts_the_hits() -> None:
 
 @pytest.mark.asyncio
 async def test_max_results_is_capped_at_one_page() -> None:
-    _, request = await _search(max_results=50)
+    answer = httpx.Response(200, json={"results": [_item(str(i)) for i in range(MAX_RESULTS + 1)]})
+    result, request = await _search(answer, max_results=50)
     assert _params(request)["num"] == str(MAX_RESULTS)
+    assert len(result.hits) == MAX_RESULTS
 
 
 @pytest.mark.asyncio
