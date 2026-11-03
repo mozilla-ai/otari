@@ -6,13 +6,12 @@ from typing import Any
 import httpx
 import pytest
 
-from any_search import ProviderError
+from any_search import ProviderError, __version__
 from any_search._http import USER_AGENT, ProviderHttp
-from any_search._version import __version__
 
 SENTINEL_URL = "https://api.example/search?q=sentinel-query&key=sentinel-key"
 TIMEOUT = {"connect": 7.5, "read": 7.5, "write": 7.5, "pool": 7.5}
-# RFC 9110's product token, which the version setuptools-scm writes (``0.36.1.dev9+g39a2ae847``) must fit.
+# RFC 9110's product token, which the version must fit, a pre-release suffix included.
 PRODUCT_TOKEN = re.compile(r"^any-search/[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
 

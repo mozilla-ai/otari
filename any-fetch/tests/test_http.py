@@ -6,13 +6,12 @@ from typing import Any
 import httpx
 import pytest
 
-from any_fetch import ProviderError
+from any_fetch import ProviderError, __version__
 from any_fetch._http import USER_AGENT, ProviderHttp
-from any_fetch._version import __version__
 
 SENTINEL_URL = "https://api.example/contents?url=sentinel-url&key=sentinel-key"
 TIMEOUT = {"connect": 7.5, "read": 7.5, "write": 7.5, "pool": 7.5}
-# RFC 9110's product token, which the version setuptools-scm writes (``0.36.1.dev9+g39a2ae847``) must fit.
+# RFC 9110's product token, which the version must fit, a pre-release suffix included.
 PRODUCT_TOKEN = re.compile(r"^any-fetch/[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
 
