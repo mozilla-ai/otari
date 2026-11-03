@@ -1251,10 +1251,10 @@ export interface paths {
         };
         /**
          * List End User Budgets
-         * @description List the budgets the calling service key may put its end users on, with how many end users each holds.
+         * @description List the budgets the calling service key may put its end users on, with their limits and end user counts.
          *
-         *     Requires a service key. The counts cover the end users of the key's user, blocked ones included and deleted
-         *     ones not.
+         *     Requires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The
+         *     counts cover the end users of the key's user, blocked ones included and deleted ones not.
          */
         get: operations["end-users-list_end_user_budgets"];
         put?: never;
@@ -10939,6 +10939,8 @@ export interface components {
         EndUserBudgetPublic: {
             /** Blocked End User Count */
             blocked_end_user_count: number;
+            /** Budget Duration Sec */
+            budget_duration_sec?: number | null;
             /** Budget Id */
             budget_id: string;
             /**
@@ -10951,6 +10953,23 @@ export interface components {
              * @description Whether a new end user starts here when its request names no budget
              */
             is_default: boolean;
+            /**
+             * Max Budget
+             * @description Dollars each end user may spend over the period
+             */
+            max_budget?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Request Limit */
+            request_limit?: number | null;
+            /** Reset Alignment */
+            reset_alignment?: string | null;
+            /** Rpm Limit */
+            rpm_limit?: number | null;
+            /** Token Limit */
+            token_limit?: number | null;
+            /** Tpm Limit */
+            tpm_limit?: number | null;
         };
         /**
          * EndUserPublic

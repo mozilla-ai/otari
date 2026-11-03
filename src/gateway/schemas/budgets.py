@@ -239,9 +239,49 @@ class EndUserBudgetPublic(BaseModel):
     """A budget a service key may put its end users on, and how many of them are on it."""
 
     budget_id: str
+    name: str | None = None
+    max_budget: float | None = Field(default=None, description="Dollars each end user may spend over the period")
+    token_limit: int | None = None
+    request_limit: int | None = None
+    rpm_limit: int | None = None
+    tpm_limit: int | None = None
+    budget_duration_sec: int | None = None
+    reset_alignment: str | None = None
     is_default: bool = Field(description="Whether a new end user starts here when its request names no budget")
     end_user_count: int = Field(description="End users of the key's user on this budget, blocked ones included")
     blocked_end_user_count: int
+
+    @classmethod
+    def from_model(
+        cls,
+        budget_id: str,
+        budget: Budget | None,
+        *,
+        is_default: bool,
+        end_user_count: int,
+        blocked_end_user_count: int,
+    ) -> EndUserBudgetPublic:
+        """The entry for ``budget_id``, with no name or limits when the budget was deleted after the key was read."""
+        entry = cls(
+            budget_id=budget_id,
+            is_default=is_default,
+            end_user_count=end_user_count,
+            blocked_end_user_count=blocked_end_user_count,
+        )
+        if budget is None:
+            return entry
+        return entry.model_copy(
+            update={
+                "name": budget.name,
+                "max_budget": as_float(budget.max_budget),
+                "token_limit": budget.token_limit,
+                "request_limit": budget.request_limit,
+                "rpm_limit": budget.rpm_limit,
+                "tpm_limit": budget.tpm_limit,
+                "budget_duration_sec": budget.budget_duration_sec,
+                "reset_alignment": budget.reset_alignment,
+            }
+        )
 
 
 class BudgetResetLogResponse(BaseModel):
