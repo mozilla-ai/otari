@@ -2,10 +2,11 @@
 
 A cached rate is only safe if a write in this process is seen at once, so every
 way the gateway writes a price (an added row, a changed one, a bulk delete) is
-shown clearing it, and a rolled-back write is shown leaving nothing behind.
+shown clearing it, and an uncommitted write is shown reaching its writer alone.
 """
 
 import asyncio
+import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -27,10 +28,14 @@ _PAST = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _run(scenario: Callable[[async_sessionmaker[AsyncSession], list[str]], Awaitable[T]]) -> T:
-    """Run one scenario on a fresh in-memory SQLite database, recording each statement it issues."""
+    """Run one scenario on a fresh SQLite database, recording each statement it issues.
 
-    async def main() -> T:
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    A file rather than ``:memory:``, whose sessions all share one connection and
+    so would see each other's uncommitted rows whatever the cache did.
+    """
+
+    async def main(directory: str) -> T:
+        engine = create_async_engine(f"sqlite+aiosqlite:///{directory}/prices.db")
         statements: list[str] = []
 
         @event.listens_for(engine.sync_engine, "before_cursor_execute")
@@ -45,7 +50,8 @@ def _run(scenario: Callable[[async_sessionmaker[AsyncSession], list[str]], Await
         finally:
             await engine.dispose()
 
-    return asyncio.run(main())
+    with tempfile.TemporaryDirectory() as directory:
+        return asyncio.run(main(directory))
 
 
 def _price(rate: float) -> ModelPricing:
@@ -154,15 +160,35 @@ def test_a_new_organization_override_is_seen_at_once() -> None:
     assert _run(scenario) == Decimal("2.5")
 
 
-def test_a_rolled_back_rate_is_not_left_cached() -> None:
+def test_an_uncommitted_rate_is_seen_only_by_its_writer() -> None:
     async def scenario(sessions: async_sessionmaker[AsyncSession], _statements: list[str]) -> Decimal | None:
         async with sessions() as session:
             session.add(_price(10))
             await session.flush()
-            # Read inside the writing transaction, which sees the uncommitted row.
             resolved = await resolve_model_pricing(session, "openai", "gpt-4o")
             assert resolved is not None
+            assert await _input_rate(sessions) is None
             await session.rollback()
         return await _input_rate(sessions)
 
     assert _run(scenario) is None
+
+
+def test_a_writer_sees_its_own_change_over_a_rate_another_session_cached() -> None:
+    async def scenario(sessions: async_sessionmaker[AsyncSession], _statements: list[str]) -> Decimal | None:
+        async with sessions() as session:
+            session.add(_price(10))
+            await session.commit()
+        async with sessions() as session:
+            row = (await session.execute(select(ModelPricing))).scalar_one()
+            row.input_price_per_million = Decimal("4")
+            await session.flush()
+            # Another session caches the committed rate after the flush.
+            assert await _input_rate(sessions) == Decimal("10")
+            resolved = await resolve_model_pricing(session, "openai", "gpt-4o")
+            assert resolved is not None
+            assert resolved.pricing.input_price_per_million == Decimal("4")
+            await session.commit()
+        return await _input_rate(sessions)
+
+    assert _run(scenario) == Decimal("4")
