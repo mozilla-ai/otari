@@ -47,7 +47,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.inference import BatchRecord
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import InsufficientFundsError
+from gateway.ports.billing_port import NO_TOOLS, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import check_rate_limit
 from gateway.services.batch_service import (
@@ -1050,6 +1050,7 @@ async def retrieve_batch_results(
             )
             await charge.settle(
                 cost,
+                tools=NO_TOOLS,
                 model=batch_model,
                 description=f"{provider}:{batch_model}",
                 expects_cost=bool(total_tokens),

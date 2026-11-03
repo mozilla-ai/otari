@@ -108,7 +108,9 @@ class ProbeBilling:
         if "release" in FAULTS or ("release-once" in FAULTS and len(RELEASES) == 1):
             raise RuntimeError("ledger down")
 
-    async def charge(self, *, organization_id, amount, billed, description=None, actor_user_id=None, api_key_id=None):
+    async def charge(
+        self, *, organization_id, amount, billed, tools, description=None, actor_user_id=None, api_key_id=None
+    ):
         if "charge" in FAULTS:
             raise RuntimeError("ledger down")
         self.write(("charge", str(organization_id), amount, description, api_key_id))

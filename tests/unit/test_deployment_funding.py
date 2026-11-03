@@ -16,7 +16,7 @@ import pytest
 from any_llm import LLMProvider
 
 from gateway.log_config import logger as gateway_logger
-from gateway.ports.billing_port import BilledModel, BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import NO_TOOLS, BilledModel, BillingPort, InsufficientFundsError
 from gateway.services import model_catalog_service
 from gateway.services.inference import DeploymentCharge, admit_deployment_paid, billed_model
 from gateway.types.models_dev import parse_catalog
@@ -129,13 +129,14 @@ async def test_an_unpriced_settlement_is_warned_about_without_its_provider(
 async def test_a_charge_is_attributed_to_the_request() -> None:
     billing = _Billing()
     charge = await _admit(billing)
-    await charge.charge(Decimal("0.25"), description="openai:gpt-4o")
+    await charge.charge(Decimal("0.25"), tools=NO_TOOLS, description="openai:gpt-4o")
     assert billing.calls[-1] == (
         "charge",
         {
             "organization_id": ORGANIZATION_ID,
             "amount": Decimal("0.25"),
             "billed": BILLED,
+            "tools": NO_TOOLS,
             "description": "openai:gpt-4o",
             "actor_user_id": IDENTITY_ID,
             "api_key_id": "key-1",
@@ -183,7 +184,12 @@ async def test_settlement_charges_a_positive_cost_inside_the_savepoint() -> None
     charge = await _admit(billing)
     savepoint = _Savepoint()
     await charge.settle(
-        Decimal("0.25"), model="gpt-4o", description="openai:gpt-4o", expects_cost=True, savepoint=savepoint
+        Decimal("0.25"),
+        tools=NO_TOOLS,
+        model="gpt-4o",
+        description="openai:gpt-4o",
+        expects_cost=True,
+        savepoint=savepoint,
     )
     assert savepoint.entered == 1
     assert billing.calls[-1][0] == "charge"
@@ -194,7 +200,9 @@ async def test_settlement_with_nothing_due_opens_no_savepoint() -> None:
     billing = _Billing()
     charge = await _admit(billing)
     savepoint = _Savepoint()
-    await charge.settle(Decimal(0), model="gpt-4o", description="openai:gpt-4o", expects_cost=True, savepoint=savepoint)
+    await charge.settle(
+        Decimal(0), tools=NO_TOOLS, model="gpt-4o", description="openai:gpt-4o", expects_cost=True, savepoint=savepoint
+    )
     assert savepoint.entered == 0
     assert all(call[0] != "charge" for call in billing.calls)
 
@@ -211,7 +219,12 @@ async def test_a_failed_charge_is_rolled_back_and_logged_without_its_text(
     charge = await _admit(_FailingBilling())
     savepoint = _Savepoint()
     await charge.settle(
-        Decimal("0.25"), model="gpt-4o", description="openai:gpt-4o", expects_cost=True, savepoint=savepoint
+        Decimal("0.25"),
+        tools=NO_TOOLS,
+        model="gpt-4o",
+        description="openai:gpt-4o",
+        expects_cost=True,
+        savepoint=savepoint,
     )
     assert savepoint.rolled_back == 1
     (record,) = gateway_logs.records
@@ -239,7 +252,7 @@ async def test_a_gateway_tools_admission_bills_no_model() -> None:
     # A tool's call is counted under no model's concurrency limit.
     assert charge.concurrency_limit is None
     assert all(call[0] != "concurrency_limit" for call in billing.calls)
-    await charge.charge(Decimal("0.01"), description="otari_web_search")
+    await charge.charge(Decimal("0.01"), tools=NO_TOOLS, description="otari_web_search")
     assert billing.calls[1] == ("require_funds_on_deposit", ORGANIZATION_ID, None)
     assert billing.calls[-1][1]["billed"] is None
 

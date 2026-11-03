@@ -93,7 +93,7 @@ from gateway.model_labeling import relabel_model
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import NO_TOOLS, BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError
 from gateway.rate_limit import check_rate_limit
 from gateway.schemas.inference import DecisionRequest, DecisionResponse
@@ -805,6 +805,7 @@ async def run_passthrough(
         if deployment_charge is not None:
             await deployment_charge.settle(
                 cost,
+                tools=NO_TOOLS,
                 model=resolved.model,
                 description=f"{resolved.instance}:{resolved.model}",
                 expects_cost=True,
@@ -1357,6 +1358,7 @@ async def run_decision(
                     amount=cost,
                     # A decision is priced by the service that answers it, not by a model's rates.
                     billed=None,
+                    tools=NO_TOOLS,
                     description=f"{provider_name}:{model}",
                     api_key_id=api_key_id,
                 )

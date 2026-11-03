@@ -54,6 +54,7 @@ def test_only_the_calls_the_deployments_account_ran_are_charged_to_the_organizat
 
     assert charges.total == Decimal("0.05")
     assert charges.deployment_paid_total == Decimal("0.04")
+    assert charges.deployment_paid_tools == {"otari:code_execution": (2, Decimal("0.04"))}
 
 
 def test_a_call_whose_payer_was_not_recorded_is_read_off_its_label() -> None:
@@ -102,3 +103,17 @@ def test_each_charge_line_says_whose_account_ran_its_calls() -> None:
         ("otari:web_search", True, 0.01),
     ]
     assert charges.unit_rates == {"web_search": Decimal("0.01")}
+
+
+def test_searches_a_models_provider_ran_are_charged_but_not_split_out_as_a_gateway_tool() -> None:
+    """They are part of the model call, so the billing port counts them in the model's share."""
+    tally = ToolUsageTally()
+    tally.record_result("web_search", _HITS, label="exa:exa-search", rate_keys=("otari:web_search",))
+    tally.record_provider_searches("anthropic", 2, deployment_paid=True)
+    calls = tally.label_calls()
+    rates = {lookup: _SEARCH_RATE for entry in calls if (lookup := tool_rate_lookup(entry)) is not None}
+
+    charges = charge_tool_calls(calls, rates)
+
+    assert charges.deployment_paid_total == Decimal("0.03")
+    assert charges.deployment_paid_tools == {"otari:web_search": (1, Decimal("0.01"))}

@@ -65,7 +65,7 @@ from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import InsufficientFundsError
+from gateway.ports.billing_port import InsufficientFundsError, ToolUse
 from gateway.ports.code_execution_port import (
     SandboxNotReachableError,
     SandboxSessionGoneError,
@@ -390,6 +390,7 @@ async def execute_code(
     if funding is not None:
         await funding.settle(
             cost,
+            tools={_PRICING_KEY: ToolUse(calls=1, amount=cost)},
             model=CODE_EXECUTION_TOOL_NAME,
             description=_PRICING_KEY,
             expects_cost=False,

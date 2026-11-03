@@ -24,8 +24,10 @@ cannot be confused at a call site.
 """
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Protocol
 
 
@@ -42,6 +44,19 @@ class BilledModel:
     model: str
     """The model as that provider names it."""
     open_weights: bool
+
+
+@dataclass(frozen=True)
+class ToolUse:
+    """The successful calls of one gateway-run tool that a charge pays for, and their part of its amount."""
+
+    calls: int
+    amount: Decimal
+    """USD, already included in the charge's ``amount``."""
+
+
+NO_TOOLS: Mapping[str, ToolUse] = MappingProxyType({})
+"""The ``tools`` of a charge that pays for no gateway-run tool call."""
 
 
 class InsufficientFundsError(Exception):
@@ -148,6 +163,7 @@ class BillingPort(Protocol):
         organization_id: uuid.UUID,
         amount: Decimal,
         billed: BilledModel | None,
+        tools: Mapping[str, ToolUse],
         description: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         api_key_id: str | None = None,
@@ -161,6 +177,11 @@ class BillingPort(Protocol):
 
         ``billed`` is the model the request was served on, or ``None`` for a
         charge that is not a model's, as at :meth:`require_funds_on_deposit`.
+        ``tools`` holds the gateway-run tool calls the charge pays for, keyed by
+        the tool's pricing name (``otari:web_search``), and is empty when there
+        are none; ``amount`` less their amounts is the model's share. A tool
+        loop settles its model call and its tool calls as one charge, so an
+        adapter that funds tools apart from models reads the split from here.
         ``description``, ``actor_user_id`` and ``api_key_id`` attribute the
         charge, so an adapter that keeps a ledger can trace it back to the
         request that incurred it.

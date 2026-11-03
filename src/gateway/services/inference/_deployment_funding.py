@@ -7,7 +7,7 @@ that leaves, and the next request is refused.
 """
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from decimal import Decimal
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.log_config import logger
-from gateway.ports.billing_port import BilledModel, BillingPort
+from gateway.ports.billing_port import BilledModel, BillingPort, ToolUse
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.provider_kwargs import provider_key
 
@@ -89,12 +89,16 @@ class DeploymentCharge:
             return None
         return cost
 
-    async def charge(self, amount: Decimal, *, description: str) -> None:
-        """Charge ``amount`` to the organization, attributed to the request's key and user."""
+    async def charge(self, amount: Decimal, *, tools: Mapping[str, ToolUse], description: str) -> None:
+        """Charge ``amount`` to the organization, attributed to the request's key and user.
+
+        ``tools`` is the gateway-run tool calls ``amount`` pays for, as at :meth:`BillingPort.charge`.
+        """
         await self.billing.charge(
             organization_id=self.organization_id,
             amount=amount,
             billed=self.billed,
+            tools=tools,
             description=description,
             actor_user_id=self.actor_user_id,
             api_key_id=self.api_key_id,
@@ -104,12 +108,13 @@ class DeploymentCharge:
         self,
         cost: Decimal | None,
         *,
+        tools: Mapping[str, ToolUse],
         model: str,
         description: str,
         expects_cost: bool,
         savepoint: Callable[[], AbstractAsyncContextManager[Any]],
     ) -> None:
-        """Charge what a settled ``cost`` owes, inside ``savepoint``.
+        """Charge what a settled ``cost`` owes, and the ``tools`` it pays for, inside ``savepoint``.
 
         Called before the settlement's commit, which is what lands the charge, so
         the budget and the organization's funds move together. Never raises: the
@@ -121,7 +126,7 @@ class DeploymentCharge:
             return
         try:
             async with savepoint():
-                await self.charge(amount, description=description)
+                await self.charge(amount, tools=tools, description=description)
         except Exception as exc:
             logger.error(
                 "Charge of %s for a served deployment-paid request failed; it goes uncharged: "

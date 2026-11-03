@@ -51,7 +51,7 @@ from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, RATE
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import BilledModel
+from gateway.ports.billing_port import BilledModel, ToolUse
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 
 from .conftest import build_test_client
@@ -66,6 +66,7 @@ from gateway.ports.model_provider_port import HostedCredential, ModelProviderPor
 
 GATES = []  # Every gate call, landed or not.
 BILLED = []  # The model each gate and charge was told it pays for.
+TOOLS = []  # The gateway-run tool calls each charge was told it pays for.
 LEDGER = []  # What landed: a session's entries move here when it commits.
 PENDING = {}  # Entries written on a session, by its id, until it commits, rolls back or closes.
 SESSIONS = []
@@ -115,10 +116,13 @@ class ProbeBilling:
     async def release_hold(self, *, organization_id, amount):
         raise AssertionError("no holds on the completion path")
 
-    async def charge(self, *, organization_id, amount, billed, description=None, actor_user_id=None, api_key_id=None):
+    async def charge(
+        self, *, organization_id, amount, billed, tools, description=None, actor_user_id=None, api_key_id=None
+    ):
         if "charge" in FAULTS:
             raise RuntimeError("ledger down")
         BILLED.append(("charge", billed))
+        TOOLS.append(dict(tools))
         entry = ("charge", str(organization_id), amount, description, api_key_id)
         PENDING.setdefault(id(self.session), []).append(entry)
 
@@ -703,6 +707,7 @@ def test_a_search_on_the_deployments_account_is_charged_beside_a_model_on_anothe
     assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
     # The search alone: the model ran on the gateway's own key, which the organization's funds do not pay for.
     assert [(entry[0], entry[2]) for entry in probe.LEDGER] == [("charge", SEARCH_COST)]
+    assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=SEARCH_COST)}]
     user = _user(client)
     assert user["spend"] == pytest.approx(float(2 * COST + SEARCH_COST))
     assert user["reserved"] == pytest.approx(0.0)
@@ -744,6 +749,8 @@ def test_a_deployment_paid_model_and_its_search_are_charged_once_together(
     assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [
         ("charge", 2 * COST + SEARCH_COST, "openai:gpt-4o")
     ]
+    # The one charge names its search and that search's share, so the model's share is the rest.
+    assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=SEARCH_COST)}]
     assert _user(client)["reserved"] == pytest.approx(0.0)
 
 
@@ -766,6 +773,7 @@ def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_i
     ]
     # A search is no model's call, so nothing funded per model may pay for it.
     assert probe.BILLED == [("gate", None), ("charge", None)]
+    assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=Decimal("0.007"))}]
     user = _user(client)
     assert user["spend"] == pytest.approx(0.007)
     assert user["reserved"] == pytest.approx(0.0)

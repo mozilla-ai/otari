@@ -103,7 +103,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tools import WebTool
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import BillingPort, InsufficientFundsError, ToolUse
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
 from gateway.schemas.tools import SearchRequest, SearchResponse
 from gateway.services.api_keys import ApiKeyService
@@ -125,6 +125,7 @@ from gateway.services.tools import (
     run_direct_search,
 )
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
+from gateway.types.tool_charges import gateway_tool_pricing_key
 
 router = APIRouter(tags=["search"])
 
@@ -568,6 +569,7 @@ async def _dispatch_search(
     if funding is not None:
         await funding.settle(
             cost,
+            tools={gateway_tool_pricing_key(WebTool.SEARCH.value): ToolUse(calls=1, amount=cost)},
             model=tool.name,
             description=f"{tool.provider}:{tool.name}",
             expects_cost=False,

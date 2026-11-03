@@ -5,11 +5,12 @@ Budgets are a separate capability and still bound what a request may spend.
 """
 
 import uuid
+from collections.abc import Mapping
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.ports.billing_port import BilledModel, BillingPort
+from gateway.ports.billing_port import BilledModel, BillingPort, ToolUse
 
 
 class NullBillingAdapter(BillingPort):
@@ -49,6 +50,7 @@ class NullBillingAdapter(BillingPort):
         organization_id: uuid.UUID,
         amount: Decimal,
         billed: BilledModel | None,
+        tools: Mapping[str, ToolUse],
         description: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         api_key_id: str | None = None,
