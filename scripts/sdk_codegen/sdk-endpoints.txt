@@ -298,8 +298,6 @@ GET /api/v1/routing/policies                        # not yet wrapped
 POST /api/v1/routing/policies                       # not yet wrapped
 DELETE /api/v1/routing/policies/{name}              # not yet wrapped
 POST /api/v1/routing/policies/explain               # not yet wrapped
-POST /api/v1/routing/preferences/rank               # not yet wrapped
-GET /api/v1/routing/status                          # not yet wrapped
 POST /api/v1/routing/recommend                      # not yet wrapped
 # Pricing refresh workflow
 POST /api/v1/pricing/refresh/reject                 # not yet wrapped
@@ -325,6 +323,7 @@ GET /api/v1/tool-settings/guardrails/profiles       # not yet wrapped
 GET /api/v1/tool-settings/guardrails/catalog        # not yet wrapped
 POST /api/v1/search                                 # not yet wrapped
 POST /api/v1/search/{search_tool_name}              # not yet wrapped
+POST /api/v1/code/execute                           # not yet wrapped
 # Search tools (runtime search-tool management)
 GET /api/v1/search-tools                            # not yet wrapped
 GET /api/v1/search-tools/providers                  # not yet wrapped
@@ -344,11 +343,14 @@ POST /api/v1/scoped-budgets                                     # not yet wrappe
 GET /api/v1/scoped-budgets/{budget_id}                          # not yet wrapped
 PATCH /api/v1/scoped-budgets/{budget_id}                        # not yet wrapped
 DELETE /api/v1/scoped-budgets/{budget_id}                       # not yet wrapped
-# Deployment administration: the accounts on the whole deployment, and the flags
-# an operator flips on one. Refused with 404 for anyone who is not an operator,
+# Deployment administration: the accounts on the whole deployment, the flags
+# an operator flips on one, and the email blocklist. Refused with 404 for anyone who is not an operator,
 # and an SDK caller holds a workspace key rather than an operator identity, so
 # there is nothing here for a shell to wrap.
 GET /api/v1/admin/access                                        # dashboard-only
+DELETE /api/v1/admin/blocked-emails/{entry_id}                  # dashboard-only
+GET /api/v1/admin/blocked-emails                                # dashboard-only
+POST /api/v1/admin/blocked-emails                               # dashboard-only
 GET /api/v1/admin/users                                         # dashboard-only
 PATCH /api/v1/admin/users/{user_id}                             # dashboard-only
 POST /api/v1/admin/users/{user_id}/password-link                # dashboard-only
@@ -520,6 +522,7 @@ DELETE /api/v1/organizations/me/web-search-keys/{key_id}                      # 
 POST /api/v1/organizations/me/web-search-keys/{key_id}/archive                # dashboard-only
 POST /api/v1/organizations/me/web-search-keys/{key_id}/restore                # dashboard-only
 POST /api/v1/organizations/me/web-search-keys/{key_id}/default                # dashboard-only
+DELETE /api/v1/organizations/me/web-search-keys/{key_id}/default              # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/web-search-keys                         # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}              # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}             # dashboard-only

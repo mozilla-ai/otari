@@ -96,7 +96,8 @@ Runner = Literal["library", "old"]
 DIRECT_TIMEOUT_S = 30.0
 IN_LOOP_TIMEOUT_S = 15.0
 
-# The rows that price any backend of each tool.
+# The ``otari:<tool>`` row of each kind, which prices a call on an organization key and a search
+# on the legacy settings.
 _SEARCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_SEARCH_TOOL_NAME)
 _FETCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_FETCH_TOOL_NAME)
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
@@ -225,6 +226,31 @@ def resolve_search(
     return None
 
 
+def search_resolves(config: ToolSettings, policy: ResolvedWebSearchConfig | None) -> bool:
+    """Whether a declared ``otari_web_search`` under ``policy`` finds something to run on, as admission resolves it.
+
+    That includes the fetch enriching its hits, whose key admission resolves with it.
+    """
+    try:
+        search = resolve_search(config, policy, requested=None, request_options=None)
+        if search is None:
+            return False
+        in_loop_search_for(config, policy, search)
+    except WebSearchCredentialRefusedError:
+        # Admission refuses the request on a key its provider cannot be called with.
+        return False
+    return True
+
+
+def fetch_resolves(config: ToolSettings, policy: ResolvedWebSearchConfig | None) -> bool:
+    """Whether a declared ``otari_web_fetch`` under ``policy`` resolves, as admission resolves it."""
+    try:
+        resolve_fetch(config, policy, requested=None, for_search=None)
+    except WebSearchCredentialRefusedError:
+        return False
+    return True
+
+
 def resolve_fetch(
     config: ToolSettings,
     policy: ResolvedWebSearchConfig | None,
@@ -316,8 +342,7 @@ def _search_on_instance(
         max_results=max_results,
         timeout=instance.timeout or (IN_LOOP_TIMEOUT_S if in_loop else DIRECT_TIMEOUT_S),
         label=label,
-        # On the direct endpoint, the instance's own row alone.
-        rate_keys=_instance_rate_keys("search", instance, _SEARCH_FALLBACK_RATE if in_loop else None),
+        rate_keys=_instance_rate_keys("search", instance),
         fetch_tool=instance.fetch_tool,
     )
 
@@ -412,12 +437,9 @@ def _search_on_credential(
     )
 
 
-def _instance_rate_keys(
-    kind: Literal["search", "fetch"], instance: ToolInstance, fallback: str | None
-) -> tuple[RateKey, ...]:
-    """The instance's rate key, then ``fallback``."""
-    own = instance_rate_key(kind, instance.name, instance.provider)
-    return (own, fallback) if fallback is not None else (own,)
+def _instance_rate_keys(kind: Literal["search", "fetch"], instance: ToolInstance) -> tuple[RateKey, ...]:
+    """The instance's own rate key, the only row that prices its calls."""
+    return (instance_rate_key(kind, instance.name, instance.provider),)
 
 
 def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
@@ -444,7 +466,7 @@ def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
         timeout=instance.timeout
         or (NETWORK_DEADLINE_SECONDS if instance.provider == BUILTIN_FETCH_PROVIDER else IN_LOOP_TIMEOUT_S),
         label=label,
-        rate_keys=_instance_rate_keys("fetch", instance, _FETCH_FALLBACK_RATE),
+        rate_keys=_instance_rate_keys("fetch", instance),
     )
 
 
@@ -506,9 +528,9 @@ def _credential_layer(credential: WebToolCredential) -> str:
     return "the organization's key"
 
 
-def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[str | None, tuple[RateKey, ...]]:
-    """The label and rate keys of a call a credential serves."""
-    return f"{ORGANIZATION_KEY_LABEL_PREFIX}{credential.provider}", (fallback,)
+def _credential_billing(credential: WebToolCredential, rate_key: str) -> tuple[str | None, tuple[RateKey, ...]]:
+    """The label and rate keys of a call a credential serves, priced under its tool's ``otari:<tool>`` row."""
+    return f"{ORGANIZATION_KEY_LABEL_PREFIX}{credential.provider}", (rate_key,)
 
 
 def _layered(

@@ -13,6 +13,7 @@ from gateway.models.base import Base, UtcDateTime
 MAX_EMAIL_LENGTH = 255
 MAX_PROVIDER_LENGTH = 50
 MAX_SUBJECT_LENGTH = 255
+MAX_BLOCK_REASON_LENGTH = 500
 
 
 class EmailAssertion(StrEnum):
@@ -103,4 +104,36 @@ class OAuthIdentityLink(Base):
     )
 
 
-__all__ = ["EmailAssertion", "MailedLinkStatus", "OAuthIdentityLink", "ProviderIdentity"]
+class BlockedEmail(Base):
+    """An address or a domain the deployment's operator has blocked from holding an account.
+
+    ``pattern`` is a whole address or a domain, normalized by ``core.email_domains.blocklist_entry``; a
+    domain also blocks its subdomains. A blocked address cannot sign up, be added or invited, or sign in.
+    """
+
+    __tablename__ = "blocked_email"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    pattern: Mapped[str] = mapped_column(String(MAX_EMAIL_LENGTH), unique=True, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(MAX_BLOCK_REASON_LENGTH))
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+    @property
+    def is_domain(self) -> bool:
+        """Whether the entry blocks a whole domain rather than one address."""
+        return "@" not in self.pattern
+
+
+__all__ = [
+    "MAX_BLOCK_REASON_LENGTH",
+    "BlockedEmail",
+    "EmailAssertion",
+    "MailedLinkStatus",
+    "OAuthIdentityLink",
+    "ProviderIdentity",
+]

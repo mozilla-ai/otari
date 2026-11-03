@@ -36,6 +36,7 @@ from gateway.services.budgets import (
     EstimateInputs,
     ReservationHandle,
     get_budget_state,
+    hold_tool_call,
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
@@ -257,6 +258,70 @@ async def test_per_user_refusal_compensates_the_scoped_holds(async_db: AsyncSess
     assert exc_info.value.status_code == 403
 
     assert await _counters(async_db, org_cap.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_hold_grows_the_ceiling_and_the_user_leg(async_db: AsyncSession, tenancy: Fixture) -> None:
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
+    async_db.add(org_cap)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update")
+
+    assert await _counters(async_db, org_cap.id) == (0.0, 1.5)
+    assert handle.scoped_estimate == Decimal("1.5")
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_the_user_budget_refuses_gives_the_ceilings_growth_back(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """The ceilings are grown before the per-user leg refuses, and a refused call holds nothing."""
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
+    async_db.add(org_cap)
+    async_db.add(Budget(budget_id="tight", max_budget=1.0))
+    await async_db.commit()
+    user = (await async_db.execute(select(User).where(User.user_id == tenancy.user_id))).scalar_one()
+    user.budget_id = "tight"
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 0.8, scope=tenancy.scope())
+
+    assert not await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update")
+
+    assert await _counters(async_db, org_cap.id) == (0.0, 0.8)
+    assert (handle.estimate, handle.scoped_estimate) == (Decimal("0.8"), Decimal("0.8"))
+    await refund_reservation(async_db, handle)
+    assert await _counters(async_db, org_cap.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_hold_that_fails_to_commit_restores_the_handle(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
+    async_db.add(org_cap)
+    await async_db.commit()
+    cap_id = org_cap.id
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+
+    async def fail() -> None:
+        raise OperationalError("COMMIT", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(async_db, "commit", fail)
+    with pytest.raises(OperationalError):
+        await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update")
+    monkeypatch.undo()
+    await async_db.rollback()
+
+    assert handle.scoped_estimate == Decimal("1.0")
+    assert await _counters(async_db, cap_id) == (0.0, 1.0)
 
 
 @pytest.mark.asyncio

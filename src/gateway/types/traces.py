@@ -350,7 +350,6 @@ class WriteResult:
 
 
 ShareAudience = Literal["organization_admins", "deployment_operator"]
-SHARE_AUDIENCES: tuple[ShareAudience, ...] = ("organization_admins", "deployment_operator")
 # How a read reached a session's content: as its owner, through a share, by
 # break-glass (an organization owner or the deployment's operator, recorded), or not at all.
 ContentAccess = Literal["owner", "share", "break_glass", "none"]

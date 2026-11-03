@@ -110,7 +110,6 @@ export type TraceContentShare = Schemas["ContentSharePublic"]
 export type TraceContentShareList = Schemas["ContentShareListPublic"]
 export type TraceContentShareCreate = Schemas["ContentShareCreate"]
 export type TraceShareAudience = Schemas["ContentSharePublic"]["audience"]
-export type TraceBreakGlassRead = Schemas["BreakGlassReadPublic"]
 export type TraceBreakGlassReadList = Schemas["BreakGlassReadListPublic"]
 export type TraceSpan = Schemas["SpanPublic"]
 export type TraceTurn = Schemas["TurnPublic"]
@@ -323,6 +322,20 @@ export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
 export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 
+// The organization's own search and fetch keys. A workspace uses the key it
+// pinned, else the organization's default of the kind, else the deployment's
+// own search or fetch tool.
+export type OrgWebSearchKey = Schemas["OrgWebSearchKeyPublic"]
+export type OrgWebSearchKeys = Schemas["OrgWebSearchKeysPublic"]
+export type CreateOrgWebSearchKeyRequest =
+  Schemas["OrgWebSearchKeyCreateRequest"]
+export type UpdateOrgWebSearchKeyRequest =
+  Schemas["OrgWebSearchKeyUpdateRequest"]
+// One workspace's view of those keys: which of each kind it uses, and what its
+// searches and fetches run on.
+export type WorkspaceWebSearchKey = Schemas["WorkspaceWebSearchKeyPublic"]
+export type WorkspaceWebSearchKeys = Schemas["WorkspaceWebSearchKeysPublic"]
+
 // The models an organization offers on one of those keys. `price_source` names
 // the rung of the pricing ladder that answered, in the vocabulary the Models
 // page already uses, so a rate shown here and a rate shown there cannot claim
@@ -412,7 +425,6 @@ export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
 }
 export type AliasResponse = Schemas["AliasResponse"]
 export type CreateAliasRequest = Schemas["AliasRequest"]
-export type RouterStatus = Schemas["RouterStatus"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails
@@ -541,6 +553,12 @@ export type DeploymentUsers = Schemas["DeploymentUsersPublic"]
 export type UpdateDeploymentUserRequest = Schemas["DeploymentUserUpdateRequest"]
 /** A link that sets an account's password: mailed, or returned to pass on. */
 export type PasswordLink = Schemas["PasswordLinkPublic"]
+/** An address or a domain blocked from holding an account on the deployment. */
+export type BlockedEmail = Schemas["BlockedEmailPublic"]
+export type BlockedEmails = Schemas["BlockedEmailsPublic"]
+/** A new entry, with how many existing accounts it now blocks. */
+export type BlockedEmailCreated = Schemas["BlockedEmailCreatedPublic"]
+export type CreateBlockedEmailRequest = Schemas["BlockedEmailCreateRequest"]
 
 export type Workspace = Schemas["WorkspacePublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]

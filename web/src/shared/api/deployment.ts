@@ -5,6 +5,9 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  BlockedEmailCreated,
+  BlockedEmails,
+  CreateBlockedEmailRequest,
   DashboardBuild,
   DeploymentAdminAccess,
   DeploymentUser,
@@ -147,5 +150,58 @@ export function useIssuePasswordLink() {
         `/admin/users/${encodeURIComponent(id)}/password-link`,
         { method: "POST" },
       ),
+  })
+}
+
+/** One page of the deployment's email blocklist, newest entry first. */
+export function useBlockedEmails(
+  { page, pageSize }: { page: number; pageSize: number },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [DEPLOYMENT_ADMIN, "blocked-emails", page, pageSize],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        skip: String(page * pageSize),
+        limit: String(pageSize),
+      })
+      return apiFetch<BlockedEmails>(`/admin/blocked-emails?${params}`)
+    },
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    enabled,
+  })
+}
+
+export function useBlockEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateBlockedEmailRequest) =>
+      apiFetch<BlockedEmailCreated>("/admin/blocked-emails", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    // Blocking ends the matching accounts' sessions, which the accounts list
+    // does not show, so only the blocklist itself goes stale.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [DEPLOYMENT_ADMIN, "blocked-emails"],
+      })
+    },
+  })
+}
+
+export function useUnblockEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/admin/blocked-emails/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [DEPLOYMENT_ADMIN, "blocked-emails"],
+      })
+    },
   })
 }

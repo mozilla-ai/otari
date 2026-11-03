@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.services import model_catalog_service as mcs
+from gateway.types.models_dev import parse_catalog
 
 from .conftest import build_test_client
 
@@ -322,7 +323,7 @@ def limits_client(limits_config: GatewayConfig, clean_database: None) -> Generat
 
 def _read(client: TestClient, path: str) -> Any:
     """GET ``path`` as the master key, with models.dev answering ``_MODELS_DEV``."""
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=_MODELS_DEV)):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(_MODELS_DEV)):
         response = client.get(path, headers={API_KEY_HEADER: "Bearer test-master-key"})
     assert response.status_code == 200, response.text
     return response.json()
@@ -414,7 +415,7 @@ def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, 
         models_dev_metadata=False,
         providers={"nebius": {"api_key": "sk-fake"}},
     )
-    fetch = AsyncMock(return_value=_MODELS_DEV)
+    fetch = AsyncMock(return_value=parse_catalog(_MODELS_DEV))
     for client in build_test_client(config):
         _price(client, _QWEN)
         with patch.object(mcs, "_fetch", new=fetch):
@@ -426,7 +427,7 @@ def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, 
 
 def test_an_unknown_model_is_refused_without_fetching_models_dev(limits_client: TestClient) -> None:
     """A 404 has no limits to report, so it never waits on a models.dev fetch."""
-    fetch = AsyncMock(return_value=_MODELS_DEV)
+    fetch = AsyncMock(return_value=parse_catalog(_MODELS_DEV))
     with patch.object(mcs, "_fetch", new=fetch):
         response = limits_client.get(
             f"{API_ROOT}/models/nebius:not-a-model", headers={API_KEY_HEADER: "Bearer test-master-key"}

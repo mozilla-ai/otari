@@ -52,7 +52,8 @@ Completion requests follow this order:
 Chat, Messages, and Responses share the pipeline in
 `api/routes/_pipeline.py`; the attempt walk and its shared refusals live in
 `_attempts.py`, and streaming settlement in `streaming.py`. Pass-through endpoints use
-`run_passthrough`. Direct search has its own dispatch scaffold.
+`run_passthrough`. Direct search and direct code execution each have their own
+dispatch scaffold.
 
 A new provider-calling scaffold must register with `track_request` so
 `/api/v1/usage/in-flight` sees it. Removal belongs to `InFlightMiddleware`,
@@ -224,8 +225,9 @@ tenant's, so it is held to public addresses and dialed through the
 owned-endpoint client (`web_provider_client_for`), whatever
 `provider_allow_private_hosts` says. A search key also serves the
 workspace's explicit `otari_web_search` declarations where the deployment has no
-search of its own; provider-native declarations, `GET /api/v1/tools` and the
-Playground follow the deployment's own search alone.
+search of its own; provider-native declarations, the Playground and `GET /api/v1/tools`
+for a master key or a session follow the deployment's own search alone, while an
+API key's `GET /api/v1/tools` counts its workspace's key and switches.
 MCP servers are workspace resources rather than a refinement of a deployment
 server list.
 

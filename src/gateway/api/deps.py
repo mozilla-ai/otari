@@ -117,7 +117,7 @@ from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
-from gateway.services.pricing_service import model_context_window
+from gateway.services.pricing_service import RequestPrices, model_context_window
 from gateway.services.providers import (
     HostedCatalogUpdate,
     HostedProviderService,
@@ -128,7 +128,12 @@ from gateway.services.providers import (
     refresh_provider_endpoint_cache,
 )
 from gateway.services.rate_limits import RateLimitService
-from gateway.services.routing import AgentRecommenderService, RoutingService, clear_router_backend_cache
+from gateway.services.routing import (
+    AgentRecommenderService,
+    AutomaticRouter,
+    RoutingService,
+    clear_router_backend_cache,
+)
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
@@ -224,7 +229,7 @@ def set_config(config: GatewayConfig) -> None:
     _config = config
 
 
-def get_config(request: Request) -> GatewayConfig:
+async def get_config(request: Request) -> GatewayConfig:
     """Return the config for the current app from ``request.app.state``.
 
     Every shared resource (rate limiter, log writer, file store) lives on
@@ -808,20 +813,25 @@ async def verify_catalog_reader(
     The narrow exception to the rule above, for the catalog reads that describe
     the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``,
     ``GET /api/v1/tools``, ``GET /api/v1/providers/catalog`` (with their by-id
-    variants), ``GET /api/v1/tool-settings/guardrails/catalog`` and
+    variants), ``GET /api/v1/tool-settings/guardrails/catalog``,
+    ``GET /api/v1/tool-settings/guardrails/profiles`` and
     ``GET /api/v1/search-tools/providers``. The
     dashboard's Models and Pricing pages are built on these, so a session has to
     reach them; they call no provider, write nothing, and bill nothing, so
     reaching them deployment-wide costs a signed-in caller's own organization
-    nothing.
+    nothing. The guardrail profiles read is the one that reaches a service, the
+    deployment's own guardrails service, and it answers from a 30 second
+    per-worker cache, so a worker sends that service at most one request in
+    that time.
 
-    The three catalogs are the reads a *tenant* rather than an operator needs. One
+    The four catalogs are the reads a *tenant* rather than an operator needs. One
     names the providers any-llm knows, which the organization provider-key form
     offers as the BYO choices; one names the guardrails any-guardrail reaches
     over a hosted API, which the organization guardrail form offers the same
-    way; and one names the providers any-search and any-fetch serve, for the
-    organization's own search keys. An owner or admin who reaches no operator
-    route still has to read all three.
+    way; one names the guardrail profiles the deployment serves, which any
+    caller may put in a request; and one names the providers any-search and
+    any-fetch serve, for the organization's own search keys. An owner or admin
+    who reaches no operator route still has to read all four.
 
     Split out rather than left as a branch inside the other dependency so that
     adding a route to this plane defaults to refusing the cookie. The six
@@ -1077,7 +1087,7 @@ def get_workspace_web_search_service(
 WorkspaceWebSearchServiceDep = Annotated[WorkspaceWebSearchService, Depends(get_workspace_web_search_service)]
 
 
-def get_workspace_code_execution_policies(
+async def get_workspace_code_execution_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceCodeExecutionPolicies:
@@ -1199,7 +1209,7 @@ def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiK
     return container.resolve(ApiKeyFormatPort, db)
 
 
-def get_code_execution_port(
+async def get_code_execution_port(
     config: Annotated[GatewayConfig, Depends(get_config)],
     container: ContainerDep,
 ) -> CodeExecutionPort | None:
@@ -1221,7 +1231,7 @@ def get_code_execution_port(
 CodeExecutionPortDep = Annotated[CodeExecutionPort | None, Depends(get_code_execution_port)]
 
 
-def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
+async def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
     """Resolve the billing adapter this build bound at startup."""
     return container.resolve(BillingPort, db)
 
@@ -1257,12 +1267,12 @@ def get_identity_provider_port(
     return container.resolve(IdentityProviderPort, db, uow=uow)
 
 
-def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
+async def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
     """Build the request path's reader of a workspace's MCP servers, on the request's session."""
     return WorkspaceMcpServers(db)
 
 
-def get_model_provider_port(
+async def get_model_provider_port(
     db: PortSessionDep,
     uow: UnitOfWorkDep,
     container: ContainerDep,
@@ -1310,7 +1320,7 @@ def get_web_provider_client(request: Request) -> httpx.AsyncClient:
     return client
 
 
-def get_optional_web_provider_client(request: Request) -> httpx.AsyncClient | None:
+async def get_optional_web_provider_client(request: Request) -> httpx.AsyncClient | None:
     """The app's web provider client, or ``None`` outside the app's lifespan, where a provider opens its own.
 
     For ``ToolPorts``, which every completion route takes, so a request that runs
@@ -1679,7 +1689,7 @@ def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> W
     )
 
 
-def get_workspace_web_search_policies(
+async def get_workspace_web_search_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceWebSearchPolicies:
@@ -2163,9 +2173,29 @@ async def get_platform_break_glass(
     )
 
 
+def get_request_prices(db: AsyncSession, organization_id: uuid.UUID | None) -> RequestPrices:
+    """Build the request pricing cache with its batched pricing repository."""
+    return RequestPrices(organization_id, OrganizationModelPricingRepository(db))
+
+
+def get_automatic_router(request: Request) -> AutomaticRouter:
+    """Build one automatic router per application worker."""
+    app_state = getattr(request.scope.get("app"), "state", None)
+    router = getattr(app_state, "automatic_router", None)
+    if router is None:
+        router = AutomaticRouter()
+        if app_state is not None:
+            app_state.automatic_router = router
+    return router
+
+
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
-    """Build the routing service, and the usage service it reads traffic through, on the request's Unit of Work."""
-    return RoutingService(config, UsageService(uow, UsageLogRepository(uow)))
+    """Build the routing service, and the usage and key services it reads through, on the request's Unit of Work."""
+    return RoutingService(
+        config,
+        UsageService(uow, UsageLogRepository(uow)),
+        get_api_key_service(uow),
+    )
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
@@ -2191,7 +2221,7 @@ class ToolPorts:
     web_provider_client: httpx.AsyncClient | None = None
 
 
-def get_tool_ports(
+async def get_tool_ports(
     code_execution: CodeExecutionPortDep,
     code_execution_policy: WorkspaceCodeExecutionPoliciesDep,
     mcp_server: WorkspaceMcpServersDep,
@@ -2231,7 +2261,7 @@ def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable
     return _require
 
 
-def get_log_writer(request: Request) -> LogWriter:
+async def get_log_writer(request: Request) -> LogWriter:
     writer: LogWriter = request.app.state.log_writer
     return writer
 
@@ -2258,7 +2288,7 @@ def get_file_service(
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 
 
-def get_optional_file_service(
+async def get_optional_file_service(
     request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
     db: Annotated[AsyncSession, Depends(get_db)],

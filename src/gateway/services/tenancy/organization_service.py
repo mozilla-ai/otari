@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyConflictError, TenancyValidationError
-from gateway.exceptions.identity_exceptions import TermsNotAcceptedError
+from gateway.exceptions.identity_exceptions import BlockedEmailError, TermsNotAcceptedError
 from gateway.exceptions.organizations_exceptions import (
     DefaultOrganizationDeletionError,
     InvitationAlreadyPendingError,
@@ -103,7 +103,7 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import InvitationMailLimit
+from gateway.services.organizations import BlockedAddresses, InvitationMailLimit
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -121,8 +121,20 @@ from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
     DEFAULT_WORKSPACE_NAME,
+    load_bootstrap_identity,
     password_claims_deployment,
 )
+
+
+def _shaped_addresses(raw: list[str]) -> set[str]:
+    """The addresses in ``raw`` that pass the shape check, normalized; the loop reports the rest."""
+    shaped: set[str] = set()
+    for value in raw:
+        try:
+            shaped.add(_validated_email(value))
+        except TenancyValidationError:
+            continue
+    return shaped
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -348,6 +360,11 @@ class OrganizationService:
     # Context resolution and authorization
     # ------------------------------------------------------------------
 
+    async def bootstrap_operator_id(self) -> uuid.UUID | None:
+        """Return the id of the identity first-boot provisioning made the deployment's operator, or None."""
+        bootstrap = await load_bootstrap_identity(self.db)
+        return None if bootstrap is None else bootstrap.id
+
     async def get_active_organization_for_user(self, user: User) -> Organization:
         """Return the organization the caller acts in, falling back to a live membership if the pointer is stale.
 
@@ -411,6 +428,11 @@ class OrganizationService:
         membership = await self._require_active_membership(user, organization)
         self._enforce_management_role(membership)
         return membership
+
+    async def manages_organization(self, *, user: User, organization: Organization) -> bool:
+        """Whether the caller is an active owner or admin of the organization."""
+        membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
+        return membership is not None and membership.role in MANAGEMENT_ROLES
 
     async def hold_workspace_write_access(
         self,
@@ -1098,6 +1120,7 @@ class OrganizationService:
         *,
         user: User,
         request: ActiveOrganizationMemberCreateRequest,
+        blocked_addresses: BlockedAddresses,
     ) -> ActiveOrganizationMemberCreateResultPublic:
         """Add someone to the caller's organization, by address.
 
@@ -1125,6 +1148,9 @@ class OrganizationService:
 
         try:
             async with self._require_unit_of_work():
+                # Inside the block, so the blocklist lock it holds lasts until the membership commits.
+                if await blocked_addresses.blocked_among([email]):
+                    raise BlockedEmailError(email)
                 target = await self._identity_for_address(email, organization)
                 membership = await self.members.get_by_organization_and_user(organization.id, target.id)
                 if membership is not None and membership.status == "active":
@@ -1323,6 +1349,7 @@ class OrganizationService:
         request: InviteOrganizationMemberRequest,
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
+        blocked_addresses: BlockedAddresses,
     ) -> InviteOrganizationMemberResultPublic:
         """Invite an address to the caller's organization by email.
 
@@ -1356,16 +1383,19 @@ class OrganizationService:
             raise MembershipUpdateError("Only organization owners can grant the owner role")
 
         try:
-            invitation, membership, token = await self._stage_invitation(
-                user=user,
-                organization=organization,
-                actor_membership=actor_membership,
-                email=email,
-                role=request.role,
-                assignments=assignments,
-                config=config,
-            )
-            await self.db.commit()
+            async with self._require_unit_of_work():
+                # Inside the block, so the blocklist lock it holds lasts until the invitation commits.
+                if await blocked_addresses.blocked_among([email]):
+                    raise BlockedEmailError(email)
+                invitation, membership, token = await self._stage_invitation(
+                    user=user,
+                    organization=organization,
+                    actor_membership=actor_membership,
+                    email=email,
+                    role=request.role,
+                    assignments=assignments,
+                    config=config,
+                )
         except IntegrityError:
             # Two admins inviting the same address at once: the unique index on
             # (organization, user) decides which racer's insert wins, and the
@@ -1375,7 +1405,7 @@ class OrganizationService:
             # `Invitation.organization_member_id` itself carries no uniqueness
             # (see its own comment on the model), since a membership can be
             # invited, revoked, and re-invited more than once over its life.
-            await self.db.rollback()
+            # The Unit of Work rolled back on the way out.
             raise OrganizationMemberAlreadyExistsError(email) from None
 
         return await self._mail_invitation(
@@ -1396,6 +1426,7 @@ class OrganizationService:
         request: BulkInviteOrganizationMembersRequest,
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
+        blocked_addresses: BlockedAddresses,
     ) -> BulkInviteOrganizationMembersResultPublic:
         """Invite several addresses to the caller's organization at once.
 
@@ -1418,37 +1449,43 @@ class OrganizationService:
         staged: list[tuple[Invitation, OrganizationMember, str]] = []
         failed: list[BulkInvitationFailurePublic] = []
         seen: set[str] = set()
-        for raw in request.emails:
-            try:
-                email = _validated_email(raw)
-                if email in seen:
-                    failed.append(BulkInvitationFailurePublic(email=raw, detail=f"{email} is listed more than once"))
-                    continue
-                seen.add(email)
-                # A savepoint, not a rollback: rolling the whole transaction back
-                # would expire every instance loaded so far, the organization
-                # and the caller's membership included.
-                async with self.db.begin_nested():
-                    staged.append(
-                        await self._stage_invitation(
-                            user=user,
-                            organization=organization,
-                            actor_membership=actor_membership,
-                            email=email,
-                            role=request.role,
-                            assignments=assignments,
-                            config=config,
+        async with self._require_unit_of_work():
+            # One lookup for the whole batch, inside the block, so the blocklist lock lasts until the batch commits.
+            blocked = await blocked_addresses.blocked_among(_shaped_addresses(request.emails))
+            for raw in request.emails:
+                try:
+                    email = _validated_email(raw)
+                    if email in seen:
+                        failed.append(
+                            BulkInvitationFailurePublic(email=raw, detail=f"{email} is listed more than once")
+                        )
+                        continue
+                    seen.add(email)
+                    if email in blocked:
+                        raise BlockedEmailError(email)
+                    # A savepoint, not a rollback: rolling the whole transaction back
+                    # would expire every instance loaded so far, the organization
+                    # and the caller's membership included.
+                    async with self.db.begin_nested():
+                        staged.append(
+                            await self._stage_invitation(
+                                user=user,
+                                organization=organization,
+                                actor_membership=actor_membership,
+                                email=email,
+                                role=request.role,
+                                assignments=assignments,
+                                config=config,
+                            )
+                        )
+                except IntegrityError:
+                    failed.append(
+                        BulkInvitationFailurePublic(
+                            email=raw, detail=str(OrganizationMemberAlreadyExistsError(raw.strip()))
                         )
                     )
-            except IntegrityError:
-                failed.append(
-                    BulkInvitationFailurePublic(
-                        email=raw, detail=str(OrganizationMemberAlreadyExistsError(raw.strip()))
-                    )
-                )
-            except (TenancyConflictError, TenancyValidationError) as exc:
-                failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
-        await self.db.commit()
+                except (TenancyConflictError, TenancyValidationError) as exc:
+                    failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
 
         mailer = Mailer(config)
         # Bounded, so a large batch does not open a hundred SMTP connections at once.
@@ -1713,6 +1750,7 @@ class OrganizationService:
         token: str,
         *,
         claims: InvitationClaimSettings,
+        blocked_addresses: BlockedAddresses,
         password: str | None = None,
         full_name: str | None = None,
         terms_accepted: bool = False,
@@ -1745,7 +1783,9 @@ class OrganizationService:
             validate_new_password(password)
             if claims.terms_url is not None and not terms_accepted:
                 raise TermsNotAcceptedError
-        _, _, organization, _ = await self._resolve_pending_invitation(token)
+        pending, _, organization, _ = await self._resolve_pending_invitation(token)
+        if await blocked_addresses.blocked_among([pending.email]):
+            raise BlockedEmailError(pending.email)
         # Locked, then re-resolved, before any write: two concurrent accepts of
         # the same token could otherwise both pass the pending check above
         # (nothing has committed yet to see), both flip the membership, and
@@ -1783,7 +1823,9 @@ class OrganizationService:
             if not claimed:
                 await self.db.rollback()
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
-        result = await self._resolve_invitation_to_active_membership(invitation, membership, organization)
+        result = await self._resolve_invitation_to_active_membership(
+            invitation, membership, organization, blocked_addresses
+        )
         verification_pending = invitee.hashed_password is not None and invitee.email_verified_at is None
         can_sign_in = password is not None or not _has_never_signed_in(invitee)
         claimed_identity = None
@@ -1807,6 +1849,7 @@ class OrganizationService:
         invitation: Invitation,
         membership: OrganizationMember,
         organization: Organization,
+        blocked_addresses: BlockedAddresses,
     ) -> AcceptInvitationResultPublic:
         """Flip a resolved pending invitation and its membership to ``active``, and commit.
 
@@ -1818,9 +1861,12 @@ class OrganizationService:
         equally entitled to whichever way they arrived.
 
         Callers resolve the invitation and take the organization's lock first;
-        this only writes.
+        this checks the blocklist again inside the block, so a block cannot
+        commit between the check and the activation, then writes.
         """
         async with self._require_unit_of_work():
+            if await blocked_addresses.blocked_among([invitation.email]):
+                raise BlockedEmailError(invitation.email)
             await self.invitations.update_status(invitation, {"status": "accepted"})
             membership = await self._update_membership(membership, {"status": "active"})
             assignments = [
@@ -1956,6 +2002,7 @@ class OrganizationService:
         *,
         user: User,
         organization_member_id: uuid.UUID,
+        blocked_addresses: BlockedAddresses,
     ) -> AcceptInvitationResultPublic:
         """Accept an invitation addressed to the caller, from their own inbox.
 
@@ -1991,7 +2038,9 @@ class OrganizationService:
         # Resolved once to learn which organization to lock, then again under
         # it: the first resolve's answer is not yet safe to write against, and
         # the second is what this acts on. Same two-step as accept_invitation.
-        _, _, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
+        pending, _, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
+        if await blocked_addresses.blocked_among([pending.email]):
+            raise BlockedEmailError(pending.email)
         await self.organizations.lock(organization.id)
         # Re-asked under the lock, because the check above raced anything that
         # was already in flight: the accept this one duplicates may have
@@ -2001,7 +2050,9 @@ class OrganizationService:
         if already is not None:
             return already
         invitation, membership, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
-        return await self._resolve_invitation_to_active_membership(invitation, membership, organization)
+        return await self._resolve_invitation_to_active_membership(
+            invitation, membership, organization, blocked_addresses
+        )
 
     async def _accepted_result_if_active(
         self,
@@ -2148,6 +2199,7 @@ class OrganizationService:
         invitation_id: uuid.UUID,
         config: GatewayConfig,
         mail_limit: InvitationMailLimit,
+        blocked_addresses: BlockedAddresses,
     ) -> InviteOrganizationMemberResultPublic:
         """Give a pending or expired invitation a new link, and email it where mail can be sent. Owners and admins only.
 
@@ -2180,6 +2232,8 @@ class OrganizationService:
             invitee = await self.users.get(membership.user_id)
             if invitee is None or not invitee.is_active:
                 raise OrganizationMemberDeactivatedError(invitation.email)
+            if await blocked_addresses.blocked_among([invitation.email]):
+                raise BlockedEmailError(invitation.email)
             invitation = await self.invitations.update_status(
                 invitation,
                 {

@@ -26,7 +26,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
+from gateway.api.routes._helpers import latest_user_text, routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -380,7 +380,7 @@ class _ChatAdapter:
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
     ) -> ChatCompletion:
-        # ``native_tools`` names the web tools whose calls the answer reports in
+        # ``native_tools`` names the built-in tools whose calls the answer reports in
         # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
         # Each kwarg is passed only when set, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
@@ -637,9 +637,8 @@ async def run_chat_completion(
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             session_principal=session_principal,
-            routing_signal=lambda: routing_signal_from_messages(
-                request.messages, raw_request, has_tools=bool(request.tools)
-            ),
+            streaming=bool(request.stream),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             tools=request.tools,
             code_execution_policies=tool_ports.code_execution_policy,

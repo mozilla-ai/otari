@@ -30,6 +30,16 @@ describe("FilterChips", () => {
     expect(clearModel).toHaveBeenCalledOnce()
   })
 
+  it("shows the pickers with no toggle when always open", () => {
+    render(
+      <FilterChips alwaysOpen chips={[]}>
+        <span>User picker</span>
+      </FilterChips>,
+    )
+    expect(screen.getByText("User picker")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Add filter" })).toBeNull()
+  })
+
   it("keeps the picker row hidden until 'Add filter' is toggled", async () => {
     const user = userEvent.setup()
     render(

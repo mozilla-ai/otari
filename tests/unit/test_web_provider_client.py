@@ -3,6 +3,7 @@
 Every route that calls a web provider takes the app's client through ``get_web_provider_client``.
 """
 
+import asyncio
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -73,8 +74,11 @@ def test_the_tool_ports_read_the_client_without_depending_on_it(tmp_path: Path) 
     """Every completion route takes the tool ports, so one that runs no web tool must not need the client."""
     app, _ = _app(tmp_path)
     with TestClient(app):
-        assert get_optional_web_provider_client(Request({"type": "http", "app": app})) is app.state.web_provider_client
-    assert get_optional_web_provider_client(Request({"type": "http", "app": app})) is None
+        assert (
+            asyncio.run(get_optional_web_provider_client(Request({"type": "http", "app": app})))
+            is app.state.web_provider_client
+        )
+    assert asyncio.run(get_optional_web_provider_client(Request({"type": "http", "app": app}))) is None
 
 
 def _through(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[dict[str, Any]]:

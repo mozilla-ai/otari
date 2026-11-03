@@ -20,6 +20,7 @@ vi.mock("@/shared/api/overlayRequestPolicy", () => ({
 afterEach(() => {
   policy.origin = ""
   policy.credentials = "same-origin"
+  policy.publicOrigin = undefined
 })
 
 const INPUT = {
@@ -105,11 +106,9 @@ describe("buildCurlSnippet", () => {
 })
 
 describe("buildPythonSnippet", () => {
-  it("points the Otari SDK at the gateway origin", () => {
-    // The origin and nothing more: the SDK appends /api/v1 itself and raises
-    // on a base that already carries it.
+  it("points the OpenAI client at the gateway's API root", () => {
     expect(buildPythonSnippet(INPUT)).toContain(
-      'client = OtariClient(api_base="https://otari.example.com", api_key="gw-abc123")',
+      `client = OpenAI(base_url="https://otari.example.com${API_ROOT}", api_key="gw-abc123")`,
     )
   })
 
@@ -138,7 +137,7 @@ describe("buildPythonSnippet", () => {
       baseUrl: 'https://gw.example/x"',
     })
 
-    expect(snippet).toContain('api_base="https://gw.example/x\\""')
+    expect(snippet).toContain(`base_url="https://gw.example/x\\"${API_ROOT}"`)
   })
 })
 
@@ -167,5 +166,21 @@ describe("resolveSnippetBaseUrl", () => {
     policy.credentials = "include"
 
     expect(resolveSnippetBaseUrl()).toBe("https://eu.otari.example")
+  })
+
+  it("prefers the public origin over the page's own", () => {
+    // The dashboard's requests stay on the page's host, whose edge cuts a long
+    // non-streamed request; a program is pointed at the API's own host.
+    policy.publicOrigin = "https://api.otari.example"
+
+    expect(resolveSnippetBaseUrl()).toBe("https://api.otari.example")
+  })
+
+  it("prefers the public origin over the deployment the requests reach", () => {
+    policy.origin = "https://eu.otari.example"
+    policy.credentials = "include"
+    policy.publicOrigin = "https://eu.api.otari.example"
+
+    expect(resolveSnippetBaseUrl()).toBe("https://eu.api.otari.example")
   })
 })

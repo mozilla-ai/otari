@@ -246,6 +246,26 @@ def test_an_owner_or_admin_gives_their_own_key_a_rule_and_a_member_cannot(
     assert _own_rule(client, caller, key_id).status_code == expected
 
 
+def test_an_owner_or_admin_manages_the_rules_of_the_organizations_service_key(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Its owner is a user of its own, so the managers reach it as the organization's, and a member does not."""
+    creator = _session(client, master_key_header, db_session_factory, "owner")
+    created = client.post(OWN_KEYS, json={"key_name": "app", "is_service_key": True}, headers=creator)
+    assert created.status_code == 200, created.text
+    key_id = created.json()["id"]
+    admin = _session(client, master_key_header, db_session_factory, "admin")
+    member = _session(client, master_key_header, db_session_factory, "member")
+
+    rule = _own_rule(client, admin, key_id)
+    assert rule.status_code == 201, rule.text
+    listed = client.get(f"{OWN_KEYS}/{key_id}/federation-rules", headers=creator)
+    assert [row["id"] for row in listed.json()] == [rule.json()["id"]]
+    assert client.get(f"{OWN_KEYS}/{key_id}/federation-rules", headers=member).status_code == 404
+    deleted = client.delete(f"{OWN_KEYS}/{key_id}/federation-rules/{rule.json()['id']}", headers=creator)
+    assert deleted.status_code == 204
+
+
 def test_an_admin_cannot_give_a_rule_to_a_colleagues_key(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:

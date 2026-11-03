@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 
 import {
   carrySearch,
-  legacySearch,
   statusApplies,
   viewForPath,
   windowFor,
@@ -165,25 +164,5 @@ describe("carrySearch scope", () => {
     expect(carrySearch("usage", "requests", { scope: "mine" }).scope).toBe(
       "mine",
     )
-  })
-})
-
-describe("legacySearch", () => {
-  it("opens an old link that names a user on Everyone", () => {
-    expect(legacySearch({ user_id: "u1", range: "7d" })).toEqual({
-      user_id: "u1",
-      range: "7d",
-      scope: "everyone",
-    })
-    expect(legacySearch({ user_id: ["u1", "u2"] }).scope).toBe("everyone")
-  })
-
-  it("keeps a scope the link already chose, and leaves the rest alone", () => {
-    expect(legacySearch({ user_id: "u1", scope: "mine" })).toEqual({
-      user_id: "u1",
-      scope: "mine",
-    })
-    expect(legacySearch({ range: "7d" })).toEqual({ range: "7d" })
-    expect(legacySearch({ user_id: [] })).toEqual({ user_id: [] })
   })
 })

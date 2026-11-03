@@ -19,11 +19,10 @@ A small configuration looks like this:
 database_url: "postgresql://otari:otari@postgres:5432/otari"
 master_key: ${OTARI_MASTER_KEY}
 default_pricing: true
-
-providers:
-  openai:
-    api_key: ${OPENAI_API_KEY}
 ```
+
+Providers are added as [hosted providers](hosted-providers.md), on the Hosted
+providers page or under `hosted_providers:`.
 
 String values support `${ENV_VAR}` interpolation. Keep credentials in the
 environment or a secret store rather than committing them to YAML. A
@@ -61,10 +60,8 @@ Use only one; raw YAML wins when both are present.
 
 ```bash
 export OTARI_CONFIG_YAML='
+master_key: ${OTARI_MASTER_KEY}
 default_pricing: true
-providers:
-  openai:
-    api_key: ${OPENAI_API_KEY}
 '
 ```
 
@@ -100,6 +97,7 @@ the corresponding startup value after the database is available.
 | `federation_member_rules` | Let an organization's owners and admins give their own API keys federation rules naming any public https issuer, matched only in the token exchange that names them. Defaults to `false`. Setting it requires `OTARI_SECRET_KEY`. See [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key). |
 | `federation_allow_private_hosts` | Let a federation issuer's discovery document and signing keys be fetched from a private address. Defaults to `false`. |
 | `federation_access_token_ttl_sec` | How long an access token from the workload identity token exchange lasts, in seconds. Defaults to 600; between 60 and 3600. See [Claude Code and the Anthropic SDKs](workload-identity.md#claude-code-and-the-anthropic-sdks). |
+| `automatic_routing` | Request-aware ordering of providers for unpinned catalog IDs. Enabled by default. See [Automatic routing](#automatic-routing). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `provider_supported_countries` | The countries each provider type serves, such as `openai: [US, DE]`. A request from another country skips that provider. Empty, the default, turns it off. See [Supported countries](#supported-countries). |
 | `client_country_header` | A header a trusted proxy sets to the client's country code, such as `CF-IPCountry`. See [Supported countries](#supported-countries). |
@@ -295,24 +293,19 @@ that both sides read from the environment.
 
 ```yaml
 budgets:
-  end-user-budget-ai:
-    max_budget: 0.1
-    reset_alignment: calendar_day
-    rpm_limit: 40
-    tpm_limit: 2000
-  mlpa-global:
-    max_budget: 100
-    reset_alignment: calendar_day
+  team-monthly:
+    max_budget: 500
+    reset_alignment: calendar_month
 
 api_keys:
-  mlpa:
-    secret: ${MLPA_SERVICE_KEY}
-    user_id: mlpa
-    is_service_key: true
-    end_user_budget_ids: [end-user-budget-ai]
-    end_user_budget_id: end-user-budget-ai
-    ceiling: mlpa-global
+  backend:
+    secret: ${BACKEND_API_KEY}
+    user_id: backend
+    ceiling: team-monthly
 ```
+
+A service key with end-user budgets is declared the same way; see
+[Or declare it in config.yml](end-users.md#or-declare-it-in-configyml).
 
 A budget is keyed by its id and takes the fields `PUT /api/v1/budgets/{budget_id}`
 takes: `name`, `max_budget`, `token_limit`, `request_limit`, `rpm_limit`,
@@ -328,9 +321,9 @@ the next start. It takes:
 | `secret` | Required. The secret requests present, interpolated from the environment. |
 | `key_name` | Display name. Defaults to the key's name in config. |
 | `user_id` | The user the key bills to, created when missing. Unset uses the shared `default` user. |
-| `is_service_key` | Lets requests name end users. See [Service keys and end users](access-control.md#service-keys-and-end-users). |
+| `is_service_key` | Lets requests name end users. See [Track spend per end user](end-users.md). |
 | `end_user_budget_ids` | Budgets a request may start a new end user on with `Otari-End-User-Budget`. |
-| `max_end_users` | Most live end users the key may have on the budgets it assigns, or on any budget when it assigns none. See [Capping a key's end users](access-control.md#capping-a-keys-end-users). |
+| `max_end_users` | Most live end users the key may have on the budgets it assigns, or on any budget when it assigns none. See [Capping a key's end users](end-users.md#capping-a-keys-end-users). |
 | `end_user_budget_id` | Budget a new end user starts on when the request names none. Must be on `end_user_budget_ids` when both are set. |
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
@@ -381,8 +374,7 @@ entry back whenever the entry changed:
   ceiling changed or removed through the API as it is.
 - Otari keeps a digest of each entry it wrote beside the budget or key, never
   the secret itself (the secret enters as its hash), to tell whether the entry
-  changed. The first start of a version that keeps it writes every entry once,
-  as every start used to.
+  changed.
 - Nothing is deleted. A budget or key removed from config stays as it is and
   stops being marked as declared, so it can then be changed or deleted through
   the API. Declaring it again writes the entry back over it at the next start,
@@ -405,26 +397,11 @@ deployment that declares a key does not mint and print one.
 
 ## Provider configuration
 
-> **Deprecated.** The `providers:` block is being retired in favor of hosted
-> providers, which the Hosted providers page and `/api/v1/hosted-providers`
-> manage. At startup, each entry a hosted provider can hold is copied onto a
-> hosted provider of the same name, once: its `${VAR}` values are read at that
-> start, and the hosted provider serves the name from then on, with a serving
-> switch, a test, its models and removal like any other. The start asks the
-> provider for its models and switches on every one it lists, priced or not,
-> and a later refresh keeps them on; one that lists none is not copied, and keeps serving from `config.yml`. The start then logs
-> that the entry is no longer read, so it can be taken out of `config.yml`;
-> rotate its key on the Hosted providers page rather than in the environment.
-> Removing the copied provider on the page sticks: the entry is not copied
-> again. An entry a hosted provider cannot hold keeps serving from `config.yml`,
-> and the start logs why: one that sets `models`, `max_retries`,
-> `messages_api` or Vertex AI's `credentials`, `project` or `location`, a
-> keyless Bedrock or SageMaker entry served on the server's own cloud role, a
-> name that names another provider or that a hosted provider already holds, or
-> a key with no `OTARI_SECRET_KEY` to encrypt it. Once copied, an organization's
-> own key for the provider is asked first, where the entry was asked before it.
-> Set `import_configured_providers: false` (`OTARI_IMPORT_CONFIGURED_PROVIDERS`)
-> to keep serving every entry from `config.yml` for now.
+The `providers:` block is deprecated in favor of
+[hosted providers](hosted-providers.md). At startup, each entry a hosted
+provider can hold is copied onto one and is no longer read; see
+[Copies of `providers:` entries](hosted-providers.md#copies-of-providers-entries)
+and [Upgrading](hosted-providers.md#upgrading).
 
 The `providers` map is keyed by provider instance. Only a provider it declares
 (or a hosted provider, or an organization's key) serves requests. A standard
@@ -436,28 +413,67 @@ providers:
     api_key: ${ANTHROPIC_API_KEY}
 ```
 
-A keyless local backend or a provider authenticating from ambient cloud
-credentials is declared with a bare entry:
+| Field | Meaning |
+| --- | --- |
+| `api_key` | The provider's credential, normally a `${VAR}` reference. |
+| `api_base` | An endpoint other than the provider's default. |
+| `provider_type` | The implementation of a [named instance](models.md#named-provider-instances). Defaults to the instance name. |
+| `models` | Model ids offered for discovery, for a backend with no model-listing endpoint. |
+| `client_args` | Options for the provider's SDK client. See [Bedrock read timeout](#bedrock-read-timeout). |
+| `max_retries` | This instance's SDK retry count. See [Provider retries](#provider-retries). |
+| `messages_api` | `completions` (default) or `responses`. See [Messages through the Responses API](#messages-through-the-responses-api). |
+| `credentials`, `project`, `location` | Vertex AI only: configure its client. |
+| Any other key | Passed to the provider's any-llm call as it is. |
+
+Keyless local backends, providers authenticating from ambient cloud
+credentials, and named instances for custom or self-hosted endpoints are
+described in [Models](models.md#configuring-a-provider). The instance names
+`otari` and `hosted` are reserved for a managed platform's own offerings and
+are refused in `providers:`.
+
+`import_configured_providers` (`OTARI_IMPORT_CONFIGURED_PROVIDERS`), default
+`true`, copies the entries onto hosted providers at startup; `false` keeps
+serving every entry from `config.yml`.
+
+### Automatic routing
 
 ```yaml
-providers:
-  ollama:
-  bedrock:
+automatic_routing:
+  enabled: true
+  session_ttl_seconds: 3600
+  # Set only behind an edge that overwrites this header and blocks direct access.
+  country_header: CF-IPCountry
+  offerings:
+    nebius-us: {region: us, capacity: 10}
+    nebius-eu: {region: eu, capacity: 10}
+    # An exact instance:model entry overrides the instance-wide hint.
+    "bedrock:eu.anthropic.claude-sonnet-4-6": {region: eu, capacity: 5}
 ```
 
-A custom or self-hosted endpoint can use a named instance:
+Offering keys name configured provider instances or exact `instance:model`
+selectors. Declare a region only when that endpoint actually serves it; Otari
+never guesses a provider's location from its brand. `region` accepts `us` or
+`eu`; omitted means unknown. `capacity` is a positive relative concurrency
+weight, default 1, not a limit. Use rate-limit rules for enforced limits, including
+`max_concurrent`. A sticky session falls back when those limits refuse its provider.
 
-```yaml
-providers:
-  home_lab:
-    provider_type: openai
-    api_base: "https://models.example.com/v1"
-    api_key: ${HOME_LAB_TOKEN}
-    models: [qwen3-32b]
-```
+Send `Otari-Conversation-Id` to reuse the provider and credential that served the
+conversation. `session_ttl_seconds` sets the inactivity expiry (1–86400 seconds,
+default 3600), refreshed by successful responses. Requests without a conversation
+ID are ranked independently.
 
-Call it as `home_lab:qwen3-32b`. The optional `models` list supplies discovery
-for backends without a model-listing endpoint. See [Models](models.md).
+Both `country_header` and `default_region` are unset by default. With a trusted
+country header, US visitors prefer US endpoints and visitors in EU member
+countries prefer EU endpoints. Server-to-server traffic reflects the location of
+the calling server; applications that know the end user's preference can send
+`Otari-Region: us` or `eu`, which takes precedence. Other locations use
+`default_region` if set, otherwise there is no region preference. These settings
+allow cross-region fallback and do not enforce data residency.
+
+This is startup configuration, also accepted as JSON in
+`OTARI_AUTOMATIC_ROUTING`. Set `enabled: false` to use the baseline catalog order.
+The [model guide](models.md#automatic-provider-selection) explains cost, load,
+latency, sticky sessions and the limits of local feedback.
 
 ### Provider retries
 
@@ -598,10 +614,10 @@ providers:
 
 ### Runtime provider management
 
-Operators add provider credentials at runtime as hosted providers, on the
-Hosted providers page or through `/api/v1/hosted-providers` (see
-[Hosted providers in config.yml](#hosted-providers-in-configyml) for the
-fields). Config-file entries remain read-only in the dashboard.
+Operators add provider credentials at runtime as
+[hosted providers](hosted-providers.md), on the Hosted providers page or through
+`/api/v1/hosted-providers`. Config-file entries remain read-only in the
+dashboard.
 
 Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
 `otari gen-secret-key`. To rotate it, configure the new key before the old key,
@@ -612,124 +628,15 @@ router's key has no re-encryption endpoint yet: re-enter it on the Subagent
 router page after the rotation. Losing every configured encryption key makes
 stored credentials unrecoverable.
 
-#### Upgrading from the Deployment providers page
-
-Earlier releases stored runtime providers on a Deployment providers page
-(`/api/v1/provider-credentials`), which is gone. At startup, each provider it
-stored becomes a hosted provider of the same name, served by the
-implementation its `provider_type` names, so an `instance:model` selector,
-routing policy or alias naming it keeps working. The start asks each provider
-for its models, so the first start after the upgrade can take a little longer,
-and offers every model it lists switched on, priced or not, as the stored
-provider served it, and a later refresh keeps them on, on every path: completions, routing-policy fallbacks, the
-pass-through endpoints and batches. A model it does not list is refused until
-it is added on the Hosted providers page, or until "Serve models not on its
-list" is turned on there.
-
-A provider the move cannot take is logged at startup and listed on the Hosted
-providers page with the reason (`GET /api/v1/hosted-providers/migration`), and
-serves nothing until it is added again: a provider that lists no models, a
-name a hosted provider already holds, a key no configured `OTARI_SECRET_KEY`
-reads, an instance named after another provider (`groq` declared as
-`openai`), or a keyless Bedrock or SageMaker provider served on the server's
-own cloud role, which belongs under `providers:` in `config.yml` instead.
-
-Two things behave differently once moved. A hosted provider is asked after an
-organization's own key, where a stored provider was asked before it, so an
-organization holding its own key is served on that key. And a `config.yml`
-provider of the same name now serves ahead of it, where a stored provider
-used to override the configured one.
-
 ### Hosted providers in config.yml
 
-A hosted provider is a credential the deployment serves requests on when
-nothing else credentials them (see [Hosted providers](hosted-providers.md#hosted-providers-and-byo-credentials)).
-Besides the Hosted providers page, a deployment can declare
-them in a `hosted_providers:` block, keyed by name, with the fields the
-`/api/v1/hosted-providers` body takes:
-
-```yaml
-hosted_providers:
-  openai:
-    api_key: ${OPENAI_API_KEY}
-  openai-eu:
-    provider: openai
-    api_key: ${OPENAI_EU_API_KEY}
-    api_base: https://eu.api.openai.com/v1
-  anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
-    restricted_to_organization_id: 4f1c2a7e-0b9d-4c55-9a0e-2d6f8b3c1e90
-  vllm:
-    api_base: http://vllm.internal:8000/v1
-    models: [qwen3-32b]
-```
-
-The name is what a request addresses (`openai-eu:gpt-4o`), and what the
-provider's models, prices and usage are keyed on. It defaults to the
-implementation; a name of its own lets two endpoints of one implementation be
-served side by side. A name may not contain `:` or `/`, may not be `otari` or
-`hosted`, and may not be another implementation's name.
-
-| Field | Meaning |
-|---|---|
-| `provider` | The any-llm implementation serving it. Defaults to the name. |
-| `api_key` | The key the provider is served on. Required unless the provider needs none (listed below) or has an `api_base` of its own. |
-| `api_base` | An endpoint other than the provider's default. |
-| `client_args` | What the provider's SDK client needs beyond the key, such as Bedrock's region. |
-| `enabled` | `false` keeps the entry without serving it. Defaults to `true`. |
-| `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
-| `models` | Model ids a refresh offers when the provider cannot list its own. |
-| `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](#supported-countries). |
-
-A key may be left out for the self-hosted backends `vllm`, `ollama`,
-`llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`, for `vertexai` and
-`vertexaianthropic`, which authenticate through the Google Cloud credentials in
-the gateway's own environment, and for any provider given an `api_base`, which
-is called with a placeholder key, as a self-hosted OpenAI-compatible server is.
-Every other provider, Bedrock included, needs `api_key`. The Hosted providers
-page and API follow the same rule. As for any hosted provider, a request is served on one
-only when no organization key or `providers:` instance answers for it first.
-
-Reference the key as `${VAR}` rather than writing it into the file: it is
-resolved from the environment as every `${VAR}` in the file is, so the key stays
-in your secret store. The whole block can instead be set as JSON through
-`OTARI_HOSTED_PROVIDERS`, where `${VAR}` resolves the same way:
-
-```bash
-OTARI_HOSTED_PROVIDERS='{"openai": {"api_key": "${OPENAI_API_KEY}"}}'
-```
-
-When it is set, it replaces the `hosted_providers:` block of the file (and of
-`OTARI_CONFIG_YAML`) whole: a provider only the file names is not served, and
-the two are never merged per provider. An empty value leaves the file's block
-in place.
-
-The block is validated at load: an unknown implementation, a `provider_type`
-key (the implementation goes in `provider`), a name a hosted provider cannot
-take, an unknown field, or a missing `api_key` for a provider that needs one
-fails the start. With
-`OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`, an `api_base` that resolves to a
-private address fails it too, as it is refused for a provider stored through the
-page; that check runs at boot, because it resolves the host. The block is never
-shown by `/api/v1/settings`.
-
-A configured entry is never written to the database or encrypted. The Hosted
-providers page lists it with a `config.yml` badge and the API marks it
-`source: "config"` with no `id`; changing or deleting it through the API answers
-`409`, so change it in the configuration and restart. Its models, their serving
-switches and their prices are managed on the page as any hosted provider's are.
-An entry starts with no models and serves only the ones switched on under it,
-so refresh its models or add them before it serves a request.
-A provider stored through the page or the API under the same name wins over the
-entry, and the start logs each entry it shadows; deleting the stored provider
-serves the entry again on the same models. Taking an entry out of the
-configuration leaves its models in the database, serving nothing and offered
-in no catalog; they come back if the entry does, and the next catalog update run
-with its cleanup on the Hosted providers page (`POST
-/api/v1/hosted-providers/catalog-update` with `cleanup`) deletes them and their
-prices, naming the provider in `orphaned_rosters`. Where no hosted provider
-offers a model at all, the cleanup deletes those models and leaves every price
-in place.
+The `hosted_providers:` block declares [hosted providers](hosted-providers.md),
+keyed by name, with the fields the `/api/v1/hosted-providers` body takes
+(`provider`, `api_key`, `api_base`, `client_args`, `enabled`,
+`restricted_to_organization_id`, `models`, `supported_countries`). `OTARI_HOSTED_PROVIDERS` sets the
+whole block as JSON and replaces the file's block whole. The fields, validation
+and how a configured entry behaves beside a stored one are in
+[The `hosted_providers:` block](hosted-providers.md#the-hosted_providers-block).
 
 ### Provider copies
 
@@ -873,9 +780,6 @@ treated this way:
   id drops that provider's candidates and falls over to the next one. A plain
   model is refused with a `403` and the `country_not_supported` code, and so
   is a plan with no candidate left, without the code.
-- A policy whose `knn` router embeds the prompt with a
-  `router_embedding_model` on such a provider does not embed it: the router
-  declines, and the policy serves its default target.
 - The call that describes an image for a text-only model is skipped, so the
   image falls back to OCR or is dropped, as when no `vision_describe_model` is
   set.
@@ -969,15 +873,20 @@ Config-file prices seed the database. Prices stored through `/api/v1/pricing` ta
 precedence. Rates and settled costs use decimal arithmetic and costs are rounded
 once to a micro-dollar. Use PostgreSQL for durable accounting.
 
+A stored price change, made through the API, the dashboard or a catalog update,
+applies at once in the gateway process that wrote it. Each other worker or
+replica keeps the rates it has read for up to 30 seconds, so it applies the
+change within that window, as it does a rate scheduled to start later.
+
 ### Default pricing
 
 `default_pricing: true` prices from a models.dev snapshot when no stored price
 exists. Explicit database or config pricing always wins. A snapshot ships inside
 the package, so defaults work offline and a fresh deployment needs no network;
 once an operator accepts a newer one (below), that one serves instead. The
-`models_dev_metadata` setting only controls the descriptions and capabilities
-shown beside a model: prices and context windows come from the snapshot whether
-or not it is on.
+`models_dev_metadata` setting only controls whether the gateway fetches the
+descriptions and capabilities shown beside a model; with it off, they come from
+the bundled snapshot. Prices come from the snapshot whether or not it is on.
 
 A model is matched on its provider and id, including a pinned HuggingFace
 backend and Bedrock geo-prefixed ids. A bare id that providers list at different
@@ -1033,20 +942,27 @@ serves, with their history; the cleanup never runs on a schedule.
   approval. `GET /api/v1/pricing/refresh/pending` reads what is held; nothing is
   metered differently until it is approved. On a deployment with nobody to make
   that call, prefer `auto`.
-- `auto` runs it and applies changed prices at once, unless they look wrong: an
+- `auto` runs it and applies changed prices without review, unless they look wrong: an
   update that would lose or remove more than a tenth of the priced models is
   held for review as under `review`.
 
 `POST /api/v1/pricing/refresh/reject` discards held prices.
+
+An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails.
+It refuses models.dev data the gateway cannot read: a document that lists
+no models, or one with more than a quarter of its models damaged. When neither
+catalog can be read, the prices in force stay, and the update reports an error.
 
 Each accepted snapshot is kept, and a request or report priced for a past
 instant (`as_of`, usage backfills) uses the snapshot in force then, or the oldest
 one for a time before the first. History therefore starts at the first accepted
 snapshot; models.dev publishes no dated price changes of its own.
 
-To refresh the bundled snapshot, as a maintainer does at release, run
+The bundled snapshot is the whole models.dev catalog, so it also carries the
+model facts a listing shows. To refresh it, as a maintainer does at release, run
 `python scripts/update_models_dev_snapshot.py` (or pass `--input FILE` with a
-saved `api.json`) and commit `src/gateway/data/models_dev_pricing.json`.
+saved v2 `api.json`, adding `--input-version v1` for a v1 one) and commit
+`src/gateway/data/models_dev_catalog.json`.
 
 Rejecting a pending update means "not now": nothing remembers what was
 rejected, so the next check re-offers the same update while upstream still
@@ -1061,7 +977,9 @@ the default it shadows, so a config-file price that has fallen behind the
 provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
-Each stored rate also carries its `unit` (`tokens`, `requests`, or `images`)
+Each stored rate also carries its `unit` (`tokens`, `requests` or `images`, or
+one of the units under
+[Per-request pricing](#per-request-pricing-audio-moderations-rerank-and-completion-models))
 and its `origin` (`config` or `api`), so a rate the config file re-seeds on
 every restart is distinguishable from one set in the dashboard.
 
@@ -1074,7 +992,8 @@ instances and any hosted models the deployment serves to every organization,
 priced at the deployment's rates, and never a hosted provider restricted to one
 organization, an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
-served as that caller, valid or not. The setting is off by default and can be changed at runtime.
+served as that caller, valid or not. The setting is off by default and can be
+changed at runtime.
 
 Anonymous reads are throttled per client address by
 `public_catalog_rate_limit_per_minute`, sixty a minute by default and its own
@@ -1094,9 +1013,6 @@ The hosted models a visitor sees are the deployment-wide roster (what
 `ModelProviderPort.get_hosted_models` answers with no organization). No
 organization's providers, overrides, or usage are public, whatever the flag is
 set to.
-
-The instance names `otari` and `hosted` are reserved for a managed platform's
-own offerings and are refused in `providers:`.
 
 ### Cache and tiered pricing
 
@@ -1132,16 +1048,25 @@ image.
 | Audio transcription | One request, and tokens for a token-billed model such as `gpt-4o-transcribe` | `requests`, or `tokens` |
 | Audio speech, moderations | One request | `requests` |
 
-A rate in `tokens` on image generation, audio or moderations is still read in
-that endpoint's old unit (raw USD per image, or USD per million requests), as
-this guide used to document, and logs a warning once per model. A later release reads such a rate
-strictly, as tokens, so set `unit: images` or `unit: requests` on those rates
-now. A token-billed model (`gpt-image-1`, `gpt-4o-transcribe`) can then be priced
-in `tokens`, because its tokens are recorded on the usage row.
+A rate in `tokens` on image generation, audio or moderations is read in that
+endpoint's per-call unit (raw USD per image, or USD per million requests) and
+logs a warning once per model. Set `unit: images` or `unit: requests` on those
+rates: a later release reads a `tokens` rate there strictly, as tokens. A
+token-billed model (`gpt-image-1`, `gpt-4o-transcribe`) can be priced in
+`tokens`, because its tokens are recorded on the usage row.
 
 A flat per-image or per-request rate cannot follow what the caller chooses: an
 image's size and quality, or an audio file's length. Set it at the dearest
 option you allow.
+
+A rate can also name `character`, `megapixel`, `second`, `minute` or
+`web_search`, the units models.dev prices some models in (a character or token
+price is per million, a search price per 1,000, and the rest per one). They are
+stored ahead of their meters: a rate in one of them prices nothing yet, so a
+budgeted request on such a rate is refused under `require_pricing` as any
+unpriced request is, and the refusal names the unit. With `require_pricing`
+off, the request is served and its usage row carries no cost. Such a rate is
+never billed as tokens. A later release gives each unit a meter.
 
 An unpriced request on audio or moderations is served at zero cost. Image
 generation, embeddings, rerank and direct search are subject to
@@ -1177,7 +1102,8 @@ against the caller's budget before it runs. A successful search settles at the
 provider's reported charge when it reports one, and at the rate otherwise. A
 search a workspace's organization search key served is priced under
 `otari:web_search` instead, since the deployment cannot price the
-organization's own provider account. With `require_pricing` on, a direct search
+organization's own provider account. A search tool's own rate prices the model's
+searches on it too. With `require_pricing` on, a request that would run a tool
 with no rate is refused with a 402 naming the price to add, even on a provider
 that reports its charge, unless the key is exempt from budgets; a zero rate is
 a valid price. With it off, such a search holds no dollars, though it still
@@ -1185,13 +1111,14 @@ holds one request against a request-count budget.
 
 A fetch instance's `price_per_call` is stored the same way, as kind `fetch`.
 The built-in fetcher cannot be declared, so its rate is set through the pricing
-API, kind `fetch` and `model_key: builtin_fetch`. Either prices the fetch tool's
-calls on that instance, ahead of `otari:web_fetch`.
+API, kind `fetch` and `model_key: builtin_fetch`. Either alone prices the fetch
+tool's calls on that instance; `otari:web_fetch` prices only a fetch on an
+organization's fetch key.
 
-A rate written before tools had a kind of their own, under `pricing:` or the
-pricing API as `<provider>:<instance>` (`exa:exa-search`, `builtin:builtin_fetch`),
-still prices its tool, behind the tool's own row, until a later release stops
-reading it; startup names every such row and how to replace it. A key under a
+A tool rate keyed as a model price, under `pricing:` or the pricing API as
+`<provider>:<instance>` (`exa:exa-search`, `builtin:builtin_fetch`), is
+deprecated: it still prices its tool, behind the tool's own row, until a later
+release stops reading it; startup names every such row and how to replace it. A key under a
 tool's provider that names no configured tool is a model's price like any
 other, never a tool's.
 
@@ -1240,9 +1167,7 @@ model needs its own pricing row.
 
 An `images` rate is USD per million images, like a request rate: $0.04 an image
 is `input_price_per_million: 40000`, which is what the dashboard stores when you
-enter $40 per 1,000 images. Before this release an `images` rate was read as
-raw USD per image, so a rate written that way in `config.yml` (for example
-`0.04`) now bills a millionth of what it meant; multiply it by 1,000,000.
+enter $40 per 1,000 images.
 
 Image generation reserves the requested image count before dispatch at an
 `images` rate, then settles on the images the provider returned. Audio holds
@@ -1387,10 +1312,9 @@ model like any other, as `<provider>:<model>` in `pricing`.
 
 ### Agent model recommendations
 
-`POST /api/v1/routing/recommend` asks a decision model which of a few
-candidate models a coding agent's subagent should run on (see
-[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model)).
-The decision model is set only on the
+For what `POST /api/v1/routing/recommend` does, see
+[Agent model recommendations](routing.md#agent-model-recommendations). The
+decision model it asks is set only on the
 [Subagent router](routing.md#subagent-routers) page of the dashboard, never in
 `config.yml`. One setting shapes the question:
 
@@ -1405,7 +1329,9 @@ agent_recommender_candidates:
 to what it is for; `null` is allowed when the name says enough. At least two
 are required, and at most 255, the limit a choice question has. The defaults
 are Claude Code's `haiku`, `sonnet` and `opus` aliases with descriptions along
-the lines above. The list is Claude Code's alone: a pi request sends its own
+the lines above.
+
+The candidate list is Claude Code's alone: a pi request sends its own
 `candidates` in the same shape, as Otari model ids (`<provider>:<model>`),
 because [pi-otari](https://github.com/mozilla-ai/pi-otari) decides them on the
 laptop.
@@ -1432,18 +1358,15 @@ smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
 
-Invitation email is limited per organization and per recipient address over 24
-hours, so an organization anyone can create cannot use the deployment's sender to
-mail strangers at will. An invitation over a limit is still created and its link
-returned to share by hand. Both limits are counted in `rate_limit_store`, and
-`null` turns one off:
+Invitation email is limited over any 24 hours. Both limits are counted in
+`rate_limit_store`, and `null` turns one off; see
+[Invitations](members.md#invitations) for why and what an invitation over
+a limit does:
 
-```yaml
-invitation_mail_limit_per_organization: 250   # default
-invitation_mail_limit_per_address: 5          # default, from every organization together
-```
-
-See [Invitations](access-control.md#invitations).
+| Setting | Limits | Default |
+| --- | --- | --- |
+| `invitation_mail_limit_per_organization` | Invitation emails one organization sends | 250 |
+| `invitation_mail_limit_per_address` | Invitation emails one address receives, from every organization together | 5 |
 
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
@@ -1452,13 +1375,11 @@ where logs are shared. Test delivery from Settings or
 
 ## Signup
 
-Signup is closed by default: only an address an owner or admin already added or invited can get an account, by setting a password or by signing in with Google or GitHub. Open it where the deployment serves many tenants and each new address should arrive with an organization of its own:
-
-```yaml
-open_signup: true
-```
-
-The signup form needs mail configured in either case, because it sends a verification link. A Google or GitHub sign-in needs no mail, because the provider has already verified the address. See [Access control](access-control.md) for what each value does with an address nobody has added.
+`open_signup` (default `false`) decides what signup and a first Google or GitHub
+sign-in do with an address nobody has added or invited. `true` gives each new
+address an organization of its own. The signup form needs [mail](#mail)
+configured either way, because it sends a verification link; a provider sign-in
+does not. See [Signup](sign-in.md#signup).
 
 ## Built-in tools and guardrails variables
 
@@ -1566,7 +1487,7 @@ refused.
 Left unset on a split deployment, an OAuth callback lands the browser on an
 origin holding none of the sign-in state it started with, and the sign-in fails
 with the authorization code unspent. Passkeys need their own settings there; see
-[Access control](access-control.md#passkeys).
+[Set up passkeys](sign-in.md#set-up-passkeys).
 
 ## Extending Otari with a bootstrap module
 
@@ -1614,3 +1535,13 @@ Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
 submission stays in the form until the person retries or explicitly discards
 it. Drafts are held only in memory and disappear on page reload. A manual retry
 after an unconfirmed delivery can produce a duplicate.
+
+## Upgrading
+
+- **Image rates.** An `images` rate is USD per million images. A rate written in
+  `config.yml` as raw USD per image (for example `0.04`) bills a millionth of
+  what it meant; multiply it by 1,000,000.
+- **Declared budgets and keys.** The first start of a version that records a
+  digest of each declared entry writes every entry once, as if each had changed.
+- **`providers:` entries and the Deployment providers page.** See
+  [Upgrading](hosted-providers.md#upgrading).

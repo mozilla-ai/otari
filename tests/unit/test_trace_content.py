@@ -52,6 +52,10 @@ def key(monkeypatch: pytest.MonkeyPatch) -> str:
 @pytest.fixture
 def kms(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     monkeypatch.setenv("AWS_DEFAULT_REGION", _REGION)
+    # moto answers in this process, so a busy CI runner can hold a call past the
+    # production budget and drop the content a test then expects to read back.
+    # The budget itself is pinned against a fake key source below.
+    monkeypatch.setattr(_content, "_KEY_SOURCE_BUDGET_S", 30.0)
     with mock_aws():
         yield boto3.client("kms", region_name=_REGION)
 
@@ -811,7 +815,7 @@ async def test_the_startup_check_reports_no_key_at_all(monkeypatch: pytest.Monke
     assert failure is not None and failure.reason == "unavailable"
 
 
-def test_a_kms_key_with_no_region_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_kms_key_with_no_region_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("AWS_REGION", "AWS_DEFAULT_REGION"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent")

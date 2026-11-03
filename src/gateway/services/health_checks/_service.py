@@ -29,10 +29,13 @@ from gateway.services.health_checks._alerts import (
     deployment_name,
     diff_alerts,
     render_health_alert,
+    render_unavailable_alert,
 )
-from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome, probe_all
+from gateway.services.health_checks._probe import HealthCheckOffering, ProbeOutcome, capped_error, probe_all
 from gateway.services.health_checks._summary import FailureStreak, failure_streaks, summarize
+from gateway.services.inference import is_model_unavailable_error
 from gateway.services.mail import Mailer
+from gateway.services.upstream_redaction import redact_upstream_message
 
 # Results are kept this long, which is what the page's history shows.
 RETENTION = timedelta(hours=48)
@@ -43,6 +46,7 @@ RECOVERY_RETENTION = timedelta(days=90)
 ABANDONED_AFTER = timedelta(hours=1)
 # Where an alert links to, the dashboard route of the Health page.
 HEALTH_PAGE = "/#/health-checks"
+HOSTED_PROVIDERS_PAGE = "/#/admin/hosted-providers"
 
 
 ListOfferings = Callable[[], Awaitable[Sequence[HealthCheckOffering]]]
@@ -54,6 +58,17 @@ class HostedRoster(Protocol):
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]: ...
 
     async def switch_off_models(self, models: Mapping[str, Collection[str]]) -> int: ...
+
+    async def switch_off_unavailable(self, provider: str, model: str) -> bool: ...
+
+
+def refusal_switches_off(exc: BaseException, *, deployment_paid: bool) -> bool:
+    """Whether ``exc`` should switch its model off: its provider refusing the model on the deployment's own credential.
+
+    An organization's own key never switches anything: what its account may
+    reach says nothing about the deployment's.
+    """
+    return deployment_paid and is_model_unavailable_error(exc)
 
 
 def _model_of(result: HealthCheckResult) -> str:
@@ -280,6 +295,48 @@ class HealthCheckService:
 
         await self._alert(run_id, outcomes, {offering.selector for offering in offerings}, finished)
         return public
+
+    async def switch_off_unavailable(self, provider: str, model: str, refusal: str) -> bool:
+        """Switch ``provider:model`` off because its provider refused to serve it, and email the alert list.
+
+        Called only for a refusal :func:`refusal_switches_off` accepts. The
+        alert goes out once, from the call that switched the model off, with the
+        provider's ``refusal`` redacted and capped. Returns whether this call
+        switched it off.
+        """
+        if not await self._hosted.switch_off_unavailable(provider, model):
+            return False
+        selector = f"{provider}:{model}"
+        # codeql[py/clear-text-logging-sensitive-data]
+        logger.warning("Switched off hosted model %s: its provider refused to serve it", selector)
+        await self._alert_unavailable(selector, capped_error(redact_upstream_message(refusal)))
+        return True
+
+    async def _alert_unavailable(self, selector: str, refusal: str) -> None:
+        async with self._uow:
+            recipients = list((await self._settings.get_or_create()).alert_emails)
+        if not recipients:
+            return
+        mailer = Mailer(self._config)
+        if not mailer.can_send_links:
+            logger.warning(
+                "Unavailable model alert not sent: this deployment cannot send mail (missing %s)",
+                ", ".join(mailer.missing_settings),
+            )
+            return
+        message = render_unavailable_alert(
+            selector,
+            refusal,
+            deployment=deployment_name(self._config.effective_ui_base_url),
+            providers_link=mailer.link(HOSTED_PROVIDERS_PAGE),
+            health_link=mailer.link(HEALTH_PAGE),
+            asset_root=mailer.asset_root,
+        )
+        for recipient in recipients:
+            delivery = await mailer.send(to=recipient, message=message)
+            if not delivery.delivered:
+                # codeql[py/clear-text-logging-sensitive-data]
+                logger.warning("Unavailable model alert for %s not delivered via %s", selector, delivery.transport)
 
     async def _forget_run(self, run_id: uuid.UUID) -> None:
         async with self._uow:

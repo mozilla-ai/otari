@@ -30,6 +30,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/blocked-emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Blocked Emails
+         * @description List the addresses and domains blocked from holding an account on this deployment, newest first.
+         */
+        get: operations["admin-list_blocked_emails"];
+        put?: never;
+        /**
+         * Block Email
+         * @description Block an address, or a domain and its subdomains, from holding an account on this deployment.
+         *
+         *     A blocked address cannot sign up, be added to or invited into an organization, or sign in by password,
+         *     passkey or provider, and nothing is mailed to it for signup, verification or a password reset. Every
+         *     existing account the entry matches has its dashboard sessions ended now; the account itself is kept, so
+         *     removing the entry lets it sign in again. API keys are not affected.
+         *
+         *     Refused with 400 for a value that is neither an address nor a domain, or one that would block your own
+         *     address or the deployment's bootstrap operator's, and with 409 for one already blocked.
+         */
+        post: operations["admin-block_email"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/blocked-emails/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unblock Email
+         * @description Remove a blocklist entry, so the accounts it matched may sign in again.
+         */
+        delete: operations["admin-unblock_email"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users": {
         parameters: {
             query?: never;
@@ -1185,6 +1237,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/code/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Code
+         * @description Run code in the gateway's sandbox and return its output.
+         *
+         *     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
+         *     code execution policy is off is refused, and its execution ceiling and pinned
+         *     image apply. It is priced under ``otari:code_execution`` and reserved against
+         *     the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+         *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
+         *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
+         *     sending that id back runs in the same sandbox, with its files and
+         *     interpreter state.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user.
+         */
+        post: operations["code-execution-execute_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/decisions": {
         parameters: {
             query?: never;
@@ -1251,10 +1343,10 @@ export interface paths {
         };
         /**
          * List End User Budgets
-         * @description List the budgets the calling service key may put its end users on, with how many end users each holds.
+         * @description List the budgets the calling service key may put its end users on, with their limits and end user counts.
          *
-         *     Requires a service key. The counts cover the end users of the key's user, blocked ones included and deleted
-         *     ones not.
+         *     Requires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The
+         *     counts cover the end users of the key's user, blocked ones included and deleted ones not.
          */
         get: operations["end-users-list_end_user_budgets"];
         put?: never;
@@ -2489,9 +2581,10 @@ export interface paths {
          * @description Per-model metadata for the dashboard's detail view, from models.dev.
          *
          *     Covers every model models.dev lists under a configured provider, keyed by the
-         *     ``instance:model`` selector the dashboard uses. ``available`` is false when
-         *     enrichment is disabled (``models_dev_metadata``) or models.dev could not be
-         *     reached; the response is then empty and the UI falls back to bundled data.
+         *     ``instance:model`` selector the dashboard uses. Until models.dev has been
+         *     fetched, and always when ``models_dev_metadata`` is off, it comes from the
+         *     catalog bundled with the gateway. ``available`` is false only when no catalog
+         *     could be read; the response is then empty.
          *     Operator-gated: it describes the gateway's configured providers.
          *
          *     Answers from the cached catalog, kept warm by a background refresher, so the
@@ -2717,9 +2810,10 @@ export interface paths {
          *
          *     A request that sends a model's catalog ID moves to the model's next offering
          *     when one fails, with no policy. Each model lists its offerings in the order
-         *     such a request tries them, priced for this organization, with who runs the
-         *     built-in tools on each, beside its traffic: how many requests a backup served,
-         *     and how many named one offering and so had no fallback. The traffic is the
+         *     such a request tries them before automatic selection reorders it, each with
+         *     its input price for this organization and who runs the built-in tools on it,
+         *     beside its traffic: how many requests a backup served, and how many named one
+         *     offering or a policy instead, by API key and provider. The traffic is the
          *     workspaces the caller may see in their active organization, by the rule the
          *     organization's usage reads use.
          */
@@ -3097,7 +3191,8 @@ export interface paths {
          *     Only keys billed to the caller's own user: an operator-minted key assigned
          *     to them is theirs to see here, and nobody else's key ever is. Naming a
          *     workspace outside their organization lists nothing rather than refusing, so
-         *     the filter reports no more than the unfiltered read does.
+         *     the filter reports no more than the unfiltered read does. An owner or admin
+         *     also sees the organization's service keys, which they manage.
          */
         get: operations["organization-keys-list_own_keys"];
         put?: never;
@@ -3110,6 +3205,10 @@ export interface paths {
          *     workspace must be visible to the caller (a member of it, or an organization
          *     owner/admin, who see every workspace). A viewer of the workspace is refused
          *     with 403. The secret is returned once.
+         *
+         *     A service key is the organization's rather than the caller's: only an
+         *     organization owner or admin may create one, its end-user budgets must be
+         *     this organization's, and it is owned by a user minted for it alone.
          */
         post: operations["organization-keys-create_own_key"];
         delete?: never;
@@ -3137,7 +3236,7 @@ export interface paths {
         head?: never;
         /**
          * Update Own Key
-         * @description Update one of the caller's own API keys.
+         * @description Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.
          */
         patch: operations["organization-keys-update_own_key"];
         trace?: never;
@@ -4341,7 +4440,8 @@ export interface paths {
          * Create Org Web Search Key
          * @description Add a search or fetch key to the caller's organization. Organization owners and admins only.
          *
-         *     A workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.
+         *     A new key serves no workspace until the organization makes it its default for the key's kind, or a
+         *     workspace pins it. Until then each workspace keeps the key it uses, or the deployment's instance.
          */
         post: operations["web-search-keys-create_org_web_search_key"];
         delete?: never;
@@ -4415,7 +4515,14 @@ export interface paths {
          *     Organization owners and admins only.
          */
         post: operations["web-search-keys-set_org_default_web_search_key"];
-        delete?: never;
+        /**
+         * Unset Org Default Web Search Key
+         * @description Stop a key being the organization's default of its kind. Organization owners and admins only.
+         *
+         *     Idempotent: a key that is not the default is returned unchanged. With no default, a workspace that
+         *     pinned no key uses the deployment's instance for that kind.
+         */
+        delete: operations["web-search-keys-unset_org_default_web_search_key"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5338,40 +5445,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/routing/preferences/rank": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rank Candidates
-         * @description Record scored examples: one routing-memory record each, plus an audit row.
-         *
-         *     The routing-memory record is written before its audit row for each example,
-         *     because it is the load-bearing one (the router votes over it) and embedding it
-         *     can fail; writing the audit row only afterwards means a failed embedding never
-         *     leaves an orphan audit row.
-         *
-         *     A failed embedding is a 502 that names the model, not a 500. Every example in
-         *     the batch is embedded, so this is the call an operator makes most often and the
-         *     one most likely to meet a misconfigured ``router_embedding_model``.
-         *
-         *     Score keys are stored canonically as ``instance:model`` (see
-         *     :func:`_validated_scores`), which is the form the router canonicalizes its
-         *     candidates to, so how a policy spells a candidate cannot decide whether it
-         *     matches.
-         */
-        post: operations["routing-rank_candidates"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/routing/recommend": {
         parameters: {
             query?: never;
@@ -5459,33 +5532,6 @@ export interface paths {
          *     provider and the API base stay the same.
          */
         patch: operations["agent-recommenders-update_agent_recommender"];
-        trace?: never;
-    };
-    "/api/v1/routing/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Routing Memory Status
-         * @description Report how warm one user's routing memory is in one workspace, per pool.
-         *
-         *     ``user_id`` is required rather than optional because there is no aggregate
-         *     answer: warmth is per user, and a total across users would describe a pool
-         *     that no request ever votes over. The same holds across workspaces, which is
-         *     why ``workspace_id`` narrows rather than aggregating; it merely defaults
-         *     instead of being required, because a single-workspace deployment has one
-         *     answer.
-         */
-        get: operations["routing-routing_memory_status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/scoped-budgets": {
@@ -6065,10 +6111,8 @@ export interface paths {
          *     every deployment of the same build, and a parameter's environment variable is
          *     a name, never whether that name is set.
          *
-         *     The profiles read next door keeps the stricter gate, and the difference is
-         *     reach rather than audience. That one dials ``guardrails_url``, so admitting a
-         *     key there would let a workspace credential probe the deployment's own
-         *     service. This one dials nothing.
+         *     The profiles read next door takes the same gate. It differs in reach: that
+         *     one dials ``guardrails_url``, from a short cache, and this one dials nothing.
          */
         get: operations["tool-settings-list_builtin_guardrails"];
         put?: never;
@@ -6107,10 +6151,10 @@ export interface paths {
          *     caller-supplied and fetching it here would make this a way to have the
          *     gateway request an address of the caller's choosing.
          *
-         *     Not on ``verify_catalog_reader``, despite being a catalog read: that gate
-         *     admits any API key to the deployment-describing reads, and admitting a key
-         *     here would let any workspace credential dial the deployment's guardrails
-         *     service. This is a management read, so it takes the router's own gate.
+         *     On ``verify_catalog_reader``, so any API key reads it: a caller who may send
+         *     a profile name may learn which ones exist (otari#2690). The answer is cached
+         *     for 30 seconds per worker, so however many reads arrive, a worker sends the
+         *     deployment's guardrails service at most one request in that time.
          */
         get: operations["tool-settings-list_guardrail_profiles"];
         put?: never;
@@ -6189,8 +6233,9 @@ export interface paths {
          * List Tools
          * @description List the tools Otari runs itself, with the declaration forms it accepts.
          *
-         *     Every other `tools[]` entry, including provider-native keywords not listed
-         *     here, is forwarded to the upstream provider untouched.
+         *     Called with an API key, a tool its workspace does not allow is listed as
+         *     unavailable. Every other `tools[]` entry, including provider-native keywords
+         *     not listed here, is forwarded to the upstream provider untouched.
          */
         get: operations["tools-list_tools"];
         put?: never;
@@ -8444,7 +8489,7 @@ export interface components {
             name: string;
             /**
              * Offerings
-             * @description What a request sent by catalog ID tries, first first. One entry means no backup.
+             * @description Offerings in baseline catalog order. Automatic selection can reorder them per request using cost, recent health, load, region, latency and cache continuity. One entry means no backup.
              */
             offerings: components["schemas"]["FallbackOfferingPublic"][];
             /**
@@ -8452,6 +8497,11 @@ export interface components {
              * @description Of `requests`, those that named an offering or a policy rather than the catalog ID, and so got no automatic fallback.
              */
             pinned: number;
+            /**
+             * Pinned Keys
+             * @description `pinned` by API key and the provider that served it, most first. Includes requests that named a policy, which may have fallen back within it.
+             */
+            pinned_keys: components["schemas"]["PinnedTrafficPublic"][];
             /**
              * Pinned Provider
              * @description The instance most pinned requests reached.
@@ -8536,6 +8586,100 @@ export interface components {
             mimeType?: string | null;
             /** Uri */
             uri: string;
+        };
+        /**
+         * BlockedEmailCreateRequest
+         * @description An address or a domain to block.
+         */
+        BlockedEmailCreateRequest: {
+            /**
+             * Reason
+             * @description A note for other operators on why the entry exists. Never shown to the blocked person.
+             */
+            reason?: string | null;
+            /**
+             * Value
+             * @description An address (person@example.com) or a domain (example.com, also accepted as @example.com or *.example.com). A domain also blocks its subdomains.
+             */
+            value: string;
+        };
+        /**
+         * BlockedEmailCreatedPublic
+         * @description A new entry, and how many existing accounts it now blocks.
+         */
+        BlockedEmailCreatedPublic: {
+            /**
+             * Blocked Account Count
+             * @description How many existing accounts the entry matches. Their dashboard sessions were ended.
+             */
+            blocked_account_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By User Id
+             * @description The operator who added it, or null once removed.
+             */
+            created_by_user_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description address or domain. A domain also blocks its subdomains.
+             */
+            kind: string;
+            /**
+             * Pattern
+             * @description The normalized address or domain the entry blocks.
+             */
+            pattern: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * BlockedEmailPublic
+         * @description One blocklist entry.
+         */
+        BlockedEmailPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By User Id
+             * @description The operator who added it, or null once removed.
+             */
+            created_by_user_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description address or domain. A domain also blocks its subdomains.
+             */
+            kind: string;
+            /**
+             * Pattern
+             * @description The normalized address or domain the entry blocks.
+             */
+            pattern: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /** BlockedEmailsPublic */
+        BlockedEmailsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["BlockedEmailPublic"][];
         };
         /** Body_audio-create_transcription */
         "Body_audio-create_transcription": {
@@ -9053,6 +9197,11 @@ export interface components {
              * @description Authorized models before any of the request's filters.
              */
             total_count: number;
+            /**
+             * Types
+             * @description Every kind an authorized model has, sorted.
+             */
+            types: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
             /** Vendors */
             vendors: components["schemas"]["CatalogVendorFacet"][];
         };
@@ -9156,6 +9305,11 @@ export interface components {
              */
             selectors: string[];
             /**
+             * Type
+             * @description What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+            /**
              * Unpriced Count
              * @description How many offerings carry no price for this caller.
              */
@@ -9254,6 +9408,11 @@ export interface components {
              */
             selectors: string[];
             /**
+             * Type
+             * @description What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+            /**
              * Unpriced Count
              * @description How many offerings carry no price for this caller.
              */
@@ -9275,6 +9434,11 @@ export interface components {
              * @description Whether the provider itself reported this model.
              */
             discovered: boolean;
+            /**
+             * Endpoints
+             * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
+             */
+            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /**
@@ -9551,6 +9715,83 @@ export interface components {
             type: "choice";
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * CodeExecuteRequest
+         * @description A direct code execution request: the code to run, and the sandbox to run it in.
+         * @example {
+         *       "code": "print(1 + 1)",
+         *       "container": "auto"
+         *     }
+         */
+        CodeExecuteRequest: {
+            /**
+             * Code
+             * @description Python source to run in the sandbox
+             */
+            code: string;
+            /**
+             * Container
+             * @description 'auto' to hold the sandbox after the run, or a container id an earlier response named in Otari-Container-Id to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends.
+             */
+            container?: string | null;
+            /**
+             * File Ids
+             * @description Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.
+             */
+            file_ids?: string[] | null;
+            /**
+             * Timeout Seconds
+             * @description How long the code may run. Never more than the workspace's code execution ceiling, or 60 seconds when it sets none.
+             */
+            timeout_seconds?: number | null;
+            /**
+             * User
+             * @description User ID for usage attribution
+             */
+            user?: string | null;
+        };
+        /**
+         * CodeExecuteResponse
+         * @description A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``.
+         */
+        CodeExecuteResponse: {
+            /**
+             * Files
+             * @description The files the code wrote. Empty when it wrote none, or where the Files API is off.
+             */
+            files: components["schemas"]["CodeExecutionOutputFile"][];
+            /**
+             * Object
+             * @default code_execution.result
+             * @constant
+             */
+            object: "code_execution.result";
+            /**
+             * Return Code
+             * @description The program's exit status; null when the sandbox did not report one.
+             */
+            return_code: number | null;
+            /** Stderr */
+            stderr: string;
+            /** Stdout */
+            stdout: string;
+        };
+        /**
+         * CodeExecutionOutputFile
+         * @description A file the code wrote, stored in the Files API.
+         */
+        CodeExecutionOutputFile: {
+            /**
+             * File Id
+             * @description Download it from GET /api/v1/files/{file_id}/content
+             */
+            file_id: string;
+            /**
+             * Filename
+             * @description The name the code gave it in the working directory
+             */
+            filename: string;
         };
         /**
          * CodeExecutor
@@ -9964,6 +10205,11 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /**
+             * Is Organization Service Key
+             * @default false
+             */
+            is_organization_service_key: boolean;
             /** Is Service Key */
             is_service_key: boolean;
             /** Key */
@@ -9990,8 +10236,9 @@ export interface components {
          * @description Create-key body for the member surface.
          *
          *     Deliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner
-         *     is always the caller) and no ``exclude_from_budget`` (a member must not
-         *     exempt their own spend from enforcement).
+         *     is the caller, or one of the key's own for a service key) and no
+         *     ``exclude_from_budget`` (a member must not exempt their own spend from
+         *     enforcement). A field it does not take is refused rather than dropped.
          */
         CreateOwnKeyRequest: {
             /**
@@ -10010,15 +10257,36 @@ export interface components {
              */
             capture_agent_telemetry?: boolean | null;
             /**
+             * End User Budget Id
+             * @description Budget of this organization each end user this key creates is capped at, unless the request names another with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.
+             */
+            end_user_budget_id?: string | null;
+            /**
+             * End User Budget Ids
+             * @description Budgets of this organization a request may start a new end user on by naming one in Otari-End-User-Budget. Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.
+             */
+            end_user_budget_ids?: string[] | null;
+            /**
              * Expires At
              * @description Optional expiration timestamp
              */
             expires_at?: string | null;
             /**
+             * Is Service Key
+             * @description When true, a request may name an end user in its 'user' field. Each end user is created on first use and billed to its own budget, while this key's own ceiling caps all of them together. Only an organization owner or admin may create one. It belongs to the organization rather than to you: every owner or admin manages it, and its end users are reachable from no other key. Fixed once the key exists.
+             * @default false
+             */
+            is_service_key: boolean;
+            /**
              * Key Name
              * @description Optional name for the key
              */
             key_name?: string | null;
+            /**
+             * Max End Users
+             * @description Most live end users this service key may have. A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is 10000: an organization's service key always has a cap.
+             */
+            max_end_users?: number | null;
             /**
              * Metadata
              * @description Optional metadata
@@ -10827,6 +11095,8 @@ export interface components {
         EndUserBudgetPublic: {
             /** Blocked End User Count */
             blocked_end_user_count: number;
+            /** Budget Duration Sec */
+            budget_duration_sec?: number | null;
             /** Budget Id */
             budget_id: string;
             /**
@@ -10839,6 +11109,23 @@ export interface components {
              * @description Whether a new end user starts here when its request names no budget
              */
             is_default: boolean;
+            /**
+             * Max Budget
+             * @description Dollars each end user may spend over the period
+             */
+            max_budget?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Request Limit */
+            request_limit?: number | null;
+            /** Reset Alignment */
+            reset_alignment?: string | null;
+            /** Rpm Limit */
+            rpm_limit?: number | null;
+            /** Token Limit */
+            token_limit?: number | null;
+            /** Tpm Limit */
+            tpm_limit?: number | null;
         };
         /**
          * EndUserPublic
@@ -10996,7 +11283,7 @@ export interface components {
             router_candidates?: string[];
             /**
              * Router Weights
-             * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.
+             * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so it is knowable here: the plan above is the real ordering by share, not the decline path.
              */
             router_weights?: {
                 [key: string]: number;
@@ -11126,6 +11413,11 @@ export interface components {
          * @description One offering a catalog ID tries, and who runs the built-in tools on it.
          */
         FallbackOfferingPublic: {
+            /**
+             * Input Price
+             * @description USD per million input tokens at the organization's rates, the price the order ranks by. Null where the offering is unpriced.
+             */
+            input_price: number | null;
             /**
              * Otari Tools
              * @description Built-in tools Otari runs in this provider's place, for that caller.
@@ -11954,7 +12246,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images") | null;
+            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelPublic
@@ -11966,7 +12258,9 @@ export interface components {
          *     supplies it, and None when nothing prices the model yet. ``unit`` says what
          *     the rates are per, so a per-request rate is not read as a per-token one.
          *     ``enabled`` is the serving switch; a model offered without a discoverable
-         *     price starts off.
+         *     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
+         *     while it waits for a rate, ``operator`` when an operator switched it off,
+         *     ``unavailable`` when its provider refused to serve it.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -11978,6 +12272,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Disabled Reason */
+            disabled_reason?: ("unpriced" | "operator" | "unavailable") | null;
             /** Enabled */
             enabled: boolean;
             /**
@@ -12026,7 +12322,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images") | null;
+            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelsPublic
@@ -12561,6 +12857,11 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /**
+             * Is Organization Service Key
+             * @default false
+             */
+            is_organization_service_key: boolean;
             /** Is Service Key */
             is_service_key: boolean;
             /** Key Name */
@@ -12643,24 +12944,6 @@ export interface components {
              * Name
              * @description Human-friendly display name.
              */
-            name: string;
-        };
-        /**
-         * LearnedPolicy
-         * @description A policy whose selection depends on routing memory, for the status overview.
-         *
-         *     Only a *learned* policy belongs here. A weighted policy names a router too, but
-         *     its split is written in the policy document, so listing it under a warmth report
-         *     would tie it to a pool it never reads.
-         */
-        LearnedPolicy: {
-            /** Backend */
-            backend: string;
-            /** Candidates */
-            candidates: string[];
-            /** Default Target */
-            default_target: string;
-            /** Name */
             name: string;
         };
         /**
@@ -12749,12 +13032,12 @@ export interface components {
         ManagedTool: {
             /**
              * Accepted Types
-             * @description Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled, and for code execution the provider-named keywords unless the deployment's executor is `provider`.
+             * @description Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled and the deployment has a search of its own, and for code execution the provider-named keywords unless the deployment's executor is `provider`.
              */
             accepted_types: string[];
             /**
              * Available
-             * @description Whether this deployment has enabled and configured the tool. A request declaring an unavailable tool is rejected with 400.
+             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
              */
             available: boolean;
             /**
@@ -12787,6 +13070,11 @@ export interface components {
              * @constant
              */
             object: "tool";
+            /**
+             * Reason
+             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
+             */
+            reason?: ("not_configured" | "workspace_disabled") | null;
         };
         /**
          * McpErrorBody
@@ -13204,6 +13492,11 @@ export interface components {
              * @default false
              */
             tool_call: boolean;
+            /**
+             * Type
+             * @description What kind of model models.dev says it is. Null where the catalog gives no kind.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
          * ModelMetadataResponse
@@ -13212,7 +13505,7 @@ export interface components {
         ModelMetadataResponse: {
             /**
              * Available
-             * @description False when metadata could not be loaded (enrichment disabled or models.dev unreachable).
+             * @description False when no models.dev catalog could be read, not even the one bundled with the gateway.
              */
             available: boolean;
             /** Models */
@@ -13261,6 +13554,8 @@ export interface components {
             pricing_source: string;
             /** Supported Parameters */
             supported_parameters?: string[] | null;
+            /** Type */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
          * ModelPricingInfo
@@ -13282,8 +13577,9 @@ export interface components {
             /**
              * Unit
              * @default tokens
+             * @enum {string}
              */
-            unit: string;
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * ModerationRequest
@@ -13642,8 +13938,9 @@ export interface components {
             /**
              * Unit
              * @default tokens
+             * @enum {string}
              */
-            unit: string;
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
             /** Updated At */
             updated_at?: string | null;
         };
@@ -14621,11 +14918,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingPublic
@@ -14740,11 +15037,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingsPublic
@@ -15058,6 +15355,29 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["PendingOrganizationInvitationPublic"][];
+        };
+        /**
+         * PinnedTrafficPublic
+         * @description The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached.
+         */
+        PinnedTrafficPublic: {
+            /**
+             * Api Key Id
+             * @description The key, or null for requests made without one or whose key was deleted.
+             */
+            api_key_id: string | null;
+            /**
+             * Key Name
+             * @description The key's name, or null where it has none.
+             */
+            key_name: string | null;
+            /**
+             * Provider
+             * @description The provider instance the requests reached.
+             */
+            provider: string;
+            /** Requests */
+            requests: number;
         };
         /**
          * PlatformBreakGlassCreate
@@ -15487,13 +15807,6 @@ export interface components {
             user_id?: string | null;
             /** Workspace Id */
             workspace_id?: string | null;
-        };
-        /** PoolStatus */
-        PoolStatus: {
-            /** Records */
-            records: number;
-            /** Warm */
-            warm: boolean;
         };
         /**
          * PricingDriftRow
@@ -15949,41 +16262,6 @@ export interface components {
             providers: components["schemas"]["ProviderInfoSchema"][];
         };
         /**
-         * RankRequest
-         * @description Record how well each candidate did, for one or many prompts.
-         *
-         *     A batch because of the arithmetic: a pool routes nothing until it holds
-         *     ``router_seed_count`` examples (20 by default) and the vote reads the ``k``
-         *     nearest (5 by default), so a useful first teaching pass is dozens of examples
-         *     across the kinds of prompt you care about.
-         */
-        RankRequest: {
-            /**
-             * Examples
-             * @description The scored prompts to record.
-             */
-            examples: components["schemas"]["ScoredExample"][];
-            /**
-             * User Id
-             * @description Whose routing memory these examples belong to.
-             */
-            user_id: string;
-            /**
-             * Workspace Id
-             * @description Which workspace's routing memory these examples belong to. Omit for the deployment's default workspace. Only requests billing to that workspace vote over them.
-             */
-            workspace_id?: string | null;
-        };
-        /** RankResponse */
-        RankResponse: {
-            /** Pools */
-            pools: components["schemas"]["RecordedPool"][];
-            /** Recorded */
-            recorded: number;
-            /** Seed Count */
-            seed_count: number;
-        };
-        /**
          * RateLimitRuleCreate
          * @description A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.
          * @example {
@@ -16198,18 +16476,6 @@ export interface components {
              * @description Why the request was refused.
              */
             detail: string;
-        };
-        /**
-         * RecordedPool
-         * @description How warm one pool is after the write.
-         */
-        RecordedPool: {
-            /** Records */
-            records: number;
-            /** Task Id */
-            task_id: string | null;
-            /** Warm */
-            warm: boolean;
         };
         /**
          * ReencryptSearchToolsResponse
@@ -16628,42 +16894,6 @@ export interface components {
             master_key: string;
         };
         /**
-         * RouterStatus
-         * @description How warm this user's routing memory is, and what depends on it.
-         *
-         *     Routing memory has no single warmth: it is a set of independent pools.
-         *     ``default_pool`` is what a request with no ``Otari-Router-Task`` header votes
-         *     over (every record the user has in this workspace, labeled or not) and
-         *     ``tasks`` lists each partition, which only requests carrying that label use.
-         *     Each crosses ``seed_count`` on its own.
-         */
-        RouterStatus: {
-            /** Alpha */
-            alpha: number;
-            /** Confidence Floor */
-            confidence_floor: number;
-            default_pool: components["schemas"]["PoolStatus"];
-            /** Embedding Model */
-            embedding_model: string;
-            /** Granularity */
-            granularity: string;
-            /** K */
-            k: number;
-            /** Policies */
-            policies: components["schemas"]["LearnedPolicy"][];
-            /** Seed Count */
-            seed_count: number;
-            /** Tasks */
-            tasks: components["schemas"]["TaskPool"][];
-            /** User Id */
-            user_id: string;
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-        };
-        /**
          * SandboxCredentialPublic
          * @description Where the key a hosted sandbox provider leases with comes from. Never the key itself.
          */
@@ -16782,35 +17012,6 @@ export interface components {
             type: "score";
         } & {
             [key: string]: unknown;
-        };
-        /**
-         * ScoredExample
-         * @description One prompt and how well each candidate answered it.
-         */
-        ScoredExample: {
-            /**
-             * Label Source
-             * @description Provenance of the scores: 'human' or 'judge'.
-             * @default human
-             */
-            label_source: string;
-            /**
-             * Prompt
-             * @description The prompt that was tried.
-             */
-            prompt: string;
-            /**
-             * Scores
-             * @description Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and meaningful: two models that both answered well is exactly the case where the router should take the cheaper one.
-             */
-            scores: {
-                [key: string]: number;
-            };
-            /**
-             * Task Id
-             * @description Partition this example belongs to, matching the Otari-Router-Task header requests send. Omit to file it in the user's default pool.
-             */
-            task_id?: string | null;
         };
         /**
          * SearchProviderOptionSchema
@@ -17306,11 +17507,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).
+             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * SignupRequest
@@ -17568,15 +17769,6 @@ export interface components {
              * Format: uuid
              */
             organization_id: string;
-        };
-        /** TaskPool */
-        TaskPool: {
-            /** Records */
-            records: number;
-            /** Task Id */
-            task_id: string;
-            /** Warm */
-            warm: boolean;
         };
         /**
          * TestServiceRequest
@@ -18146,7 +18338,9 @@ export interface components {
          *     The operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the
          *     reason the create body gives. The tri-state fields follow the same
          *     ``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,
-         *     a value = pin it.
+         *     a value = pin it. ``is_service_key`` is accepted only unchanged, and
+         *     ``max_end_users`` takes no null: an organization's service key always has a
+         *     cap, so null is refused with 400.
          */
         UpdateOwnKeyRequest: {
             /** Allowed Models */
@@ -18155,12 +18349,20 @@ export interface components {
             allowed_tools?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
+            /** End User Budget Id */
+            end_user_budget_id?: string | null;
+            /** End User Budget Ids */
+            end_user_budget_ids?: string[] | null;
             /** Expires At */
             expires_at?: string | null;
             /** Is Active */
             is_active?: boolean | null;
+            /** Is Service Key */
+            is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
@@ -19558,6 +19760,7 @@ export interface components {
             default_enabled: boolean;
             /** Enabled */
             enabled: boolean;
+            fetch_executor: components["schemas"]["CodeExecutor"] | null;
             /** Max Results */
             max_results: number | null;
             /** Provider Options */
@@ -19566,6 +19769,7 @@ export interface components {
             } | null;
             /** Purpose Hint */
             purpose_hint: string | null;
+            search_executor: components["schemas"]["CodeExecutor"] | null;
             /** Updated At */
             updated_at: string | null;
             /** Web Search Configured */
@@ -19600,6 +19804,8 @@ export interface components {
              * @description False refuses web access for this workspace through otari_web_search, otari_web_fetch, and POST /api/v1/search.
              */
             enabled: boolean;
+            /** @description Who runs a provider-native web-fetch declaration (Anthropic's web_fetch_<date>) for this workspace, in search_executor's vocabulary. Pins over the request's Otari-Web-Fetch header; null leaves the header in charge */
+            fetch_executor?: components["schemas"]["CodeExecutor"] | null;
             /**
              * Max Results
              * @description Search only: ceiling on results one search returns, through otari_web_search and POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the provider's own maximum is the only limit.
@@ -19617,6 +19823,8 @@ export interface components {
              * @description Search only: hint used when a request declares otari_web_search without one of its own
              */
             purpose_hint?: string | null;
+            /** @description Who runs a provider-native web-search declaration (Anthropic's web_search_<date>, OpenAI's web_search) for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's search), 'otari' or 'provider'. Pins over the request's Otari-Web-Search header; null leaves the header in charge. The deployment's web_search_intercept still claims every search */
+            search_executor?: components["schemas"]["CodeExecutor"] | null;
         };
         /**
          * WorkspaceWebSearchKeyOverrideRequest
@@ -19655,6 +19863,12 @@ export interface components {
              */
             is_effective: boolean;
             /**
+             * Is Org Default
+             * @description The organization's default of its kind, which a workspace that pinned no key uses unless it turned the key off or this deployment cannot decrypt it; the deployment's instance serves it then.
+             * @default false
+             */
+            is_org_default: boolean;
+            /**
              * Kind
              * @enum {string}
              */
@@ -19687,6 +19901,16 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WorkspaceWebSearchKeyPublic"][];
+            /**
+             * Deployment Fetch Tool
+             * @description The name of the deployment's fetch tool, which the workspace's fetches run on when no key serves them, whether or not one does now: builtin_fetch for the built-in fetcher.
+             */
+            deployment_fetch_tool?: string | null;
+            /**
+             * Deployment Search Tool
+             * @description The name of the deployment's search tool, which the workspace's searches run on when no key serves them, whether or not one does now. Null when the deployment has none.
+             */
+            deployment_search_tool?: string | null;
             /**
              * Fetch Provider
              * @description The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the search's instance names a fetch instance of its own: its effective fetch key's, else the deployment's default fetch instance's, which is builtin for the built-in fetcher.
@@ -19757,6 +19981,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentAdminAccessPublic"];
+                };
+            };
+        };
+    };
+    "admin-list_blocked_emails": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedEmailsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-block_email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockedEmailCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedEmailCreatedPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-unblock_email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -21276,6 +21596,8 @@ export interface operations {
                 output_modality?: string[];
                 /** @description Require every capability. */
                 capability?: components["schemas"]["CatalogCapability"][];
+                /** @description Match any kind; a model of unknown kind does not match. */
+                type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
                 /** @description Minimum context window; unknown windows do not match. */
                 min_context?: number;
                 /** @description Maximum cheapest input price per million tokens; unpriced models do not match. */
@@ -21391,6 +21713,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "code-execution-execute_code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeExecuteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -27337,6 +27692,37 @@ export interface operations {
             };
         };
     };
+    "web-search-keys-unset_org_default_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "web-search-keys-restore_org_web_search_key": {
         parameters: {
             query?: never;
@@ -28827,39 +29213,6 @@ export interface operations {
             };
         };
     };
-    "routing-rank_candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RankRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RankResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     "routing-recommend_model_for_agent": {
         parameters: {
             query?: never;
@@ -29006,40 +29359,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRecommenderPublic"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "routing-routing_memory_status": {
-        parameters: {
-            query: {
-                /** @description Whose routing memory to report on. */
-                user_id: string;
-                /** @description Which workspace's routing memory to report on. Omit for the default workspace. */
-                workspace_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RouterStatus"];
                 };
             };
             /** @description Validation Error */

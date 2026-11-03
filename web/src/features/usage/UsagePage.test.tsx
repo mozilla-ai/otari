@@ -1612,7 +1612,7 @@ describe("UsagePage view state in the URL", () => {
     expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument()
   })
 
-  it("leaves the entity pickers and their reads to the Overview when embedded", async () => {
+  it("leaves the window, the entity pickers and their reads to the Overview when embedded", async () => {
     const fetchMock = mockApi(summary())
     renderPage(<UsagePage embedded />)
     await screen.findByText("gpt-5.6")
@@ -1621,8 +1621,9 @@ describe("UsagePage view state in the URL", () => {
     expect(
       screen.queryByRole("button", { name: "Add filter" }),
     ).not.toBeInTheDocument()
-    // The window's presets stay.
-    expect(screen.getByRole("button", { name: "24h" })).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "24h" }),
+    ).not.toBeInTheDocument()
     // Only the page's own summary and its previous-period read run: no model,
     // user or key list is fetched for a picker that is not drawn.
     const dimensions = fetchMock.mock.calls

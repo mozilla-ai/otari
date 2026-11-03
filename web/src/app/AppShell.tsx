@@ -1,6 +1,5 @@
-import { Button, Disclosure, Popover } from "@heroui/react"
+import { Button, cn, Disclosure, Popover } from "@heroui/react"
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
-import { clsx } from "clsx"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { IconType } from "react-icons"
@@ -390,7 +389,7 @@ function NavGroup({
     <Disclosure
       isExpanded={open}
       onExpandedChange={setOpen}
-      className={clsx("flex flex-col", open && "gap-0.5")}
+      className={cn("flex flex-col", open && "gap-0.5")}
     >
       {/* A plain wrapper rather than `Disclosure.Heading`: HeroUI renders that
           as an <h3>, which put every group's label ("Routing", "Tools") into the
@@ -796,7 +795,10 @@ function AppShellChrome() {
   const backgroundInert = isMobile && mobileNavOpen ? true : undefined
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden">
+    // NOTE: This clips rather than hides. `overflow: hidden` makes a box a
+    // scroll container, and a control's real input is positioned against this
+    // box, so one past the fold gives it a scroll range that focus scrolls.
+    <div className="relative flex h-full flex-col overflow-clip">
       {/* The first tab stop: a keyboard user can jump straight to the page body
           instead of tabbing through the whole nav on every route. Visually hidden
           until focused, then pinned top-left over the header (z above it). Goes
@@ -863,13 +865,13 @@ function AppShellChrome() {
           // the natural tab order.
           tabIndex={-1}
           inert={isMobile && !mobileNavOpen ? true : undefined}
-          className={clsx(
+          className={cn(
             // `otari-rail`: the rail is a named place, the way the toolbar and
             // the tables already are, and a ghost control inside it drops its
             // edge rather than each of them remembering to.
             "otari-rail flex flex-col border-r border-border bg-background focus:outline-none",
             isMobile
-              ? clsx(
+              ? cn(
                   // Full width, starting below the top bar: `top-14` pairs with
                   // the header's `min-h-14`, which is exact because everything in
                   // that bar truncates rather than wrapping. Absolute within the
@@ -885,7 +887,7 @@ function AppShellChrome() {
                   "absolute inset-x-0 top-14 bottom-0 z-40 w-full transition-transform duration-250 ease-out-fluid motion-reduce:transition-none",
                   mobileNavOpen ? "translate-x-0" : "-translate-x-full",
                 )
-              : clsx(
+              : cn(
                   // 150ms, which is what `otari-ai/frontend`'s shell collapses
                   // its own rail in.
                   "relative shrink-0 transition-[width] duration-150 motion-reduce:transition-none",
@@ -974,7 +976,7 @@ function AppShellChrome() {
               // Expanded, one 2px rhythm runs through rows *and* between groups:
               // the 32px heading block is what separates one group from the next.
               // Collapsed there are no headings, so the gap has to do that work.
-              className={clsx(
+              className={cn(
                 "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden",
                 effectiveCollapsed ? "gap-3" : "gap-0.5",
               )}

@@ -111,6 +111,10 @@ class WebSearchInterceptedError(TenancyForbiddenError):
     """A request asked the provider to run a web search this deployment runs on its own backend."""
 
 
+class WebToolExecutorPinnedError(TenancyForbiddenError):
+    """A request's header asked for a different web tool executor than its workspace pinned."""
+
+
 class WebAccessRefusedError(Exception):
     """A workspace's web search policy refuses the web access a request declared."""
 

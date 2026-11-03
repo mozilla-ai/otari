@@ -14,14 +14,17 @@ import { usePlaygroundTools } from "@/shared/api/playground"
 export function WorkspaceToolStatus({
   tool,
   leading,
+  trailing,
   workspace,
 }: {
   tool: "web_search" | "code_execution"
   leading?: ReactNode
+  /** Read-only rows after the setting, such as what the tool runs on. */
+  trailing?: ReactNode
   workspace: { workspace_id: string; name: string }
 }) {
   const status = usePlaygroundTools(workspace.workspace_id).data?.[tool]
-  if (!leading && !status?.configured) return null
+  if (!leading && !trailing && !status?.configured) return null
   return (
     <SettingsGroup isBounded>
       {leading}
@@ -40,6 +43,7 @@ export function WorkspaceToolStatus({
           }
         />
       ) : null}
+      {trailing}
     </SettingsGroup>
   )
 }

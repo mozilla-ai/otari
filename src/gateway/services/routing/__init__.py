@@ -9,11 +9,10 @@ marks the routing capability line provisional, and whether that port should exis
 at all is an open maintainer decision, so this does not presume one.
 
 A policy's ``select`` may hand the ordering to a *router backend*
-(``backends.py``), which is where the learned kNN router (``knn.py``), the
-weighted load balancer (``weighted.py``) and the priority order plug in. The split is deliberate: the
-compiler stays pure and synchronous, and a backend's asynchronous work
-(embedding, reading stored examples) happens in the request pipeline, which
-passes the resulting order in as a value.
+(``backends.py``), which is where the weighted load balancer (``weighted.py``)
+and the priority order plug in. The split is deliberate: the compiler stays pure
+and synchronous, and a backend's asynchronous work happens in the request
+pipeline, which passes the resulting order in as a value.
 
 ``RoutingService`` reads what routing gives an organization's callers: the
 automatic fallbacks a catalog ID gets with no policy, and the traffic that used them.
@@ -30,7 +29,6 @@ from gateway.services.routing._agent_recommender_price import HOLD_INPUT_TOKENS,
 from gateway.services.routing._agent_recommender_rules import check_recommender
 from gateway.services.routing._agent_recommender_service import AgentRecommenderService
 from gateway.services.routing._agent_recommenders import (
-    REFRESH_SECONDS,
     StoredRecommender,
     active_agent_recommender,
     apply_agent_recommenders,
@@ -39,10 +37,15 @@ from gateway.services.routing._agent_recommenders import (
     reset_agent_recommenders,
     run_agent_recommender_refresher,
 )
-from gateway.services.routing._service import FALLBACK_WINDOW, AutomaticFallback, FallbackOffering, RoutingService
+from gateway.services.routing._automatic import AutomaticObservation, AutomaticRouter, preferred_region
+from gateway.services.routing._service import (
+    FALLBACK_WINDOW,
+    AutomaticFallback,
+    FallbackOffering,
+    PinnedTraffic,
+    RoutingService,
+)
 from gateway.services.routing.backends import (
-    KNN_BACKEND,
-    NOOP_BACKEND,
     PRIORITY_BACKEND,
     WEIGHTED_BACKEND,
     RouterBackend,
@@ -50,8 +53,6 @@ from gateway.services.routing.backends import (
     RoutingDecision,
     backend_is_priority,
     backend_is_weighted,
-    backend_pool_is_teachable,
-    backend_requires_pricing,
     clear_router_backend_cache,
     get_router_backend,
     known_backends,
@@ -67,7 +68,6 @@ from gateway.services.routing.compiler import (
     selection_consults_router,
 )
 from gateway.services.routing.decide import RoutingSignal, decide_ordering, explain_router_ordering
-from gateway.services.routing.knn import KnnRoutingMemory, unpriced_router_candidates
 from gateway.services.routing.recommend import (
     ROUTER_LABEL,
     ROUTER_LABEL_MODEL,
@@ -79,13 +79,13 @@ from gateway.services.routing.recommend import (
 from gateway.types.budget_state import BudgetState
 
 __all__ = [
+    "AutomaticObservation",
+    "AutomaticRouter",
+    "preferred_region",
     "FALLBACK_WINDOW",
     "HOLD_INPUT_TOKENS",
     "HOLD_OUTPUT_TOKENS",
-    "KNN_BACKEND",
-    "NOOP_BACKEND",
     "PRIORITY_BACKEND",
-    "REFRESH_SECONDS",
     "ROUTER_LABEL",
     "ROUTER_LABEL_MODEL",
     "ROUTER_LABEL_PROVIDER",
@@ -96,8 +96,8 @@ __all__ = [
     "CompiledPlan",
     "DroppedCandidate",
     "FallbackOffering",
-    "KnnRoutingMemory",
     "NoEligibleCandidatesError",
+    "PinnedTraffic",
     "RecommenderPrice",
     "RouterBackend",
     "RouterOrdering",
@@ -111,8 +111,6 @@ __all__ = [
     "apply_agent_recommenders",
     "backend_is_priority",
     "backend_is_weighted",
-    "backend_pool_is_teachable",
-    "backend_requires_pricing",
     "build_decision_request",
     "candidates_for",
     "check_recommender",
@@ -130,5 +128,4 @@ __all__ = [
     "reset_agent_recommenders",
     "run_agent_recommender_refresher",
     "selection_consults_router",
-    "unpriced_router_candidates",
 ]

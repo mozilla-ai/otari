@@ -76,7 +76,7 @@ from gateway.services.tools._mcp_admission import (
     MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL,
     duplicate_mcp_server_name_detail,
 )
-from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL
+from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL, WorkspaceWebExecutors
 from gateway.services.traces import SessionRef
 
 ADAPTERS = [
@@ -146,6 +146,9 @@ class _Policy:
     ) -> ResolvedWebSearchConfig | None:
         self.asked.append(workspace_id)
         return self._policy
+
+    async def executors(self, workspace_id: uuid.UUID) -> WorkspaceWebExecutors:
+        return None, None
 
 
 def _ctx(
@@ -280,9 +283,13 @@ def test_keepalive_interval_wired_from_config_for_every_format(
 class _Settlement:
     """Records which settlement primitives the callbacks invoked."""
 
-    def __init__(self, pricing_source: PriceSource | None = "deployment", *, per_request: bool = False) -> None:
+    def __init__(
+        self, pricing_source: PriceSource | None = "deployment", *, per_request: bool = False, broken: bool = False
+    ) -> None:
         self.pricing_source = pricing_source
         self.per_request = per_request
+        # Every usage write raises, as one whose rate lookup failed does.
+        self.broken = broken
         self.reconciled: list[float] = []
         self.settled_tokens: list[int] = []
         self.refunded = 0
@@ -291,6 +298,8 @@ class _Settlement:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def fake_record_usage(**kwargs: Any) -> LoggedUsage:
             self.logged.append(kwargs)
+            if self.broken:
+                raise RuntimeError("rate lookup failed")
             logged = settled(kwargs)
             # No tool ran, so a deployment-paid row is charged its whole cost, as record_usage reports it.
             return logged._replace(deployment_paid_cost=logged.cost if kwargs.get("deployment_paid") else None)
@@ -463,6 +472,24 @@ async def test_stream_without_usage_estimate_policy_charges_estimate(monkeypatch
 
     assert settlement.reconciled == [0.5]
     assert settlement.refunded == 0
+
+
+@pytest.mark.parametrize("policy", ["estimate", "fail"])
+@pytest.mark.asyncio
+async def test_stream_without_usage_refunds_when_the_row_cannot_be_written(
+    monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    """The estimate's row resolves a rate first; a failure there must not leave the hold to the sweeper."""
+    settlement = _Settlement(broken=True)
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+
+    await _drain(_build(stream(), GatewayConfig(stream_missing_usage_policy=cast(Any, policy))))
+
+    assert settlement.refunded == 1
+    assert settlement.reconciled == []
 
 
 @pytest.mark.parametrize("policy", ["allow_free", "estimate", "fail"])
@@ -819,6 +846,43 @@ async def _settle(model: str) -> Any:
         usage_override=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
     )
     return writer.put_rows[0]
+
+
+async def _settle_without_usage(unit: str, cost_override: Decimal) -> Any:
+    """A row written with a fixed amount and no usage, as the missing-usage estimate policy writes it."""
+    writer = _FakeLogWriter()
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        cost_override=cost_override,
+    )
+    return writer.put_rows[0]
+
+
+@pytest.mark.asyncio
+async def test_an_estimate_settles_a_stream_without_usage_only_at_a_rate_with_a_completion_meter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def rate(unit: str) -> ResolvedPricing:
+        pricing = ModelPricing(
+            model_key="openai:gpt-4", input_price_per_million=Decimal(1), output_price_per_million=Decimal(1), unit=unit
+        )
+        return ResolvedPricing(pricing, "deployment", "openai:gpt-4")
+
+    _stub_pricing(monkeypatch, rate("tokens"))
+    assert (await _settle_without_usage("tokens", Decimal("0.5"))).cost == Decimal("0.5")
+
+    # The rate held nothing, so the row keeps no cost rather than a zero that reads as priced.
+    _stub_pricing(monkeypatch, rate("second"))
+    assert (await _settle_without_usage("second", Decimal(0))).cost is None
+
+    # An unpriced model records the zero its estimate was, as it always has.
+    _stub_pricing(monkeypatch, None)
+    assert (await _settle_without_usage("tokens", Decimal(0))).cost == Decimal(0)
 
 
 @pytest.fixture
@@ -2667,3 +2731,68 @@ async def test_a_completions_row_says_whether_the_deployment_paid(
     (row,) = settlement.logged
     assert row["deployment_paid"] is paid
     assert (row.get("error") is not None) is fails
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+@pytest.mark.parametrize("outcome", ["on_complete", "on_no_usage", "on_error", "on_incomplete"])
+@pytest.mark.asyncio
+async def test_automatic_load_is_released_by_every_stream_terminal_callback(
+    monkeypatch: pytest.MonkeyPatch, adapter: Any, outcome: str
+) -> None:
+    """Every terminal stream callback releases load, but only successful completion establishes affinity."""
+    from gateway.core.settings.routing import AutomaticRouting
+    from gateway.services.routing import AutomaticRouter, CompiledPlan
+    from gateway.types.attempt import Attempt
+
+    _Settlement().install(monkeypatch)
+    router = AutomaticRouter()
+    plan = router.rank(
+        CompiledPlan("model", [Attempt(1, "openai", LLMProvider.OPENAI, "m")]),
+        settings=AutomaticRouting(),
+        costs={"openai:m": Decimal(1)},
+        scope="workspace",
+        anchor="session",
+        region=None,
+        mode="stream",
+    )
+    assert plan.automatic is not None
+    observation = plan.automatic.start(plan.head)
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        """Provide an exhausted stream so terminal callbacks can be exercised independently."""
+        return
+        yield
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        """Capture streaming callbacks for direct settlement and load-release assertions."""
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    build_streaming_response(
+        adapter=adapter,
+        stream=empty(),
+        provider=LLMProvider.OPENAI,
+        model="m",
+        config=GatewayConfig(),
+        db=cast(Any, object()),
+        log_writer=cast(Any, object()),
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+        automatic_observation=observation,
+    )
+    captured["on_first_chunk"]()
+    assert observation.first_at is not None
+    args: list[Any] = []
+    if outcome == "on_complete":
+        args = [CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)]
+    elif outcome == "on_error":
+        args = [TimeoutError()]
+    await captured[outcome](*args)
+    assert observation.finished
+    assert all(health.active == 0 for health in router.health.values())
+
+    assert bool(router.affinities) is (outcome in {"on_complete", "on_no_usage"})

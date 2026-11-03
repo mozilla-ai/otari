@@ -136,3 +136,40 @@ def test_a_tool_past_the_name_cap_records_its_label_under_the_overflow_meter() -
     overflow = [entry for entry in tally.label_calls() if entry.tool == OVERFLOW_TOOL_NAME]
     assert [(entry.label, entry.calls) for entry in overflow] == [("mcp:one_more", 1)]
     assert tally.overflowed
+
+
+class _Gate:
+    def __init__(self, *, fits: bool) -> None:
+        self.fits = fits
+        self.asked: list[LabelCalls] = []
+
+    async def admit(self, call: LabelCalls) -> bool:
+        self.asked.append(call)
+        return self.fits
+
+
+@pytest.mark.asyncio
+async def test_a_tally_with_no_spend_gate_admits_every_call() -> None:
+    assert await ToolUsageTally().admit("web_search")
+
+
+@pytest.mark.asyncio
+async def test_the_spend_gate_is_asked_about_one_unreported_call_under_its_label() -> None:
+    """One call with no reported cost, which is what a rate prices before the call has run."""
+    tally = ToolUsageTally()
+    tally.spend_gate = gate = _Gate(fits=False)
+
+    assert not await tally.admit("web_search", label=_EXA, rate_keys=_EXA_KEYS, deployment_paid=True)
+    assert gate.asked == [
+        LabelCalls(
+            tool="web_search",
+            label=_EXA,
+            rate_keys=_EXA_KEYS,
+            calls=1,
+            unreported_calls=1,
+            reported_cost=Decimal(0),
+            enrichment_cost=Decimal(0),
+            deployment_paid=True,
+        )
+    ]
+    assert tally.is_empty(), "asking records nothing"

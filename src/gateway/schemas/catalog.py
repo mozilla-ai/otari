@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from gateway.models.pricing import PriceSource
+from gateway.types.model_type import ModelType
 
 
 class CatalogCapabilities(BaseModel):
@@ -38,6 +39,13 @@ class CatalogModelSummary(BaseModel):
     vendor: str | None
     description: str | None = Field(default=None, description="models.dev's, from the offering that named the model.")
     family: str | None = None
+    type: ModelType | None = Field(
+        default=None,
+        description=(
+            "What kind of model it is: the kind most of its offerings give, from the provider's listing or "
+            "models.dev. A tie goes to the vendor's own provider. Null where no offering gives one."
+        ),
+    )
     capabilities: CatalogCapabilities
     input_modalities: list[str]
     output_modalities: list[str]
@@ -100,6 +108,9 @@ class CatalogQuery(BaseModel):
     capability: list[CatalogCapability] = Field(
         default_factory=list, max_length=100, description="Require every capability."
     )
+    type: list[ModelType] = Field(
+        default_factory=list, max_length=100, description="Match any kind; a model of unknown kind does not match."
+    )
     min_context: int = Field(default=0, ge=0, description="Minimum context window; unknown windows do not match.")
     max_input: float | None = Field(
         default=None,
@@ -134,6 +145,7 @@ class CatalogFacets(BaseModel):
     total_count: int = Field(ge=0, description="Authorized models before any of the request's filters.")
     providers: list[str] = Field(description="Every provider instance offering an authorized model, sorted.")
     vendors: list[CatalogVendorFacet]
+    types: list[ModelType] = Field(description="Every kind an authorized model has, sorted.")
 
 
 class CatalogPage(BaseModel):

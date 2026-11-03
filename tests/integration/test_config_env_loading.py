@@ -183,41 +183,17 @@ def test_load_config_otari_prefix_covers_all_scalar_fields(tmp_path: Path, monke
     assert config.db_pool_timeout == 12.5
 
 
-def test_router_knob_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Clear both namespaces: config layering honors OTARI_ but still accepts the
-    # legacy GATEWAY_ fallback, so an ambient var in either would skew the defaults.
-    knobs = ("ALPHA", "K", "SEED_COUNT", "GRANULARITY", "EMBEDDING_MODEL", "CONFIDENCE_FLOOR")
-    for prefix in ("OTARI_ROUTER_", "GATEWAY_ROUTER_"):
-        for knob in knobs:
-            monkeypatch.delenv(f"{prefix}{knob}", raising=False)
-    config = GatewayConfig()
-    assert config.router_alpha == 0.3
-    assert config.router_k == 5
-    assert config.router_seed_count == 20
-    assert config.router_confidence_floor == 0.0
-    assert config.router_granularity == "trace_sticky"
-    assert config.router_embedding_model == "openai:text-embedding-3-small"
-
-
-def test_router_knobs_otari_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retired_router_settings_still_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployment still setting the removed learned router's knobs keeps booting."""
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("{}\n", encoding="utf-8")
-
+    config_file.write_text("router_k: 9\n", encoding="utf-8")
     monkeypatch.setenv("OTARI_ROUTER_ALPHA", "0.7")
-    monkeypatch.setenv("OTARI_ROUTER_K", "9")
-    monkeypatch.setenv("OTARI_ROUTER_GRANULARITY", "step")
+    monkeypatch.setenv("OTARI_ROUTER_GRANULARITY", "per-token")
 
     config = load_config(str(config_file))
-    assert config.router_alpha == 0.7
-    assert config.router_k == 9
-    assert config.router_granularity == "step"
 
-
-def test_router_granularity_rejects_an_unknown_value() -> None:
-    # There is no on/off switch to get wrong (a policy naming a router is the
-    # switch), so granularity is the one router enum a typo can break.
-    with pytest.raises(ValueError, match="router_granularity must be one of"):
-        GatewayConfig(router_granularity="per-token")
+    assert not hasattr(config, "router_alpha")
+    assert not hasattr(config, "router_k")
 
 
 def test_load_config_promotes_service_level_fields_from_otari_prefix(
@@ -629,3 +605,26 @@ def test_feedback_rejects_invalid_env(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setenv("OTARI_FEEDBACK_ENABLED", "maybe")
     with pytest.raises(ValueError):
         load_config(str(config_file))
+
+
+def test_automatic_routing_loads_yaml_and_structured_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Structured environment settings override YAML while defaults fill omitted routing options."""
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(
+        "automatic_routing:\n  country_header: Trusted-Country\n  offerings:\n    european: {region: eu, capacity: 4}\n"
+    )
+    config = load_config(str(config_file))
+    assert config.automatic_routing.enabled
+    assert config.automatic_routing.session_ttl_seconds == 3600
+    assert config.automatic_routing.country_header == "Trusted-Country"
+    assert config.automatic_routing.offerings["european"].region == "eu"
+    assert config.automatic_routing.offerings["european"].capacity == 4
+    monkeypatch.setenv(
+        "OTARI_AUTOMATIC_ROUTING", '{"enabled": false, "default_region": "us", "session_ttl_seconds": 120}'
+    )
+    overridden = load_config(str(config_file))
+    assert not overridden.automatic_routing.enabled
+    assert overridden.automatic_routing.default_region == "us"
+    assert overridden.automatic_routing.session_ttl_seconds == 120

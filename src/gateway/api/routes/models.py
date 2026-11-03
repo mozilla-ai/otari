@@ -20,7 +20,7 @@ from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.services.catalog import apply_model_metadata, load_catalog_metadata
+from gateway.services.catalog import ModelType, apply_model_metadata, load_catalog_metadata
 from gateway.services.merged_catalog_service import (
     CatalogScope,
     ModelObject,
@@ -146,6 +146,10 @@ class ModelMetadata(BaseModel):
     deprecated: bool = False
     cost_input: float | None = None
     cost_output: float | None = None
+    type: ModelType | None = Field(
+        default=None,
+        description="What kind of model models.dev says it is. Null where the catalog gives no kind.",
+    )
 
 
 class ModelMetadataResponse(BaseModel):
@@ -153,7 +157,7 @@ class ModelMetadataResponse(BaseModel):
 
     source: str = "models.dev"
     available: bool = Field(
-        description="False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+        description="False when no models.dev catalog could be read, not even the one bundled with the gateway.",
     )
     models: dict[str, ModelMetadata] = Field(default_factory=dict)
 
@@ -179,6 +183,7 @@ def _to_metadata_schema(entry: ModelCatalogEntry) -> ModelMetadata:
         deprecated=entry.deprecated,
         cost_input=entry.cost_input,
         cost_output=entry.cost_output,
+        type=entry.type,
     )
 
 
@@ -298,9 +303,10 @@ async def list_model_metadata(
     """Per-model metadata for the dashboard's detail view, from models.dev.
 
     Covers every model models.dev lists under a configured provider, keyed by the
-    ``instance:model`` selector the dashboard uses. ``available`` is false when
-    enrichment is disabled (``models_dev_metadata``) or models.dev could not be
-    reached; the response is then empty and the UI falls back to bundled data.
+    ``instance:model`` selector the dashboard uses. Until models.dev has been
+    fetched, and always when ``models_dev_metadata`` is off, it comes from the
+    catalog bundled with the gateway. ``available`` is false only when no catalog
+    could be read; the response is then empty.
     Operator-gated: it describes the gateway's configured providers.
 
     Answers from the cached catalog, kept warm by a background refresher, so the

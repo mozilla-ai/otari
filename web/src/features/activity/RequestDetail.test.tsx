@@ -30,6 +30,29 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("shows the Otari-Request-ID the request was answered under, not the row's own id", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ id: "row-1", request_group_id: "req-9" })}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("req-9")).toBeInTheDocument()
+    expect(screen.queryByText("row-1")).toBeNull()
+  })
+
+  it("shows a row's own id when it predates request groups", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail entry={entry({ id: "row-1", request_group_id: null })} />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("row-1")).toBeInTheDocument()
+  })
+
   it("names the model and the API key in full, which the row cuts short", async () => {
     mockApi()
     renderPage(

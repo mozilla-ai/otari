@@ -74,6 +74,7 @@ from gateway.api.routes._pipeline import (
     rate_limit_headers,
     throttle_early_rejection,
 )
+from gateway.api.routes._unavailable_models import note_unavailable_model
 from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
 from gateway.core.error_codes import (
@@ -225,6 +226,7 @@ async def run_passthrough(
     enforce_require_pricing: bool = False,
     billing: PassthroughBilling,
     map_provider_error: Callable[[Exception], HTTPException | None] | None = None,
+    refuse_model: Callable[[ResolvedProvider], HTTPException | None] | None = None,
     request_params: Collection[str] = (),
     reserve_before_resolve: bool = False,
     relabel: bool = True,
@@ -276,6 +278,10 @@ async def run_passthrough(
         map_provider_error: Route-specific provider-exception mapping checked
             before the shared classification (the error log and refund happen
             either way).
+        refuse_model: Route-specific refusal of the model a request resolved
+            to, checked after every gate and before the provider is called.
+            The refusal is recorded and the reservation refunded, as for a
+            gate's own.
         request_params: The names of the request fields the caller set. A
             provider SDK refusing one of them as an unexpected keyword answers
             400 naming it; any other unexpected keyword stays a 502.
@@ -656,8 +662,11 @@ async def run_passthrough(
 
     # The last rung of the credential ladder, past every gate on the name the caller wrote.
     deployment_charge: DeploymentCharge | None = None
+    # The roster's name for a hosted model, which dispatch replaces with the upstream's.
+    hosted_instance: str | None = None
     hosted = await _serve_hosted(resolved, reservation, country_gate)
     if hosted is not None:
+        hosted_instance = resolved.instance
         resolved, deployment_charge = hosted
         if lookup_pricing:
             # Settled at the rate a deployment-paid request settles at, which no
@@ -701,6 +710,12 @@ async def run_passthrough(
                     raise await _refuse(
                         reservation, resolved, exc.status_code, str(exc.detail), **(exc.headers or {})
                     ) from exc
+
+    refused_model = refuse_model(resolved) if refuse_model is not None else None
+    if refused_model is not None:
+        raise await _refuse(
+            reservation, resolved, refused_model.status_code, str(refused_model.detail), **(refused_model.headers or {})
+        )
 
     # Already resolved above (needed there for organization-scoped provider
     # credentials); reused here rather than re-derived, since it is fixed for
@@ -818,6 +833,10 @@ async def run_passthrough(
         await refund_reservation(db, reservation)
         raise
     except Exception as e:
+        if hosted_instance is not None:
+            note_unavailable_model(
+                config, hosted_instance, resolved.model, e, deployment_paid=deployment_charge is not None
+            )
         caller_params = frozenset(request_params) - SENSITIVE_PARAM_FIELDS
         failed_row = _usage_row(
             "error",

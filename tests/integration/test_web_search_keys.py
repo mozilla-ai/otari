@@ -55,7 +55,7 @@ from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tools import WebSearchKeyService, _web_search_keys
 
-from .conftest import MODEL_NAME
+from .conftest import MODEL_NAME, build_test_client
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _KEYS = f"{API_ROOT}/organizations/me/web-search-keys"
@@ -87,13 +87,19 @@ def _add_key(
     provider: str = "tavily",
     name: str = "ours",
     api_key: str,
+    default: bool = False,
     **fields: Any,
 ) -> dict[str, Any]:
+    """Add a key, and make it its kind's default when ``default``, so every workspace uses it."""
     created = client.post(
         _KEYS, json={"provider": provider, "name": name, "api_key": api_key, **fields}, headers=headers
     )
     assert created.status_code == 201, created.text
     body: dict[str, Any] = created.json()
+    if default:
+        starred = client.post(f"{_KEYS}/{body['id']}/default", headers=headers)
+        assert starred.status_code == 200, starred.text
+        body = starred.json()
     return body
 
 
@@ -246,10 +252,11 @@ def test_a_workspace_pins_or_turns_off_a_key(client: TestClient, master_key_head
             key["name"] for key in client.get(view, headers=master_key_header).json()["data"] if key["is_effective"]
         ]
 
-    # No default and no pin: the oldest key.
-    assert effective() == ["t"]
+    # No default and no pin: the deployment's search.
+    assert effective() == []
     client.patch(f"{view}/{brave['id']}", json={"is_default": True}, headers=master_key_header)
     assert effective() == ["b"]
+    client.post(f"{_KEYS}/{tavily['id']}/default", headers=master_key_header)
     client.patch(f"{view}/{brave['id']}", json={"disabled": True}, headers=master_key_header)
     assert effective() == ["t"]
     client.patch(f"{view}/{tavily['id']}", json={"disabled": True}, headers=master_key_header)
@@ -257,6 +264,26 @@ def test_a_workspace_pins_or_turns_off_a_key(client: TestClient, master_key_head
     reset = client.delete(f"{view}/{tavily['id']}", headers=master_key_header)
     assert reset.status_code == 200
     assert effective() == ["t"]
+
+
+def test_removing_the_default_returns_unpinned_workspaces_to_the_deployments_search(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    view = f"{API_ROOT}/workspaces/{_workspace_id(client, master_key_header)}/web-search-keys"
+    key = _add_key(client, master_key_header, name="t", api_key="tvly-1", default=True)
+    listed = client.get(view, headers=master_key_header).json()
+    assert listed["search_provider"] == "tavily"
+    assert [row["is_org_default"] for row in listed["data"]] == [True]
+
+    removed = client.delete(f"{_KEYS}/{key['id']}/default", headers=master_key_header)
+    again = client.delete(f"{_KEYS}/{key['id']}/default", headers=master_key_header)
+
+    assert (removed.status_code, removed.json()["is_org_default"]) == (200, False)
+    assert (again.status_code, again.json()["is_org_default"]) == (200, False)
+    # The legacy URL is the deployment's search.
+    listed = client.get(view, headers=master_key_header).json()
+    assert listed["search_provider"] == "searxng"
+    assert [row["is_org_default"] for row in listed["data"]] == [False]
 
 
 def test_a_workspaces_keys_are_paged_and_the_effective_key_is_chosen_across_pages(
@@ -298,7 +325,7 @@ def test_pinning_and_turning_off_one_key_at_once_is_refused(
 def test_a_workspace_with_a_key_searches_with_it(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
-    _add_key(client, master_key_header, api_key="tvly-org-secret")
+    _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
 
     seen = _searched_with(client, api_key_header)
 
@@ -310,7 +337,7 @@ def test_a_workspace_that_turned_its_keys_off_uses_the_deployments_search(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
     workspace_id = _workspace_id(client, master_key_header)
-    key = _add_key(client, master_key_header, api_key="tvly-org-secret")
+    key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
     client.patch(
         f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys/{key['id']}",
         json={"disabled": True},
@@ -335,9 +362,12 @@ def test_a_workspace_with_no_key_uses_the_deployments_search_unchanged(
 def test_an_archived_key_is_not_searched_with(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
-    key = _add_key(client, master_key_header, api_key="tvly-org-secret")
-    client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
+    key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
+    assert _searched_with(client, api_key_header)["provider_api_key"] == "tvly-org-secret"
 
+    archived = client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
+
+    assert archived.status_code == 200
     assert "provider" not in _searched_with(client, api_key_header)
 
 
@@ -399,6 +429,7 @@ async def test_a_workspace_member_sees_the_workspace_key_but_cannot_change_it(as
     key = await service.create_key(
         user=owner, request=OrgWebSearchKeyCreateRequest(provider="tavily", name="n", api_key="tvly-1")
     )
+    await service.set_default(user=owner, key_id=key.id)
 
     seen = await service.list_workspace_keys(user=member, workspace_id=workspace.id)
 
@@ -649,15 +680,47 @@ def test_the_workspace_listing_reports_what_its_calls_run_on(
     on_the_deployment = client.get(view, headers=master_key_header).json()
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
     on_nothing = client.get(view, headers=master_key_header).json()
-    key = _add_key(client, master_key_header, provider="exa", api_key="exa-1")
+    key = _add_key(client, master_key_header, provider="exa", api_key="exa-1", default=True)
     turned_off = client.patch(f"{view}/{key['id']}", json={"disabled": True}, headers=master_key_header).json()
     on_its_key = client.delete(f"{view}/{key['id']}", headers=master_key_header).json()
 
     # The legacy URL is the deployment's search; the built-in fetcher its fetch.
     assert (on_the_deployment["search_provider"], on_the_deployment["fetch_provider"]) == ("searxng", "builtin")
+    assert (on_the_deployment["deployment_search_tool"], on_the_deployment["deployment_fetch_tool"]) == (
+        "searxng",
+        "builtin_fetch",
+    )
     assert (on_nothing["search_provider"], on_nothing["fetch_provider"]) == (None, "builtin")
+    assert (on_nothing["deployment_search_tool"], on_nothing["deployment_fetch_tool"]) == (None, "builtin_fetch")
     assert turned_off["search_provider"] is None
     assert on_its_key["search_provider"] == "exa"
+
+
+@pytest.fixture
+def named_default_client(postgres_url: str) -> Iterator[TestClient]:
+    """A deployment whose default search is a named tool."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        search_tools={"fake-search": {"provider": "fake"}},
+        web_search_default_tool="fake-search",
+    )
+    yield from build_test_client(config)
+
+
+def test_the_workspace_listing_names_the_deployments_tools_while_a_key_serves(
+    named_default_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = named_default_client
+    view = f"{API_ROOT}/workspaces/{_workspace_id(client, master_key_header)}/web-search-keys"
+    _add_key(client, master_key_header, provider="exa", api_key="exa-1", default=True)
+
+    listed = client.get(view, headers=master_key_header).json()
+
+    assert listed["search_provider"] == "exa"
+    assert (listed["deployment_search_tool"], listed["deployment_fetch_tool"]) == ("fake-search", "builtin_fetch")
 
 
 # --- serving with them on a deployment with no search of its own ---------------------------------
@@ -676,7 +739,7 @@ def test_a_tavily_key_serves_an_explicit_declaration_where_the_deployment_has_no
     api_key_header: dict[str, str],
     no_search_of_its_own: None,
 ) -> None:
-    _add_key(client, master_key_header, api_key="tvly-org-secret")
+    _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
 
     seen = _searched_with(client, api_key_header)
 
@@ -689,7 +752,7 @@ def test_the_workspace_page_counts_its_key_where_the_deployment_has_no_search(
     page = f"{API_ROOT}/workspaces/{_workspace_id(client, master_key_header)}/web-search"
 
     before = client.get(page, headers=master_key_header).json()
-    _add_key(client, master_key_header, provider="exa", api_key="exa-1")
+    _add_key(client, master_key_header, provider="exa", api_key="exa-1", default=True)
     after = client.get(page, headers=master_key_header).json()
 
     assert (before["web_search_configured"], after["web_search_configured"]) == (False, True)
@@ -816,7 +879,15 @@ def test_a_fetch_key_serves_the_fetch_tool(
     db_session_factory: Callable[[], Session],
     no_search_of_its_own: None,
 ) -> None:
-    _add_key(client, master_key_header, provider="tabstack", name="pages", api_key="tbs-org-secret", kind="fetch")
+    _add_key(
+        client,
+        master_key_header,
+        provider="tabstack",
+        name="pages",
+        api_key="tbs-org-secret",
+        kind="fetch",
+        default=True,
+    )
     _price(client, master_key_header, "otari:web_fetch", 0.001)
     seen: list[httpx.Request] = []
 

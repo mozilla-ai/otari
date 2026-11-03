@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { API_ROOT } from "@/shared/api/client"
+import { localMidnightIso } from "@/shared/helpers/timeRange"
 import {
   entry,
   jsonResponse,
@@ -38,7 +39,7 @@ async function renderBar(view: ObserveView, search = "") {
     </>,
     `${PATHS[view]}${search}`,
   )
-  await screen.findByRole("button", { name: "Add filter" })
+  await screen.findByText("Time range")
 }
 
 // By element rather than role: an open picker hides everything outside its
@@ -223,6 +224,47 @@ describe("ObserveFilterBar writing the URL", () => {
   })
 })
 
+describe("ObserveFilterBar time range", () => {
+  it("names each view's default window", async () => {
+    mockApi({ rows: [entry()] })
+    await renderBar("usage")
+    await waitFor(() =>
+      expect(selectTrigger("Time range")).toHaveTextContent("30d"),
+    )
+  })
+
+  it("writes a preset and drops explicit bounds", async () => {
+    const user = userEvent.setup()
+    mockApi({ rows: [entry()] })
+    await renderBar(
+      "requests",
+      "?start_date=2026-01-01T00:00:00Z&end_date=2026-01-02T00:00:00Z&page=2",
+    )
+    expect(selectTrigger("Time range")).toHaveTextContent("Custom")
+
+    await pickOption(user, "Time range", "7d")
+
+    await waitFor(() => expect(urlParams().get("range")).toBe("7d"))
+    expect(urlParams().has("start_date")).toBe(false)
+    expect(urlParams().has("end_date")).toBe(false)
+    expect(urlParams().has("page")).toBe(false)
+  })
+
+  it("offers Today on Usage as the local day so far", async () => {
+    const user = userEvent.setup()
+    mockApi({ rows: [entry()] })
+    await renderBar("usage", "?range=7d")
+
+    await pickOption(user, "Time range", "Today")
+
+    await waitFor(() =>
+      expect(urlParams().get("start_date")).toBe(localMidnightIso()),
+    )
+    expect(urlParams().has("range")).toBe(false)
+    expect(selectTrigger("Time range")).toHaveTextContent("Today")
+  })
+})
+
 describe("ObserveFilterBar chips", () => {
   it("shows a chip for every applied filter, each clearing only itself", async () => {
     const user = userEvent.setup()
@@ -273,9 +315,6 @@ describe("ObserveFilterBar chips", () => {
     mockApi({ rows: [entry()] })
     await renderBar("requests")
 
-    expect(
-      await screen.findByRole("button", { name: "Add filter" }),
-    ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Clear all" }),
     ).not.toBeInTheDocument()

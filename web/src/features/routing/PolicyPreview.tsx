@@ -3,7 +3,7 @@ import { Fragment, useId } from "react"
 import { offeringPhrase } from "@/features/models/offerings"
 import { useSelectorOwner } from "@/features/models/useSelectorOwner"
 
-import { KNN_BACKEND, WEIGHTED_BACKEND } from "./policyModel"
+import { WEIGHTED_BACKEND } from "./policyModel"
 
 /** One target in words, named from the catalog once it answers. */
 function Offering({ selector }: { selector: string }) {
@@ -63,11 +63,6 @@ export function PolicyPreview({
         ) : pool.backend === WEIGHTED_BACKEND ? (
           <>
             {subject} are split across {pool.size} models by weight.
-          </>
-        ) : pool.backend === KNN_BACKEND ? (
-          <>
-            {subject} go to the cheapest of {pool.size} models a router expects
-            to answer well.
           </>
         ) : (
           <>

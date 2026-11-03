@@ -44,6 +44,7 @@ import { Route as OrganizationMembersRouteImport } from './routes/organization.m
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
 import { Route as OrganizationProviderKeysRouteImport } from './routes/organization.provider-keys'
 import { Route as OrganizationUsageRouteImport } from './routes/organization.usage'
+import { Route as OrganizationWebSearchKeysRouteImport } from './routes/organization.web-search-keys'
 import { Route as RoutingIndexRouteImport } from './routes/routing.index'
 import { Route as RoutingNameRouteImport } from './routes/routing.$name'
 import { Route as ToolsIndexRouteImport } from './routes/tools.index'
@@ -227,6 +228,12 @@ const OrganizationUsageRoute = OrganizationUsageRouteImport.update({
   path: '/usage',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const OrganizationWebSearchKeysRoute =
+  OrganizationWebSearchKeysRouteImport.update({
+    id: '/web-search-keys',
+    path: '/web-search-keys',
+    getParentRoute: () => OrganizationRoute,
+  } as any)
 const RoutingIndexRoute = RoutingIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -296,6 +303,7 @@ export interface FileRoutesByFullPath {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
@@ -334,6 +342,7 @@ export interface FileRoutesByTo {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
@@ -379,6 +388,7 @@ export interface FileRoutesById {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
@@ -425,6 +435,7 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/organization/web-search-keys'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
@@ -463,6 +474,7 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/organization/web-search-keys'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
@@ -507,6 +519,7 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/organization/web-search-keys'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
@@ -792,6 +805,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationUsageRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/organization/web-search-keys': {
+      id: '/organization/web-search-keys'
+      path: '/web-search-keys'
+      fullPath: '/organization/web-search-keys'
+      preLoaderRoute: typeof OrganizationWebSearchKeysRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
     '/routing/': {
       id: '/routing/'
       path: '/'
@@ -880,6 +900,7 @@ interface OrganizationRouteChildren {
   OrganizationPricingRoute: typeof OrganizationPricingRoute
   OrganizationProviderKeysRoute: typeof OrganizationProviderKeysRoute
   OrganizationUsageRoute: typeof OrganizationUsageRoute
+  OrganizationWebSearchKeysRoute: typeof OrganizationWebSearchKeysRoute
   OrganizationIndexRoute: typeof OrganizationIndexRoute
 }
 
@@ -890,6 +911,7 @@ const OrganizationRouteChildren: OrganizationRouteChildren = {
   OrganizationPricingRoute: OrganizationPricingRoute,
   OrganizationProviderKeysRoute: OrganizationProviderKeysRoute,
   OrganizationUsageRoute: OrganizationUsageRoute,
+  OrganizationWebSearchKeysRoute: OrganizationWebSearchKeysRoute,
   OrganizationIndexRoute: OrganizationIndexRoute,
 }
 

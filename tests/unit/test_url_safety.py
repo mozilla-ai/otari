@@ -5,6 +5,7 @@ import pytest
 from gateway.services.url_safety import (
     UnsafeURLError,
     redact_url_secrets,
+    validate_federation_url,
     validate_mcp_url,
     validate_outbound_fetch_url,
     validate_provider_api_base,
@@ -86,6 +87,64 @@ async def test_the_default_label_leaves_the_mcp_wording_alone() -> None:
     """Pinned because the label is what a future caller is tempted to rename."""
     with pytest.raises(UnsafeURLError, match="MCP server URL must use http or https"):
         await validate_mcp_url("ftp://example.com/mcp", has_authorization_token=False)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # An unbracketed IPv6 host ends at its first colon, so the host reads as
+        # "2400", which a resolver answers with 0.0.9.96.
+        "http://2400:8901::1:8787/mcp",
+        "http://2400:8901::1/mcp",
+        "http://[::1:8787/mcp",
+    ],
+)
+@pytest.mark.asyncio
+async def test_malformed_authority_rejected_for_its_shape(url: str) -> None:
+    with pytest.raises(UnsafeURLError, match="IPv6 address in brackets"):
+        await validate_mcp_url(url, has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+async def test_bracketed_ipv6_literal_accepted() -> None:
+    await validate_mcp_url("http://[2400:8901::1]:8787/mcp", has_authorization_token=False)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com:bad/mcp",
+        "https://example.com:99999/mcp",
+        # The host is written correctly, so only the port is wrong.
+        "https://[2400:8901::1]:bad/mcp",
+    ],
+)
+@pytest.mark.asyncio
+async def test_port_that_is_not_a_number_rejected(url: str) -> None:
+    with pytest.raises(UnsafeURLError, match="port must be a number"):
+        await validate_mcp_url(url, has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+async def test_shape_is_validated_before_the_private_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The override relaxes which addresses are allowed, not which URLs parse."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    with pytest.raises(UnsafeURLError, match="IPv6 address in brackets"):
+        await validate_mcp_url("http://2400:8901::1:8787/mcp", has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+async def test_every_validator_refuses_a_malformed_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The provider gate is opt-in, and in its default allow-all state it
+    # deliberately imposes no shape on an operator's api_base.
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    for check in (
+        validate_outbound_fetch_url("http://2400:8901::1:8787/page"),
+        validate_provider_api_base("http://2400:8901::1:8787/v1"),
+        validate_federation_url("https://2400:8901::1:8787/.well-known/jwks.json"),
+    ):
+        with pytest.raises(UnsafeURLError, match="IPv6 address in brackets"):
+            await check
 
 
 @pytest.mark.asyncio
@@ -240,11 +299,8 @@ async def test_provider_api_base_on_keeps_allow_all(monkeypatch: pytest.MonkeyPa
         ("https://example.com/mcp?api_key=secret", "https://example.com/mcp?api_key=***"),
         # An IPv6 literal keeps its brackets, or the rebuilt URL is malformed.
         ("https://user:pass@[::1]:8080/mcp", "https://user:***@[::1]:8080/mcp"),
-        # A port that is not a number reaches this function, because nothing
-        # rejects one on the way in: `validate_mcp_url` reads `hostname` and
-        # never the port. Rebuilding through `SplitResult.port` raised
-        # ValueError here, which turned a member's read of a stored MCP server
-        # into a 500 rather than a masked URL.
+        # A port that is not a number still reaches this function, which masks
+        # a URL that is already stored and must not raise on one.
         ("https://svc:token@example.com:bad/mcp", "https://svc:***@example.com:bad/mcp"),
         # Nothing to mask is returned untouched, not rebuilt.
         ("https://example.com/mcp", "https://example.com/mcp"),

@@ -38,6 +38,102 @@
           }
         },
         {
+          "name": "List Blocked Emails",
+          "request": {
+            "description": "List the addresses and domains blocked from holding an account on this deployment, newest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Block Email",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"value\": \"string\"\n}"
+            },
+            "description": "Block an address, or a domain and its subdomains, from holding an account on this deployment.\n\nA blocked address cannot sign up, be added to or invited into an organization, or sign in by password,\npasskey or provider, and nothing is mailed to it for signup, verification or a password reset. Every\nexisting account the entry matches has its dashboard sessions ended now; the account itself is kept, so\nremoving the entry lets it sign in again. API keys are not affected.\n\nRefused with 400 for a value that is neither an address nor a domain, or one that would block your own\naddress or the deployment's bootstrap operator's, and with 409 for one already blocked.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails"
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails"
+            }
+          }
+        },
+        {
+          "name": "Unblock Email",
+          "request": {
+            "description": "Remove a blocklist entry, so the accounts it matched may sign in again.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails",
+                ":entry_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails/:entry_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "entry_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "List Deployment Users",
           "request": {
             "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.\n``search`` narrows the page and the count together.",
@@ -1822,6 +1918,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Match any kind; a model of unknown kind does not match.",
+                  "disabled": true,
+                  "key": "type",
+                  "value": ""
+                },
+                {
                   "description": "Minimum context window; unknown windows do not match.",
                   "disabled": true,
                   "key": "min_context",
@@ -1870,7 +1972,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
             }
           }
         },
@@ -1964,6 +2066,45 @@
         }
       ],
       "name": "chat"
+    },
+    {
+      "item": [
+        {
+          "name": "Execute Code",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"code\": \"print(1 + 1)\",\n  \"container\": \"auto\"\n}"
+            },
+            "description": "Run code in the gateway's sandbox and return its output.\n\nThe run is admitted as an ``otari_code_execution`` call is: a workspace whose\ncode execution policy is off is refused, and its execution ceiling and pinned\nimage apply. It is priced under ``otari:code_execution`` and reserved against\nthe caller's budgets. ``file_ids`` puts uploads in the working directory, and\neach file the code writes comes back with a ``file_id``. ``container: \"auto\"``\nholds the sandbox after the run and names it in ``Otari-Container-Id``;\nsending that id back runs in the same sandbox, with its files and\ninterpreter state.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "code",
+                "execute"
+              ],
+              "raw": "{{baseUrl}}/api/v1/code/execute"
+            }
+          }
+        }
+      ],
+      "name": "code-execution"
     },
     {
       "item": [
@@ -2079,7 +2220,7 @@
         {
           "name": "List End User Budgets",
           "request": {
-            "description": "List the budgets the calling service key may put its end users on, with how many end users each holds.\n\nRequires a service key. The counts cover the end users of the key's user, blocked ones included and deleted\nones not.",
+            "description": "List the budgets the calling service key may put its end users on, with their limits and end user counts.\n\nRequires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The\ncounts cover the end users of the key's user, blocked ones included and deleted ones not.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4383,7 +4524,7 @@
         {
           "name": "List Model Metadata",
           "request": {
-            "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
+            "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. Until models.dev has been\nfetched, and always when ``models_dev_metadata`` is off, it comes from the\ncatalog bundled with the gateway. ``available`` is false only when no catalog\ncould be read; the response is then empty.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
             "header": [],
             "method": "GET",
             "url": {
@@ -5233,7 +5374,7 @@
         {
           "name": "List Automatic Fallbacks",
           "request": {
-            "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them, priced for this organization, with who runs the\nbuilt-in tools on each, beside its traffic: how many requests a backup served,\nand how many named one offering and so had no fallback. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
+            "description": "The models the caller's organization sent requests to in the last 30 days, and the fallback each gets.\n\nA request that sends a model's catalog ID moves to the model's next offering\nwhen one fails, with no policy. Each model lists its offerings in the order\nsuch a request tries them before automatic selection reorders it, each with\nits input price for this organization and who runs the built-in tools on it,\nbeside its traffic: how many requests a backup served, and how many named one\noffering or a policy instead, by API key and provider. The traffic is the\nworkspaces the caller may see in their active organization, by the rule the\norganization's usage reads use.",
             "header": [],
             "method": "GET",
             "url": {
@@ -5498,41 +5639,6 @@
           }
         },
         {
-          "name": "Rank Candidates",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"user_id\": \"string\",\n  \"examples\": [\n    {\n      \"prompt\": \"string\",\n      \"scores\": {}\n    }\n  ]\n}"
-            },
-            "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "routing",
-                "preferences",
-                "rank"
-              ],
-              "raw": "{{baseUrl}}/api/v1/routing/preferences/rank"
-            }
-          }
-        },
-        {
           "name": "Recommend Model For Agent",
           "request": {
             "body": {
@@ -5563,40 +5669,6 @@
                 "recommend"
               ],
               "raw": "{{baseUrl}}/api/v1/routing/recommend"
-            }
-          }
-        },
-        {
-          "name": "Routing Memory Status",
-          "request": {
-            "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "routing",
-                "status"
-              ],
-              "query": [
-                {
-                  "description": "Whose routing memory to report on.",
-                  "disabled": false,
-                  "key": "user_id",
-                  "value": ""
-                },
-                {
-                  "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
-                  "disabled": true,
-                  "key": "workspace_id",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/routing/status?user_id=&workspace_id="
             }
           }
         }
@@ -6279,7 +6351,7 @@
         {
           "name": "List Own Keys",
           "request": {
-            "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does.",
+            "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does. An owner or admin\nalso sees the organization's service keys, which they manage.",
             "header": [],
             "method": "GET",
             "url": {
@@ -6327,9 +6399,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"key_name\": \"my-key\"\n}"
             },
-            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.",
+            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.\n\nA service key is the organization's rather than the caller's: only an\norganization owner or admin may create one, its end-user budgets must be\nthis organization's, and it is owned by a user minted for it alone.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6362,9 +6434,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"allowed_tools\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"key_name\": \"my-key\"\n}"
             },
-            "description": "Update one of the caller's own API keys.",
+            "description": "Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8738,7 +8810,7 @@
               },
               "raw": "{\n  \"api_key\": \"<your Exa API key>\",\n  \"kind\": \"search\",\n  \"name\": \"production\",\n  \"provider\": \"exa\"\n}"
             },
-            "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key of a kind uses it for that kind's calls rather than the deployment's instance.",
+            "description": "Add a search or fetch key to the caller's organization. Organization owners and admins only.\n\nA new key serves no workspace until the organization makes it its default for the key's kind, or a\nworkspace pins it. Until then each workspace keeps the key it uses, or the deployment's instance.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8869,6 +8941,36 @@
             "description": "Make a key the organization's default of its kind, in place of the previous one.\n\nOrganization owners and admins only.",
             "header": [],
             "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys",
+                ":key_id",
+                "default"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys/:key_id/default",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unset Org Default Web Search Key",
+          "request": {
+            "description": "Stop a key being the organization's default of its kind. Organization owners and admins only.\n\nIdempotent: a key that is not the default is returned unchanged. With no default, a workspace that\npinned no key uses the deployment's instance for that kind.",
+            "header": [],
+            "method": "DELETE",
             "url": {
               "host": [
                 "{{baseUrl}}"
@@ -11350,7 +11452,7 @@
         {
           "name": "List Builtin Guardrails",
           "request": {
-            "description": "List the guardrails this gateway can run itself, for the form that defines one.\n\nEvery guardrail ``any_guardrail`` reaches over a hosted API, with the\nconstructor and per-call arguments each one takes, so a guardrail is\nconfigured by picking it and filling typed fields. It is not the whole\nlibrary: a guardrail that works by holding model weights in the process\nrunning it belongs in the guardrails service the profiles read beside this one\ndescribes, not here. A parameter names the environment variable that fills it\nwhere one exists, and ``requirement_groups`` carries the constraints satisfied\nby any of several parameters, which no single required flag can state. This is\nthe counterpart of\n``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather\nthan a provider, and on the same gate that one takes.\n\nReaches no service, so there is no unavailable state to report: the answer is\na property of the installed ``any_guardrail``, not of any deployment's state.\n\nOn the catalog router rather than the operator one beside it, because the\nform this feeds belongs to an organization and is filled by an owner or\nadmin, who reaches no operator route. So it is readable without\ndeployment-wide standing, by a dashboard session and by any API key alike.\nWhat it publishes carries no deployment state to withhold: the same bytes on\nevery deployment of the same build, and a parameter's environment variable is\na name, never whether that name is set.\n\nThe profiles read next door keeps the stricter gate, and the difference is\nreach rather than audience. That one dials ``guardrails_url``, so admitting a\nkey there would let a workspace credential probe the deployment's own\nservice. This one dials nothing.",
+            "description": "List the guardrails this gateway can run itself, for the form that defines one.\n\nEvery guardrail ``any_guardrail`` reaches over a hosted API, with the\nconstructor and per-call arguments each one takes, so a guardrail is\nconfigured by picking it and filling typed fields. It is not the whole\nlibrary: a guardrail that works by holding model weights in the process\nrunning it belongs in the guardrails service the profiles read beside this one\ndescribes, not here. A parameter names the environment variable that fills it\nwhere one exists, and ``requirement_groups`` carries the constraints satisfied\nby any of several parameters, which no single required flag can state. This is\nthe counterpart of\n``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather\nthan a provider, and on the same gate that one takes.\n\nReaches no service, so there is no unavailable state to report: the answer is\na property of the installed ``any_guardrail``, not of any deployment's state.\n\nOn the catalog router rather than the operator one beside it, because the\nform this feeds belongs to an organization and is filled by an owner or\nadmin, who reaches no operator route. So it is readable without\ndeployment-wide standing, by a dashboard session and by any API key alike.\nWhat it publishes carries no deployment state to withhold: the same bytes on\nevery deployment of the same build, and a parameter's environment variable is\na name, never whether that name is set.\n\nThe profiles read next door takes the same gate. It differs in reach: that\none dials ``guardrails_url``, from a short cache, and this one dials nothing.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11371,7 +11473,7 @@
         {
           "name": "List Guardrail Profiles",
           "request": {
-            "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nNot on ``verify_catalog_reader``, despite being a catalog read: that gate\nadmits any API key to the deployment-describing reads, and admitting a key\nhere would let any workspace credential dial the deployment's guardrails\nservice. This is a management read, so it takes the router's own gate.",
+            "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nOn ``verify_catalog_reader``, so any API key reads it: a caller who may send\na profile name may learn which ones exist (otari#2690). The answer is cached\nfor 30 seconds per worker, so however many reads arrive, a worker sends the\ndeployment's guardrails service at most one request in that time.",
             "header": [],
             "method": "GET",
             "url": {
@@ -11495,7 +11597,7 @@
         {
           "name": "List Tools",
           "request": {
-            "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nEvery other `tools[]` entry, including provider-native keywords not listed\nhere, is forwarded to the upstream provider untouched.",
+            "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. Every other `tools[]` entry, including provider-native keywords\nnot listed here, is forwarded to the upstream provider untouched.",
             "header": [],
             "method": "GET",
             "url": {

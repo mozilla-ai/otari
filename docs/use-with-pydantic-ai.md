@@ -20,9 +20,9 @@ Create an API key at [otari.ai](https://otari.ai) and export it:
 export OTARI_API_KEY=<your-otari-key>
 ```
 
-That is all the configuration otari.ai's gateway needs, once your organization
-there has credit or provider keys of its own; without either, it answers 402. For
-a gateway you run yourself, use a key it issued and also export its API root:
+On otari.ai that key is all the configuration there is (your organization needs
+credit or provider keys of its own there, or requests answer 402). For a gateway
+you run yourself, use a key it issued and also export its API root:
 
 ```bash
 export OTARI_BASE_URL=http://localhost:8000/api/v1   # your gateway's URL plus /api/v1
@@ -41,7 +41,8 @@ print(result.output)
 ```
 
 Without `OTARI_BASE_URL`, requests go to otari.ai's gateway,
-`https://api.otari.ai/api/v1`. To configure the gateway in code instead, pass a
+`https://api.otari.ai/api/v1`. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use. Set `OTARI_BASE_URL` to the EU host in that case.
+To configure the gateway in code instead, pass a
 provider: `OtariModel("openai:gpt-4o", provider=OtariProvider(base_url=..., api_key=...))`.
 `OtariProvider` never falls back to `OPENAI_API_KEY`, so an OpenAI key in your
 environment is not sent to the gateway by mistake.
@@ -119,24 +120,23 @@ asyncio.run(main())
 
 ## Choosing a model
 
-The model name is whatever your gateway routes, as `provider:model`. The same
-agent code works across providers: every example on this page runs unchanged on
-`openai:gpt-4o`, `anthropic:claude-sonnet-4-6` and `mistral:mistral-large-latest`.
+Pass the model to `OtariModel` the way Otari spells it, as `provider:model`:
+`OtariModel("anthropic:claude-sonnet-4-6")`. Every example on this page runs
+unchanged on `openai:gpt-4o`, `anthropic:claude-sonnet-4-6` and
+`mistral:mistral-large-latest`. A routing policy or alias name works too,
+`OtariModel("support-agent")`, and then Otari picks the candidate and falls over
+to the next on failure, so the agent code does not change when the policy does.
 
-- **On otari.ai:** any model your organization's catalog lists, which
-  `GET /api/v1/models` returns for your key.
-- **On your own gateway:** `provider:model` for any provider it is configured
-  with, for example `openai:gpt-4o` or `mistral:mistral-large-latest`.
-- **A routing policy or alias:** its name, for example `OtariModel("support-agent")`.
-  Otari picks the candidate and falls over to the next on failure, so the agent
-  code does not change when the policy does. See [Routing](routing.md).
+[Model format](models.md#model-format) has every spelling Otari accepts,
+[Listing available models](models.md#listing-available-models) shows which your
+key can use, and [Routing](routing.md) covers policies.
 
 ## One key per project
 
-Give each project (or each client) its own Otari key. Its usage and spend are
-then reported apart, a budget ceiling on the key caps that project alone, and
-revoking the key stops only that project. See [Access control](access-control.md)
-and [Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+Give each project its own Otari key, so its usage and spend are reported apart, a
+budget on the key caps that project alone, and revoking the key stops only that
+project. See [Access control](access-control.md) and
+[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
 
 ## Without the package
 
