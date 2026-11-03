@@ -447,11 +447,13 @@ def _federated_token_verifier(request: Request, config: GatewayConfig) -> Federa
     if (
         verifier is None
         or verifier.issuers != tuple(config.federation_issuers)
+        or verifier.audiences != tuple(config.federation_audiences)
         or verifier.allow_private_hosts != config.federation_allow_private_hosts
         or verifier.member_issuers != config.federation_member_rules
     ):
         verifier = FederatedTokenVerifier(
             config.federation_issuers,
+            audiences=config.federation_audiences,
             allow_private_hosts=config.federation_allow_private_hosts,
             member_issuers=config.federation_member_rules,
         )
