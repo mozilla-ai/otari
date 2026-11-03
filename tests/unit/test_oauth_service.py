@@ -563,6 +563,7 @@ class TestDatabaseStateStore:
             state="s",
             redirect_uri="https://otari.example.com/auth/google/callback",
             created_at=0.0,
+            openid_requested=False,
             context={"caller": "data"},
         )
 

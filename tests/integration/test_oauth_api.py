@@ -1832,8 +1832,9 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
     async def _fetch_identity(self: Any, _tokens: Any) -> Any:
         return SimpleNamespace(subject="ada-subject", email="ada@example.com", name="Ada Lovelace", email_verified=True)
 
-    async def _revoke_token(self: Any, token: str) -> bool:
-        endpoint.revoked.append(token)
+    async def _revoke_token(self: Any, token: Any) -> bool:
+        # The library hands revocation a wrapped token; a provider's endpoint receives its value.
+        endpoint.revoked.append(token.get_secret_value())
         return True
 
     monkeypatch.setattr(oauth_service._DatabaseStateStore, "consume", _consume)

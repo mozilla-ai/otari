@@ -1021,6 +1021,7 @@ def test_the_context_of_a_caller_in_no_organization_says_so_without_naming_one(
     with _client(tmp_path) as client:
         membership_id = _signed_in_member(client, caplog, email="eve@example.com")
         former, _ = _organization_ids(tmp_path, email="eve@example.com")
+        assert former is not None
         _remove(client, membership_id)
 
         context = client.get(f"{API_ROOT}/organizations/me")

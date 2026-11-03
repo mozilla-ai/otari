@@ -281,6 +281,9 @@ class _DatabaseStateStore:
             redirect_uri=redirect_uri,
             code_verifier=code_verifier,
             nonce=nonce,
+            # A nonce is minted for an OpenID request and withheld otherwise, which is the same
+            # fact the library records, and it refuses a state whose two disagree.
+            openid_requested=nonce is not None,
             created_at=created_at.timestamp(),
         )
 
