@@ -26,12 +26,12 @@ from gateway.types.tool_charges import instance_rate_key
 
 _INSTANCE = "fake-search"
 _FAKE_SEARCH = GatewayConfig(search_tools={_INSTANCE: {"provider": "fake"}})
-_SEARCH_ROWS = (instance_rate_key("search", _INSTANCE, "fake"), "otari:web_search")
+_SEARCH_ROWS = (instance_rate_key("search", _INSTANCE, "fake"),)
 _SEARCH_ON_ITS_OWN_ROW = PricedTool(WEB_SEARCH_TOOL_NAME, None, ("otari:web_search",), True)
 _BUILTIN_FETCH = PricedTool(
     WEB_FETCH_TOOL_NAME,
     "builtin:builtin_fetch",
-    (instance_rate_key("fetch", "builtin_fetch", "builtin"), "otari:web_fetch"),
+    (instance_rate_key("fetch", "builtin_fetch", "builtin"),),
     True,
 )
 _CODE = PricedTool("code_execution", None, ("otari:code_execution",), True)
@@ -131,7 +131,7 @@ def test_the_deployments_search_and_fetch_are_checked_as_a_call_with_no_workspac
         PricedTool(WEB_SEARCH_TOOL_NAME, f"fake:{_INSTANCE}", _SEARCH_ROWS, True),
         PricedTool(WEB_FETCH_TOOL_NAME, fetch.label, fetch.rate_keys, True),
     ]
-    assert fetch.rate_keys == (instance_rate_key("fetch", "fake-fetch", "fake"), "otari:web_fetch")
+    assert fetch.rate_keys == (instance_rate_key("fetch", "fake-fetch", "fake"),)
 
 
 def test_a_search_on_the_legacy_settings_is_checked_on_its_tools_own_row() -> None:
@@ -144,13 +144,27 @@ def test_a_tool_the_deployment_cannot_run_is_not_checked() -> None:
     assert configured_tools_to_price(GatewayConfig(web_search_default_tool="none")) == []
 
 
-def test_the_refusal_names_the_row_that_prices_any_of_the_tools_calls() -> None:
-    detail = unpriced_tool_detail(WEB_SEARCH_TOOL_NAME)
+def test_the_refusal_names_the_instances_own_row() -> None:
+    detail = unpriced_tool_detail(WEB_SEARCH_TOOL_NAME, _SEARCH_ROWS[0])
 
     assert "'web_search' has no pricing" in detail
-    assert "model_key 'otari:web_search'" in detail
+    assert f"kind 'search' and model_key '{_INSTANCE}'" in detail
     assert "Web search pricing page" in detail
+    assert "price_per_call" in detail
     assert "require_pricing" in detail
+
+
+def test_the_builtin_fetch_refusal_offers_no_config_entry() -> None:
+    detail = unpriced_tool_detail(WEB_FETCH_TOOL_NAME, _BUILTIN_FETCH.rate_keys[0])
+
+    assert "kind 'fetch' and model_key 'builtin_fetch'" in detail
+    assert "price_per_call" not in detail
+
+
+def test_the_refusal_of_a_tool_on_its_own_row_names_that_row() -> None:
+    detail = unpriced_tool_detail(WEB_SEARCH_TOOL_NAME)
+
+    assert "model_key 'otari:web_search'" in detail
 
 
 def test_the_code_execution_refusal_names_its_own_dashboard_page() -> None:
