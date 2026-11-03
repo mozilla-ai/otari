@@ -53,14 +53,14 @@ as `gemini-embedding-001` to `POST /api/v1/embeddings` instead (see the
 
 ## Verify
 
-Make a request with your Otari API key (`tk-...`) through the Otari Python SDK
-(`pip install otari`; any OpenAI-compatible client also works):
+Make a request with your Otari API key (`tk-...`) through the OpenAI client
+(`pip install openai`):
 
 ```python
-from otari import OtariClient
+from openai import OpenAI
 
-client = OtariClient(api_base="http://localhost:8000", api_key="tk-...")
-resp = client.completion(
+client = OpenAI(base_url="http://localhost:8000/api/v1", api_key="tk-...")
+resp = client.chat.completions.create(
     model="gemini:gemini-3-flash-preview",
     messages=[{"role": "user", "content": "Say hello in five words."}],
 )

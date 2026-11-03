@@ -5,20 +5,25 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { useDeletePricing } from "@/shared/api/pricing"
 import { useDeleteSearchTool } from "@/shared/api/tools"
 
-import type { WebToolRow } from "./webTools"
+import { oldPriceKey, type WebToolRow } from "./webTools"
 
 // Removing a tool leaves two things keyed by its name: its price, and its place
 // in the search tool access lists of API keys and users. A later tool of the
-// same name would inherit both. The price is offered for deletion here, checked;
-// the access lists are only named, since nothing here can edit them.
+// same name would inherit both. The price is offered for deletion here, checked.
+// A price under the tool's old `<provider>:<name>` key is only named: for a
+// provider that also serves models, such as DeepSeek, that key can be a model's
+// price. The access lists are only named, since nothing here can edit them.
 export function RemoveWebToolDialog({
   tool,
   isDefault,
+  hasOldKeyPrice,
   onClose,
 }: {
   tool: WebToolRow
   /** Whether a default setting names the tool. */
   isDefault: boolean
+  /** Whether a price is stored under the tool's old `<provider>:<name>` key. */
+  hasOldKeyPrice: boolean
   onClose: () => void
 }) {
   const remove = useDeleteSearchTool()
@@ -72,6 +77,13 @@ export function RemoveWebToolDialog({
               API keys and users that list {tool.name} in their search tool
               access keep the name, so a new tool named {tool.name} would be
               open to them.
+            </p>
+          ) : null}
+          {hasOldKeyPrice ? (
+            <p>
+              The price stored under {oldPriceKey(tool)} stays, and prices a new
+              tool named {tool.name} on {tool.provider} that has no price of its
+              own.
             </p>
           ) : null}
           <Checkbox

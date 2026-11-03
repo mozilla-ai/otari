@@ -82,7 +82,6 @@
 
 * [Agent Guardrails reference](agent-guardrails-reference.md)
 
-## Protocols and SDKs
+## Protocols
 
-* [SDK compatibility](sdk-compatibility.md)
 * [Code-execution protocol](code-execution-protocol.md)

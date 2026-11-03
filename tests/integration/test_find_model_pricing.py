@@ -191,7 +191,9 @@ async def test_find_pricing_falls_back_to_models_dev_defaults(async_db: AsyncSes
     assert pricing.output_price_per_million > 0
 
     # The default is a lookup result, not a stored row: nothing is persisted.
-    count = (await async_db.execute(select(func.count()).select_from(ModelPricing))).scalar_one()
+    count = (
+        await async_db.execute(select(func.count()).select_from(ModelPricing).where(ModelPricing.kind == "model"))
+    ).scalar_one()
     assert count == 0
 
 

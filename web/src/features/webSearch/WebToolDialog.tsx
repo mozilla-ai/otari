@@ -61,20 +61,12 @@ const NOUN: Readonly<Record<WebToolKind, string>> = {
 const REDIRECT_WARNING =
   "does not report where a redirect led, so a workspace's allowed and blocked domains are not checked past one. Keep builtin_fetch where they must hold."
 
-const PRICE_HELP: Readonly<Record<WebToolKind, string>> = {
-  search:
-    "Blank: the model's searches on it are billed at Web search's rate, and its calls on the search API are unpriced, which require_pricing refuses. A call the provider reports a cost for is billed at that cost instead.",
-  fetch:
-    "Blank bills it at Web fetch's rate. A call the provider reports a cost for is billed at that cost instead.",
-}
+const PRICE_HELP =
+  "Blank: the tool takes a rate already stored for it, if there is one, and is otherwise unpriced, which require_pricing refuses. A call the provider reports a cost for is billed at that cost instead."
 
-/** What a tool added with no price of its own is billed at, for the result step. */
-const UNPRICED_RESULT: Readonly<Record<WebToolKind, string>> = {
-  search:
-    "It has no price of its own: the model's searches on it are billed at Web search's rate, and its calls on the search API go unpriced, which require_pricing refuses. Set one with Edit on its row.",
-  fetch:
-    "It has no price of its own, so its calls are billed at Web fetch's rate. Set one with Edit on its row.",
-}
+/** What the result step says of a tool added with no price. */
+const UNPRICED_RESULT =
+  "No price was set here, so unless one is already stored for it, it is unpriced, which require_pricing refuses. Set one with Edit on its row."
 
 function capitalized(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
@@ -322,7 +314,7 @@ export function WebToolDialog({
               tool.api_base ?? "provider endpoint",
               hasPrice && priceError === null && price !== undefined
                 ? `${formatUnitRate(toPerCall(price))} a call`
-                : "no price of its own",
+                : "no price set",
             ].join(" · ")}
           </p>
         </div>
@@ -333,7 +325,7 @@ export function WebToolDialog({
             on its row.
           </InfoBanner>
         ) : !hasPrice ? (
-          <p className="text-caption">{UNPRICED_RESULT[kind]}</p>
+          <p className="text-caption">{UNPRICED_RESULT}</p>
         ) : null}
       </FormDialog>
     )
@@ -483,7 +475,7 @@ export function WebToolDialog({
             description={
               isEdit && currentPrice !== undefined
                 ? "0 prices it as free. Clearing the field keeps the current price."
-                : PRICE_HELP[kind]
+                : PRICE_HELP
             }
           />
 

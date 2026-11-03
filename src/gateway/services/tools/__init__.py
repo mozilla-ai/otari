@@ -17,6 +17,7 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
 ``tools_to_price`` and ``configured_tools_to_price`` say which pricing rows ``require_pricing`` checks for a
 request's gateway-run tools, and for the deployment's at startup, and ``unpriced_tool_detail`` what its refusal says.
+``deployment_tool_rate_keys`` names the own price row of each of the deployment's search and fetch tools.
 ``search_provider_catalog`` lists the providers a search or fetch tool may name.
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
@@ -109,6 +110,7 @@ from gateway.services.tools._tool_prices import (
     PricedTool,
     admitted_tools,
     configured_tools_to_price,
+    deployment_tool_rate_keys,
     tools_to_price,
     unpriced_tool_detail,
 )
@@ -211,6 +213,7 @@ __all__ = [
     "PricedTool",
     "admitted_tools",
     "configured_tools_to_price",
+    "deployment_tool_rate_keys",
     "tools_to_price",
     "unpriced_tool_detail",
     "NO_WEB_TOOLS",

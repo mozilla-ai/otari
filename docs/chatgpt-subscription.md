@@ -83,10 +83,10 @@ per-request fee.
 ## Route a request
 
 ```python
-from otari import OtariClient
+from openai import OpenAI
 
-client = OtariClient(api_base="http://localhost:8000", api_key="tk-...")
-response = client.completion(
+client = OpenAI(base_url="http://localhost:8000/api/v1", api_key="tk-...")
+response = client.chat.completions.create(
     model="chatgpt:gpt-5",
     messages=[{"role": "user", "content": "Say hello in five words."}],
 )

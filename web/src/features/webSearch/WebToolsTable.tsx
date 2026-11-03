@@ -23,6 +23,7 @@ import { formatUnitRate } from "@/shared/helpers/format"
 import {
   BUILTIN_FETCH,
   describeOptions,
+  ORGANIZATION_KEY_ROW,
   servesTheModel,
   TEST_INPUT,
   type ToolPrice,
@@ -31,27 +32,15 @@ import {
   type WebToolRow,
 } from "./webTools"
 
-// One kind's tools as a table, each beside its price, and the kind's fallback
-// rate as the last row, since it prices what no tool in the table prices.
+// One kind's tools as a table, each beside its price, and as the last row the
+// kind's rate for a call on an organization's own key, which no tool prices.
 // Clicking a row opens its details in a band under it; the actions stay on the
 // row.
 
-/** A tool's row, or the fallback rate's. */
+/** A tool's row, or the organization keys' rate. */
 export type WebToolTableRow =
   | { type: "tool"; tool: WebToolRow; price: ToolPrice }
-  | { type: "fallback"; price: ToolPrice }
-
-const FALLBACK: Readonly<Record<WebToolKind, { label: string; role: string }>> =
-  {
-    search: {
-      label: "Web search",
-      role: "A model's search on a tool with no price of its own, and a search on an organization's own key.",
-    },
-    fetch: {
-      label: "Web fetch",
-      role: "A fetch on a tool with no price of its own, and a fetch on an organization's own key.",
-    },
-  }
+  | { type: "organization"; price: ToolPrice }
 
 const COPY: Readonly<
   Record<
@@ -75,11 +64,11 @@ const COPY: Readonly<
   },
 }
 
-/** The fallback row's key: a tool's name never holds a "/", so no tool can take it. */
-const FALLBACK_ROW = "/fallback"
+/** The organization keys' row key: a tool's name never holds a "/", so no tool can take it. */
+const ORGANIZATION_ROW = "/organization"
 
 function rowKey(row: WebToolTableRow): string {
-  return row.type === "tool" ? row.tool.name : FALLBACK_ROW
+  return row.type === "tool" ? row.tool.name : ORGANIZATION_ROW
 }
 
 /** A problem worth a mark: a square dot and a sentence. */
@@ -125,20 +114,8 @@ export function PriceCell({ price }: { price: ToolPrice }) {
           {price.fromConfig ? (
             <span className="text-caption">From config.yml</span>
           ) : null}
-        </span>
-      )
-    case "fallback":
-      return (
-        <span className="flex flex-col gap-0.5">
-          <span className="tabular-nums">
-            {formatUnitRate(toPerCall(price.perMillion))}
-          </span>
-          <span className="text-caption">
-            From {price.fallbackKey}
-            {price.direct === "unpriced" ? ", for the model's searches" : ""}
-          </span>
-          {price.direct === "unpriced" ? (
-            <Badge tone="warn">Unpriced on the search API</Badge>
+          {price.oldKey ? (
+            <span className="text-caption">Under its old price key</span>
           ) : null}
         </span>
       )
@@ -335,7 +312,7 @@ export function WebToolsTable({
   onAdd,
   onEdit,
   onEditPrice,
-  onEditFallbackPrice,
+  onEditOrganizationKeyPrice,
   onRemove,
   onSetDefault,
   isSettingDefault,
@@ -353,7 +330,7 @@ export function WebToolsTable({
   onAdd: () => void
   onEdit: (tool: WebToolRow) => void
   onEditPrice: (tool: WebToolRow) => void
-  onEditFallbackPrice: () => void
+  onEditOrganizationKeyPrice: () => void
   onRemove: (tool: WebToolRow) => void
   /** Names the default tool, or clears the setting with `null`. */
   onSetDefault: (name: string | null) => void
@@ -398,16 +375,15 @@ export function WebToolsTable({
       header: "Tool",
       isRowHeader: true,
       cell: (row) => {
-        if (row.type === "fallback") {
+        if (row.type === "organization") {
           return (
             <span className="flex flex-col gap-0.5">
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="font-medium text-foreground">
-                  {FALLBACK[kind].label}
-                </span>
-                <Badge tone="muted">Fallback</Badge>
+              <span className="font-medium text-foreground">
+                {ORGANIZATION_KEY_ROW[kind].label}
               </span>
-              <span className="text-caption">{FALLBACK[kind].role}</span>
+              <span className="text-caption">
+                {ORGANIZATION_KEY_ROW[kind].role}
+              </span>
             </span>
           )
         }
@@ -446,7 +422,7 @@ export function WebToolsTable({
       id: "key",
       header: "API key",
       cell: (row) =>
-        row.type === "fallback" ? null : row.tool.last4 ? (
+        row.type === "organization" ? null : row.tool.last4 ? (
           <code className="text-muted">••••{row.tool.last4}</code>
         ) : (
           <span className="text-muted">
@@ -468,16 +444,16 @@ export function WebToolsTable({
       header: "Actions",
       align: "end",
       cell: (row) =>
-        row.type === "fallback" ? (
+        row.type === "organization" ? (
           <RowActionRow>
             <RowAction
               icon={FiEdit2}
               label="Edit price"
-              ariaLabel={`Edit the price of ${FALLBACK[kind].label}`}
+              ariaLabel={`Edit the price of ${ORGANIZATION_KEY_ROW[kind].label}`}
               isDisabled={
                 row.price.state === "pending" || row.price.state === "error"
               }
-              onPress={onEditFallbackPrice}
+              onPress={onEditOrganizationKeyPrice}
             />
           </RowActionRow>
         ) : (
@@ -523,7 +499,7 @@ export function WebToolsTable({
         emptyContent={copy.empty}
         mobileLayout="cards"
         onRowAction={(key) =>
-          key === FALLBACK_ROW
+          key === ORGANIZATION_ROW
             ? undefined
             : setOpenKey((current) => (current === key ? null : key))
         }

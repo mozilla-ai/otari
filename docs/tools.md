@@ -160,7 +160,10 @@ acts on them. Changing any setting stays a deployment operator's to do.
 
 ## Pricing a gateway-run tool
 
-Gateway-run tools are priced per successful call:
+Gateway-run tools are priced per successful call. Each search or fetch tool,
+`builtin_fetch` included, is priced at its own price, stored under its name or
+under its old `<provider>:<instance>` model key, and only that price prices its
+calls. Three rows price the rest:
 
 ```text
 otari:code_execution
@@ -168,19 +171,24 @@ otari:web_search
 otari:web_fetch
 ```
 
-The dashboard's Web search and Code execution pricing pages, in the deployment
-view, set these rates, and Web search each search or fetch tool's own, in
-dollars per call. The pricing API stores the value in
-`input_price_per_million`, so one cent per call is `10000`.
+`otari:code_execution` prices code execution. `otari:web_search` and
+`otari:web_fetch` price the calls on a workspace's
+[organization search or fetch key](#organization-search-keys), and
+`otari:web_search` also prices a search on the legacy settings. The dashboard's Web
+search and Code execution pricing pages, in the deployment view, set these
+rates, and Web search each search or fetch tool's own, in dollars per call. The
+pricing API stores the value in `input_price_per_million`, so one cent per call
+is `10000`.
 
 With `require_pricing: true`, a gateway-run tool whose calls no row would price
 is refused before the model call, with a `402` and the code `pricing_required`.
 The check looks for the rows settlement prices the calls with, described below:
-a search or fetch on an instance passes on its own row, and a call the
+a search or fetch on an instance passes on its own row alone, and a call the
 deployment pays for does not pass on an organization's own override. A provider
 that reports its cost still needs a row, and a zero rate counts as one. The
-refusal names the tool's `otari:` row, which prices it on any instance. A failed
-tool invocation is recorded but not charged. Charges settle on the final usage
+refusal names the row to set: the tool's own for a search or fetch tool, and the
+tool's `otari:` row otherwise. A failed tool invocation is recorded but not
+charged. Charges settle on the final usage
 row alongside model tokens.
 
 Each call is also held against the caller's budgets and spend ceilings at its
@@ -206,12 +214,12 @@ served the calls:
   on the legacy settings.
 
 A call is priced at the cost its provider reported, when it reports one, and
-otherwise at the first of its label's rows that has a price: the instance's own
-search or fetch row (its `price_per_call`, or a price row of kind `search` or
-`fetch` keyed by the instance's name, `builtin_fetch` for the built-in fetcher),
-then the `<provider>:<instance>` model-kind row it was priced under before tools
-had a kind of their own (read until a later release, with a startup warning),
-then `otari:web_search` or `otari:web_fetch`. A tool's own row and a model's
+otherwise at the instance's own search or fetch row (its `price_per_call`, or a
+price row of kind `search` or `fetch` keyed by the instance's name,
+`builtin_fetch` for the built-in fetcher), or the `<provider>:<instance>`
+model-kind row it was priced under before tools had a kind of their own (read
+until a later release, with a startup warning). An instance with neither is
+unpriced, as a model with no price is. A tool's own row and a model's
 never share a key, so a search provider named like a model provider, such as
 DeepSeek, cannot price its models. The `otari:<tool>` rows of gateway-run tools
 stay model-kind rows. An organization key's calls take the `otari:` row only,
@@ -238,8 +246,8 @@ funds paid in, and so is a direct search on one of the deployment's tools.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
-search instance. A search on the legacy settings, or on a Tavily or Brave
-organization key, which the older backend still runs, is labeled
+search instance. A search on the legacy settings, or on a Tavily, Brave or
+SearXNG organization key, which the older backend still runs, is labeled
 `otari:web_search`. Searches a model's provider runs itself carry the provider's
 label, as the next section says.
 
@@ -674,9 +682,10 @@ loop rather than returning a `[tool error]`. Non-streaming requests return HTTP
 without a completed answer.
 
 Successful Fetch calls are billed as [Pricing a gateway-run
-tool](#pricing-a-gateway-run-tool) says: under the fetch instance that served
-them, then `otari:web_fetch`. Ordinary Fetch failures return sanitized tool
-errors, are counted as errors, and are not billed.
+tool](#pricing-a-gateway-run-tool) says: at the price of the fetch instance that
+served them, or at `otari:web_fetch` on an organization's fetch key. Ordinary
+Fetch failures return sanitized tool errors, are counted as errors, and are not
+billed.
 
 Declaring Fetch authorizes the model to make arbitrary public GET requests
 within the workspace domain policy. Fetched content can contain prompt
@@ -716,8 +725,8 @@ one, and never with the provider's own message.
   instance apart from a DeepSeek search tool, such as `deepseek-fetch`, since
   names are unique across `search_tools` and `fetch_tools`. It reports no cost, so
   a fetch is billed at the instance's own rate (its `price_per_call`, or a `fetch`
-  price set on the dashboard's Web search page or through the API), else
-  `otari:web_fetch`; a price for one of DeepSeek's models never prices it.
+  price set on the dashboard's Web search page or through the API); a price for
+  one of DeepSeek's models never prices it.
   DeepSeek's [pricing](https://api-docs.deepseek.com/guides/search), read
   2026-10-19, is $0.75 per 1,000 successful fetches, with at most 25 fetches a
   second per account, apart from searches, and a limit per domain; its free period
@@ -729,7 +738,7 @@ one, and never with the provider's own message.
 - **Tabstack** (`tabstack`) needs an API key, read from the instance's
   `api_key`, such as `${TABSTACK_API_KEY}`. It reports no cost, so a fetch is
   billed at the instance's own rate (its `price_per_call`, or a `fetch` price set
-  through the API), else `otari:web_fetch`. Tabstack's
+  through the API). Tabstack's
   [pricing](https://docs.tabstack.ai/pricing), read 2026-10-13, is 10 credits a
   page, and a credit costs $0.0001 to $0.0003 depending on the plan and on
   whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
@@ -977,7 +986,7 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no
   cost, so a search is billed at the tool's own rate (its `price_per_call`, or a
   `search` price set on the dashboard's Web search page or through the
-  API), else `otari:web_search`; a price for one of DeepSeek's models never prices
+  API); a price for one of DeepSeek's models never prices
   it. A key restricted to some models runs it when
   [`allowed_tools`](api-keys.md#model-and-search-tool-access), its own or its
   user's, names it; `deepseek:*` in `allowed_models` grants DeepSeek's models
@@ -1008,12 +1017,47 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   plan, £3 on Business, Enterprise by arrangement; set the rate in dollars at what
   your plan costs you. A search returns at most 10 results, the Startup plan's
   limit, whatever the plan, and its hits carry a snippet but no page text.
+- **Serply** (`serply`) needs an API key, read from the tool's `api_key`, such as
+  `${SERPLY_API_KEY}`. Serply returns Google's results; it takes the key in a
+  header and the query in the request URL, which Otari keeps out of its logs. Set
+  `gl` in the tool's `options`, such as `gl: us`: without it, the region a search
+  runs from can change between calls, and the results and the language of their
+  dates with it. It reports no cost, so a search is billed at the tool's own rate
+  (its `price_per_call`, or a `search` price set on the dashboard's Web search
+  page or through the API). Serply's [pricing](https://serply.io/pricing), read
+  2026-10-15, is prepaid credits, one per search not served from its cache, from
+  $2.00 per 1,000 (2,500 for $5) down to $0.75 per 1,000 in the largest packs; a
+  new account gets 2,500 credits for its first 30 days. A search returns at most
+  10 results, and its hits carry a snippet but no page text.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate.
 
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.36: a search or fetch tool is billed at its own price only
+
+`otari:web_search` and `otari:web_fetch` no longer price the model's calls on a
+tool with no price of its own: they price calls on an organization's own key,
+and searches on the legacy settings. The upgrade gives each search and fetch
+tool stored in the database, and `builtin_fetch`, that had no price of its own
+the `otari:web_search` or `otari:web_fetch` price in force as its own, so its
+calls cost what they did. `builtin_fetch` with neither gets a price of 0. Three
+cases are left to you:
+
+- A tool declared in `config.yml` gets no price: give it a `price_per_call`.
+  Until then the startup log names it, and with `require_pricing` on a request
+  that would run it is refused with `402`.
+- An override you set on `otari:web_search` or `otari:web_fetch` for one
+  organization no longer reaches the deployment's tools: set it on each tool.
+- An `otari:` price dated after the upgrade does not reach the tools either:
+  set it on each tool.
+
+A tool added after the upgrade with no price is unpriced. On the search API, a
+stored tool the upgrade priced is billed that price: a search that answered
+`402` is served, and with `require_pricing` off one that settled at zero is
+charged.
 
 ### From 0.35: a workspace with no search key default uses the deployment's instance
 

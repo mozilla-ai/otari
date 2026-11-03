@@ -33,6 +33,12 @@ AnyFetch.get_provider_metadata("fake")
   timeout, and never closes it or changes its settings. Without one, the provider opens a client
   with httpx's defaults and closes it in `aclose()`, which `async with` calls.
 
+Every request a provider sends carries `User-Agent: any-fetch/<version>`, the library's own
+version (`any_fetch.__version__`, which a change to the library bumps in the same PR), so a
+provider, or a proxy that allowlists outbound traffic, can tell the library's requests apart. A
+`client` that sets a `User-Agent` of its own keeps it: httpx's default is replaced, and a client
+that carries none is filled in. `builtin` is the host's own fetcher, and sends what the host sends.
+
 `fetch` takes one shared parameter, which every provider maps onto its own: `max_chars`. Every
 other keyword is a native option, passed to the provider under its own name. An option the
 provider's metadata does not list raises `UnsupportedParameterError` rather than being dropped.

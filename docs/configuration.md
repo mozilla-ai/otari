@@ -1104,7 +1104,8 @@ against the caller's budget before it runs. A successful search settles at the
 provider's reported charge when it reports one, and at the rate otherwise. A
 search a workspace's organization search key served is priced under
 `otari:web_search` instead, since the deployment cannot price the
-organization's own provider account. With `require_pricing` on, a direct search
+organization's own provider account. A search tool's own rate prices the model's
+searches on it too. With `require_pricing` on, a request that would run a tool
 with no rate is refused with a 402 naming the price to add, even on a provider
 that reports its charge, unless the key is exempt from budgets; a zero rate is
 a valid price. With it off, such a search holds no dollars, though it still
@@ -1112,8 +1113,9 @@ holds one request against a request-count budget.
 
 A fetch instance's `price_per_call` is stored the same way, as kind `fetch`.
 The built-in fetcher cannot be declared, so its rate is set through the pricing
-API, kind `fetch` and `model_key: builtin_fetch`. Either prices the fetch tool's
-calls on that instance, ahead of `otari:web_fetch`.
+API, kind `fetch` and `model_key: builtin_fetch`. Either alone prices the fetch
+tool's calls on that instance; `otari:web_fetch` prices only a fetch on an
+organization's fetch key.
 
 A tool rate keyed as a model price, under `pricing:` or the pricing API as
 `<provider>:<instance>` (`exa:exa-search`, `builtin:builtin_fetch`), is

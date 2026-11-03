@@ -239,10 +239,10 @@ The flow, end to end:
 repository while a regeneration PR has failing checks or has stayed open past
 its freshness window, which signals an SDK lagging the spec.
 
-For the spec-version compatibility rule and matrix users read, see
-[`docs/sdk-compatibility.md`](docs/sdk-compatibility.md); for the per-SDK
-registries and secrets, each SDK repo's `RELEASE.md`. Update that page's matrix
-when tagged SDK releases land.
+For the full model (the spec-version compatibility scheme, the two-merge
+lifecycle, and the per-SDK registries and secrets) see
+[`scripts/sdk_codegen/README.md`](scripts/sdk_codegen/README.md) and each SDK
+repo's `RELEASE.md`.
 
 ## Integration package releases
 
