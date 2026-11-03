@@ -318,10 +318,9 @@ files = ["src", "cli/src", "any-search/src", "any-fetch/src", "tests", "scripts"
 exclude = ["scripts/web-search-[^/]+-adapter/"]
 
 [[tool.mypy.overrides]]
-# setuptools-scm writes each package's _version.py at build time, so it is
-# absent from a source tree nothing has built yet; the importer falls back
-# when it is.
-module = ["otari_agent._version", "any_search._version", "any_fetch._version"]
+# setuptools-scm writes otari_agent/_version.py at build time, so it is absent
+# from a source tree nothing has built yet; __init__.py falls back when it is.
+module = ["otari_agent._version"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

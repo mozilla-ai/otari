@@ -4,14 +4,8 @@ from typing import Any
 
 import httpx
 
+from any_search import __version__
 from any_search._errors import ProviderError
-
-# Written at build time by setuptools-scm from the repository's Git tag (see
-# pyproject.toml), as cli/'s is. Absent in a source tree nothing has built yet.
-try:
-    from any_search._version import __version__
-except ImportError:
-    __version__ = "0.0.0"
 
 USER_AGENT = f"any-search/{__version__}"
 """Sent with every request, so a provider can tell the library's traffic apart and tie it to a release."""
