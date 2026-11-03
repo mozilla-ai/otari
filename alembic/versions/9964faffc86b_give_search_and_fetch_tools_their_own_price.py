@@ -65,11 +65,19 @@ def _spellings(model_key: str) -> list[str]:
 
 
 def _priced_keys(bind: sa.Connection, keys: set[tuple[str, str]], now: datetime) -> set[tuple[str, str]]:
-    """The ``(kind, model_key)`` pairs among ``keys`` with a version in force."""
-    query = sa.select(_prices.c.kind, _prices.c.model_key).where(
-        sa.tuple_(_prices.c.kind, _prices.c.model_key).in_(sorted(keys)), _prices.c.effective_at <= now
-    )
-    return {(kind, key) for kind, key in bind.execute(query)}
+    """The ``(kind, model_key)`` pairs among ``keys`` with a version in force.
+
+    Asked in chunks: each pair takes two query parameters, and SQLite allows 999 in one query.
+    """
+    wanted = sorted(keys)
+    found: set[tuple[str, str]] = set()
+    for start in range(0, len(wanted), 300):
+        query = sa.select(_prices.c.kind, _prices.c.model_key).where(
+            sa.tuple_(_prices.c.kind, _prices.c.model_key).in_(wanted[start : start + 300]),
+            _prices.c.effective_at <= now,
+        )
+        found |= {(kind, key) for kind, key in bind.execute(query)}
+    return found
 
 
 def _rate_in_force(bind: sa.Connection, model_key: str, now: datetime) -> Decimal | None:
