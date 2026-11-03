@@ -52,7 +52,8 @@ Completion requests follow this order:
 Chat, Messages, and Responses share the pipeline in
 `api/routes/_pipeline.py`; the attempt walk and its shared refusals live in
 `_attempts.py`, and streaming settlement in `streaming.py`. Pass-through endpoints use
-`run_passthrough`. Direct search has its own dispatch scaffold.
+`run_passthrough`. Direct search and direct code execution each have their own
+dispatch scaffold.
 
 A new provider-calling scaffold must register with `track_request` so
 `/api/v1/usage/in-flight` sees it. Removal belongs to `InFlightMiddleware`,
