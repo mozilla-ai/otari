@@ -37,6 +37,7 @@ from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.tools import (
     Tool,
     code_execution_declaration_forms,
+    fetch_resolves,
     search_resolves,
     web_fetch_tool_definition,
     web_search_configured,
@@ -106,7 +107,7 @@ class _WorkspaceSwitches:
 
     web: bool = True
     code_execution: bool = True
-    # What a declared search resolves on, with the workspace's own key; ``None`` for the deployment's alone.
+    # What the web tools resolve on, with the workspace's own keys; ``None`` for the deployment's alone.
     search_policy: ResolvedWebSearchConfig | None = None
 
 
@@ -144,13 +145,16 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
     # "unavailable" for a deployment that runs code perfectly well.
     sandbox_configured = config.sandbox_configured()
     deployment_searches = web_search_configured(config)
+    can_web_fetch = config.web_fetch_enabled and (
+        fetch_resolves(config, switches.search_policy) if switches.search_policy else True
+    )
     can_web_search = search_resolves(config, switches.search_policy) if switches.search_policy else deployment_searches
     return [
         ManagedTool(
             id=Tool.WEB_FETCH,
             description=web_fetch["description"],
-            available=config.web_fetch_enabled and switches.web,
-            reason=_reason(config.web_fetch_enabled, switches.web),
+            available=can_web_fetch and switches.web,
+            reason=_reason(can_web_fetch, switches.web),
             accepted_types=[str(Tool.WEB_FETCH)],
             input_schema=web_fetch["parameters"],
             example={"type": Tool.WEB_FETCH},

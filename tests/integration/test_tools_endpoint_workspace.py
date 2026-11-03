@@ -252,3 +252,39 @@ def test_a_key_served_search_advertises_only_the_canonical_type(
     web_search = _tools(client, api_key_header)["otari_web_search"]
 
     assert (web_search["available"], web_search["accepted_types"]) == (True, ["otari_web_search"])
+
+
+def _add_default_key(client: TestClient, master_key_header: dict[str, str], **key: Any) -> str:
+    keys = f"{API_ROOT}/organizations/me/web-search-keys"
+    created = client.post(keys, json=key, headers=master_key_header)
+    assert created.status_code == 201, created.text
+    key_id: str = created.json()["id"]
+    assert client.post(f"{keys}/{key_id}/default", headers=master_key_header).status_code == 200
+    return key_id
+
+
+def test_a_fetch_key_admission_refuses_takes_both_web_tools_with_it(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fetch key with no secret refuses the fetch tool and the enrichment of a search on the libraries."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _add_default_key(client, master_key_header, provider="exa", name="search", api_key="exa-1")
+    fetch_key = _add_default_key(
+        client, master_key_header, provider="tabstack", name="pages", api_key="tbs-1", kind="fetch"
+    )
+    assert _status(_tools(client, api_key_header)) == _ALL_AVAILABLE
+    # A row stored before the write checks required a secret.
+    with db_session_factory() as db:
+        db.execute(
+            update(OrgWebSearchKey).where(OrgWebSearchKey.id == uuid.UUID(fetch_key)).values(encrypted_api_key=None)
+        )
+        db.commit()
+
+    status = _status(_tools(client, api_key_header))
+
+    assert status["otari_web_fetch"] == (False, "not_configured")
+    assert status["otari_web_search"] == (False, "not_configured")

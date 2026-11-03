@@ -226,12 +226,28 @@ def resolve_search(
 
 
 def search_resolves(config: ToolSettings, policy: ResolvedWebSearchConfig | None) -> bool:
-    """Whether a declared ``otari_web_search`` under ``policy`` finds something to run on, as admission resolves it."""
+    """Whether a declared ``otari_web_search`` under ``policy`` finds something to run on, as admission resolves it.
+
+    That includes the fetch enriching its hits, whose key admission resolves with it.
+    """
     try:
-        return resolve_search(config, policy, requested=None, request_options=None) is not None
+        search = resolve_search(config, policy, requested=None, request_options=None)
+        if search is None:
+            return False
+        in_loop_search_for(config, policy, search)
     except WebSearchCredentialRefusedError:
         # Admission refuses the request on a key its provider cannot be called with.
         return False
+    return True
+
+
+def fetch_resolves(config: ToolSettings, policy: ResolvedWebSearchConfig | None) -> bool:
+    """Whether a declared ``otari_web_fetch`` under ``policy`` resolves, as admission resolves it."""
+    try:
+        resolve_fetch(config, policy, requested=None, for_search=None)
+    except WebSearchCredentialRefusedError:
+        return False
+    return True
 
 
 def resolve_fetch(

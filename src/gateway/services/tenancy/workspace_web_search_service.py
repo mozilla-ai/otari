@@ -325,10 +325,10 @@ class WorkspaceWebSearchPolicies:
         return replace(policy or _NO_NARROWING, credential=keys.search, fetch_credential=keys.fetch)
 
     async def access(self, workspace_id: uuid.UUID) -> tuple[bool, ResolvedWebSearchConfig]:
-        """Whether the workspace's requests may declare the web tools, and the policy a declared search resolves on.
+        """Whether the workspace's requests may declare the web tools, and the policy they resolve on.
 
-        The policy carries the workspace's search key whatever the switch says, so a caller can tell
-        a search nothing serves from one the workspace refuses. A stored row that is invalid refuses
+        The policy carries the workspace's search and fetch keys whatever the switch says, so a caller
+        can tell a tool nothing serves from one the workspace refuses. A stored row that is invalid refuses
         every web declaration, so it reads as not allowed.
         """
         try:
@@ -337,8 +337,8 @@ class WorkspaceWebSearchPolicies:
             stored, allowed = None, False
         else:
             allowed = stored.enabled if stored is not None else self._on_without_policy
-        keys = await self._search_keys.keys_for(workspace_id, search=True, fetch=False)
-        return allowed, replace(stored or _NO_NARROWING, credential=keys.search)
+        keys = await self._search_keys.keys_for(workspace_id, search=True, fetch=True)
+        return allowed, replace(stored or _NO_NARROWING, credential=keys.search, fetch_credential=keys.fetch)
 
     async def executors(self, workspace_id: uuid.UUID) -> tuple[CodeExecutor | None, CodeExecutor | None]:
         """Who the workspace pinned to run a provider's own search and fetch keywords, ``None`` where it did not.
