@@ -89,10 +89,12 @@ describe("useListSearch", () => {
       })
       expect(result.current.search.value).toBe("gp")
       expect(result.current.search.term).toBe("")
+      expect(result.current.search.isSettled).toBe(false)
       await act(async () => {
         vi.advanceTimersByTime(250)
       })
       expect(result.current.search.term).toBe("gp")
+      expect(result.current.search.isSettled).toBe(true)
     })
   })
 })

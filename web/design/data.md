@@ -212,7 +212,8 @@ TablePagination    the narrowed total, when the list pages
 - **Say how many matched.** Pass `resultCount` to `SearchField`; it shows the count
   beside the field while there is a term and announces it to a screen reader.
   Pass `undefined` until the rows it counts have loaded, so a shared link does
-  not announce "0 matches" while its results are still arriving.
+  not announce "0 matches" while its results are still arriving, and until
+  `isSettled`, so the count is never the last term's beside the one being typed.
 - **An empty search is not an empty list.** A term that finds nothing gets an
   `EmptyMessage` naming the search ("No API keys match this search."); the list's
   own `EmptyState` stays for the case where nothing exists yet.
@@ -233,7 +234,7 @@ const rows = (keys.data ?? []).filter((key) =>
     value={search.value}
     onChange={search.onChange}
     maxLength={SEARCH_MAX_LENGTH}
-    resultCount={keys.isPending ? undefined : rows.length}
+    resultCount={search.isSettled && !keys.isPending ? rows.length : undefined}
     className="w-full md:w-80"
   />
 </Toolbar>

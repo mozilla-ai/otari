@@ -12,6 +12,8 @@ export const SEARCH_MAX_LENGTH = 200
  * back to its first page. `term` is what to search with: trimmed, capped, and
  * settled for a pause in typing, so it can go into a query key without a
  * request per keystroke, or into `matchesSearch` for rows already in memory.
+ * `isSettled` says `term` has caught up with `value`: until it has, a count of
+ * what `term` found is the last term's, not the one on screen.
  *
  * A list that shares its page with another names its own `param`, and the
  * `pageParam` its pager keeps, so the two searches and pagers stay apart.
@@ -25,11 +27,13 @@ export function useListSearch({
 } = {}) {
   const url = useUrlState({ [param]: "", [pageParam]: "0" })
   const value = url.get(param)
-  const term = useDebounced(value.trim().slice(0, SEARCH_MAX_LENGTH))
+  const typed = value.trim().slice(0, SEARCH_MAX_LENGTH)
+  const term = useDebounced(typed)
   return {
     value,
     onChange: (next: string) => url.patch({ [param]: next, [pageParam]: 0 }),
     term,
+    isSettled: term === typed,
   }
 }
 

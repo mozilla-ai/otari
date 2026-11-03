@@ -307,7 +307,9 @@ export function DeploymentAccountsPage() {
         onChange={search.onChange}
         maxLength={SEARCH_MAX_LENGTH}
         resultCount={
-          accounts.isPlaceholderData ? undefined : accounts.data?.count
+          search.isSettled && !accounts.isPlaceholderData
+            ? accounts.data?.count
+            : undefined
         }
         className="mb-3 md:w-80"
       />
