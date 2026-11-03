@@ -10,9 +10,9 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from starlette.datastructures import UploadFile
 from starlette.requests import ClientDisconnect
-from starlette.types import Message
 
 from gateway.api.deps import InferenceServiceDep, require_deployment_operator
+from gateway.api.routes._request_body import bounded_request
 from gateway.schemas.inference import CountryDatabaseStatus
 
 router = APIRouter(
@@ -44,18 +44,8 @@ async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
 
 
 def _bounded(request: Request) -> Request:
-    """``request``, refusing its body once more than ``_MAX_BODY_BYTES`` arrive, whatever ``Content-Length`` says."""
-    received = 0
-
-    async def receive() -> Message:
-        nonlocal received
-        message = await request.receive()
-        received += len(message.get("body", b""))
-        if received > _MAX_BODY_BYTES:
-            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, _TOO_LARGE)
-        return message
-
-    return Request(request.scope, receive)
+    """Refuse the country database body beyond its multipart allowance."""
+    return bounded_request(request, max_bytes=_MAX_BODY_BYTES, detail=_TOO_LARGE)
 
 
 @router.get("")

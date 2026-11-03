@@ -16,12 +16,13 @@ import json
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Never, cast
 from unittest.mock import patch
 
 import httpx
 import pytest
 from anthropic import Anthropic, BadRequestError
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -63,7 +64,11 @@ def _make_completion() -> Any:
     )
 
 
-def test_upload_requires_auth(client: TestClient) -> None:
+def test_upload_requires_auth_before_reading_the_body(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the body was parsed before authentication")
+
+    monkeypatch.setattr(Request, "form", unread)
     resp = client.post(f"{API_ROOT}/files", files={"file": ("a.txt", b"x", "text/plain")})
     assert resp.status_code == 401
 
@@ -85,6 +90,26 @@ def test_upload_too_large_rejected(
         f"{API_ROOT}/files",
         headers=api_key_header,
         files={"file": ("big.bin", b"x" * 64, "application/octet-stream")},
+    )
+    assert resp.status_code == 413
+
+
+def test_upload_body_over_the_route_limit_is_refused_before_parsing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "files_max_bytes", 16)
+
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the oversized body was parsed")
+
+    monkeypatch.setattr(Request, "form", unread)
+    resp = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("big.bin", b"x" * (16 + 1024 * 1024 + 1), "application/octet-stream")},
     )
     assert resp.status_code == 413
 

@@ -2359,124 +2359,6 @@
         "title": "BlobResourceContents",
         "type": "object"
       },
-      "Body_audio-create_transcription": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          },
-          "language": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Language"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt"
-          },
-          "response_format": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Response Format"
-          },
-          "temperature": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Temperature"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User"
-          }
-        },
-        "required": [
-          "file",
-          "model"
-        ],
-        "title": "Body_audio-create_transcription",
-        "type": "object"
-      },
-      "Body_files-create_file": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          },
-          "purpose": {
-            "default": "user_data",
-            "title": "Purpose",
-            "type": "string"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User"
-          }
-        },
-        "required": [
-          "file"
-        ],
-        "title": "Body_files-create_file",
-        "type": "object"
-      },
-      "Body_playground-upload_playground_file": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          }
-        },
-        "required": [
-          "file"
-        ],
-        "title": "Body_playground-upload_playground_file",
-        "type": "object"
-      },
       "BreakGlassCreate": {
         "description": "Why you are opening a session's content without its owner's share. Recorded with the opening.",
         "properties": {
@@ -28320,7 +28202,78 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_audio-create_transcription"
+                "properties": {
+                  "file": {
+                    "contentMediaType": "application/octet-stream",
+                    "title": "File",
+                    "type": "string"
+                  },
+                  "language": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Language"
+                  },
+                  "model": {
+                    "title": "Model",
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Prompt"
+                  },
+                  "response_format": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Response Format"
+                  },
+                  "temperature": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Temperature"
+                  },
+                  "user": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "User"
+                  }
+                },
+                "required": [
+                  "file",
+                  "model"
+                ],
+                "title": "Body_audio-create_transcription",
+                "type": "object"
               }
             }
           },
@@ -28334,6 +28287,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "413": {
+            "description": "The audio upload exceeds the maximum request size."
           },
           "422": {
             "content": {
@@ -31427,7 +31383,34 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_files-create_file"
+                "properties": {
+                  "file": {
+                    "contentMediaType": "application/octet-stream",
+                    "title": "File",
+                    "type": "string"
+                  },
+                  "purpose": {
+                    "default": "user_data",
+                    "title": "Purpose",
+                    "type": "string"
+                  },
+                  "user": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "User"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "title": "Body_files-create_file",
+                "type": "object"
               }
             }
           },
@@ -31451,6 +31434,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "413": {
+            "description": "The upload exceeds the configured maximum size."
           },
           "422": {
             "content": {
@@ -43418,7 +43404,18 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_playground-upload_playground_file"
+                "properties": {
+                  "file": {
+                    "contentMediaType": "application/octet-stream",
+                    "title": "File",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "title": "Body_playground-upload_playground_file",
+                "type": "object"
               }
             }
           },
@@ -43434,6 +43431,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "413": {
+            "description": "The upload exceeds the configured maximum size."
           },
           "422": {
             "content": {

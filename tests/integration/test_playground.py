@@ -30,13 +30,13 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Never, cast
 from unittest.mock import patch
 
 import httpx
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
-from fastapi import status
+from fastapi import Request, status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -1102,6 +1102,16 @@ def _upload(
         client.cookies.clear()
 
 
+def test_an_unauthenticated_upload_is_not_parsed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the body was parsed before authentication")
+
+    monkeypatch.setattr(Request, "form", unread)
+    response = client.post(f"{_PREFIX}/files", files={"file": ("report.txt", b"secret", "text/plain")})
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
 def test_the_tools_read_reports_that_files_can_be_attached(client: TestClient, world: _World) -> None:
     code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
 
@@ -1166,6 +1176,17 @@ def test_an_oversized_upload_answers_413(
     code, body = _upload(client, world, "member")
     assert code == status.HTTP_413_CONTENT_TOO_LARGE
     assert "maximum upload size" in body["detail"]
+
+
+def test_upload_body_over_the_route_limit_is_refused_before_parsing(
+    client: TestClient,
+    world: _World,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "files_max_bytes", 16)
+    code, _ = _upload(client, world, "member", data=b"x" * (16 + 1024 * 1024 + 1))
+    assert code == status.HTTP_413_CONTENT_TOO_LARGE
 
 
 def test_an_upload_resolves_in_the_caller_s_own_completion(

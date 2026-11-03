@@ -1,11 +1,12 @@
 """Tests for the POST /api/v1/audio/transcriptions and POST /api/v1/audio/speech endpoints."""
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Never
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.audio import Transcription
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT
@@ -26,14 +27,41 @@ FAKE_AUDIO_BYTES = b"fake-audio-content-mp3"
 # === Transcription tests ===
 
 
-def test_transcription_requires_auth(client: TestClient) -> None:
+def test_transcription_requires_auth_before_reading_the_body(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """POST /api/v1/audio/transcriptions requires authentication."""
+
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the body was parsed before authentication")
+
+    monkeypatch.setattr(Request, "form", unread)
     resp = client.post(
         f"{API_ROOT}/audio/transcriptions",
         files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
         data={"model": "openai:whisper-1"},
     )
     assert resp.status_code == 401
+
+
+def test_transcription_body_over_the_route_limit_is_refused_before_parsing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gateway.api.routes.audio._MAX_AUDIO_UPLOAD_BYTES", 16)
+
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the oversized body was parsed")
+
+    monkeypatch.setattr(Request, "form", unread)
+    response = client.post(
+        f"{API_ROOT}/audio/transcriptions",
+        headers=api_key_header,
+        files={"file": ("large.mp3", b"x" * (16 + 1024 * 1024 + 1), "audio/mpeg")},
+        data={"model": "openai:whisper-1"},
+    )
+    assert response.status_code == 413
 
 
 def test_transcription_with_api_key(
