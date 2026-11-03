@@ -103,10 +103,10 @@ export function WebSearchPage() {
       readOf.get(toRowId({ kind: tool.kind, modelKey: tool.name })),
       readOf.get(toRowId({ kind: "model", modelKey: oldPriceKey(tool) })),
     )
-  const isPricedUnderOldKey = (tool: WebToolRow) => {
-    const price = toolPrice(tool)
-    return price.state === "own" && price.oldKey
-  }
+  const hasOldKeyPrice = (tool: WebToolRow) =>
+    Boolean(
+      readOf.get(toRowId({ kind: "model", modelKey: oldPriceKey(tool) }))?.data,
+    )
   const organizationKeyPrice = (kind: WebToolKind): ToolPrice =>
     rateOnly(
       readOf.get(
@@ -276,7 +276,7 @@ export function WebSearchPage() {
             dialog.tool.name ===
             (dialog.tool.kind === "search" ? searchDefault : fetchDefault)
           }
-          isPricedUnderOldKey={isPricedUnderOldKey(dialog.tool)}
+          hasOldKeyPrice={hasOldKeyPrice(dialog.tool)}
           onClose={close}
         />
       ) : null}

@@ -537,34 +537,41 @@ describe("WebSearchPage", () => {
     )
   })
 
-  it("names, and keeps, the price under a removed tool's old key", async () => {
-    const user = userEvent.setup()
-    const requests = mockApi({
-      rates: { "model:exa:exa": rate("exa:exa", 0.004) },
-    })
-    await renderPage()
+  it.each([
+    ["when it is the tool's price", {}],
+    [
+      "beside the tool's own price",
+      { "search:exa": rate("exa", 0.005, "search") },
+    ],
+  ])(
+    "names, and keeps, the price under a removed tool's old key %s",
+    async (_, own) => {
+      const user = userEvent.setup()
+      const requests = mockApi({
+        rates: { "model:exa:exa": rate("exa:exa", 0.004), ...own },
+      })
+      await renderPage()
 
-    const exa = await findRow("Search tools", "exa")
-    expect(
-      await within(exa).findByText("Under its old price key"),
-    ).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Remove exa" }))
-    const confirm = await screen.findByRole("alertdialog")
-    expect(
-      within(confirm).getByText(
-        /Its price is stored under exa:exa, which stays/,
-      ),
-    ).toBeInTheDocument()
-    await user.click(
-      within(confirm).getByRole("button", { name: "Remove permanently" }),
-    )
+      await user.click(
+        await screen.findByRole("button", { name: "Remove exa" }),
+      )
+      const confirm = await screen.findByRole("alertdialog")
+      expect(
+        await within(confirm).findByText(
+          /The price stored under exa:exa stays/,
+        ),
+      ).toBeInTheDocument()
+      await user.click(
+        within(confirm).getByRole("button", { name: "Remove permanently" }),
+      )
 
-    await waitFor(() =>
-      expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
-    )
-    // For a provider that also serves models, that key can be a model's price.
-    expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
-  })
+      await waitFor(() =>
+        expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
+      )
+      // For a provider that also serves models, that key can be a model's price.
+      expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
+    },
+  )
 
   it("configures a stored tool by sending only what changed", async () => {
     const user = userEvent.setup()

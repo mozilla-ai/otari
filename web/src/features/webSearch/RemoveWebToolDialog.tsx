@@ -16,14 +16,14 @@ import { oldPriceKey, type WebToolRow } from "./webTools"
 export function RemoveWebToolDialog({
   tool,
   isDefault,
-  isPricedUnderOldKey,
+  hasOldKeyPrice,
   onClose,
 }: {
   tool: WebToolRow
   /** Whether a default setting names the tool. */
   isDefault: boolean
-  /** Whether the tool's price is the rate under its old `<provider>:<name>` key. */
-  isPricedUnderOldKey: boolean
+  /** Whether a price is stored under the tool's old `<provider>:<name>` key. */
+  hasOldKeyPrice: boolean
   onClose: () => void
 }) {
   const remove = useDeleteSearchTool()
@@ -79,11 +79,11 @@ export function RemoveWebToolDialog({
               open to them.
             </p>
           ) : null}
-          {isPricedUnderOldKey ? (
+          {hasOldKeyPrice ? (
             <p>
-              Its price is stored under {oldPriceKey(tool)}, which stays, so a
-              new tool named {tool.name} on {tool.provider} would be billed at
-              it.
+              The price stored under {oldPriceKey(tool)} stays, and prices a new
+              tool named {tool.name} on {tool.provider} that has no price of its
+              own.
             </p>
           ) : null}
           <Checkbox
