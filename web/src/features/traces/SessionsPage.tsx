@@ -233,13 +233,18 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const workspaces = useWorkspaces()
   const { policy } = useTraceContentPolicy()
   const platformBreakGlass = policy.platform_break_glass
-  const keepsContent =
-    policy.content_available &&
-    (workspaces.data ?? []).some(
-      (candidate) =>
-        candidate.trace_content_enabled &&
-        (workspace ? candidate.id === workspace.workspace_id : true),
-    )
+  const keeping = policy.content_available
+    ? (workspaces.data ?? []).filter(
+        (candidate) =>
+          candidate.trace_content_enabled &&
+          (workspace ? candidate.id === workspace.workspace_id : true),
+      )
+    : []
+  const keepsContent = keeping.length > 0
+  // A workspace can stop keeping tool output that the deployment keeps.
+  const keepsToolOutput =
+    policy.tool_output &&
+    keeping.some((candidate) => candidate.trace_content_tool_output ?? true)
   const isMobile = useIsMobile()
   const [now, setNow] = useState(() => Date.now())
   // The window a timeline selection asked for, until its list lands.
@@ -464,8 +469,8 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
           <InfoBanner>
             {workspace ? "This workspace keeps" : "Your workspaces keep"} what
             your sessions were about: the prompts and tool calls your agents
-            send{policy.tool_output ? ", and what each tool returned" : ""}.
-            Otari shows yours only to you, unless you share a session.{" "}
+            send{keepsToolOutput ? ", and what each tool returned" : ""}. Otari
+            shows yours only to you, unless you share a session.{" "}
             {exceptionalAccess(platformBreakGlass)}
           </InfoBanner>
         ) : null}

@@ -166,8 +166,8 @@ function spanInput(span: TraceSpan): unknown {
   return values.length === 1 ? values[0] : input
 }
 
-// What a tool returned, where the deployment keeps tool output.
-function spanOutput(span: TraceSpan): unknown {
+// What a tool returned, where the deployment and the workspace keep tool output.
+function spanOutput(span: TraceSpan): string | undefined {
   if (span.content_private) return undefined
   return span.content["tool.output"]
 }

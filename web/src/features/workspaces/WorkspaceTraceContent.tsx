@@ -14,8 +14,9 @@ import {
 } from "@/shared/api/workspaces"
 
 const LABEL = "Keep what agent sessions were about"
+const TOOL_OUTPUT_LABEL = "Keep what tools returned"
 
-type Pending = "on" | "off" | "delete"
+type Pending = "on" | "off" | "delete" | "tool-output-on" | "tool-output-off"
 
 /**
  * Whether a workspace keeps what its agent sessions were about: the prompts
@@ -27,6 +28,9 @@ type Pending = "on" | "off" | "delete"
  * because "in the same workspace" is what people will otherwise assume. Every
  * change asks first. Deleting what is stored is offered on its own as well as
  * with turning content off, so it stays reachable while content is off.
+ *
+ * Tool output has a switch of its own, offered only where the deployment keeps
+ * it: the workspace can stop keeping it, never keep it where the deployment does not.
  */
 export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
   const { policy, isPending: policyPending } = useTraceContentPolicy()
@@ -36,10 +40,12 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
   const [pending, setPending] = useState<Pending>()
   const [deleteStored, setDeleteStored] = useState(false)
   const enabled = workspace.trace_content_enabled ?? false
+  const toolOutputEnabled = workspace.trace_content_tool_output ?? true
   const exceptions = exceptionalAccess(policy.platform_break_glass)
-  const toolOutput = policy.tool_output
-    ? "On requests routed through Otari it also keeps what each tool returned. Never model responses."
-    : "It does not keep what tools return, though any it kept before stays until it is deleted, and never model responses."
+  const toolOutput =
+    policy.tool_output && toolOutputEnabled
+      ? "On requests routed through Otari it also keeps what each tool returned. Never model responses."
+      : "It does not keep what tools return, though any it kept before stays until it is deleted, and never model responses."
   const retention = `A session is deleted, with what it was about, ${policy.retention_days} days after its last activity, and ${policy.session_max_age_days} days after it started at the latest.`
 
   const close = () => {
@@ -55,7 +61,13 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
       if (pending === "on" || pending === "off") {
         await setContent.mutateAsync({
           id: workspace.id,
-          enabled: pending === "on",
+          trace_content_enabled: pending === "on",
+        })
+      }
+      if (pending === "tool-output-on" || pending === "tool-output-off") {
+        await setContent.mutateAsync({
+          id: workspace.id,
+          trace_content_tool_output: pending === "tool-output-on",
         })
       }
       if (pending === "delete" || (pending === "off" && deleteStored)) {
@@ -85,6 +97,26 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
           isDisabled={!available || policyPending || setContent.isPending}
         />
       </div>
+      {available && policy.tool_output ? (
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-body">{TOOL_OUTPUT_LABEL}</p>
+            <p className="mt-1 max-w-md text-caption">
+              This deployment keeps what each tool returned on requests routed
+              through Otari, such as file contents, command output and web
+              pages. This workspace can stop keeping it.
+            </p>
+          </div>
+          <Toggle
+            isSelected={enabled && toolOutputEnabled}
+            onChange={(next) =>
+              setPending(next ? "tool-output-on" : "tool-output-off")
+            }
+            label={TOOL_OUTPUT_LABEL}
+            isDisabled={!enabled || setContent.isPending}
+          />
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="ghost"
@@ -105,7 +137,11 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
             ? "Keep what this workspace's sessions were about?"
             : pending === "off"
               ? "Stop keeping what sessions were about?"
-              : "Delete what this workspace's sessions were about?"
+              : pending === "tool-output-on"
+                ? "Keep what tools returned?"
+                : pending === "tool-output-off"
+                  ? "Stop keeping what tools returned?"
+                  : "Delete what this workspace's sessions were about?"
         }
         body={
           pending === "on" ? (
@@ -114,6 +150,19 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
               tool calls its members' agents send. Otari shows each person only
               their own sessions' content. Nobody else sees it, you included,
               unless they share a session with you. {exceptions} {retention}
+            </p>
+          ) : pending === "tool-output-on" ? (
+            <p>
+              From the next request on, requests routed through Otari also keep
+              what each tool returned, which can include file contents and
+              command output. Otari shows it only to the person whose session it
+              is, unless they share a session. {retention}
+            </p>
+          ) : pending === "tool-output-off" ? (
+            <p>
+              No tool output is kept from the next request on, including content
+              already sent and not yet stored. What is already stored stays
+              until its sessions are deleted.
             </p>
           ) : pending === "off" ? (
             <div className="flex flex-col gap-3">
@@ -143,7 +192,11 @@ export function WorkspaceTraceContent({ workspace }: { workspace: Workspace }) {
             ? "Keep content"
             : pending === "off"
               ? "Stop keeping content"
-              : "Delete content"
+              : pending === "tool-output-on"
+                ? "Keep tool output"
+                : pending === "tool-output-off"
+                  ? "Stop keeping tool output"
+                  : "Delete content"
         }
         confirmVariant={
           pending === "delete" || (pending === "off" && deleteStored)
