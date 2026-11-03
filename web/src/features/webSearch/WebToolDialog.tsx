@@ -62,11 +62,11 @@ const REDIRECT_WARNING =
   "does not report where a redirect led, so a workspace's allowed and blocked domains are not checked past one. Keep builtin_fetch where they must hold."
 
 const PRICE_HELP =
-  "Blank leaves the tool unpriced, which require_pricing refuses. A call the provider reports a cost for is billed at that cost instead."
+  "Blank: the tool takes a rate already stored for it, if there is one, and is otherwise unpriced, which require_pricing refuses. A call the provider reports a cost for is billed at that cost instead."
 
 /** What the result step says of a tool added with no price. */
 const UNPRICED_RESULT =
-  "It has no price, so require_pricing refuses its calls. Set one with Edit on its row."
+  "No price was set here, so unless one is already stored for it, require_pricing refuses its calls. Set one with Edit on its row."
 
 function capitalized(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)

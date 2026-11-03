@@ -202,9 +202,8 @@ export function WebSearchPage() {
       >
         The search and fetch tools this deployment runs for every workspace,
         what each call costs, and which tool the model uses. A call is billed at
-        its tool&rsquo;s own rate, else at the Web search or Web fetch rate,
-        except a search on the search API, which only the tool&rsquo;s own rate
-        prices.
+        its tool&rsquo;s own rate, and a tool with none is unpriced. Each
+        table&rsquo;s last row prices a call on an organization&rsquo;s own key.
       </PageIntro>
 
       <ErrorBanner
