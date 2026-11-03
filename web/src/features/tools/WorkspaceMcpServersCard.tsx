@@ -381,7 +381,9 @@ export function WorkspaceMcpServersCard({
             value={search.value}
             maxLength={SEARCH_MAX_LENGTH}
             onChange={search.onChange}
-            resultCount={query.isPending ? undefined : rows.length}
+            resultCount={
+              search.isSettled && !query.isPending ? rows.length : undefined
+            }
             className="w-full md:w-96"
           />
         </Toolbar>

@@ -293,7 +293,9 @@ export function RoutingPage() {
               value={search.value}
               maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
-              resultCount={isListLoading ? undefined : shown.length}
+              resultCount={
+                search.isSettled && !isListLoading ? shown.length : undefined
+              }
               className="w-full md:w-96"
             />
           </Toolbar>

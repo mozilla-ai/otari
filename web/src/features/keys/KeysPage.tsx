@@ -1822,7 +1822,7 @@ export function KeysPage() {
             value={search.value}
             maxLength={SEARCH_MAX_LENGTH}
             onChange={search.onChange}
-            resultCount={loading ? undefined : rows.length}
+            resultCount={search.isSettled && !loading ? rows.length : undefined}
             className="w-full md:w-96"
           />
         </Toolbar>

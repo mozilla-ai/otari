@@ -225,6 +225,16 @@ describe("WorkspaceMembersPage", () => {
     expect(await screen.findByText("1 match")).toBeInTheDocument()
   })
 
+  it("offers no search to a manager with no workspace and no roster on the page", async () => {
+    mockApi({ memberships: [] })
+    await renderPage()
+
+    expect(await screen.findByText(/No workspace selected/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("searchbox", { name: "Search members" }),
+    ).toBeNull()
+  })
+
   it("says so rather than showing an empty roster when there is no workspace", async () => {
     mockApi({ memberships: [] })
     await renderPage()

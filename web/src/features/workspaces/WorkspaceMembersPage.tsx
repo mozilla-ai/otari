@@ -154,18 +154,23 @@ export function WorkspaceMembersPage() {
           an empty candidate list otherwise looks like. */}
       <ErrorBanner error={orgMembers.error} />
       {/* One search for both lists: who is in this workspace, and the
-          organization roster beside it, are the same people at two scopes. */}
-      <Toolbar>
-        <SearchField
-          label="Search members"
-          placeholder="Search by name"
-          value={search.value}
-          maxLength={SEARCH_MAX_LENGTH}
-          onChange={search.onChange}
-          resultCount={rostersAnswered ? matched.size : undefined}
-          className="w-full md:w-96"
-        />
-      </Toolbar>
+          organization roster beside it, are the same people at two scopes.
+          Not over a page with neither, unless a term is left to clear. */}
+      {selected || showsRoster || search.value ? (
+        <Toolbar>
+          <SearchField
+            label="Search members"
+            placeholder="Search by name"
+            value={search.value}
+            maxLength={SEARCH_MAX_LENGTH}
+            onChange={search.onChange}
+            resultCount={
+              search.isSettled && rostersAnswered ? matched.size : undefined
+            }
+            className="w-full md:w-96"
+          />
+        </Toolbar>
+      ) : null}
       {selected ? (
         <WorkspaceMembersPanel
           workspaceId={selected.workspace_id}
