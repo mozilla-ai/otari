@@ -13322,6 +13322,11 @@ export interface components {
              * @default false
              */
             tool_call: boolean;
+            /**
+             * Type
+             * @description What kind of model models.dev says it is. Null where the catalog gives no kind.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
          * ModelMetadataResponse
@@ -13380,7 +13385,7 @@ export interface components {
             /** Supported Parameters */
             supported_parameters?: string[] | null;
             /** Type */
-            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "other") | null;
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
          * ModelPricingInfo

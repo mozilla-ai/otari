@@ -175,18 +175,22 @@ than unsupported. An alias reports its target's capabilities but no `name`,
 because the target's name would say what the alias points at.
 
 `type` says what kind of model it is: `chat`, `embedding`, `image`, `speech`,
-`transcription`, `rerank`, `moderation` or `video`, so a chat picker can offer
-chat models alone. `other` is a model that is not a chat model and nothing more
-is known of, which is what OVHcloud's listing says of a model that writes no
-completion tokens. It comes from the provider's own model listing where that
-says (Together's `type`, DeepInfra's tags, DeepSeek's `output_modalities`,
-OVHcloud's `max_completion_tokens`), otherwise from models.dev, and is unset
-where neither does. models.dev gives an
-embedding model text output, as it does a chat model, so `architecture` alone
-does not tell them apart. A chat request whose every candidate is an embedding,
-rerank, transcription or `other` model is refused with `400` `wrong_model_type` before any provider is
-called, as is an embeddings request for a model its provider lists as another
-kind.
+`transcription`, `rerank`, `moderation`, `video`, `decision` or `realtime`, so a
+chat picker can offer chat models alone. `other` is a model that is not a chat
+model and nothing more is known of, which is what OVHcloud's listing says of a
+model that writes no completion tokens. It comes from the provider's own model
+listing where that says (Together's `type`, DeepInfra's tags, DeepSeek's
+`output_modalities`, OVHcloud's `max_completion_tokens`), otherwise from the
+`type` in models.dev's v2 catalog, and is unset where neither does. models.dev's
+`reranking` is `rerank`, its `audio` is `speech`, and a value it adds later is
+`other` until the gateway knows it. The v1 catalog gives no type, so while the
+gateway serves v1 only the listing gives one. models.dev gives an embedding model
+text output, as it does a chat model, so `architecture` alone does not tell them
+apart. A chat request whose every candidate is an embedding, rerank,
+transcription or `other` model is refused with `400` `wrong_model_type` before
+any provider is called, as is an embeddings request for a model its provider
+lists as another kind. A `decision` or `realtime` model is not refused, because
+some hosts serve one through chat completions.
 
 One worker downloads the catalog every `models_dev_cache_ttl_seconds` (a day by
 default) and stores it in the database, and every worker serves the stored copy

@@ -10,7 +10,7 @@ from gateway.core.config import GatewayConfig
 from gateway.services.catalog import model_type, not_chat_detail, not_embedding_detail
 from gateway.services.catalog._model_type import type_from_listing
 from gateway.services.model_discovery_service import get_model_cache
-from gateway.types.models_dev import parse_catalog
+from gateway.types.models_dev import parse_catalog, parse_catalog_v2
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +67,41 @@ def test_the_providers_listing_wins_over_models_dev() -> None:
     assert model_type(GatewayConfig(), models_dev, "together:BAAI/bge-x") == "embedding"
 
 
-def test_models_dev_names_an_embedding_model_by_its_family_not_its_text_output() -> None:
+@pytest.mark.parametrize(
+    ("models_dev_type", "expected"),
+    [
+        ("chat", "chat"),
+        ("image", "image"),
+        ("video", "video"),
+        ("embedding", "embedding"),
+        ("reranking", "rerank"),
+        ("decision", "decision"),
+        ("transcription", "transcription"),
+        ("speech", "speech"),
+        ("realtime", "realtime"),
+        # Not one of the nine values models.dev filters by, but in its data.
+        ("audio", "speech"),
+        ("extraction", "other"),
+        ("something-new", "other"),
+    ],
+)
+def test_models_dev_names_the_kind_in_its_v2_type(models_dev_type: str, expected: str) -> None:
+    # The modalities say chat, as they do for an embedding model, so only the type can say otherwise.
+    model = {"type": models_dev_type, "family": "gpt", "modalities": {"input": ["text"], "output": ["text"]}}
+    models_dev = parse_catalog_v2({"openai": {"models": {"m": model}}})
+
+    assert model_type(GatewayConfig(), models_dev, "openai:m") == expected
+    assert model_type(GatewayConfig(), models_dev, "openai:unknown") is None
+
+
+def test_a_v2_model_with_no_type_is_a_chat_model() -> None:
+    models_dev = parse_catalog_v2({"openai": {"models": {"m": {}}}})
+
+    assert model_type(GatewayConfig(), models_dev, "openai:m") == "chat"
+
+
+def test_a_v1_model_has_no_kind_from_models_dev() -> None:
+    """v1 has no type, and its family and modalities are not read as one."""
     models_dev = parse_catalog(
         {
             "openai": {
@@ -76,15 +110,14 @@ def test_models_dev_names_an_embedding_model_by_its_family_not_its_text_output()
                         "family": "text-embedding",
                         "modalities": {"input": ["text"], "output": ["text"]},
                     },
-                    "gpt-4o": {"family": "gpt", "modalities": {"input": ["text", "image"], "output": ["text"]}},
+                    "tts-1": {"modalities": {"input": ["text"], "output": ["audio"]}},
                 }
             }
         }
     )
 
-    assert model_type(GatewayConfig(), models_dev, "openai:text-embedding-3-small") == "embedding"
-    assert model_type(GatewayConfig(), models_dev, "openai:gpt-4o") == "chat"
-    assert model_type(GatewayConfig(), models_dev, "openai:unknown") is None
+    assert model_type(GatewayConfig(), models_dev, "openai:text-embedding-3-small") is None
+    assert model_type(GatewayConfig(), models_dev, "openai:tts-1") is None
 
 
 def test_a_chat_request_is_refused_only_when_every_candidate_cannot_chat() -> None:
