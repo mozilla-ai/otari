@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from any_search import AnySearch, MissingCredentialError, ProviderError, SearchResult, UnsupportedParameterError
-from any_search.providers.serply import MAX_RESULTS, USER_AGENT
+from any_search.providers.serply import MAX_RESULTS
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "serply"
 KEY = "test-key"
@@ -52,7 +52,7 @@ def test_metadata() -> None:
     assert (metadata.query_in_url, metadata.key_in_url) == (True, False)
     assert metadata.max_results == MAX_RESULTS == 10
     assert not [option for option in metadata.options if option.operator_only]
-    # What the adapter sets itself is not an option.
+    # What the adapter, or the library, sets itself is not an option.
     names = {option.name for option in metadata.options}
     assert not names & {"q", "num", "X-Api-Key", "User-Agent"}
 
@@ -62,7 +62,7 @@ async def test_sends_the_query_as_parameters_of_a_get_and_the_key_as_a_header() 
     _, request = await _search()
     assert (request.method, str(request.url.copy_with(query=None))) == ("GET", "https://api.serply.io/v1/search")
     assert _params(request) == {"q": "latest stable python release", "num": "10"}
-    assert (request.headers["X-Api-Key"], request.headers["User-Agent"]) == (KEY, USER_AGENT)
+    assert request.headers["X-Api-Key"] == KEY
     assert KEY not in str(request.url)
     assert request.content == b""
 

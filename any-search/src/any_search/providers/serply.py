@@ -4,8 +4,7 @@ The query travels in the URL, as ``q``, beside ``num`` and the native options
 that are Google's own parameters. The adapter passes them to ``self._http`` as
 ``params`` and never hands the URL to a logger; httpx logs it at INFO, which
 the log filter (``install_log_filter``) redacts during a provider call. The
-key is a header, so it never reaches the URL. Each request also names the
-library in its ``User-Agent``, so Serply can tell its traffic from a script's.
+key is a header, so it never reaches the URL.
 
 It sends ``num``, from ``max_results`` and at most 10: Serply serves one page
 of Google's results, so ``num=20`` answers with the same page as ``num=10``.
@@ -53,9 +52,6 @@ from any_search._types import OptionSpec, ProviderMetadata, SearchHit, SearchRes
 
 MAX_RESULTS = 10
 """The most results Serply returns for one search: one page of Google's results."""
-
-USER_AGENT = "any-search"
-"""Sent with every request, so Serply can tell the library's traffic apart."""
 
 _TBS = {"day": "qdr:d", "week": "qdr:w", "month": "qdr:m", "year": "qdr:y"}
 
@@ -143,7 +139,7 @@ class SerplyProvider(AnySearch):
         if time_range is not None:
             params["tbs"] = _TBS[time_range]
         headers = {name: str(options[name]) for name in _HEADER_OPTIONS if options.get(name) is not None}
-        headers.update({"X-Api-Key": self._api_key or "", "User-Agent": USER_AGENT})
+        headers["X-Api-Key"] = self._api_key or ""
 
         endpoint = f"{(self._api_base or '').rstrip('/')}/v1/search"
         response = await self._http.request("GET", endpoint, params=params, headers=headers)

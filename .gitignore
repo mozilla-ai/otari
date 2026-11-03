@@ -12,6 +12,8 @@ build/
 *.egg-info/
 # Written at build time by setuptools-scm.
 cli/src/otari_agent/_version.py
+any-search/src/any_search/_version.py
+any-fetch/src/any_fetch/_version.py
 
 .env
 config.yml

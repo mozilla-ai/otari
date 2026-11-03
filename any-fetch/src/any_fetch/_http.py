@@ -6,6 +6,19 @@ import httpx
 
 from any_fetch._errors import ProviderError
 
+# Written at build time by setuptools-scm from the repository's Git tag (see
+# pyproject.toml), as cli/'s is. Absent in a source tree nothing has built yet.
+try:
+    from any_fetch._version import __version__
+except ImportError:
+    __version__ = "0.0.0"
+
+USER_AGENT = f"any-fetch/{__version__}"
+"""Sent with every request, so a provider can tell the library's traffic apart and tie it to a release."""
+
+# What a client sends when its host set no ``User-Agent``: the one value the library replaces.
+_HTTPX_USER_AGENT = f"python-httpx/{httpx.__version__}"
+
 
 class ProviderHttp:
     """Send a provider's requests through the host's client, or through one of its own.
@@ -15,6 +28,10 @@ class ProviderHttp:
     its pool and its proxy settings. Without one, a client with httpx's
     defaults and the provider's timeout is opened on the first request and
     closed by ``aclose``.
+
+    Each request names the library in its ``User-Agent``, in place of httpx's
+    default, so a provider can tell whose traffic it is. A host's client that
+    sets a ``User-Agent`` of its own keeps it.
     """
 
     def __init__(self, provider: str, client: httpx.AsyncClient | None, timeout: float) -> None:
@@ -36,7 +53,11 @@ class ProviderHttp:
                 self._own_client = httpx.AsyncClient(timeout=self._timeout)
             client = self._own_client
         try:
-            return await client.request(method, url, timeout=self._timeout, **kwargs)
+            # ``Headers`` encodes eagerly, so a header httpx cannot send fails inside the handler.
+            headers = httpx.Headers(kwargs.pop("headers", None))
+            if client.headers.get("User-Agent") == _HTTPX_USER_AGENT:
+                headers["User-Agent"] = USER_AGENT
+            return await client.request(method, url, headers=headers, timeout=self._timeout, **kwargs)
         except httpx.TimeoutException:
             tag = "timeout"
         except (httpx.HTTPError, httpx.InvalidURL):
