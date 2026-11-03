@@ -104,7 +104,7 @@ def test_an_images_rate_holds_the_requested_images_and_settles_the_returned_ones
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     # $0.04 an image, per million images: what the dashboard stores for $40 per 1,000.
-    _price(client, master_key_header, "openai:dall-e-3", unit="images", rate=40000.0)
+    _price(client, master_key_header, "openai:dall-e-3", unit="image", rate=40000.0)
     headers = _user_key(client, master_key_header)
 
     with _held() as held:
@@ -124,7 +124,7 @@ def test_a_token_rate_on_images_keeps_its_per_image_reading_and_records_the_toke
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     """The legacy reading: the money a configuration produced before the rate's unit decided."""
-    _price(client, master_key_header, "openai:dall-e-3", unit="tokens", rate=0.04)
+    _price(client, master_key_header, "openai:dall-e-3", unit="token", rate=0.04)
     headers = _user_key(client, master_key_header)
     usage = ImageUsage(
         input_tokens=50,
@@ -149,7 +149,7 @@ def test_a_requests_rate_on_images_bills_one_request_not_its_rate_per_image(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     """A per-request price read as dollars per image billed a million times too much."""
-    _price(client, master_key_header, "openai:dall-e-3", unit="requests", rate=2000.0)
+    _price(client, master_key_header, "openai:dall-e-3", unit="request", rate=2000.0)
     headers = _user_key(client, master_key_header)
 
     with _held() as held:
@@ -175,7 +175,7 @@ def _rerank(client: TestClient, headers: dict[str, str], result: RerankResponse,
 def test_rerank_holds_the_search_units_its_documents_imply_and_settles_the_billed_ones(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    _price(client, master_key_header, "cohere:rerank-v3.5", unit="requests", rate=2000.0)
+    _price(client, master_key_header, "cohere:rerank-v3.5", unit="request", rate=2000.0)
     headers = _user_key(client, master_key_header)
     result = RerankResponse(
         id="r",
@@ -212,7 +212,7 @@ def test_a_requests_rate_on_embeddings_bills_one_request_not_the_tokens(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     """A per-call price multiplied by the token count billed a thousand calls for one."""
-    _price(client, master_key_header, "openai:text-embedding-3-small", unit="requests", rate=5000.0)
+    _price(client, master_key_header, "openai:text-embedding-3-small", unit="request", rate=5000.0)
     headers = _user_key(client, master_key_header)
 
     response = _embed(client, headers)
@@ -254,7 +254,7 @@ def test_an_images_rate_on_a_per_request_endpoint_settles_free_rather_than_per_i
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     """The rate cannot price a request, and this endpoint's unpriced is free: never the rate read per image."""
-    _price(client, master_key_header, "openai:whisper-1", unit="images", rate=0.5)
+    _price(client, master_key_header, "openai:whisper-1", unit="image", rate=0.5)
     headers = _user_key(client, master_key_header)
 
     response = _transcribe(client, headers)
@@ -284,7 +284,7 @@ def strict_client(postgres_url: str) -> Generator[TestClient]:
 def test_require_pricing_refuses_a_rate_the_endpoint_cannot_settle(strict_client: TestClient) -> None:
     """An images rate on embeddings would settle unpriced; it is refused before the provider is called."""
     master = {API_KEY_HEADER: "Bearer test-master-key"}
-    _price(strict_client, master, "openai:text-embedding-3-small", unit="images", rate=0.04)
+    _price(strict_client, master, "openai:text-embedding-3-small", unit="image", rate=0.04)
     headers = _user_key(strict_client, master)
     provider = AsyncMock()
 
@@ -300,7 +300,7 @@ def test_require_pricing_refuses_a_rate_the_endpoint_cannot_settle(strict_client
 
 def test_require_pricing_admits_a_rate_the_endpoint_can_settle(strict_client: TestClient) -> None:
     master = {API_KEY_HEADER: "Bearer test-master-key"}
-    _price(strict_client, master, "openai:text-embedding-3-small", unit="tokens", rate=2.0)
+    _price(strict_client, master, "openai:text-embedding-3-small", unit="token", rate=2.0)
     headers = _user_key(strict_client, master)
 
     response = _embed(strict_client, headers)

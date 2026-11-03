@@ -58,7 +58,7 @@ async def test_an_unpriced_model_is_remembered_as_unpriced(monkeypatch: pytest.M
 
 @pytest.mark.parametrize(
     ("unit", "missing"),
-    [("tokens", False), ("requests", False), ("images", False), ("second", True), ("minute", True)],
+    [("token", False), ("request", False), ("image", False), ("second", True), ("minute", True)],
 )
 def test_a_rate_in_a_unit_with_no_completion_meter_is_pricing_required(unit: str, *, missing: bool) -> None:
     from decimal import Decimal

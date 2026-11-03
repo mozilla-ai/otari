@@ -138,7 +138,7 @@ def test_drift_puts_a_stored_rate_beside_todays_default(client: TestClient, mast
                 "model_key": "otari:web_search",
                 "input_price_per_million": 5000,
                 "output_price_per_million": 0,
-                "unit": "requests",
+                "unit": "request",
             },
             headers=master_key_header,
         )

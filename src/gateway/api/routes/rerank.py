@@ -54,7 +54,7 @@ async def create_rerank(
 ) -> RerankResponse:
     """Rerank documents by relevance to a query.
 
-    Billing: a model priced per request (``unit: requests``) is charged per
+    Billing: a model priced per request (``unit: request``) is charged per
     search unit the provider reports, or for one unit when it reports none. A
     model priced per token is charged on the input tokens the provider reports.
 

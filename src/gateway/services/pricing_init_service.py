@@ -267,7 +267,7 @@ async def initialize_tool_prices_from_config(config: GatewayConfig, db: AsyncSes
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if latest is not None and latest.input_price_per_million == per_million and latest.unit == "requests":
+        if latest is not None and latest.input_price_per_million == per_million and latest.unit == "request":
             continue
         db.add(
             ModelPricing(
@@ -277,7 +277,7 @@ async def initialize_tool_prices_from_config(config: GatewayConfig, db: AsyncSes
                 input_price_per_million=per_million,
                 output_price_per_million=Decimal(0),
                 pricing_tiers=[],
-                unit="requests",
+                unit="request",
                 origin="config",
             )
         )
