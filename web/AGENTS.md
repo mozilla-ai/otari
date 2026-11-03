@@ -99,7 +99,8 @@ types aligned with otari-ai.
 
 More seams let a build whose one dashboard reaches several deployments
 say which: `shared/api/overlayRequestPolicy.ts` (the origin and credential every
-management request uses, settled before the bootstrap is read),
+management request uses, settled before the bootstrap is read, and the origin
+request snippets show when the API has a host of its own),
 `features/auth/overlayPublicAuthFields.tsx` (a control above the address on the
 pages that post one), `features/auth/overlayAuthShellSlot.tsx` (a control in the
 header of the public auth pages), `features/auth/overlayLoginRefusalHint.tsx` (a
