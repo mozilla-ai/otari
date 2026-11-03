@@ -376,6 +376,39 @@ caller, the organization's last thirty days on that offering: requests, cache
 hit rate, and the effective price per million tokens after cache reads and
 tiers.
 
+Each offering also lists the Otari routes its models.dev protocols map to, in
+`endpoints`. A route is a path below the API base, so `/embeddings` is called at
+`/api/v1/embeddings`. The list comes from the protocols in models.dev's v2
+`api` block for that offering, in models.dev's order:
+
+| models.dev protocol | Route |
+|---|---|
+| `chat-completions` | `/chat/completions` |
+| `responses` | `/responses` |
+| `messages` | `/messages` |
+| `images` | `/images/generations` |
+| `embeddings` | `/embeddings` |
+| `speech` | `/audio/speech` |
+| `transcriptions` | `/audio/transcriptions` |
+| `rerank` | `/rerank` |
+| `moderations` | `/moderations` |
+| `decisions` | `/decisions` |
+| `systemone` | `/systemone` |
+
+`/decisions` and `/systemone` take only a selector whose provider is a
+`decision_providers` entry. An offering from another provider instance lists
+them when its models.dev entry names those protocols, but a request to either
+route with that offering's selector is refused.
+
+Other protocols name no route. A vendor's native protocol, such as `converse`
+or `generate-content`, is what any-llm calls behind the routes above, so a
+client never calls it directly. A live, two-way session (`realtime`, `live`),
+`videos`, `fim` and `ocr` have no Otari route. An empty list means not known:
+models.dev has no entry for the offering, its download is v1, which has no
+`api` block, or none of its protocols has a route. Otari does not guess routes
+from the model's `type`. The list repeats what models.dev says, so a model it
+gives the wrong protocol shows the wrong route until models.dev is corrected.
+
 ### Browsing the grouped catalog
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
