@@ -753,8 +753,8 @@ function MemberEditor({
             }}
           />
           <ToolScopeControl
-            title="Search tool access (default for this member's keys)"
-            description="The search tools this member's keys may run on /v1/search by default. Left on its default, a key follows its own model access, or the member's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
+            title="Tool access (default for this member's keys)"
+            description="The search and fetch tools this member's keys may run on /v1/search and /v1/fetch by default. Left on its default, a key follows its own model access, or the member's when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
             inheritLabel="Default"
             initial={spendRow.allowed_tools ?? undefined}
             onChange={(value, isValid) => {
