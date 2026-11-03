@@ -89,6 +89,7 @@ from gateway.services.selector_index_service import (
     real_offerings,
     rebuild_selector_index,
 )
+from gateway.types.model_endpoint import ModelEndpoint
 from gateway.types.models_dev import ModelsDevCatalog, models_dev_provider_id
 
 # ``verify_catalog_reader_or_public`` rather than ``verify_catalog_reader``: a
@@ -192,6 +193,14 @@ class CatalogOffering(BaseModel):
         ),
     )
     metadata_output_price_per_million: float | None = None
+    endpoints: list[ModelEndpoint] = Field(
+        default_factory=list,
+        description=(
+            "The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. "
+            "`/decisions` and `/systemone` take only a `decision_providers` selector, not this one. "
+            "Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves."
+        ),
+    )
     usage_30d: OfferingUsage | None = None
 
 
@@ -397,6 +406,7 @@ async def _group(
                 price_reference=reference,
                 metadata_input_price_per_million=metadata.cost_input if metadata else None,
                 metadata_output_price_per_million=metadata.cost_output if metadata else None,
+                endpoints=list(metadata.endpoints) if metadata else [],
             ),
             metadata=metadata,
             model_id=model_id,

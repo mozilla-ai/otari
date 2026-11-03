@@ -490,6 +490,33 @@ def test_the_catalog_names_each_models_kind_and_filters_by_it(
         get_model_cache().clear("nebius")
 
 
+def test_each_offering_names_the_routes_that_serve_it(priced: TestClient, master_header: dict[str, str]) -> None:
+    # Fireworks has no models.dev entry here, so nothing says which routes serve it.
+    catalog = parse_catalog_v2(
+        {
+            "nebius": {
+                "models": {
+                    "zai-org/GLM-5.3": {
+                        "name": "GLM-5.3",
+                        "api": {"responses": {}, "converse": {}, "chat-completions": {}},
+                    },
+                    # An entry whose protocols have no Otari route.
+                    "moonshotai/Kimi-K2.6": {"name": "Kimi K2.6", "api": {"converse": {}}},
+                }
+            },
+        }
+    )
+
+    def endpoints(model_id: str) -> dict[str, list[str]]:
+        with patch.object(mcs, "_fallback", return_value=catalog):
+            response = priced.get(f"{API_ROOT}/catalog/models/{model_id}", headers=master_header)
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return {offering["selector"]: offering["endpoints"] for offering in response.json()["offerings"]}
+
+    assert endpoints("z-ai/glm-5.3") == {_NEBIUS_GLM: ["/responses", "/chat/completions"], _FIREWORKS_GLM: []}
+    assert endpoints("moonshotai/kimi-k2.6") == {_NEBIUS_KIMI: []}
+
+
 def test_prices_compare_at_the_tier_a_request_size_settles_at(
     priced: TestClient, master_header: dict[str, str]
 ) -> None:
