@@ -206,6 +206,7 @@ def _hit(item: Any, response: httpx.Response) -> SearchHit | None:
 def _is_web_url(link: str) -> bool:
     try:
         parts = urlsplit(link)
+        _ = parts.port  # raises for a port that is not a number from 0 to 65535
     except ValueError:
         return False
     return parts.scheme in ("http", "https") and bool(parts.hostname)
