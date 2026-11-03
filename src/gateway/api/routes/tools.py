@@ -32,10 +32,12 @@ from gateway.api.deps import (
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
+from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.tools import (
     Tool,
     code_execution_declaration_forms,
+    search_resolves,
     web_fetch_tool_definition,
     web_search_configured,
     web_search_declaration_forms,
@@ -84,7 +86,8 @@ class ManagedTool(BaseModel):
         description=(
             "Every `tools[].type` this deployment currently routes to the tool. Always "
             "includes the canonical `otari_*` type; for web search it also includes the "
-            "provider-named keywords when interception is enabled, and for code execution "
+            "provider-named keywords when interception is enabled and the deployment has a "
+            "search of its own, and for code execution "
             "the provider-named keywords unless the deployment's executor is `provider`."
         )
     )
@@ -107,11 +110,12 @@ class _WorkspaceSwitches:
 
     web: bool = True
     code_execution: bool = True
-    # Whether an organization search key serves the workspace's searches where the deployment has none.
-    search_key: bool = False
+    # What a declared search resolves on, with the workspace's own key; ``None`` for the deployment's alone.
+    search_policy: ResolvedWebSearchConfig | None = None
 
 
 async def _workspace_switches(
+    config: GatewayConfig,
     api_key: APIKey | None,
     web_policies: "WorkspaceWebSearchPolicies",
     code_execution_policies: "WorkspaceCodeExecutionPolicies",
@@ -119,11 +123,13 @@ async def _workspace_switches(
     """The switches the request path applies to ``api_key``'s workspace, all on without a key."""
     if api_key is None:
         return _WorkspaceSwitches()
-    web, search_key = await web_policies.access(api_key.workspace_id)
+    web, search_policy = await web_policies.access(api_key.workspace_id)
     return _WorkspaceSwitches(
         web=web,
-        code_execution=await code_execution_policies.allows_sandbox(api_key.workspace_id),
-        search_key=search_key,
+        code_execution=await code_execution_policies.allows_sandbox(
+            api_key.workspace_id, pinnable_images=config.pinnable_sandbox_images()
+        ),
+        search_policy=search_policy,
     )
 
 
@@ -141,7 +147,8 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
     # provider needs no URL, so deriving this from sandbox_url would publish
     # "unavailable" for a deployment that runs code perfectly well.
     sandbox_configured = config.sandbox_configured()
-    can_web_search = web_search_configured(config) or switches.search_key
+    deployment_searches = web_search_configured(config)
+    can_web_search = search_resolves(config, switches.search_policy) if switches.search_policy else deployment_searches
     return [
         ManagedTool(
             id=Tool.WEB_FETCH,
@@ -157,7 +164,8 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
             description=web_search["description"],
             available=can_web_search and switches.web,
             reason=_reason(can_web_search, switches.web),
-            accepted_types=web_search_declaration_forms(config),
+            # Admission claims a provider's own search keywords only for a deployment that searches itself.
+            accepted_types=web_search_declaration_forms(config) if deployment_searches else [str(Tool.WEB_SEARCH)],
             input_schema=web_search["parameters"],
             example={"type": Tool.WEB_SEARCH},
         ),
@@ -189,5 +197,5 @@ async def list_tools(
     not listed here, is forwarded to the upstream provider untouched.
     """
     api_key, _ = auth
-    switches = await _workspace_switches(api_key, web_policies, code_execution_policies)
+    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies)
     return ToolsResponse(data=_managed_tools(config, switches))

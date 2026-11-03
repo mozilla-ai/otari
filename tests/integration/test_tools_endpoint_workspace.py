@@ -7,12 +7,17 @@ as unavailable, so discovery agrees with what the request path would refuse.
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.tools import OrgWebSearchKey, WorkspaceWebSearchConfig
 from gateway.services.secret_box import generate_secret_key
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
@@ -173,3 +178,75 @@ def test_a_policy_whose_tool_list_leaves_nothing_to_run_reads_as_disabled(
     monkeypatch.setattr("gateway.services.tools._code_execution_policy.SERVED_TOOL_NAMES", ("something_else",))
 
     assert _status(_tools(client, api_key_header))["otari_code_execution"] == (False, "workspace_disabled")
+
+
+def test_an_invalid_stored_row_reads_as_the_workspace_refusing_not_as_nothing_to_search_with(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _add_org_search_key(client, master_key_header)
+    _put(client, master_key_header, "web-search", {"enabled": True, "allowed_domains": ["example.com"]})
+    with db_session_factory() as db:
+        row = db.get(WorkspaceWebSearchConfig, uuid.UUID(_default_workspace_id(client, master_key_header)))
+        assert row is not None
+        row.allowed_domains = ["https://example.com/private"]
+        db.commit()
+
+    assert _status(_tools(client, api_key_header))["otari_web_search"] == (False, "workspace_disabled")
+
+
+def test_a_key_whose_provider_this_gateway_cannot_call_serves_no_search(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The request path skips such a key, so with no search of the deployment's there is nothing to run on."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _add_org_search_key(client, master_key_header)
+    with db_session_factory() as db:
+        db.execute(update(OrgWebSearchKey).values(provider="retired-provider"))
+        db.commit()
+
+    assert _status(_tools(client, api_key_header))["otari_web_search"] == (False, "not_configured")
+
+
+def test_a_pinned_image_the_operator_withdrew_reads_as_disabled(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admission refuses every sandbox request on a withdrawn pin, so the catalog does too."""
+    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES", "ghcr.io/acme/sandbox:2")
+    _put(client, master_key_header, "code-execution-policy", {"enabled": True, "image": "ghcr.io/acme/sandbox:2"})
+    assert _status(_tools(client, api_key_header))["otari_code_execution"] == (True, None)
+
+    monkeypatch.delenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES")
+
+    assert _status(_tools(client, api_key_header))["otari_code_execution"] == (False, "workspace_disabled")
+
+
+def test_a_key_served_search_advertises_only_the_canonical_type(
+    client: TestClient,
+    test_config: GatewayConfig,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interception claims a provider's own keywords only for a deployment that searches itself."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    monkeypatch.setattr(test_config, "web_search_intercept", True)
+    _add_org_search_key(client, master_key_header)
+
+    web_search = _tools(client, api_key_header)["otari_web_search"]
+
+    assert (web_search["available"], web_search["accepted_types"]) == (True, ["otari_web_search"])

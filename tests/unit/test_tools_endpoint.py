@@ -109,6 +109,14 @@ def test_interception_advertises_the_provider_named_keywords(tmp_path: Path) -> 
     assert tools["otari_code_execution"]["accepted_types"] == ["otari_code_execution"]
 
 
+def test_interception_advertises_nothing_extra_without_a_search(tmp_path: Path) -> None:
+    """Admission leaves a provider's own keywords to the provider when the deployment cannot search."""
+    with _client(tmp_path, web_search_intercept=True) as client:
+        tools = _tools(client)
+
+    assert tools["otari_web_search"]["accepted_types"] == ["otari_web_search"]
+
+
 def test_interception_from_env_is_reflected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
     with _client(tmp_path, web_search_url="http://searxng:8080") as client:

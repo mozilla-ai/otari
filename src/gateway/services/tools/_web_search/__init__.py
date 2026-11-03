@@ -32,6 +32,7 @@ from gateway.services.tools._web_search._resolve import (
     resolve_fetch,
     resolve_in_loop_search,
     resolve_search,
+    search_resolves,
 )
 
 __all__ = [
@@ -58,6 +59,7 @@ __all__ = [
     "resolve_search",
     "run_direct_search",
     "search_default_to_pin",
+    "search_resolves",
     "warn_about_tool_instances",
     "web_search_configured",
 ]

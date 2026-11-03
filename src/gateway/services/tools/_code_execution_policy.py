@@ -273,10 +273,17 @@ class WorkspaceCodeExecutionPolicies:
             return _NOT_TURNED_ON
         return policy
 
-    async def allows_sandbox(self, workspace_id: uuid.UUID) -> bool:
-        """Whether the workspace's requests may run code in the deployment's sandbox, as admission decides it."""
+    async def allows_sandbox(self, workspace_id: uuid.UUID, *, pinnable_images: Collection[str]) -> bool:
+        """Whether the workspace's requests may run code in the deployment's sandbox, as admission decides it.
+
+        ``pinnable_images`` is the deployment's current list, which a stored pin may have fallen off.
+        """
         policy = await self.for_request(workspace_id)
-        return policy is None or (policy.enabled and leaves_a_served_tool(policy.tools))
+        return policy is None or (
+            policy.enabled
+            and leaves_a_served_tool(policy.tools)
+            and (policy.image is None or policy.image in pinnable_images)
+        )
 
     async def resolve(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
         """The workspace's stored policy, or ``None`` when it has none.

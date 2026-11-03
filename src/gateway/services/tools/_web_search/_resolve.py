@@ -225,6 +225,15 @@ def resolve_search(
     return None
 
 
+def search_resolves(config: ToolSettings, policy: ResolvedWebSearchConfig | None) -> bool:
+    """Whether a declared ``otari_web_search`` under ``policy`` finds something to run on, as admission resolves it."""
+    try:
+        return resolve_search(config, policy, requested=None, request_options=None) is not None
+    except WebSearchCredentialRefusedError:
+        # Admission refuses the request on a key its provider cannot be called with.
+        return False
+
+
 def resolve_fetch(
     config: ToolSettings,
     policy: ResolvedWebSearchConfig | None,

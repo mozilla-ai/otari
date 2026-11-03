@@ -24,6 +24,7 @@ request's gateway-run tools, and for the deployment's at startup, and ``unpriced
 ``web_search_configured`` answers whether the in-loop default yields a search, and ``warn_about_tool_instances``
 logs at startup what the instance rules let load but an operator should fix.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
+``search_resolves`` whether a declared search finds anything to run on,
 ``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
 and ``builtin_fetch_resolved`` answers ``builtin_fetch``'s without a config. ``WebFetchBackend`` runs the fetch
 tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds one for a request, and
@@ -167,6 +168,7 @@ from gateway.services.tools._web_search import (
     resolve_in_loop_search,
     resolve_search,
     run_direct_search,
+    search_resolves,
     warn_about_tool_instances,
     web_search_configured,
 )
@@ -301,6 +303,7 @@ __all__ = [
     "refuse_unpriced_direct_search",
     "resolve_direct_search",
     "run_direct_search",
+    "search_resolves",
     "warn_about_tool_instances",
     "web_search_configured",
 ]
