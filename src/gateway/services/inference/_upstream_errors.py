@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Literal, TypeVar
 
 import httpx
+import httpx2
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
 from anthropic import APITimeoutError as _AnthropicAPITimeoutError
 from openai import APIConnectionError as _OpenAIAPIConnectionError
@@ -160,7 +161,7 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
     Recognizes, in order, walking ``.original_exception`` when the current
     exception carries no signal of its own:
 
-    1. Stdlib/httpx timeout and network exceptions directly.
+    1. Stdlib, httpx and httpx2 (Anthropic's SDK) timeout and network exceptions directly.
     2. The OpenAI and Anthropic SDKs' own ``APITimeoutError`` /
        ``APIConnectionError``. any-llm calls these SDKs directly (it does not
        wrap httpx itself unless ``ANY_LLM_UNIFIED_EXCEPTIONS=1``), and both
@@ -198,12 +199,15 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
                 asyncio.TimeoutError,
                 TimeoutError,
                 httpx.TimeoutException,
+                httpx2.TimeoutException,
                 _OpenAIAPITimeoutError,
                 _AnthropicAPITimeoutError,
             ),
         ):
             return "timeout", None
-        if isinstance(current, (httpx.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)):
+        if isinstance(
+            current, (httpx.NetworkError, httpx2.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)
+        ):
             return "conn_err", None
 
         status_code = _error_status_code(current)
@@ -499,7 +503,7 @@ def is_retry_futile(exc: BaseException) -> bool:
 
 def is_upstream_connect_failure(exc: BaseException) -> bool:
     """Whether the connection to the provider was never opened, as opposed to dropped once open."""
-    return any(isinstance(link, httpx.ConnectError) for link in _causal_chain(exc))
+    return any(isinstance(link, (httpx.ConnectError, httpx2.ConnectError)) for link in _causal_chain(exc))
 
 
 def is_upstream_stream_interrupted(exc: BaseException) -> bool:
@@ -514,7 +518,16 @@ def is_upstream_stream_interrupted(exc: BaseException) -> bool:
     if upstream_exception_shape(exc)[0] == "conn_err":
         return True
     return any(
-        isinstance(link, (IncompleteStreamError, httpx.RemoteProtocolError, httpx.NetworkError))
+        isinstance(
+            link,
+            (
+                IncompleteStreamError,
+                httpx.RemoteProtocolError,
+                httpx.NetworkError,
+                httpx2.RemoteProtocolError,
+                httpx2.NetworkError,
+            ),
+        )
         for link in _causal_chain(exc)
     )
 
@@ -535,6 +548,6 @@ def _causal_chain(exc: BaseException) -> Iterator[BaseException]:
 
 def _carries_upstream_signal(exc: BaseException) -> bool:
     """Whether ``exc`` came from talking to the provider, and so may not recur."""
-    if isinstance(exc, (IncompleteStreamError, OSError, httpx.HTTPError)):
+    if isinstance(exc, (IncompleteStreamError, OSError, httpx.HTTPError, httpx2.HTTPError)):
         return True
     return upstream_exception_shape(exc) != (None, None)

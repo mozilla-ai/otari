@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-import httpx
+import httpx2
 import pytest
 from anthropic import Anthropic, BadRequestError
 from fastapi.testclient import TestClient
@@ -709,16 +709,16 @@ def anthropic_sdk(client: TestClient, api_key_obj: dict[str, Any]) -> Generator[
     Gotcha: the SDK accepts only an ``httpx.Client``, and ``TestClient`` is built on ``httpx2``.
     """
 
-    def forward(request: httpx.Request) -> httpx.Response:
+    def forward(request: httpx2.Request) -> httpx2.Response:
         sent = client.request(
             request.method, str(request.url), headers=request.headers.multi_items(), content=request.read()
         )
-        return httpx.Response(sent.status_code, headers=sent.headers.multi_items(), content=sent.content)
+        return httpx2.Response(sent.status_code, headers=sent.headers.multi_items(), content=sent.content)
 
     with Anthropic(
         base_url=f"{client.base_url}{API_ROOT.removesuffix(f'/{API_VERSION}')}",
         api_key=api_key_obj["key"],
-        http_client=httpx.Client(transport=httpx.MockTransport(forward)),
+        http_client=httpx2.Client(transport=httpx2.MockTransport(forward)),
         max_retries=0,
     ) as sdk:
         yield sdk

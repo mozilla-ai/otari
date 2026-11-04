@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-import httpx
+import httpx2
 import pytest
 from anthropic.types import CodeExecutionOutputBlock, CodeExecutionResultBlock, CodeExecutionToolResultBlock
 from any_llm.types.messages import (
@@ -91,14 +91,14 @@ class _StubAnthropic:
         self.files: dict[str, bytes] = {}
         self.serving = True
 
-    def handle(self, request: httpx.Request) -> httpx.Response:
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
         prefix = "/v1/files/"
         file_id, _, tail = request.url.path.removeprefix(prefix).partition("/")
         if not self.serving or not request.url.path.startswith(prefix) or file_id not in self.files:
-            return httpx.Response(404)
+            return httpx2.Response(404)
         if tail == "content":
-            return httpx.Response(200, content=self.files[file_id])
-        return httpx.Response(
+            return httpx2.Response(200, content=self.files[file_id])
+        return httpx2.Response(
             200,
             json={
                 "id": file_id,
@@ -116,13 +116,13 @@ def anthropic(monkeypatch: pytest.MonkeyPatch) -> _StubAnthropic:
     """A deployment credentialed for Anthropic by the SDK's own variable, whose Files API is stubbed."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     stub = _StubAnthropic()
-    original_init = httpx.AsyncClient.__init__
+    original_init = httpx2.AsyncClient.__init__
 
-    def patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
-        kwargs["transport"] = httpx.MockTransport(stub.handle)
+    def patched_init(self: httpx2.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        kwargs["transport"] = httpx2.MockTransport(stub.handle)
         original_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+    monkeypatch.setattr(httpx2.AsyncClient, "__init__", patched_init)
     return stub
 
 

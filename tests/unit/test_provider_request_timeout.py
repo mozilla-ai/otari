@@ -3,6 +3,7 @@
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 from any_llm import LLMProvider
 
@@ -17,7 +18,19 @@ def test_timeout_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -
 
 def test_a_separate_provider_keyword_is_honored() -> None:
     kwargs = {"provider": LLMProvider.ANTHROPIC, "model": "claude-sonnet-4-5"}
-    assert _with_provider_timeout(kwargs, GatewayConfig())["timeout"] == httpx.Timeout(600.0, connect=5.0)
+    assert _with_provider_timeout(kwargs, GatewayConfig())["timeout"] == httpx2.Timeout(600.0, connect=5.0)
+
+
+@pytest.mark.parametrize("model", ["anthropic:claude-sonnet-4-5", "azureanthropic:claude-sonnet-4-5"])
+def test_an_anthropic_sdk_provider_gets_an_httpx2_timeout(model: str) -> None:
+    # Anthropic's SDK runs on httpx2 and refuses httpx's ``Timeout``.
+    assert _with_provider_timeout({"model": model}, GatewayConfig())["timeout"] == httpx2.Timeout(600.0, connect=5.0)
+
+
+@pytest.mark.parametrize("model", ["deepseek:deepseek-chat", "meta:llama-4"])
+def test_a_provider_on_both_sdks_gets_seconds(model: str) -> None:
+    # Its kwargs reach OpenAI's SDK and Anthropic's, and each refuses the other's ``Timeout``.
+    assert _with_provider_timeout({"model": model}, GatewayConfig())["timeout"] == 600.0
 
 
 def test_connect_never_outlasts_the_whole_budget() -> None:

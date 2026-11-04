@@ -227,21 +227,21 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "0.125.0"
+version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
-    { name = "distro" },
     { name = "docstring-parser" },
-    { name = "httpx" },
+    { name = "httpx2" },
     { name = "jiter" },
+    { name = "opentelemetry-api" },
     { name = "pydantic" },
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/62/f8/6f0560884b5363848347bd640b6c1d04abc25e7aa61787a232f790c6b60a/anthropic-0.125.0.tar.gz", hash = "sha256:e0cdd336580cb7411c1cdab69f80973e9bf4bff7f8e08141811d46307d45c682", size = 1112593, upload-time = "2026-08-19T22:00:42.837Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/66/4ec271f7607460005276bb09b0d1c749a9ed0cead35a488a8676f15ed6d5/anthropic-1.17.0.tar.gz", hash = "sha256:dcf77a74dde89a9fd12405fca798b012725a107f7c9488454234a74e275c2163", size = 1756371, upload-time = "2026-10-20T22:13:35.117Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/1a/b1bd30cda3790557e8791bec5922a6ec8fabb6fa8b008c76a39cf7be6152/anthropic-0.125.0-py3-none-any.whl", hash = "sha256:3486013602eca76d8b12540764e53654f02cf4951110bca86cf06e67428a9f21", size = 1184067, upload-time = "2026-08-19T22:00:44.596Z" },
+    { url = "https://files.pythonhosted.org/packages/98/9d/b4d4e46ec05bf19bcfd46c1417337e7cf42b9ecb95c3c63f295e2e9fee4b/anthropic-1.17.0-py3-none-any.whl", hash = "sha256:ccb98b85e1a14f81cf1e2ba348393f341f342bad9e07e014f96c9b69f853aaa7", size = 2094718, upload-time = "2026-10-20T22:13:32.585Z" },
 ]
 
 [package.optional-dependencies]
@@ -310,7 +310,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.43.0"
+version = "1.44.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -321,9 +321,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4e/87/410ba70ead87b6a5a0caaee72013b474f18ac74a51071a38e5784cf00b72/any_llm_sdk-1.43.0.tar.gz", hash = "sha256:d1bc1c97eca12102ebc2b14432e5817280d6aa7c3fc06cb28dea12295243d065", size = 313681, upload-time = "2026-11-03T09:15:08.581Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/4f/dadb54f93aeab3e7317fdb3ddca4f3b955964a074920ee98d91b5d68afa7/any_llm_sdk-1.44.0.tar.gz", hash = "sha256:9cc1e4b13a3ce8d808dfb78252c186a5959df778f524a0e5899878af3447487c", size = 318271, upload-time = "2026-11-04T13:14:55.137Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/bb/aedcfc5341b630cc7fe283a64981313c1cf1ecf1ac5c4287ef2e7a467bf7/any_llm_sdk-1.43.0-py3-none-any.whl", hash = "sha256:92760c8432676c35628d77767c06796d75947aef4c23ebb80f4c87752b920f74", size = 380539, upload-time = "2026-11-03T09:15:06.868Z" },
+    { url = "https://files.pythonhosted.org/packages/26/ad/ebe6e5474303cf6d0fd3ef0dfcac021b406f11bcb8bf0f62f2e931a1a8f7/any_llm_sdk-1.44.0-py3-none-any.whl", hash = "sha256:f18b22682549f390582b4160e59a376af31d35b2b3edb4c10d676226043a8a6c", size = 385829, upload-time = "2026-11-04T13:14:53.402Z" },
 ]
 
 [package.optional-dependencies]
@@ -1406,7 +1406,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "any-fetch", editable = "any-fetch" },
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.43.0" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.44.0" },
     { name = "any-search", editable = "any-search" },
     { name = "apron-auth", specifier = ">=0.18.0,<0.19.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
