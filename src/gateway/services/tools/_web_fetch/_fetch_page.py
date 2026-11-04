@@ -13,6 +13,8 @@ A failure is returned, never raised, with its safe fields: the provider that
 failed, ``None`` for a URL the gateway's own checks refused, the HTTP status, a
 tag and whether a retry may help. An exception a provider raises other than its
 own failure is logged by its class alone, since its text can carry the URL.
+:func:`refused_url` is the check of the URL asked for on its own, for the
+direct endpoint to refuse a URL before it holds anything for the call.
 """
 
 from __future__ import annotations
@@ -76,12 +78,9 @@ async def fetch_page(
     builtin = resolved.provider == BUILTIN_FETCH_PROVIDER
     if not builtin:
         # A provider is asked for the canonical form of the URL checked here.
-        try:
-            checked = canonicalize_web_url(url)
-        except WebURLValidationError:
-            return _refused(URL_INVALID_TAG)
-        if (tag := _refusal(checked, policy)) is not None:
-            return _refused(tag)
+        tag, checked = refused_url(url, policy)
+        if tag is not None or checked is None:
+            return _refused(tag or URL_INVALID_TAG)
         url = str(checked.url)
     try:
         fetcher = (
@@ -116,6 +115,19 @@ async def fetch_page(
         if (tag := _refusal(found, policy)) is not None:
             return _refused(tag)
     return page
+
+
+def refused_url(url: str, policy: DomainPolicy) -> tuple[str | None, CanonicalWebURL | None]:
+    """Why ``url`` may not be asked of a provider, as a tag, else ``None`` with the URL's canonical form.
+
+    The built-in fetcher makes the same checks itself, and more: it resolves
+    the host and checks every redirect.
+    """
+    try:
+        checked = canonicalize_web_url(url)
+    except WebURLValidationError:
+        return URL_INVALID_TAG, None
+    return _refusal(checked, policy), checked
 
 
 def _refusal(url: CanonicalWebURL, policy: DomainPolicy) -> str | None:

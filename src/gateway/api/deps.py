@@ -24,6 +24,7 @@ from gateway.core.config import (
 )
 from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db, release_session
 from gateway.core.feature import CoreFeature
+from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
@@ -2520,8 +2521,8 @@ class _DirectToolAccounts:
         )
         return resolved.user_id, resolved.budget_id
 
-    async def tool_refusal(self, api_key: APIKey | None, *, provider: str, tool: str) -> str | None:
-        return await self._api_keys.search_tool_refusal(self._config, api_key, provider=provider, tool=tool)
+    async def tool_refusal(self, api_key: APIKey | None, *, kind: ToolKind, provider: str, tool: str) -> str | None:
+        return await self._api_keys.tool_refusal(self._config, api_key, kind=kind, provider=provider, tool=tool)
 
 
 def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) -> DirectToolLedger:

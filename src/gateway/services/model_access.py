@@ -14,7 +14,7 @@ The matcher (:func:`is_model_allowed`) is the one place membership is decided; b
 the inference gates and the catalog filter feed it the *same* canonical
 ``instance:model`` key so visibility and execution can never disagree.
 
-A search tool has a list of its own, ``allowed_tools``, of tool names
+A search or fetch tool has a list of its own, ``allowed_tools``, of tool names
 (:func:`effective_tool_allowlist`), so no model wildcard can grant one.
 """
 
@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
-from gateway.core.settings.tools import ALL_SEARCH_TOOLS
+from gateway.core.settings.tools import ALL_SEARCH_TOOLS, ToolKind, effective_fetch_instances
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
@@ -105,7 +105,7 @@ KEY_MODELS_EXCEED_USER_DETAIL = (
     "the user's model access, not broaden it."
 )
 KEY_TOOLS_EXCEED_USER_DETAIL = (
-    "This key's allowed_tools exceeds its user's; a key can only narrow the user's search tool access, not broaden it."
+    "This key's allowed_tools exceeds its user's; a key can only narrow the user's tool access, not broaden it."
 )
 
 
@@ -171,13 +171,14 @@ def effective_tool_allowlist(
     user_tools: list[str] | None,
     user_models: list[str] | None,
 ) -> list[str] | None:
-    """The search tools a key may use, by name. ``None`` = every one.
+    """The search and fetch tools a key may use, by name. ``None`` = every one.
 
     The key's own ``allowed_tools`` wins, then its user's. With neither set, the
-    tools its model list grants the deprecated way, so a key restricted to models
-    stays refused every tool until one is granted, and never one its user's model
-    list does not grant too: a user's wildcard can admit a key's exact entry at
-    write time, and the wildcard grants no tool.
+    search tools its model list grants the deprecated way, which grants no fetch
+    tool, so a key restricted to models stays refused every tool until one is
+    granted, and never one its user's model list does not grant too: a user's
+    wildcard can admit a key's exact entry at write time, and the wildcard
+    grants no tool.
     """
     if key_tools is not None:
         return key_tools
@@ -201,7 +202,7 @@ def tools_within_user(
 
 
 def is_tool_allowed(allowlist: list[str] | None, tool: str) -> bool:
-    """Whether a search tool, by name, is permitted. ``None`` = every tool, ``[]`` = none."""
+    """Whether a search or fetch tool, by name, is permitted. ``None`` = every tool, ``[]`` = none."""
     if allowlist is None:
         return True
     return ALL_SEARCH_TOOLS in allowlist or tool in allowlist
@@ -217,32 +218,40 @@ def is_tool_allowlist_subset(child: list[str] | None, parent: list[str] | None) 
 def validate_allowed_tools(config: GatewayConfig, entries: list[str] | None) -> list[str] | None:
     """Validate a write of ``allowed_tools``. ``None`` and ``[]`` pass through as-is.
 
-    An entry is a search tool's name, configured or stored, or ``*``. Raises
-    ``ValueError`` (a 400 at the caller) on any other; duplicates are collapsed.
+    An entry is a search or fetch tool's name, configured or stored,
+    ``builtin_fetch`` included, or ``*``. Raises ``ValueError`` (a 400 at the
+    caller) on any other; duplicates are collapsed.
     """
     if entries is None:
         return None
     if not isinstance(entries, list):
         raise ValueError("allowed_tools must be a list of strings, [] to deny all, or null to inherit")
     names: list[str] = []
+    fetch_tools = effective_fetch_instances(config)
     for entry in entries:
         if not isinstance(entry, str):
             raise ValueError("allowed_tools entries must be strings")
         name = entry.strip()
-        if name != ALL_SEARCH_TOOLS and name not in config.search_tools:
-            raise ValueError(f"'{name}' is not a search tool; name a configured one, or '*' for every search tool")
+        if name != ALL_SEARCH_TOOLS and name not in config.search_tools and name not in fetch_tools:
+            raise ValueError(
+                f"'{name}' is not a search or fetch tool; name a configured one, builtin_fetch, or '*' for every tool"
+            )
         if name not in names:
             names.append(name)
     return names
 
 
-def tool_not_allowed_detail(tool: str, legacy_key: str, legacy_models: Sequence[list[str]] = ()) -> str:
-    """Human-readable 403 detail for a search tool a key may not use.
+def tool_not_allowed_detail(
+    tool: str, legacy_key: str, legacy_models: Sequence[list[str]] = (), *, kind: ToolKind = "search"
+) -> str:
+    """Human-readable 403 detail for a search or fetch tool a key may not use.
 
     ``legacy_models`` are the model lists the refusal was read off the deprecated
     way, if it was; a wildcard there that matches ``legacy_key`` is named.
     """
-    detail = f"Search tool '{tool}' is not permitted for this API key. Name it in allowed_tools to allow it."
+    detail = (
+        f"{kind.capitalize()} tool '{tool}' is not permitted for this API key. Name it in allowed_tools to allow it."
+    )
     if any(legacy_key not in models and is_model_allowed(models, legacy_key) for models in legacy_models):
         detail += f" A wildcard in allowed_models allows models only, not '{legacy_key}'."
     return detail

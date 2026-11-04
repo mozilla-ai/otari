@@ -4,6 +4,7 @@ from typing import Any
 
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import ApiKeyConfig, https_url_problem
+from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import (
     FederationIssuerInvalidError,
@@ -239,10 +240,10 @@ class ApiKeyService:
             raise ValueError(KEY_TOOLS_EXCEED_USER_DETAIL)
         return checked
 
-    async def search_tool_refusal(
-        self, config: GatewayConfig, api_key: APIKey | None, *, provider: str, tool: str
+    async def tool_refusal(
+        self, config: GatewayConfig, api_key: APIKey | None, *, kind: ToolKind, provider: str, tool: str
     ) -> str | None:
-        """Why a request's key may not run a search tool, or ``None`` when it may.
+        """Why a request's key may not run a search or fetch tool, or ``None`` when it may.
 
         Master-key callers (``api_key is None``) run every tool. The key's owner's
         lists are read only when the key has no ``allowed_tools`` of its own.
@@ -266,7 +267,7 @@ class ApiKeyService:
         legacy_models: list[list[str]] = []
         if api_key.allowed_tools is None and owner.tools is None:
             legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
-        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models)
+        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models, kind=kind)
 
     async def pin_before_user_grant(
         self, config: GatewayConfig, user_id: str, *, before: AccessLists, user_tools: list[str] | None

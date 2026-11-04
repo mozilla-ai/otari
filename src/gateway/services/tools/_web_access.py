@@ -75,14 +75,10 @@ def apply_web_access_policy(
         WorkspaceWebSearchDomainsExcludedError: the request's domains share nothing with the workspace's.
     """
     fetch_requested = WebTool.FETCH in requested_tools
-    workspace_domains = DomainPolicy()
+    workspace_domains = workspace_domain_policy(policy)
     if policy is not None:
         if not policy.enabled:
             raise web_access_disabled_refusal(requested_tools)
-        workspace_domains = DomainPolicy(
-            allowed=canonicalize_domain_rules(policy.allowed_domains or ()),
-            blocked=canonicalize_domain_rules(policy.blocked_domains or ()),
-        )
         if (
             policy.authorized_tools is not None
             and not {tool.value for tool in requested_tools} <= policy.authorized_tools
@@ -104,6 +100,16 @@ def apply_web_access_policy(
         search_tool_entry=search_tool_entry,
         fetch_policy=fetch_policy,
         search_credential=policy.credential if policy is not None and search_tool_entry is not None else None,
+    )
+
+
+def workspace_domain_policy(policy: ResolvedWebSearchConfig | None) -> DomainPolicy:
+    """The workspace's domain lists as the fetchers check them; no policy narrows nothing (contract G2)."""
+    if policy is None:
+        return DomainPolicy()
+    return DomainPolicy(
+        allowed=canonicalize_domain_rules(policy.allowed_domains or ()),
+        blocked=canonicalize_domain_rules(policy.blocked_domains or ()),
     )
 
 
