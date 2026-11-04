@@ -27,6 +27,7 @@ from gateway.services.tenancy.user_service import (
     update_full_name,
 )
 from gateway.services.tenancy.workspace_service import WorkspaceService
+from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 
 __all__ = [
     "DeploymentUserService",
@@ -38,6 +39,7 @@ __all__ = [
     "OrganizationDomainService",
     "OrganizationService",
     "WorkspaceService",
+    "WorkspaceWebSearchPolicies",
     "describe_caller",
     "ensure_bootstrap_identity",
     "forget_unproven_access",
