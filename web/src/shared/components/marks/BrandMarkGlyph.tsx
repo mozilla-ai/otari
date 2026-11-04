@@ -27,7 +27,12 @@ export default function BrandMarkGlyph({
   if (glyph === undefined) return null
 
   const shapes = glyph.shapes.map((shape) => (
-    <path key={shape.d} d={shape.d} fillOpacity={shape.fillOpacity} />
+    <path
+      key={shape.d}
+      d={shape.d}
+      fillOpacity={shape.fillOpacity}
+      fillRule={shape.fillRule}
+    />
   ))
   return (
     <svg
