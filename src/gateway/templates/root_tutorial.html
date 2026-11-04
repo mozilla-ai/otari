@@ -486,8 +486,8 @@
           <div class="card-head">
             <span class="step-num" aria-hidden="true">03</span>
             <div>
-              <h3>Send a chat completion</h3>
-              <p>Point <code>base_url</code> at Otari and call any model as <code>provider:model</code>.</p>
+              <h3>Send a chat completion through the Otari router</h3>
+              <p>Point <code>base_url</code> at Otari and send a model's catalog id as <code>model</code>: the Otari router chooses the provider and falls back to the next when one fails. <code>GET /api/v1/models</code> lists the ids your gateway serves.</p>
             </div>
           </div>
           <figure class="code">
@@ -509,8 +509,8 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="openai:gpt-4o",
-    messages=[{"role": "user", "content": "Hello!"}],
+    model="deepseek/deepseek-v4-pro-0813",
+    messages=[{"role": "user", "content": "Say hello in one short sentence."}],
 )
 
 print(response.choices[0].message.content)</code></pre>
