@@ -59,9 +59,10 @@ async def create_fetch(
     The tool is taken from ``fetch_tool_name``, which may be omitted: the
     deployment's ``web_fetch_default_tool`` then serves, else ``builtin_fetch``,
     the gateway's own fetcher. Such a call runs on the workspace's organization
-    fetch key when it has one. The deployment's ``web_fetch_enabled`` must be
-    on, and the URL must pass the workspace's domain lists and the fetcher's
-    own checks: a public http or https address, never a private one.
+    fetch key when it has one. While the deployment's ``web_fetch_enabled`` is
+    off, the gateway fetches no page and the call is refused. The URL must pass
+    the workspace's domain lists and the fetcher's own checks: a public http or
+    https address, never a private one.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.

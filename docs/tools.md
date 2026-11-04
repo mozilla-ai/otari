@@ -1071,8 +1071,9 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 runs a query, so a client that runs its own agent loop reads pages through the
 gateway without a completion for each. It runs on the deployment's fetch tool,
 `web_fetch_default_tool` else `builtin_fetch`, or on the tool named in the path
-or in `fetch_tool_name`, `builtin_fetch` included. It is served only where
-[`web_fetch_enabled`](#web-fetch) is on.
+or in `fetch_tool_name`, `builtin_fetch` included. While
+[`web_fetch_enabled`](#web-fetch) is off, the gateway fetches no page, and a call
+is refused with `400`.
 
 A direct fetch that names no tool runs on the workspace's usable
 [organization fetch key](#organization-search-keys), if it has one, in place of

@@ -562,8 +562,9 @@ completion; both are described in [Built-in tools](tools.md#direct-fetch). A
 client that runs its own agent loop reads pages this way, with the gateway's URL
 checks, prices and budgets, without a completion for each page.
 
-The endpoint is served only where `web_fetch_enabled` is on, the one switch for
-every page the gateway fetches; off, it answers `400`.
+`web_fetch_enabled` decides whether the gateway fetches any page, for this
+endpoint as for the `otari_web_fetch` tool, and is read on every request: while
+it is off, a call is refused with `400`.
 
 **Which tool.** The path names the tool. On `POST /api/v1/fetch`, the body's
 `fetch_tool_name` does, else the deployment's `web_fetch_default_tool`, else
