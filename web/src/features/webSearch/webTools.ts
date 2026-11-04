@@ -1,7 +1,7 @@
 /**
  * The rules the Web search page shows, kept apart from the rendering so they
  * can be tested without mounting it: which tools a table lists and in what
- * order, what a tool's price reads as on each door, what a new tool may be
+ * order, what a tool's price reads as, what a new tool may be
  * named, and how a tool's options travel between typed fields and JSON.
  */
 
@@ -15,6 +15,9 @@ import type {
 import type { RateRead } from "@/features/toolPricing/toolRates"
 
 export type WebToolKind = "search" | "fetch"
+
+/** Both kinds, in the order a page lists them. */
+export const WEB_TOOL_KINDS: readonly WebToolKind[] = ["search", "fetch"]
 
 /** The one fetch tool that always exists: the built-in fetcher. */
 export const BUILTIN_FETCH = "builtin_fetch"
@@ -136,37 +139,43 @@ export function perCallText(perMillion: number): string {
   return (perMillion / 1_000_000).toFixed(12).replace(/\.?0+$/, "")
 }
 
-/** The `otari:` price a tool with no price of its own falls back to, by kind. */
-export const FALLBACK_KEY: Readonly<Record<WebToolKind, string>> = {
+/** The `otari:` price of each kind, which prices a call on an organization's own key. */
+export const ORGANIZATION_KEY_RATE: Readonly<Record<WebToolKind, string>> = {
   search: "otari:web_search",
   fetch: "otari:web_fetch",
 }
 
-/** What a tool's calls are billed at, door by door, once both reads answered. */
+/** The organization keys' row, by kind; its label also names the rate in the price dialog. */
+export const ORGANIZATION_KEY_ROW: Readonly<
+  Record<WebToolKind, { label: string; role: string }>
+> = {
+  search: {
+    label: "Search on organization keys",
+    role: "A search on an organization's own key, unless the organization sets its own price, and a search on the legacy settings.",
+  },
+  fetch: {
+    label: "Fetch on organization keys",
+    role: "A fetch on an organization's own key, unless the organization sets its own price.",
+  },
+}
+
+/** What a tool's calls are billed at, once its rate read answered. */
 export type ToolPrice =
   /**
-   * Its own rate, on every door. `fromConfig` when the rate in force came from
-   * `price_per_call` in config.yml, which the next start writes back.
+   * Its own rate, the one that prices its calls. `fromConfig` when the rate in
+   * force came from `price_per_call` in config.yml, which the next start writes
+   * back; `oldKey` when it is stored under the tool's old `<provider>:<name>`
+   * model key, which prices it until its own row is set.
    */
-  | { state: "own"; perMillion: number; fromConfig: boolean }
-  /**
-   * No rate of its own, and the fallback prices it where one applies. A fetch
-   * tool has no other door; a search tool's calls on the search API are
-   * priced by its own rate alone, so they go unpriced (`direct: "unpriced"`).
-   */
-  | {
-      state: "fallback"
-      perMillion: number
-      fallbackKey: string
-      direct: "none" | "unpriced"
-    }
+  | { state: "own"; perMillion: number; fromConfig: boolean; oldKey: boolean }
   | { state: "unpriced" }
   | { state: "pending" }
   | { state: "error" }
 
 /**
- * A rate with nothing to fall back to: an `otari:` row's own. Never marked as
- * config.yml's: a `pricing:` entry is written once, so the page may change it.
+ * A rate read as a price: an `otari:` row's, or a tool's old key's. Never
+ * marked as config.yml's: a `pricing:` entry is written once, so the page may
+ * change it.
  */
 export function rateOnly(read: RateRead | undefined): ToolPrice {
   if (!read || read.isPending) return { state: "pending" }
@@ -176,19 +185,27 @@ export function rateOnly(read: RateRead | undefined): ToolPrice {
     state: "own",
     perMillion: read.data.input_price_per_million,
     fromConfig: false,
+    oldKey: false,
   }
 }
 
+/** The `<provider>:<name>` model key, which prices a tool that has no row of its own. */
+export function oldPriceKey(
+  tool: Pick<WebToolRow, "provider" | "name">,
+): string {
+  return `${tool.provider}:${tool.name}`
+}
+
 /**
- * A tool's price, from its own rate read and its fallback's. Only a config.yml
- * tool's rate can be its `price_per_call`, which every start writes back.
+ * A tool's price, from its own rate read, else its old key's. Only a
+ * config.yml tool's rate can be its `price_per_call`, which every start
+ * writes back.
  */
 export function priceOf(
-  tool: Pick<WebToolRow, "kind" | "source">,
+  tool: Pick<WebToolRow, "source">,
   own: RateRead | undefined,
-  fallback: RateRead | undefined,
+  old: RateRead | undefined,
 ): ToolPrice {
-  const { kind } = tool
   if (!own || own.isPending) return { state: "pending" }
   if (own.isError) return { state: "error" }
   if (own.data) {
@@ -196,32 +213,12 @@ export function priceOf(
       state: "own",
       perMillion: own.data.input_price_per_million,
       fromConfig: tool.source === "config" && own.data.origin === "config",
+      oldKey: false,
     }
   }
-  // Not "unpriced" until the rate it would inherit is known to be absent too.
-  if (!fallback || fallback.isPending) return { state: "pending" }
-  if (fallback.isError) return { state: "error" }
-  if (fallback.data) {
-    return {
-      state: "fallback",
-      perMillion: fallback.data.input_price_per_million,
-      fallbackKey: FALLBACK_KEY[kind],
-      direct: kind === "search" ? "unpriced" : "none",
-    }
-  }
-  return { state: "unpriced" }
-}
-
-/**
- * Whether some call on the tool goes unpriced, which `require_pricing` refuses:
- * no rate at all, or a search tool whose search API calls have no rate of
- * their own. Unknown while a read is pending or failed.
- */
-export function hasUnpricedCalls(price: ToolPrice): boolean {
-  return (
-    price.state === "unpriced" ||
-    (price.state === "fallback" && price.direct === "unpriced")
-  )
+  // Not unpriced until the old key is known to hold no rate either.
+  const price = rateOnly(old)
+  return price.state === "own" ? { ...price, oldKey: true } : price
 }
 
 /**

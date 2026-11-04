@@ -47,7 +47,7 @@ from gateway.services.budgets._scoped_enforcement import (
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
 from gateway.services.budgets._scoped_enforcement import settle as settle_scoped
-from gateway.services.pricing import price_usage
+from gateway.services.pricing import has_completion_meter, price_usage
 from gateway.services.pricing_service import find_model_pricing, is_free_pricing, search_unit_cost
 from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
@@ -402,7 +402,9 @@ class EstimateInputs:
 
     def get_reserved_output_tokens(self, pricing: ModelPricing | None) -> int | None:
         """Return the output tokens an estimate on ``pricing`` assumes, or None where a lower limit cannot shrink it."""
-        if pricing is None or priced_per_request(pricing) or pricing.output_price_per_million <= 0:
+        if pricing is None or not has_completion_meter(pricing) or priced_per_request(pricing):
+            return None
+        if pricing.output_price_per_million <= 0:
             return None
         return self.max_output_tokens if self.max_output_tokens is not None else self.default_output_tokens
 
@@ -442,9 +444,10 @@ def estimate_cost(
     requested, the input is conservatively reserved at the rate a write on the
     requested TTL bills at (a ``1h`` request also covers its 5m writes), since
     any prompt token could become a cache write. The estimate is reconciled to
-    actual usage on completion.
+    actual usage on completion. A rate in a unit no completion meter reads
+    settles unpriced, so it holds nothing.
     """
-    if pricing is None:
+    if not has_completion_meter(pricing):
         return ZERO
     # Whole tokens, rounded up: a fraction of a token is not billable, and the
     # estimate is an upper bound, so the fraction rounds towards the gateway.
@@ -1103,7 +1106,7 @@ async def record_external_spend(db: AsyncSession, user_id: str, cost: Decimal | 
     Dollars only, for the same reason: the handle is unreserved, so the window
     counters are not its to move (see :func:`reconcile_reservation`), and a batch
     of ten thousand prompts therefore contributes nothing to a token cap however
-    many tokens it used. ``docs/access-control.md`` says so, and says to cap
+    many tokens it used. ``docs/budgets.md`` says so, and says to cap
     batch-heavy workloads in dollars. Moving that boundary means giving this path
     a window to count over, not passing a token count through it.
     """
@@ -1306,26 +1309,30 @@ async def increase_reservation(
             handle.token_estimate -= delta.token_estimate
 
 
-async def hold_tool_call(db: AsyncSession, handle: ReservationHandle, amount: Decimal, *, strategy: str) -> bool:
-    """Grow every leg of ``handle`` by ``amount`` before a gateway-run tool call runs, and commit.
+async def hold_tool_call(
+    db: AsyncSession, handle: ReservationHandle, amount: Decimal, *, strategy: str, calls: int = 1
+) -> Decimal | None:
+    """Grow every leg of ``handle`` by ``amount`` for each of ``calls`` calls before they run, and commit.
 
-    All or nothing: ``False`` where a budget or a ceiling has no room, with the
-    ceilings that had room given their growth back, so a refused call holds
-    nothing and the ledger still matches the counters. The commit ends the
-    transaction either way, so no budget row stays locked across the next
-    provider call. Work pending on ``db`` lands in that commit too.
+    One hold for all of them, all or nothing: the amount held, or ``None`` where
+    a budget or a ceiling has no room for it, with the ceilings that had room
+    given their growth back, so refused calls hold nothing and the ledger still
+    matches the counters. The commit ends the transaction either way, so no
+    budget row stays locked across the next provider call. Work pending on
+    ``db`` lands in that commit too.
 
     Raises:
         DATABASE_ERRORS: with ``handle`` restored to what it held before; the
             caller rolls ``db`` back.
     """
+    held = max(to_usd(amount), ZERO) * calls
     before = replace(handle)
     try:
         try:
             await increase_reservation(
                 db,
                 handle,
-                estimate=max(handle.estimate, handle.scoped_estimate) + max(to_usd(amount), ZERO),
+                estimate=max(handle.estimate, handle.scoped_estimate) + held,
                 model_is_free=False,
                 strategy=strategy,
             )
@@ -1336,10 +1343,10 @@ async def hold_tool_call(db: AsyncSession, handle: ReservationHandle, amount: De
             )
             handle.scoped_estimate = before.scoped_estimate
             await db.commit()
-            return False
+            return None
         await db.commit()
     except DATABASE_ERRORS:
         for item in fields(handle):
             setattr(handle, item.name, getattr(before, item.name))
         raise
-    return True
+    return held

@@ -25,7 +25,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content, with_retry_hint
+from gateway.api.routes._helpers import latest_user_text, routing_signal, text_from_content, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -147,24 +147,6 @@ def _responses_input_text(value: Any) -> str:
     if isinstance(value, list):
         return latest_user_text(value)
     return text_from_content(value)
-
-
-def _routing_text(body: Any) -> str:
-    """The task signal a policy's router reads for a Responses request.
-
-    ``instructions`` is part of the task, not decoration: the same ``input`` under
-    "answer in one word" and "write a proof" are different jobs with different
-    quality bars. Embedding only ``input`` gave both the same routing decision and,
-    under trace-sticky granularity, the same conversation identity. Guardrails read
-    ``input`` alone because they screen what the user sent; routing has to read what
-    the model was actually asked to do.
-    """
-    instructions = getattr(body, "instructions", None)
-    parts = [
-        instructions if isinstance(instructions, str) else "",
-        _responses_input_text(body.input),
-    ]
-    return "\n".join(part for part in parts if part)
 
 
 def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
@@ -515,9 +497,7 @@ async def create_response(
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             streaming=bool(request_body.stream),
-            routing_signal=lambda: routing_signal_from_text(
-                _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
-            ),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             tools=request_body.tools,
             code_execution_policies=tool_ports.code_execution_policy,

@@ -13,7 +13,6 @@ import pytest
 
 _DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
 _DASHBOARD_DOC = _DOCS_DIR / "dashboard.md"
-_INDEX_DOC = _DOCS_DIR / "index.md"
 
 # Markdown links to other docs, e.g. [text](configuration.md#anchor).
 _LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -61,9 +60,9 @@ def test_dashboard_doc_internal_links_resolve(dashboard_text: str) -> None:
         assert resolved.is_file(), f"broken doc link: {target} -> {resolved}"
 
 
-def test_dashboard_doc_is_linked_from_index() -> None:
-    index_text = _INDEX_DOC.read_text(encoding="utf-8")
-    assert "(dashboard.md)" in index_text, "docs/index.md does not link to dashboard.md"
+def test_dashboard_doc_is_on_the_menu() -> None:
+    summary_text = (_DOCS_DIR / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "(dashboard.md)" in summary_text, "docs/SUMMARY.md does not list dashboard.md"
 
 
 def test_dashboard_doc_avoids_em_dash_prose(dashboard_text: str) -> None:

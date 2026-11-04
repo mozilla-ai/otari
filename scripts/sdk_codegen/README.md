@@ -55,9 +55,8 @@ language-native marker file the SDK's hand-written shell reads to surface it
 The version is the spec's `info.version` by default; the codegen workflow passes
 the gateway release version (the tag without its leading `v`) via `--spec-version`
 on a release so the stamp is the real release version rather than the `0.0.0-dev`
-placeholder in the committed spec. See
-[`docs/sdk-compatibility.md`](../../docs/sdk-compatibility.md) for the release
-policy and the spec-version to minimum-SDK-version matrix.
+placeholder in the committed spec. Each SDK repo's `RELEASE.md` has its release
+policy.
 
 ## Endpoint-coverage drift gate
 

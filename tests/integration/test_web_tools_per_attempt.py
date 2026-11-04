@@ -501,8 +501,8 @@ def test_an_unpriced_tool_skips_only_the_fallback_that_needs_it(
     assert seen.loop_calls == []
     skipped = [row for row in _rows(db_session) if row.status == "absorbed" and row.provider == "vertexai"]
     assert len(skipped) == 1
-    assert f"otari:{_NAMES[tool]}" in (skipped[0].error_message or "")
-    rejections = [row for row in _rows(db_session) if row.provider == "otari" and row.status != "success"]
+    assert f"'{_NAMES[tool]}' has no pricing" in (skipped[0].error_message or "")
+    rejections = [row for row in _rows(db_session) if row.status == "error" and row.status_code == 402]
     assert rejections == [], "a refusal that answered no request was logged as one"
 
 

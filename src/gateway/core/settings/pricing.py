@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.types.price_unit import PriceUnit
 
 PRICING_REFRESH_POLICIES: tuple[str, ...] = ("manual", "review", "auto")
 
@@ -44,6 +45,13 @@ PRICE_PER_REQUEST_DESCRIPTION = (
     "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's "
     "answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not "
     "combined with token prices."
+)
+
+PRICE_UNIT_DESCRIPTION = (
+    "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
+    "moderation call, or a completion model billed per call, 'images' for image generation."
+    " Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored "
+    "and prices nothing."
 )
 
 
@@ -112,14 +120,7 @@ class PricingConfig(BaseModel):
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
-    unit: Literal["tokens", "requests", "images"] = Field(
-        default="tokens",
-        description=(
-            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
-            "moderation call, or a completion model billed per call (USD per million requests), "
-            "'images' for image generation (USD per million images)."
-        ),
-    )
+    unit: PriceUnit = Field(default="tokens", description=PRICE_UNIT_DESCRIPTION)
     price_per_request: float | None = Field(
         default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
     )

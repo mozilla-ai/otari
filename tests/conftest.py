@@ -211,24 +211,28 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_models_dev_fetch(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    """Answer every models.dev fetch as unreachable unless the test patches in a catalog.
+    """Answer every models.dev fetch as unreachable, and serve no bundled catalog, unless the test patches one in.
 
     The model listing joins models.dev, and with the refresher suppressed above
     its cache starts empty, so every listing read would otherwise fetch the live
     catalog: an outbound call from any test that lists a model, and limits that
-    move whenever models.dev does. A test that wants metadata patches
-    ``model_catalog_service._fetch`` itself. The cache is cleared on both sides,
-    so one test's answer, a failure included, is never the next one's.
+    move whenever models.dev does. The bundled catalog moves at every release,
+    so it is off too. A test that wants metadata patches
+    ``model_catalog_service._fetch`` or ``_fallback`` itself. The cache is
+    cleared on both sides, so one test's answer, a failure included, is never
+    the next one's.
     """
     from gateway.services import model_catalog_service
+    from gateway.services.pricing_refresh_service import reset_catalog_refresh_state
 
     async def _unreachable() -> None:
         return None
 
-    model_catalog_service.clear_catalog_cache()
+    reset_catalog_refresh_state()
     monkeypatch.setattr(model_catalog_service, "_fetch", _unreachable)
+    monkeypatch.setattr(model_catalog_service, "_fallback", lambda: None)
     yield
-    model_catalog_service.clear_catalog_cache()
+    reset_catalog_refresh_state()
 
 
 @pytest.fixture(autouse=True)
@@ -257,18 +261,25 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     the config field's opt-in default; tests that need defaults enable explicitly.
 
     Also drops the accepted price generations, so a snapshot accepted by one test
-    cannot price another's models.
+    cannot price another's models, and the cached stored rates, which name rows a
+    test's emptied database no longer holds.
     """
     from gateway.services.pricing_refresh_service import reset_price_refresh_state
-    from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
+    from gateway.services.pricing_service import (
+        configure_default_pricing,
+        configure_provider_types,
+        reset_pricing_cache,
+    )
 
     configure_default_pricing(False)
     configure_provider_types(None)
     reset_price_refresh_state()
+    reset_pricing_cache()
     yield
     configure_default_pricing(False)
     configure_provider_types(None)
     reset_price_refresh_state()
+    reset_pricing_cache()
 
 
 @pytest.fixture

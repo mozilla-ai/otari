@@ -38,6 +38,102 @@
           }
         },
         {
+          "name": "List Blocked Emails",
+          "request": {
+            "description": "List the addresses and domains blocked from holding an account on this deployment, newest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Block Email",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"value\": \"string\"\n}"
+            },
+            "description": "Block an address, or a domain and its subdomains, from holding an account on this deployment.\n\nA blocked address cannot sign up, be added to or invited into an organization, or sign in by password,\npasskey or provider, and nothing is mailed to it for signup, verification or a password reset. Every\nexisting account the entry matches has its dashboard sessions ended now; the account itself is kept, so\nremoving the entry lets it sign in again. API keys are not affected.\n\nRefused with 400 for a value that is neither an address nor a domain, or one that would block your own\naddress or the deployment's bootstrap operator's, and with 409 for one already blocked.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails"
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails"
+            }
+          }
+        },
+        {
+          "name": "Unblock Email",
+          "request": {
+            "description": "Remove a blocklist entry, so the accounts it matched may sign in again.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "blocked-emails",
+                ":entry_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/admin/blocked-emails/:entry_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "entry_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "List Deployment Users",
           "request": {
             "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.\n``search`` narrows the page and the count together.",
@@ -1822,6 +1918,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Match any kind; a model of unknown kind does not match.",
+                  "disabled": true,
+                  "key": "type",
+                  "value": ""
+                },
+                {
                   "description": "Minimum context window; unknown windows do not match.",
                   "disabled": true,
                   "key": "min_context",
@@ -1870,7 +1972,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
             }
           }
         },
@@ -1964,6 +2066,45 @@
         }
       ],
       "name": "chat"
+    },
+    {
+      "item": [
+        {
+          "name": "Execute Code",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"code\": \"print(1 + 1)\",\n  \"container\": \"auto\"\n}"
+            },
+            "description": "Run code in the gateway's sandbox and return its output.\n\nThe run is admitted as an ``otari_code_execution`` call is: a workspace whose\ncode execution policy is off is refused, and its execution ceiling and pinned\nimage apply. It is priced under ``otari:code_execution`` and reserved against\nthe caller's budgets. ``file_ids`` puts uploads in the working directory, and\neach file the code writes comes back with a ``file_id``. ``container: \"auto\"``\nholds the sandbox after the run and names it in ``Otari-Container-Id``;\nsending that id back runs in the same sandbox, with its files and\ninterpreter state.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "code",
+                "execute"
+              ],
+              "raw": "{{baseUrl}}/api/v1/code/execute"
+            }
+          }
+        }
+      ],
+      "name": "code-execution"
     },
     {
       "item": [
@@ -2079,7 +2220,7 @@
         {
           "name": "List End User Budgets",
           "request": {
-            "description": "List the budgets the calling service key may put its end users on, with how many end users each holds.\n\nRequires a service key. The counts cover the end users of the key's user, blocked ones included and deleted\nones not.",
+            "description": "List the budgets the calling service key may put its end users on, with their limits and end user counts.\n\nRequires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The\ncounts cover the end users of the key's user, blocked ones included and deleted ones not.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4383,7 +4524,7 @@
         {
           "name": "List Model Metadata",
           "request": {
-            "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
+            "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. Until models.dev has been\nfetched, and always when ``models_dev_metadata`` is off, it comes from the\ncatalog bundled with the gateway. ``available`` is false only when no catalog\ncould be read; the response is then empty.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
             "header": [],
             "method": "GET",
             "url": {
@@ -5359,63 +5500,6 @@
           }
         },
         {
-          "name": "Rank Own Candidates",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"examples\": [\n    {\n      \"prompt\": \"What is 2 plus 2?\",\n      \"scores\": {\n        \"openai:gpt-5-nano\": 1.0,\n        \"openai:gpt-5\": 1.0\n      }\n    }\n  ]\n}"
-            },
-            "description": "Record scored examples into the calling key's own routing memory.\n\nThe memory is the key's user's in the key's workspace, the pool that key's\nrequests vote over; nothing in the body can name another. Validation, storage\nand the response are those of ``POST /api/v1/routing/preferences/rank``.\n\nEach call counts against the user's request rate limit, and is refused (403)\nwhen the router's embedding provider does not serve the caller's country,\nbecause embedding an example sends its prompt there.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "routing",
-                "me",
-                "preferences",
-                "rank"
-              ],
-              "raw": "{{baseUrl}}/api/v1/routing/me/preferences/rank"
-            }
-          }
-        },
-        {
-          "name": "Own Routing Memory Status",
-          "request": {
-            "description": "Report how warm the calling key's own routing memory is, per pool.\n\nThe same report as ``GET /api/v1/routing/status``, for the key's user in the\nkey's workspace.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "routing",
-                "me",
-                "status"
-              ],
-              "raw": "{{baseUrl}}/api/v1/routing/me/status"
-            }
-          }
-        },
-        {
           "name": "List Policies",
           "request": {
             "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
@@ -5555,41 +5639,6 @@
           }
         },
         {
-          "name": "Rank Candidates",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"user_id\": \"my-user\",\n  \"examples\": [\n    {\n      \"prompt\": \"What is 2 plus 2?\",\n      \"scores\": {\n        \"openai:gpt-5-nano\": 1.0,\n        \"openai:gpt-5\": 1.0\n      }\n    }\n  ]\n}"
-            },
-            "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "routing",
-                "preferences",
-                "rank"
-              ],
-              "raw": "{{baseUrl}}/api/v1/routing/preferences/rank"
-            }
-          }
-        },
-        {
           "name": "Recommend Model For Agent",
           "request": {
             "body": {
@@ -5620,40 +5669,6 @@
                 "recommend"
               ],
               "raw": "{{baseUrl}}/api/v1/routing/recommend"
-            }
-          }
-        },
-        {
-          "name": "Routing Memory Status",
-          "request": {
-            "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "routing",
-                "status"
-              ],
-              "query": [
-                {
-                  "description": "Whose routing memory to report on.",
-                  "disabled": false,
-                  "key": "user_id",
-                  "value": ""
-                },
-                {
-                  "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
-                  "disabled": true,
-                  "key": "workspace_id",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/routing/status?user_id=&workspace_id="
             }
           }
         }
@@ -11582,7 +11597,7 @@
         {
           "name": "List Tools",
           "request": {
-            "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nEvery other `tools[]` entry, including provider-native keywords not listed\nhere, is forwarded to the upstream provider untouched.",
+            "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. Every other `tools[]` entry, including provider-native keywords\nnot listed here, is forwarded to the upstream provider untouched.",
             "header": [],
             "method": "GET",
             "url": {

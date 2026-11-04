@@ -6,7 +6,9 @@ endpoint is how such an app registers one with Otari, so the user's traffic goes
 through the gateway like everything else, with usage recorded and without
 touching anyone's budget.
 
-Provider endpoints are off until an operator turns them on:
+## Turn it on
+
+Provider endpoints are off until an operator turns them on in `config.yml`:
 
 ```yaml
 provider_endpoints_enabled: true
@@ -91,6 +93,12 @@ address it checked rather than resolving the name a second time. Redirects are
 not followed. An endpoint with an API key must use `https`, since the key
 travels in every request. Requests to an endpoint do not use the environment's
 HTTP proxy.
+
+A model server you run yourself on a private address, such as llama.cpp on
+your laptop or a compose network, is a hosted provider instead, where
+`provider_allow_private_hosts` applies. See
+[Connect a llama.cpp server](providers/llamacpp.md) and
+[Hosted providers and BYO credentials](hosted-providers.md).
 
 Each gateway worker holds at most 100 concurrent requests open to one endpoint
 address. A request that finds them all in use waits up to 10 seconds for one,

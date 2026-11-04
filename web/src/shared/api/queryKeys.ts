@@ -45,7 +45,6 @@ export const BUILTIN_GUARDRAIL_CATALOG = "builtin-guardrail-catalog"
 // sibling share a head that one invalidation covers. See `useRoutingScope`.
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
-export const ROUTER_STATUS = "router-status"
 export const AUTOMATIC_FALLBACKS = "automatic-fallbacks"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the

@@ -14,10 +14,10 @@
     "typecheck": "tsc -b --noEmit",
     "test": "pnpm run client:generate && vitest run",
     "test:watch": "vitest",
-    "e2e": "pnpm run build && playwright test --project=onboarding --project=seed --project=parity",
+    "e2e": "pnpm run build && playwright test --project=onboarding --project=seed --project=parity --project=parity-webkit",
     "e2e:screenshots": "pnpm run build && playwright test --project=screenshots-desktop-large-light --project=screenshots-desktop-large-dark --project=screenshots-desktop-small-light --project=screenshots-desktop-small-dark --project=screenshots-mobile-light --project=screenshots-mobile-dark",
     "e2e:screenshots:update": "pnpm run e2e:screenshots --update-snapshots=changed",
-    "e2e:install": "playwright install chromium",
+    "e2e:install": "playwright install chromium webkit",
     "client:generate": "openapi-typescript ../docs/public/openapi.json -o src/client/schema.ts",
     "icons:generate": "node scripts/generate-pwa-icons.mjs",
     "lint": "biome check",
@@ -39,7 +39,7 @@
     "thinking-orbs": "^0.3.2"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.7",
+    "@babel/core": "^8.0.10",
     "@biomejs/biome": "2.5.13",
     "@playwright/test": "^1.64.1",
     "@rolldown/plugin-babel": "^0.2.4",

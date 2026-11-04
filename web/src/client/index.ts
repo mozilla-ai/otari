@@ -425,7 +425,6 @@ export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
 }
 export type AliasResponse = Schemas["AliasResponse"]
 export type CreateAliasRequest = Schemas["AliasRequest"]
-export type RouterStatus = Schemas["RouterStatus"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails
@@ -554,6 +553,12 @@ export type DeploymentUsers = Schemas["DeploymentUsersPublic"]
 export type UpdateDeploymentUserRequest = Schemas["DeploymentUserUpdateRequest"]
 /** A link that sets an account's password: mailed, or returned to pass on. */
 export type PasswordLink = Schemas["PasswordLinkPublic"]
+/** An address or a domain blocked from holding an account on the deployment. */
+export type BlockedEmail = Schemas["BlockedEmailPublic"]
+export type BlockedEmails = Schemas["BlockedEmailsPublic"]
+/** A new entry, with how many existing accounts it now blocks. */
+export type BlockedEmailCreated = Schemas["BlockedEmailCreatedPublic"]
+export type CreateBlockedEmailRequest = Schemas["BlockedEmailCreateRequest"]
 
 export type Workspace = Schemas["WorkspacePublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]

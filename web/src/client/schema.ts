@@ -30,6 +30,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/blocked-emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Blocked Emails
+         * @description List the addresses and domains blocked from holding an account on this deployment, newest first.
+         */
+        get: operations["admin-list_blocked_emails"];
+        put?: never;
+        /**
+         * Block Email
+         * @description Block an address, or a domain and its subdomains, from holding an account on this deployment.
+         *
+         *     A blocked address cannot sign up, be added to or invited into an organization, or sign in by password,
+         *     passkey or provider, and nothing is mailed to it for signup, verification or a password reset. Every
+         *     existing account the entry matches has its dashboard sessions ended now; the account itself is kept, so
+         *     removing the entry lets it sign in again. API keys are not affected.
+         *
+         *     Refused with 400 for a value that is neither an address nor a domain, or one that would block your own
+         *     address or the deployment's bootstrap operator's, and with 409 for one already blocked.
+         */
+        post: operations["admin-block_email"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/blocked-emails/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unblock Email
+         * @description Remove a blocklist entry, so the accounts it matched may sign in again.
+         */
+        delete: operations["admin-unblock_email"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users": {
         parameters: {
             query?: never;
@@ -1185,6 +1237,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/code/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Code
+         * @description Run code in the gateway's sandbox and return its output.
+         *
+         *     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
+         *     code execution policy is off is refused, and its execution ceiling and pinned
+         *     image apply. It is priced under ``otari:code_execution`` and reserved against
+         *     the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+         *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
+         *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
+         *     sending that id back runs in the same sandbox, with its files and
+         *     interpreter state.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user.
+         */
+        post: operations["code-execution-execute_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/decisions": {
         parameters: {
             query?: never;
@@ -1251,10 +1343,10 @@ export interface paths {
         };
         /**
          * List End User Budgets
-         * @description List the budgets the calling service key may put its end users on, with how many end users each holds.
+         * @description List the budgets the calling service key may put its end users on, with their limits and end user counts.
          *
-         *     Requires a service key. The counts cover the end users of the key's user, blocked ones included and deleted
-         *     ones not.
+         *     Requires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The
+         *     counts cover the end users of the key's user, blocked ones included and deleted ones not.
          */
         get: operations["end-users-list_end_user_budgets"];
         put?: never;
@@ -2489,9 +2581,10 @@ export interface paths {
          * @description Per-model metadata for the dashboard's detail view, from models.dev.
          *
          *     Covers every model models.dev lists under a configured provider, keyed by the
-         *     ``instance:model`` selector the dashboard uses. ``available`` is false when
-         *     enrichment is disabled (``models_dev_metadata``) or models.dev could not be
-         *     reached; the response is then empty and the UI falls back to bundled data.
+         *     ``instance:model`` selector the dashboard uses. Until models.dev has been
+         *     fetched, and always when ``models_dev_metadata`` is off, it comes from the
+         *     catalog bundled with the gateway. ``available`` is false only when no catalog
+         *     could be read; the response is then empty.
          *     Operator-gated: it describes the gateway's configured providers.
          *
          *     Answers from the cached catalog, kept warm by a background refresher, so the
@@ -5273,57 +5366,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/routing/me/preferences/rank": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rank Own Candidates
-         * @description Record scored examples into the calling key's own routing memory.
-         *
-         *     The memory is the key's user's in the key's workspace, the pool that key's
-         *     requests vote over; nothing in the body can name another. Validation, storage
-         *     and the response are those of ``POST /api/v1/routing/preferences/rank``.
-         *
-         *     Each call counts against the user's request rate limit, and is refused (403)
-         *     when the router's embedding provider does not serve the caller's country,
-         *     because embedding an example sends its prompt there.
-         */
-        post: operations["routing-rank_own_candidates"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/routing/me/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Own Routing Memory Status
-         * @description Report how warm the calling key's own routing memory is, per pool.
-         *
-         *     The same report as ``GET /api/v1/routing/status``, for the key's user in the
-         *     key's workspace.
-         */
-        get: operations["routing-own_routing_memory_status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/routing/policies": {
         parameters: {
             query?: never;
@@ -5398,40 +5440,6 @@ export interface paths {
          * @description Delete a stored policy in one scope.
          */
         delete: operations["routing-delete_policy"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/routing/preferences/rank": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rank Candidates
-         * @description Record scored examples: one routing-memory record each, plus an audit row.
-         *
-         *     The routing-memory record is written before its audit row for each example,
-         *     because it is the load-bearing one (the router votes over it) and embedding it
-         *     can fail; writing the audit row only afterwards means a failed embedding never
-         *     leaves an orphan audit row.
-         *
-         *     A failed embedding is a 502 that names the model, not a 500. Every example in
-         *     the batch is embedded, so this is the call an operator makes most often and the
-         *     one most likely to meet a misconfigured ``router_embedding_model``.
-         *
-         *     Score keys are stored canonically as ``instance:model`` (see
-         *     :func:`_validated_scores`), which is the form the router canonicalizes its
-         *     candidates to, so how a policy spells a candidate cannot decide whether it
-         *     matches.
-         */
-        post: operations["routing-rank_candidates"];
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5524,33 +5532,6 @@ export interface paths {
          *     provider and the API base stay the same.
          */
         patch: operations["agent-recommenders-update_agent_recommender"];
-        trace?: never;
-    };
-    "/api/v1/routing/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Routing Memory Status
-         * @description Report how warm one user's routing memory is in one workspace, per pool.
-         *
-         *     ``user_id`` is required rather than optional because there is no aggregate
-         *     answer: warmth is per user, and a total across users would describe a pool
-         *     that no request ever votes over. The same holds across workspaces, which is
-         *     why ``workspace_id`` narrows rather than aggregating; it merely defaults
-         *     instead of being required, because a single-workspace deployment has one
-         *     answer.
-         */
-        get: operations["routing-routing_memory_status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/scoped-budgets": {
@@ -6252,8 +6233,9 @@ export interface paths {
          * List Tools
          * @description List the tools Otari runs itself, with the declaration forms it accepts.
          *
-         *     Every other `tools[]` entry, including provider-native keywords not listed
-         *     here, is forwarded to the upstream provider untouched.
+         *     Called with an API key, a tool its workspace does not allow is listed as
+         *     unavailable. Every other `tools[]` entry, including provider-native keywords
+         *     not listed here, is forwarded to the upstream provider untouched.
          */
         get: operations["tools-list_tools"];
         put?: never;
@@ -8606,6 +8588,100 @@ export interface components {
             uri: string;
         };
         /**
+         * BlockedEmailCreateRequest
+         * @description An address or a domain to block.
+         */
+        BlockedEmailCreateRequest: {
+            /**
+             * Reason
+             * @description A note for other operators on why the entry exists. Never shown to the blocked person.
+             */
+            reason?: string | null;
+            /**
+             * Value
+             * @description An address (person@example.com) or a domain (example.com, also accepted as @example.com or *.example.com). A domain also blocks its subdomains.
+             */
+            value: string;
+        };
+        /**
+         * BlockedEmailCreatedPublic
+         * @description A new entry, and how many existing accounts it now blocks.
+         */
+        BlockedEmailCreatedPublic: {
+            /**
+             * Blocked Account Count
+             * @description How many existing accounts the entry matches. Their dashboard sessions were ended.
+             */
+            blocked_account_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By User Id
+             * @description The operator who added it, or null once removed.
+             */
+            created_by_user_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description address or domain. A domain also blocks its subdomains.
+             */
+            kind: string;
+            /**
+             * Pattern
+             * @description The normalized address or domain the entry blocks.
+             */
+            pattern: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * BlockedEmailPublic
+         * @description One blocklist entry.
+         */
+        BlockedEmailPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By User Id
+             * @description The operator who added it, or null once removed.
+             */
+            created_by_user_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description address or domain. A domain also blocks its subdomains.
+             */
+            kind: string;
+            /**
+             * Pattern
+             * @description The normalized address or domain the entry blocks.
+             */
+            pattern: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /** BlockedEmailsPublic */
+        BlockedEmailsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["BlockedEmailPublic"][];
+        };
+        /**
          * BreakGlassCreate
          * @description Why you are opening a session's content without its owner's share. Recorded with the opening.
          */
@@ -9087,6 +9163,11 @@ export interface components {
              * @description Authorized models before any of the request's filters.
              */
             total_count: number;
+            /**
+             * Types
+             * @description Every kind an authorized model has, sorted.
+             */
+            types: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
             /** Vendors */
             vendors: components["schemas"]["CatalogVendorFacet"][];
         };
@@ -9190,6 +9271,11 @@ export interface components {
              */
             selectors: string[];
             /**
+             * Type
+             * @description What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+            /**
              * Unpriced Count
              * @description How many offerings carry no price for this caller.
              */
@@ -9288,6 +9374,11 @@ export interface components {
              */
             selectors: string[];
             /**
+             * Type
+             * @description What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+            /**
              * Unpriced Count
              * @description How many offerings carry no price for this caller.
              */
@@ -9309,6 +9400,11 @@ export interface components {
              * @description Whether the provider itself reported this model.
              */
             discovered: boolean;
+            /**
+             * Endpoints
+             * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
+             */
+            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /**
@@ -9585,6 +9681,83 @@ export interface components {
             type: "choice";
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * CodeExecuteRequest
+         * @description A direct code execution request: the code to run, and the sandbox to run it in.
+         * @example {
+         *       "code": "print(1 + 1)",
+         *       "container": "auto"
+         *     }
+         */
+        CodeExecuteRequest: {
+            /**
+             * Code
+             * @description Python source to run in the sandbox
+             */
+            code: string;
+            /**
+             * Container
+             * @description 'auto' to hold the sandbox after the run, or a container id an earlier response named in Otari-Container-Id to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends.
+             */
+            container?: string | null;
+            /**
+             * File Ids
+             * @description Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.
+             */
+            file_ids?: string[] | null;
+            /**
+             * Timeout Seconds
+             * @description How long the code may run. Never more than the workspace's code execution ceiling, or 60 seconds when it sets none.
+             */
+            timeout_seconds?: number | null;
+            /**
+             * User
+             * @description User ID for usage attribution
+             */
+            user?: string | null;
+        };
+        /**
+         * CodeExecuteResponse
+         * @description A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``.
+         */
+        CodeExecuteResponse: {
+            /**
+             * Files
+             * @description The files the code wrote. Empty when it wrote none, or where the Files API is off.
+             */
+            files: components["schemas"]["CodeExecutionOutputFile"][];
+            /**
+             * Object
+             * @default code_execution.result
+             * @constant
+             */
+            object: "code_execution.result";
+            /**
+             * Return Code
+             * @description The program's exit status; null when the sandbox did not report one.
+             */
+            return_code: number | null;
+            /** Stderr */
+            stderr: string;
+            /** Stdout */
+            stdout: string;
+        };
+        /**
+         * CodeExecutionOutputFile
+         * @description A file the code wrote, stored in the Files API.
+         */
+        CodeExecutionOutputFile: {
+            /**
+             * File Id
+             * @description Download it from GET /api/v1/files/{file_id}/content
+             */
+            file_id: string;
+            /**
+             * Filename
+             * @description The name the code gave it in the working directory
+             */
+            filename: string;
         };
         /**
          * CodeExecutor
@@ -10888,6 +11061,8 @@ export interface components {
         EndUserBudgetPublic: {
             /** Blocked End User Count */
             blocked_end_user_count: number;
+            /** Budget Duration Sec */
+            budget_duration_sec?: number | null;
             /** Budget Id */
             budget_id: string;
             /**
@@ -10900,6 +11075,23 @@ export interface components {
              * @description Whether a new end user starts here when its request names no budget
              */
             is_default: boolean;
+            /**
+             * Max Budget
+             * @description Dollars each end user may spend over the period
+             */
+            max_budget?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Request Limit */
+            request_limit?: number | null;
+            /** Reset Alignment */
+            reset_alignment?: string | null;
+            /** Rpm Limit */
+            rpm_limit?: number | null;
+            /** Token Limit */
+            token_limit?: number | null;
+            /** Tpm Limit */
+            tpm_limit?: number | null;
         };
         /**
          * EndUserPublic
@@ -11057,7 +11249,7 @@ export interface components {
             router_candidates?: string[];
             /**
              * Router Weights
-             * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.
+             * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so it is knowable here: the plan above is the real ordering by share, not the decline path.
              */
             router_weights?: {
                 [key: string]: number;
@@ -12020,7 +12212,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images") | null;
+            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelPublic
@@ -12096,7 +12288,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images") | null;
+            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelsPublic
@@ -12667,14 +12859,6 @@ export interface components {
              */
             workspace_id: string;
         };
-        /** KeyRankRequest */
-        KeyRankRequest: {
-            /**
-             * Examples
-             * @description The scored prompts to record.
-             */
-            examples: components["schemas"]["ScoredExample"][];
-        };
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.
@@ -12726,24 +12910,6 @@ export interface components {
              * Name
              * @description Human-friendly display name.
              */
-            name: string;
-        };
-        /**
-         * LearnedPolicy
-         * @description A policy whose selection depends on routing memory, for the status overview.
-         *
-         *     Only a *learned* policy belongs here. A weighted policy names a router too, but
-         *     its split is written in the policy document, so listing it under a warmth report
-         *     would tie it to a pool it never reads.
-         */
-        LearnedPolicy: {
-            /** Backend */
-            backend: string;
-            /** Candidates */
-            candidates: string[];
-            /** Default Target */
-            default_target: string;
-            /** Name */
             name: string;
         };
         /**
@@ -12832,12 +12998,12 @@ export interface components {
         ManagedTool: {
             /**
              * Accepted Types
-             * @description Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled, and for code execution the provider-named keywords unless the deployment's executor is `provider`.
+             * @description Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled and the deployment has a search of its own, and for code execution the provider-named keywords unless the deployment's executor is `provider`.
              */
             accepted_types: string[];
             /**
              * Available
-             * @description Whether this deployment has enabled and configured the tool. A request declaring an unavailable tool is rejected with 400.
+             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
              */
             available: boolean;
             /**
@@ -12870,6 +13036,11 @@ export interface components {
              * @constant
              */
             object: "tool";
+            /**
+             * Reason
+             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
+             */
+            reason?: ("not_configured" | "workspace_disabled") | null;
         };
         /**
          * McpErrorBody
@@ -13287,6 +13458,11 @@ export interface components {
              * @default false
              */
             tool_call: boolean;
+            /**
+             * Type
+             * @description What kind of model models.dev says it is. Null where the catalog gives no kind.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
          * ModelMetadataResponse
@@ -13295,7 +13471,7 @@ export interface components {
         ModelMetadataResponse: {
             /**
              * Available
-             * @description False when metadata could not be loaded (enrichment disabled or models.dev unreachable).
+             * @description False when no models.dev catalog could be read, not even the one bundled with the gateway.
              */
             available: boolean;
             /** Models */
@@ -13345,7 +13521,7 @@ export interface components {
             /** Supported Parameters */
             supported_parameters?: string[] | null;
             /** Type */
-            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "other") | null;
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
          * ModelPricingInfo
@@ -13367,8 +13543,9 @@ export interface components {
             /**
              * Unit
              * @default tokens
+             * @enum {string}
              */
-            unit: string;
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * ModerationRequest
@@ -13727,8 +13904,9 @@ export interface components {
             /**
              * Unit
              * @default tokens
+             * @enum {string}
              */
-            unit: string;
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
             /** Updated At */
             updated_at?: string | null;
         };
@@ -14706,11 +14884,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingPublic
@@ -14825,11 +15003,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingsPublic
@@ -15596,13 +15774,6 @@ export interface components {
             /** Workspace Id */
             workspace_id?: string | null;
         };
-        /** PoolStatus */
-        PoolStatus: {
-            /** Records */
-            records: number;
-            /** Warm */
-            warm: boolean;
-        };
         /**
          * PricingDriftRow
          * @description A stored deployment rate beside the default it shadows.
@@ -16056,33 +16227,6 @@ export interface components {
             /** Providers */
             providers: components["schemas"]["ProviderInfoSchema"][];
         };
-        /** RankRequest */
-        RankRequest: {
-            /**
-             * Examples
-             * @description The scored prompts to record.
-             */
-            examples: components["schemas"]["ScoredExample"][];
-            /**
-             * User Id
-             * @description Whose routing memory these examples belong to.
-             */
-            user_id: string;
-            /**
-             * Workspace Id
-             * @description Which workspace's routing memory these examples belong to. Omit for the deployment's default workspace. Only requests billing to that workspace vote over them.
-             */
-            workspace_id?: string | null;
-        };
-        /** RankResponse */
-        RankResponse: {
-            /** Pools */
-            pools: components["schemas"]["RecordedPool"][];
-            /** Recorded */
-            recorded: number;
-            /** Seed Count */
-            seed_count: number;
-        };
         /**
          * RateLimitRuleCreate
          * @description A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.
@@ -16298,18 +16442,6 @@ export interface components {
              * @description Why the request was refused.
              */
             detail: string;
-        };
-        /**
-         * RecordedPool
-         * @description How warm one pool is after the write.
-         */
-        RecordedPool: {
-            /** Records */
-            records: number;
-            /** Task Id */
-            task_id: string | null;
-            /** Warm */
-            warm: boolean;
         };
         /**
          * ReencryptSearchToolsResponse
@@ -16728,42 +16860,6 @@ export interface components {
             master_key: string;
         };
         /**
-         * RouterStatus
-         * @description How warm this user's routing memory is, and what depends on it.
-         *
-         *     Routing memory has no single warmth: it is a set of independent pools.
-         *     ``default_pool`` is what a request with no ``Otari-Router-Task`` header votes
-         *     over (every record the user has in this workspace, labeled or not) and
-         *     ``tasks`` lists each partition, which only requests carrying that label use.
-         *     Each crosses ``seed_count`` on its own.
-         */
-        RouterStatus: {
-            /** Alpha */
-            alpha: number;
-            /** Confidence Floor */
-            confidence_floor: number;
-            default_pool: components["schemas"]["PoolStatus"];
-            /** Embedding Model */
-            embedding_model: string;
-            /** Granularity */
-            granularity: string;
-            /** K */
-            k: number;
-            /** Policies */
-            policies: components["schemas"]["LearnedPolicy"][];
-            /** Seed Count */
-            seed_count: number;
-            /** Tasks */
-            tasks: components["schemas"]["TaskPool"][];
-            /** User Id */
-            user_id: string;
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-        };
-        /**
          * SandboxCredentialPublic
          * @description Where the key a hosted sandbox provider leases with comes from. Never the key itself.
          */
@@ -16882,35 +16978,6 @@ export interface components {
             type: "score";
         } & {
             [key: string]: unknown;
-        };
-        /**
-         * ScoredExample
-         * @description One prompt and how well each candidate answered it.
-         */
-        ScoredExample: {
-            /**
-             * Label Source
-             * @description Provenance of the scores: 'human' or 'judge'.
-             * @default human
-             */
-            label_source: string;
-            /**
-             * Prompt
-             * @description The prompt that was tried.
-             */
-            prompt: string;
-            /**
-             * Scores
-             * @description Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and meaningful: two models that both answered well is exactly the case where the router should take the cheaper one.
-             */
-            scores: {
-                [key: string]: number;
-            };
-            /**
-             * Task Id
-             * @description Partition this example belongs to, matching the Otari-Router-Task header requests send. Omit to file it in the user's default pool.
-             */
-            task_id?: string | null;
         };
         /**
          * SearchProviderOptionSchema
@@ -17406,11 +17473,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).
+             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * SignupRequest
@@ -17668,15 +17735,6 @@ export interface components {
              * Format: uuid
              */
             organization_id: string;
-        };
-        /** TaskPool */
-        TaskPool: {
-            /** Records */
-            records: number;
-            /** Task Id */
-            task_id: string;
-            /** Warm */
-            warm: boolean;
         };
         /**
          * TestServiceRequest
@@ -19888,6 +19946,102 @@ export interface operations {
             };
         };
     };
+    "admin-list_blocked_emails": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedEmailsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-block_email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockedEmailCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedEmailCreatedPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-unblock_email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "admin-list_deployment_users": {
         parameters: {
             query?: {
@@ -21425,6 +21579,8 @@ export interface operations {
                 output_modality?: string[];
                 /** @description Require every capability. */
                 capability?: components["schemas"]["CatalogCapability"][];
+                /** @description Match any kind; a model of unknown kind does not match. */
+                type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
                 /** @description Minimum context window; unknown windows do not match. */
                 min_context?: number;
                 /** @description Maximum cheapest input price per million tokens; unpriced models do not match. */
@@ -21540,6 +21696,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "code-execution-execute_code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeExecuteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -28902,59 +29091,6 @@ export interface operations {
             };
         };
     };
-    "routing-rank_own_candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KeyRankRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RankResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "routing-own_routing_memory_status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RouterStatus"];
-                };
-            };
-        };
-    };
     "routing-list_policies": {
         parameters: {
             query?: {
@@ -29075,39 +29211,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "routing-rank_candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RankRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RankResponse"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -29266,40 +29369,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRecommenderPublic"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "routing-routing_memory_status": {
-        parameters: {
-            query: {
-                /** @description Whose routing memory to report on. */
-                user_id: string;
-                /** @description Which workspace's routing memory to report on. Omit for the default workspace. */
-                workspace_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RouterStatus"];
                 };
             };
             /** @description Validation Error */

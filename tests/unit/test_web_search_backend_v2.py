@@ -590,7 +590,7 @@ async def test_the_search_and_its_enrichment_are_recorded_under_the_instance_wit
         LabelCalls(
             tool=WEB_SEARCH_TOOL_NAME,
             label=_LABEL,
-            rate_keys=(instance_rate_key("search", _SEARCH, "fake"), "otari:web_search"),
+            rate_keys=(instance_rate_key("search", _SEARCH, "fake"),),
             calls=2,
             unreported_calls=1,
             reported_cost=Decimal("0.005"),

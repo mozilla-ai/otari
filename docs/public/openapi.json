@@ -2359,6 +2359,181 @@
         "title": "BlobResourceContents",
         "type": "object"
       },
+      "BlockedEmailCreateRequest": {
+        "description": "An address or a domain to block.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A note for other operators on why the entry exists. Never shown to the blocked person.",
+            "title": "Reason"
+          },
+          "value": {
+            "description": "An address (person@example.com) or a domain (example.com, also accepted as @example.com or *.example.com). A domain also blocks its subdomains.",
+            "maxLength": 257,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "BlockedEmailCreateRequest",
+        "type": "object"
+      },
+      "BlockedEmailCreatedPublic": {
+        "description": "A new entry, and how many existing accounts it now blocks.",
+        "properties": {
+          "blocked_account_count": {
+            "description": "How many existing accounts the entry matches. Their dashboard sessions were ended.",
+            "title": "Blocked Account Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator who added it, or null once removed.",
+            "title": "Created By User Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "address or domain. A domain also blocks its subdomains.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "The normalized address or domain the entry blocks.",
+            "title": "Pattern",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "pattern",
+          "kind",
+          "reason",
+          "created_by_user_id",
+          "created_at",
+          "blocked_account_count"
+        ],
+        "title": "BlockedEmailCreatedPublic",
+        "type": "object"
+      },
+      "BlockedEmailPublic": {
+        "description": "One blocklist entry.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator who added it, or null once removed.",
+            "title": "Created By User Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "address or domain. A domain also blocks its subdomains.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "The normalized address or domain the entry blocks.",
+            "title": "Pattern",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "pattern",
+          "kind",
+          "reason",
+          "created_by_user_id",
+          "created_at"
+        ],
+        "title": "BlockedEmailPublic",
+        "type": "object"
+      },
+      "BlockedEmailsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedEmailPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "BlockedEmailsPublic",
+        "type": "object"
+      },
       "BreakGlassCreate": {
         "description": "Why you are opening a session's content without its owner's share. Recorded with the opening.",
         "properties": {
@@ -3272,6 +3447,27 @@
             "title": "Total Count",
             "type": "integer"
           },
+          "types": {
+            "description": "Every kind an authorized model has, sorted.",
+            "items": {
+              "enum": [
+                "chat",
+                "embedding",
+                "image",
+                "speech",
+                "transcription",
+                "rerank",
+                "moderation",
+                "video",
+                "decision",
+                "realtime",
+                "other"
+              ],
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          },
           "vendors": {
             "items": {
               "$ref": "#/components/schemas/CatalogVendorFacet"
@@ -3283,7 +3479,8 @@
         "required": [
           "total_count",
           "providers",
-          "vendors"
+          "vendors",
+          "types"
         ],
         "title": "CatalogFacets",
         "type": "object"
@@ -3504,6 +3701,31 @@
             },
             "title": "Selectors",
             "type": "array"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.",
+            "title": "Type"
           },
           "unpriced_count": {
             "description": "How many offerings carry no price for this caller.",
@@ -3741,6 +3963,31 @@
             "title": "Selectors",
             "type": "array"
           },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.",
+            "title": "Type"
+          },
           "unpriced_count": {
             "description": "How many offerings carry no price for this caller.",
             "title": "Unpriced Count",
@@ -3798,6 +4045,27 @@
             "description": "Whether the provider itself reported this model.",
             "title": "Discovered",
             "type": "boolean"
+          },
+          "endpoints": {
+            "description": "The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.",
+            "items": {
+              "enum": [
+                "/chat/completions",
+                "/responses",
+                "/messages",
+                "/images/generations",
+                "/embeddings",
+                "/audio/speech",
+                "/audio/transcriptions",
+                "/systemone",
+                "/rerank",
+                "/decisions",
+                "/moderations"
+              ],
+              "type": "string"
+            },
+            "title": "Endpoints",
+            "type": "array"
           },
           "max_output_tokens": {
             "anyOf": [
@@ -4540,6 +4808,147 @@
           "criteria"
         ],
         "title": "ChoiceQuestion",
+        "type": "object"
+      },
+      "CodeExecuteRequest": {
+        "description": "A direct code execution request: the code to run, and the sandbox to run it in.",
+        "example": {
+          "code": "print(1 + 1)",
+          "container": "auto"
+        },
+        "properties": {
+          "code": {
+            "description": "Python source to run in the sandbox",
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "container": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'auto' to hold the sandbox after the run, or a container id an earlier response named in Otari-Container-Id to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends.",
+            "title": "Container"
+          },
+          "file_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.",
+            "title": "File Ids"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long the code may run. Never more than the workspace's code execution ceiling, or 60 seconds when it sets none.",
+            "title": "Timeout Seconds"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID for usage attribution",
+            "title": "User"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "CodeExecuteRequest",
+        "type": "object"
+      },
+      "CodeExecuteResponse": {
+        "description": "A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``.",
+        "properties": {
+          "files": {
+            "description": "The files the code wrote. Empty when it wrote none, or where the Files API is off.",
+            "items": {
+              "$ref": "#/components/schemas/CodeExecutionOutputFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "object": {
+            "const": "code_execution.result",
+            "default": "code_execution.result",
+            "title": "Object",
+            "type": "string"
+          },
+          "return_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The program's exit status; null when the sandbox did not report one.",
+            "title": "Return Code"
+          },
+          "stderr": {
+            "title": "Stderr",
+            "type": "string"
+          },
+          "stdout": {
+            "title": "Stdout",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stdout",
+          "stderr",
+          "return_code",
+          "files"
+        ],
+        "title": "CodeExecuteResponse",
+        "type": "object"
+      },
+      "CodeExecutionOutputFile": {
+        "description": "A file the code wrote, stored in the Files API.",
+        "properties": {
+          "file_id": {
+            "description": "Download it from GET /api/v1/files/{file_id}/content",
+            "title": "File Id",
+            "type": "string"
+          },
+          "filename": {
+            "description": "The name the code gave it in the working directory",
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id",
+          "filename"
+        ],
+        "title": "CodeExecutionOutputFile",
         "type": "object"
       },
       "CodeExecutor": {
@@ -7347,6 +7756,17 @@
             "title": "Blocked End User Count",
             "type": "integer"
           },
+          "budget_duration_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Duration Sec"
+          },
           "budget_id": {
             "title": "Budget Id",
             "type": "string"
@@ -7360,6 +7780,84 @@
             "description": "Whether a new end user starts here when its request names no budget",
             "title": "Is Default",
             "type": "boolean"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dollars each end user may spend over the period",
+            "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "request_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Limit"
+          },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
+          },
+          "rpm_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rpm Limit"
+          },
+          "token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Limit"
+          },
+          "tpm_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tpm Limit"
           }
         },
         "required": [
@@ -7697,7 +8195,7 @@
             "additionalProperties": {
               "type": "number"
             },
-            "description": "For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.",
+            "description": "For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so it is knowable here: the plan above is the real ordering by share, not the decline path.",
             "title": "Router Weights",
             "type": "object"
           },
@@ -9648,7 +10146,12 @@
                 "enum": [
                   "tokens",
                   "requests",
-                  "images"
+                  "images",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
                 ],
                 "type": "string"
               },
@@ -9871,7 +10374,12 @@
                 "enum": [
                   "tokens",
                   "requests",
-                  "images"
+                  "images",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
                 ],
                 "type": "string"
               },
@@ -11174,26 +11682,6 @@
         "title": "KeyInfo",
         "type": "object"
       },
-      "KeyRankRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "examples": {
-            "description": "The scored prompts to record.",
-            "items": {
-              "$ref": "#/components/schemas/ScoredExample"
-            },
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Examples",
-            "type": "array"
-          }
-        },
-        "required": [
-          "examples"
-        ],
-        "title": "KeyRankRequest",
-        "type": "object"
-      },
       "KnownProviderSchema": {
         "description": "A selected provider's autofill hints for the add-provider form.",
         "properties": {
@@ -11270,38 +11758,6 @@
           "name"
         ],
         "title": "KnownProviderSummarySchema",
-        "type": "object"
-      },
-      "LearnedPolicy": {
-        "description": "A policy whose selection depends on routing memory, for the status overview.\n\nOnly a *learned* policy belongs here. A weighted policy names a router too, but\nits split is written in the policy document, so listing it under a warmth report\nwould tie it to a pool it never reads.",
-        "properties": {
-          "backend": {
-            "title": "Backend",
-            "type": "string"
-          },
-          "candidates": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Candidates",
-            "type": "array"
-          },
-          "default_target": {
-            "title": "Default Target",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "backend",
-          "candidates",
-          "default_target"
-        ],
-        "title": "LearnedPolicy",
         "type": "object"
       },
       "MailSettings": {
@@ -11431,7 +11887,7 @@
         "description": "One tool the gateway can run itself.",
         "properties": {
           "accepted_types": {
-            "description": "Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled, and for code execution the provider-named keywords unless the deployment's executor is `provider`.",
+            "description": "Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled and the deployment has a search of its own, and for code execution the provider-named keywords unless the deployment's executor is `provider`.",
             "items": {
               "type": "string"
             },
@@ -11439,7 +11895,7 @@
             "type": "array"
           },
           "available": {
-            "description": "Whether this deployment has enabled and configured the tool. A request declaring an unavailable tool is rejected with 400.",
+            "description": "Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.",
             "title": "Available",
             "type": "boolean"
           },
@@ -11470,6 +11926,22 @@
             "default": "tool",
             "title": "Object",
             "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "not_configured",
+                  "workspace_disabled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.",
+            "title": "Reason"
           }
         },
         "required": [
@@ -12395,6 +12867,31 @@
             "default": false,
             "title": "Tool Call",
             "type": "boolean"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of model models.dev says it is. Null where the catalog gives no kind.",
+            "title": "Type"
           }
         },
         "title": "ModelMetadata",
@@ -12404,7 +12901,7 @@
         "description": "models.dev metadata keyed by ``provider:model``.",
         "properties": {
           "available": {
-            "description": "False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+            "description": "False when no models.dev catalog could be read, not even the one bundled with the gateway.",
             "title": "Available",
             "type": "boolean"
           },
@@ -12536,6 +13033,8 @@
                   "rerank",
                   "moderation",
                   "video",
+                  "decision",
+                  "realtime",
                   "other"
                 ],
                 "type": "string"
@@ -12614,6 +13113,16 @@
           },
           "unit": {
             "default": "tokens",
+            "enum": [
+              "tokens",
+              "requests",
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
+            ],
             "title": "Unit",
             "type": "string"
           }
@@ -13331,6 +13840,16 @@
           },
           "unit": {
             "default": "tokens",
+            "enum": [
+              "tokens",
+              "requests",
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
+            ],
             "title": "Unit",
             "type": "string"
           },
@@ -15244,11 +15763,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"
@@ -15449,11 +15973,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"
@@ -16955,24 +17484,6 @@
         "title": "PolicyResponse",
         "type": "object"
       },
-      "PoolStatus": {
-        "properties": {
-          "records": {
-            "title": "Records",
-            "type": "integer"
-          },
-          "warm": {
-            "title": "Warm",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "records",
-          "warm"
-        ],
-        "title": "PoolStatus",
-        "type": "object"
-      },
       "PricingDriftRow": {
         "description": "A stored deployment rate beside the default it shadows.",
         "properties": {
@@ -17952,70 +18463,6 @@
         "title": "ProvidersResponse",
         "type": "object"
       },
-      "RankRequest": {
-        "properties": {
-          "examples": {
-            "description": "The scored prompts to record.",
-            "items": {
-              "$ref": "#/components/schemas/ScoredExample"
-            },
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Examples",
-            "type": "array"
-          },
-          "user_id": {
-            "description": "Whose routing memory these examples belong to.",
-            "title": "User Id",
-            "type": "string"
-          },
-          "workspace_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which workspace's routing memory these examples belong to. Omit for the deployment's default workspace. Only requests billing to that workspace vote over them.",
-            "title": "Workspace Id"
-          }
-        },
-        "required": [
-          "examples",
-          "user_id"
-        ],
-        "title": "RankRequest",
-        "type": "object"
-      },
-      "RankResponse": {
-        "properties": {
-          "pools": {
-            "items": {
-              "$ref": "#/components/schemas/RecordedPool"
-            },
-            "title": "Pools",
-            "type": "array"
-          },
-          "recorded": {
-            "title": "Recorded",
-            "type": "integer"
-          },
-          "seed_count": {
-            "title": "Seed Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "recorded",
-          "seed_count",
-          "pools"
-        ],
-        "title": "RankResponse",
-        "type": "object"
-      },
       "RateLimitRuleCreate": {
         "additionalProperties": false,
         "description": "A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.",
@@ -18471,37 +18918,6 @@
           "detail"
         ],
         "title": "RecommendationRefusal",
-        "type": "object"
-      },
-      "RecordedPool": {
-        "description": "How warm one pool is after the write.",
-        "properties": {
-          "records": {
-            "title": "Records",
-            "type": "integer"
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Id"
-          },
-          "warm": {
-            "title": "Warm",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "task_id",
-          "records",
-          "warm"
-        ],
-        "title": "RecordedPool",
         "type": "object"
       },
       "ReencryptSearchToolsResponse": {
@@ -19526,76 +19942,6 @@
         "title": "RotateMasterKeyResponse",
         "type": "object"
       },
-      "RouterStatus": {
-        "description": "How warm this user's routing memory is, and what depends on it.\n\nRouting memory has no single warmth: it is a set of independent pools.\n``default_pool`` is what a request with no ``Otari-Router-Task`` header votes\nover (every record the user has in this workspace, labeled or not) and\n``tasks`` lists each partition, which only requests carrying that label use.\nEach crosses ``seed_count`` on its own.",
-        "properties": {
-          "alpha": {
-            "title": "Alpha",
-            "type": "number"
-          },
-          "confidence_floor": {
-            "title": "Confidence Floor",
-            "type": "number"
-          },
-          "default_pool": {
-            "$ref": "#/components/schemas/PoolStatus"
-          },
-          "embedding_model": {
-            "title": "Embedding Model",
-            "type": "string"
-          },
-          "granularity": {
-            "title": "Granularity",
-            "type": "string"
-          },
-          "k": {
-            "title": "K",
-            "type": "integer"
-          },
-          "policies": {
-            "items": {
-              "$ref": "#/components/schemas/LearnedPolicy"
-            },
-            "title": "Policies",
-            "type": "array"
-          },
-          "seed_count": {
-            "title": "Seed Count",
-            "type": "integer"
-          },
-          "tasks": {
-            "items": {
-              "$ref": "#/components/schemas/TaskPool"
-            },
-            "title": "Tasks",
-            "type": "array"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          },
-          "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "workspace_id",
-          "embedding_model",
-          "seed_count",
-          "granularity",
-          "alpha",
-          "k",
-          "confidence_floor",
-          "default_pool",
-          "tasks",
-          "policies"
-        ],
-        "title": "RouterStatus",
-        "type": "object"
-      },
       "SandboxCredentialPublic": {
         "description": "Where the key a hosted sandbox provider leases with comes from. Never the key itself.",
         "properties": {
@@ -19898,52 +20244,6 @@
           "criteria"
         ],
         "title": "ScoreQuestion",
-        "type": "object"
-      },
-      "ScoredExample": {
-        "description": "One prompt and how well each candidate answered it.",
-        "properties": {
-          "label_source": {
-            "default": "human",
-            "description": "Provenance of the scores: 'human' or 'judge'.",
-            "title": "Label Source",
-            "type": "string"
-          },
-          "prompt": {
-            "description": "The prompt that was tried.",
-            "minLength": 1,
-            "title": "Prompt",
-            "type": "string"
-          },
-          "scores": {
-            "additionalProperties": {
-              "maximum": 1.0,
-              "minimum": 0.0,
-              "type": "number"
-            },
-            "description": "Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and meaningful: two models that both answered well is exactly the case where the router should take the cheaper one.",
-            "minProperties": 1,
-            "title": "Scores",
-            "type": "object"
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Partition this example belongs to, matching the Otari-Router-Task header requests send. Omit to file it in the user's default pool.",
-            "title": "Task Id"
-          }
-        },
-        "required": [
-          "prompt",
-          "scores"
-        ],
-        "title": "ScoredExample",
         "type": "object"
       },
       "SearchProviderOptionSchema": {
@@ -20863,11 +21163,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).",
+            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"
@@ -21491,29 +21796,6 @@
           "organization_id"
         ],
         "title": "SwitchActiveOrganizationRequest",
-        "type": "object"
-      },
-      "TaskPool": {
-        "properties": {
-          "records": {
-            "title": "Records",
-            "type": "integer"
-          },
-          "task_id": {
-            "title": "Task Id",
-            "type": "string"
-          },
-          "warm": {
-            "title": "Warm",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "task_id",
-          "records",
-          "warm"
-        ],
-        "title": "TaskPool",
         "type": "object"
       },
       "TestServiceRequest": {
@@ -27155,7 +27437,7 @@
     }
   },
   "info": {
-    "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
+    "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
     "version": "0.0.0-dev"
   },
@@ -27186,6 +27468,168 @@
           }
         ],
         "summary": "Get Administration Access",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/blocked-emails": {
+      "get": {
+        "description": "List the addresses and domains blocked from holding an account on this deployment, newest first.",
+        "operationId": "admin-list_blocked_emails",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedEmailsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Blocked Emails",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Block an address, or a domain and its subdomains, from holding an account on this deployment.\n\nA blocked address cannot sign up, be added to or invited into an organization, or sign in by password,\npasskey or provider, and nothing is mailed to it for signup, verification or a password reset. Every\nexisting account the entry matches has its dashboard sessions ended now; the account itself is kept, so\nremoving the entry lets it sign in again. API keys are not affected.\n\nRefused with 400 for a value that is neither an address nor a domain, or one that would block your own\naddress or the deployment's bootstrap operator's, and with 409 for one already blocked.",
+        "operationId": "admin-block_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockedEmailCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedEmailCreatedPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Block Email",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/blocked-emails/{entry_id}": {
+      "delete": {
+        "description": "Remove a blocklist entry, so the accounts it matched may sign in again.",
+        "operationId": "admin-unblock_email",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Unblock Email",
         "tags": [
           "admin"
         ]
@@ -30077,6 +30521,34 @@
             }
           },
           {
+            "description": "Match any kind; a model of unknown kind does not match.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "description": "Match any kind; a model of unknown kind does not match.",
+              "items": {
+                "enum": [
+                  "chat",
+                  "embedding",
+                  "image",
+                  "speech",
+                  "transcription",
+                  "rerank",
+                  "moderation",
+                  "video",
+                  "decision",
+                  "realtime",
+                  "other"
+                ],
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Type",
+              "type": "array"
+            }
+          },
+          {
             "description": "Minimum context window; unknown windows do not match.",
             "in": "query",
             "name": "min_context",
@@ -30402,6 +30874,56 @@
         ]
       }
     },
+    "/api/v1/code/execute": {
+      "post": {
+        "description": "Run code in the gateway's sandbox and return its output.\n\nThe run is admitted as an ``otari_code_execution`` call is: a workspace whose\ncode execution policy is off is refused, and its execution ceiling and pinned\nimage apply. It is priced under ``otari:code_execution`` and reserved against\nthe caller's budgets. ``file_ids`` puts uploads in the working directory, and\neach file the code writes comes back with a ``file_id``. ``container: \"auto\"``\nholds the sandbox after the run and names it in ``Otari-Container-Id``;\nsending that id back runs in the same sandbox, with its files and\ninterpreter state.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user.",
+        "operationId": "code-execution-execute_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodeExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeExecuteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Execute Code",
+        "tags": [
+          "code-execution"
+        ]
+      }
+    },
     "/api/v1/decisions": {
       "post": {
         "description": "Answer typed questions (noul, choice, score) about a state.\n\n``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``\nentry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user; a ``user`` naming a\n  different user is rejected with 403 unless mismatch rejection is off.",
@@ -30504,7 +31026,7 @@
     },
     "/api/v1/end-user-budgets": {
       "get": {
-        "description": "List the budgets the calling service key may put its end users on, with how many end users each holds.\n\nRequires a service key. The counts cover the end users of the key's user, blocked ones included and deleted\nones not.",
+        "description": "List the budgets the calling service key may put its end users on, with their limits and end user counts.\n\nRequires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The\ncounts cover the end users of the key's user, blocked ones included and deleted ones not.",
         "operationId": "end-users-list_end_user_budgets",
         "responses": {
           "200": {
@@ -34647,7 +35169,7 @@
     },
     "/api/v1/models/metadata": {
       "get": {
-        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
+        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. Until models.dev has been\nfetched, and always when ``models_dev_metadata`` is off, it comes from the\ncatalog bundled with the gateway. ``available`` is false only when no catalog\ncould be read; the response is then empty.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
         "operationId": "models-list_model_metadata",
         "responses": {
           "200": {
@@ -45008,86 +45530,6 @@
         ]
       }
     },
-    "/api/v1/routing/me/preferences/rank": {
-      "post": {
-        "description": "Record scored examples into the calling key's own routing memory.\n\nThe memory is the key's user's in the key's workspace, the pool that key's\nrequests vote over; nothing in the body can name another. Validation, storage\nand the response are those of ``POST /api/v1/routing/preferences/rank``.\n\nEach call counts against the user's request rate limit, and is refused (403)\nwhen the router's embedding provider does not serve the caller's country,\nbecause embedding an example sends its prompt there.",
-        "operationId": "routing-rank_own_candidates",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/KeyRankRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RankResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Rank Own Candidates",
-        "tags": [
-          "routing"
-        ]
-      }
-    },
-    "/api/v1/routing/me/status": {
-      "get": {
-        "description": "Report how warm the calling key's own routing memory is, per pool.\n\nThe same report as ``GET /api/v1/routing/status``, for the key's user in the\nkey's workspace.",
-        "operationId": "routing-own_routing_memory_status",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RouterStatus"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Own Routing Memory Status",
-        "tags": [
-          "routing"
-        ]
-      }
-    },
     "/api/v1/routing/policies": {
       "get": {
         "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
@@ -45327,56 +45769,6 @@
           }
         ],
         "summary": "Delete Policy",
-        "tags": [
-          "routing"
-        ]
-      }
-    },
-    "/api/v1/routing/preferences/rank": {
-      "post": {
-        "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
-        "operationId": "routing-rank_candidates",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RankRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RankResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Rank Candidates",
         "tags": [
           "routing"
         ]
@@ -45622,78 +46014,6 @@
         "summary": "Update Agent Recommender",
         "tags": [
           "agent-recommenders"
-        ]
-      }
-    },
-    "/api/v1/routing/status": {
-      "get": {
-        "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
-        "operationId": "routing-routing_memory_status",
-        "parameters": [
-          {
-            "description": "Whose routing memory to report on.",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "Whose routing memory to report on.",
-              "title": "User Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
-            "in": "query",
-            "name": "workspace_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
-              "title": "Workspace Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RouterStatus"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Routing Memory Status",
-        "tags": [
-          "routing"
         ]
       }
     },
@@ -47231,7 +47551,7 @@
     },
     "/api/v1/tools": {
       "get": {
-        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nEvery other `tools[]` entry, including provider-native keywords not listed\nhere, is forwarded to the upstream provider untouched.",
+        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. Every other `tools[]` entry, including provider-native keywords\nnot listed here, is forwarded to the upstream provider untouched.",
         "operationId": "tools-list_tools",
         "responses": {
           "200": {

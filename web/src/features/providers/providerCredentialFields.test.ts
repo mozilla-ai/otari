@@ -51,6 +51,16 @@ describe("the registry", () => {
     expect(byKey.get("region_name")?.pairedWith).toBeUndefined()
   })
 
+  // any-llm's Hugging Face provider takes `bill_to` and sends it as
+  // X-HF-Bill-To; without it the token's own account is billed.
+  it("offers Hugging Face an optional organization to bill", () => {
+    const fields = credentialFieldsFor("huggingface")
+    expect(fields.map((field) => field.key)).toEqual(["bill_to"])
+    expect(fields[0]?.isRequired).toBe(false)
+    expect(fields[0]?.isSecret).toBeUndefined()
+    expect(credentialSpecFor("huggingface")?.apiKeyLabel).toBeUndefined()
+  })
+
   it("renames the API key field where the provider does not call it one", () => {
     expect(credentialSpecFor("bedrock")?.apiKeyLabel).toBe("Bedrock API key")
     expect(credentialSpecFor("openai")).toBeUndefined()

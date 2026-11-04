@@ -244,7 +244,7 @@ function KeySecretStep({
           isMultiline
         />
         <CopyField
-          label="Python (Otari SDK)"
+          label="Python (OpenAI SDK)"
           value={snippets.python}
           concealed={snippets.concealedPython}
           isRevealed={isSecretRevealed}

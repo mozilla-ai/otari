@@ -629,6 +629,34 @@ describe("the rail's closing rules", () => {
   })
 })
 
+describe("the shell's outer box", () => {
+  // Found by walking up from the content region rather than by its classes, so
+  // the search cannot assert what it is looking for.
+  const outerBoxOf = (container: HTMLElement) => {
+    const main = container.querySelector("main#main-content")
+    if (!main) throw new Error("the shell rendered no content region")
+    let box = main as HTMLElement
+    while (box.parentElement && box.parentElement !== container) {
+      box = box.parentElement
+    }
+    return box
+  }
+
+  // `overflow: hidden` here would make this box a scroll container that focus
+  // can scroll, taking the top bar and the rail off screen with no scrollbar
+  // and no wheel to bring them back. jsdom computes no layout, so what is
+  // pinned is the class that causes it; e2e/parity.models.spec.ts covers the
+  // behavior in a browser.
+  it("clips its overflow instead of becoming a scroll container", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell()
+
+    const box = outerBoxOf(container)
+    expect(box).toHaveClass("overflow-clip")
+    expect(box).not.toHaveClass("overflow-hidden")
+  })
+})
+
 describe("AppShell surface gating", () => {
   afterEach(() => {
     vi.restoreAllMocks()

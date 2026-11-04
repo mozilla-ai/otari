@@ -5,6 +5,7 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -16,10 +17,11 @@ from gateway.log_config import logger as gateway_logger
 from gateway.services import model_catalog_service as mcs
 from gateway.services.catalog import load_catalog_metadata, metadata_entry
 from gateway.services.model_catalog_service import ModelCatalogEntry, build_metadata_map
-from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, parse_catalog
+from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, parse_catalog, parse_catalog_v2
 
-# The real fetch, before the shared conftest answers every fetch as unreachable.
+# The real fetch and fallback, before the shared conftest turns both off.
 _REAL_FETCH = mcs._fetch
+_REAL_FALLBACK = mcs._fallback
 
 
 @pytest.fixture(autouse=True)
@@ -99,6 +101,24 @@ def test_the_entry_marks_deprecated_status() -> None:
     assert _entry({"id": "old", "status": "deprecated"}).deprecated is True
 
 
+def _v2_entry(model: dict[str, Any]) -> ModelCatalogEntry:
+    return ModelCatalogEntry.from_model(parse_catalog_v2({"p": {"models": {"m": model}}}).providers["p"].models["m"])
+
+
+def test_the_entry_names_the_routes_its_protocols_map_to_in_models_dev_order() -> None:
+    api: dict[str, Any] = {"generate-content": {}, "chat-completions": {}, "interactions": {}, "responses": {}}
+
+    assert _v2_entry({"api": api}).endpoints == ["/chat/completions", "/responses"]
+
+
+def test_a_v2_entry_with_no_api_block_has_no_endpoints() -> None:
+    assert _v2_entry({}).endpoints == []
+
+
+def test_a_v1_entry_has_no_endpoints() -> None:
+    assert _entry(GPT_4O).endpoints == []
+
+
 def test_build_metadata_map_keys_by_instance() -> None:
     config = _config({"openai": {"api_key": "sk-x"}})
     result = build_metadata_map(config, CATALOG)
@@ -124,77 +144,51 @@ def test_build_metadata_map_empty_when_catalog_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stale_catalog_is_served_without_refetching() -> None:
-    """A dashboard read must not pay the 15s models.dev fetch timeout."""
-    mcs.clear_catalog_cache()
+async def test_a_read_the_refresher_keeps_warm_never_fetches() -> None:
+    """A dashboard read must not pay the 15s models.dev fetch timeout, not even on a cold worker."""
     config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
 
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=EMPTY)) as fetch:
-        await mcs.load_models_dev_catalog(config, force=True)
-        assert fetch.await_count == 1
-        # Age the entry past its TTL; a stale read still answers from cache.
-        mcs._cache.at = time.monotonic() - 200_000
-        result = await mcs.load_models_dev_catalog(config, serve_stale=True)
-        assert fetch.await_count == 1
+    with (
+        patch.object(mcs, "_fallback", return_value=EMPTY),
+        patch.object(mcs, "_download", new=AsyncMock(return_value=CATALOG)) as download,
+    ):
+        assert await mcs.load_models_dev_catalog(config, serve_stale=True) is EMPTY
+        await mcs.fetch_models_dev_document(fill_cache=True)
+        mcs._cache.fetched_at = datetime.now(UTC) - timedelta(days=30)
+        assert await mcs.load_models_dev_catalog(config, serve_stale=True) is CATALOG
 
-    assert result is EMPTY
+    assert download.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_stale_read_without_a_cache_entry_still_fetches() -> None:
-    """A cold worker fetches rather than reporting metadata unavailable."""
-    mcs.clear_catalog_cache()
-    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
-
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=EMPTY)) as fetch:
-        result = await mcs.load_models_dev_catalog(config, serve_stale=True)
-
-    assert fetch.await_count == 1
-    assert result is EMPTY
-
-
-@pytest.mark.asyncio
-async def test_stale_read_retries_a_failed_fetch_on_the_negative_ttl() -> None:
-    """A failed fetch must not be pinned for the refresher's whole interval.
-
-    The refresh cadence is the *success* cadence (``models_dev_cache_ttl_seconds``,
-    a day by default). Serving a failure at any age would leave the dashboard
-    without enrichment until the next tick, and ``/api/v1/models/metadata`` has no
-    ``refresh`` flag to escape it. The 60s negative TTL still governs a failure.
-    """
-    mcs.clear_catalog_cache()
-    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
+async def test_without_a_refresher_a_read_fetches_and_holds_a_failure_briefly() -> None:
+    """With caching off (TTL 0) every read fetches, but a failure is held for the negative TTL."""
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=0)
 
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=None)) as failing:
-        assert await mcs.load_models_dev_catalog(config, force=True) is None
+        assert await mcs.load_models_dev_catalog(config) is None
+        assert await mcs.load_models_dev_catalog(config) is None
         assert failing.await_count == 1
 
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=EMPTY)) as recovered:
-        # Inside the negative TTL the failure is still served, as before.
-        assert await mcs.load_models_dev_catalog(config, serve_stale=True) is None
-        assert recovered.await_count == 0
-        # Past it, a read retries rather than waiting out the refresh interval.
         mcs._cache.at = time.monotonic() - (mcs._NEGATIVE_TTL_SECONDS + 1)
-        assert await mcs.load_models_dev_catalog(config, serve_stale=True) is EMPTY
-        assert recovered.await_count == 1
+        assert await mcs.load_models_dev_catalog(config) is EMPTY
+        assert await mcs.load_models_dev_catalog(config) is EMPTY
+        assert recovered.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_a_failed_fetch_keeps_the_last_good_catalog() -> None:
     """A models.dev outage must not take the context windows and capabilities away with it."""
-    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=0)
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
-        await mcs.load_models_dev_catalog(config, force=True)
+        await mcs.load_models_dev_catalog(config)
 
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=None)) as failing:
-        assert await mcs.load_models_dev_catalog(config, force=True) is CATALOG
+        assert await mcs.load_models_dev_catalog(config) is CATALOG
         assert await mcs.load_models_dev_catalog(config, serve_stale=True) is CATALOG
-        assert mcs.cached_models_dev_catalog(config) is CATALOG
+        assert mcs.cached_models_dev_catalog() is CATALOG
         assert failing.await_count == 1
-        # The failure still governs the retry: past the negative TTL a read fetches again.
-        mcs._cache.at = time.monotonic() - (mcs._NEGATIVE_TTL_SECONDS + 1)
-        assert await mcs.load_models_dev_catalog(config, serve_stale=True) is CATALOG
-        assert failing.await_count == 2
 
 
 def test_background_catalog_requires_caching_and_enrichment() -> None:
@@ -239,18 +233,49 @@ def test_metadata_entry_reads_a_malformed_catalog_as_no_entry(catalog: dict[str,
 
 @pytest.mark.asyncio
 async def test_catalog_metadata_fetches_only_when_a_read_may() -> None:
-    """A request-time read fetches on a cold cache; a read off the request path never does."""
-    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=60)
-
+    """Only a read with caching off fetches; one the refresher keeps warm, or one off the request path, never does."""
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)) as fetch:
-        assert await load_catalog_metadata(config, cached_only=True) is None
+        warm = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=60)
+        assert await load_catalog_metadata(warm) is None
+        assert await load_catalog_metadata(warm, cached_only=True) is None
         fetch.assert_not_called()
 
-        assert await load_catalog_metadata(config) is CATALOG
+        uncached = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=0)
+        assert await load_catalog_metadata(uncached, cached_only=True) is None
+        fetch.assert_not_called()
+        assert await load_catalog_metadata(uncached) is CATALOG
         fetch.assert_awaited_once()
 
-        assert await load_catalog_metadata(config, cached_only=True) is CATALOG
-    assert await load_catalog_metadata(GatewayConfig(models_dev_metadata=False)) is None
+        assert await load_catalog_metadata(warm, cached_only=True) is CATALOG
+        # Without models_dev_metadata nothing is fetched, and the catalog already held is still served.
+        assert await load_catalog_metadata(GatewayConfig(models_dev_metadata=False)) is CATALOG
+        fetch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False], ids=["metadata-on", "metadata-off"])
+async def test_the_bundled_catalog_serves_until_a_download_succeeds(enabled: bool) -> None:
+    config = GatewayConfig(models_dev_metadata=enabled, models_dev_cache_ttl_seconds=0)
+
+    with (
+        patch.object(mcs, "_fallback", return_value=EMPTY),
+        patch.object(mcs, "_fetch", new=AsyncMock(return_value=None)) as fetch,
+    ):
+        assert mcs.cached_models_dev_catalog() is EMPTY
+        assert await load_catalog_metadata(config) is EMPTY
+        assert fetch.await_count == int(enabled)
+
+        fetch.return_value = CATALOG
+        mcs.clear_catalog_cache()
+        assert await load_catalog_metadata(config) is (CATALOG if enabled else EMPTY)
+        assert mcs.cached_models_dev_catalog() is (CATALOG if enabled else EMPTY)
+
+
+def test_the_fallback_is_the_bundled_catalog() -> None:
+    catalog = _REAL_FALLBACK()
+
+    assert catalog is not None
+    assert catalog.model_for("openai", "gpt-4o") is not None
 
 
 V2_URL, V1_URL = (source.url for source in MODELS_DEV_SOURCES)
@@ -380,14 +405,14 @@ async def test_a_refused_download_logs_one_error_and_keeps_the_last_good_catalog
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(mcs, "_fetch", _REAL_FETCH)
-    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=0)
     with _serving(v2=SERVED):
-        good = await mcs.load_models_dev_catalog(config, force=True)
+        good = await mcs.load_models_dev_catalog(config)
     assert good is not None
 
     refused = {"openai": {"models": ["gpt-4o"]}}
     with _serving(v2=refused, v1=refused), _logs(caplog):
-        assert await mcs.load_models_dev_catalog(config, force=True) is good
+        assert await mcs.load_models_dev_catalog(config) is good
 
     assert [record.levelname for record in caplog.records] == ["WARNING", "ERROR"]
     assert "openai.models: expected an object; keeping the last good copy" in caplog.records[1].getMessage()
@@ -400,12 +425,19 @@ async def test_the_shared_fetch_fills_the_metadata_cache_and_is_reused() -> None
         assert await mcs.fetch_models_dev_document(fill_cache=True) is EMPTY
         assert await mcs.fetch_models_dev_document(reuse_within=60) is EMPTY
         assert download.await_count == 1
-
-        # A catalog refresher tick right after reuses it too, instead of fetching again.
-        config = GatewayConfig(master_key="k", models_dev_metadata=True)
-        assert await mcs.load_models_dev_catalog(config, force=True, reuse_within=60) is EMPTY
-        assert download.await_count == 1
+        assert mcs.cached_models_dev_catalog() is EMPTY
     mcs.clear_catalog_cache()
+
+
+@pytest.mark.asyncio
+async def test_a_stored_catalog_is_reused_by_when_it_was_downloaded() -> None:
+    """A catalog another worker downloaded an hour ago is reused within a day, and not within ten minutes."""
+    mcs.serve_catalog(CATALOG, datetime.now(UTC) - timedelta(hours=1))
+    with patch.object(mcs, "_download", new=AsyncMock(return_value=EMPTY)) as download:
+        assert await mcs.fetch_models_dev_document(reuse_within=86400) is CATALOG
+        download.assert_not_awaited()
+        assert await mcs.fetch_models_dev_document(reuse_within=600) is EMPTY
+        download.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -413,7 +445,7 @@ async def test_the_shared_fetch_leaves_the_cache_alone_unless_asked_and_raises_o
     mcs.clear_catalog_cache()
     with patch.object(mcs, "_download", new=AsyncMock(return_value=EMPTY)):
         await mcs.fetch_models_dev_document()
-    assert mcs._cache.ok is False
+    assert mcs._cache.data is None
 
     with (
         patch.object(mcs, "_download", new=AsyncMock(side_effect=mcs.ModelsDevFetchError("down"))),

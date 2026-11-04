@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from gateway.core.config import MAX_AGENT_MODEL_CANDIDATES
 
@@ -245,92 +245,3 @@ class AgentRecommendersPublic(BaseModel):
     """Every stored subagent router, oldest first."""
 
     data: list[AgentRecommenderPublic]
-
-
-# One request may not teach more than this. Each example costs an embedding call,
-# so a batch is a loop with a bound rather than an unbounded fan-out.
-MAX_EXAMPLES_PER_REQUEST = 100
-
-
-class ScoredExample(BaseModel):
-    """One prompt and how well each candidate answered it."""
-
-    prompt: str = Field(min_length=1, description="The prompt that was tried.")
-
-    @field_validator("prompt")
-    @classmethod
-    def _prompt_has_content(cls, value: str) -> str:
-        """Refuse a blank prompt rather than counting it and storing nothing.
-
-        ``record_preference`` returns 0 for a prompt with no content, so a
-        whitespace-only one wrote an audit row, no routing-memory row, and a
-        ``recorded`` count that silently disagreed with both.
-        """
-        if not value.strip():
-            raise ValueError("prompt cannot be blank")
-        return value
-
-    @field_validator("task_id")
-    @classmethod
-    def _normalize_task_id(cls, value: str | None) -> str | None:
-        """Trim the partition label, and treat blank as absent.
-
-        The request side already does this: ``Otari-Router-Task`` is trimmed and a
-        blank header means the default pool. Storing `" support "` verbatim created a
-        partition that ``Otari-Router-Task: support`` could never reach, and
-        ``/status`` listed it as a real pool.
-        """
-        if value is None:
-            return None
-        trimmed = value.strip()
-        return trimmed or None
-
-    scores: dict[str, Annotated[float, Field(ge=0.0, le=1.0)]] = Field(
-        min_length=1,
-        description=(
-            "Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and "
-            "meaningful: two models that both answered well is exactly the case where the router "
-            "should take the cheaper one."
-        ),
-    )
-    task_id: str | None = Field(
-        default=None,
-        description=(
-            "Partition this example belongs to, matching the Otari-Router-Task header requests send. "
-            "Omit to file it in the user's default pool."
-        ),
-    )
-    label_source: str = Field(default="human", description="Provenance of the scores: 'human' or 'judge'.")
-
-
-class _ScoredBatch(BaseModel):
-    """Record how well each candidate did, for one or many prompts.
-
-    A batch because of the arithmetic: a pool routes nothing until it holds
-    ``router_seed_count`` examples (20 by default) and the vote reads the ``k``
-    nearest (5 by default), so a useful first teaching pass is dozens of examples
-    across the kinds of prompt you care about.
-    """
-
-    examples: list[ScoredExample] = Field(
-        min_length=1,
-        max_length=MAX_EXAMPLES_PER_REQUEST,
-        description="The scored prompts to record.",
-    )
-
-
-class RankRequest(_ScoredBatch):
-    user_id: str = Field(description="Whose routing memory these examples belong to.")
-    workspace_id: uuid.UUID | None = Field(
-        default=None,
-        description=(
-            "Which workspace's routing memory these examples belong to. Omit for the deployment's "
-            "default workspace. Only requests billing to that workspace vote over them."
-        ),
-    )
-
-
-class KeyRankRequest(_ScoredBatch):
-    # Forbidden rather than ignored: a `user_id` copied from the operator route
-    # would otherwise be dropped silently and the examples filed under the key's user.
-    model_config = ConfigDict(extra="forbid")

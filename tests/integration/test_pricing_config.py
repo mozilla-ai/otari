@@ -705,8 +705,9 @@ def test_pricing_initialization_with_no_config(postgres_url: str, test_db: Sessi
         with TestClient(app):
             # App should start successfully
             # No pricing should be in database
-            pricing_count = test_db.query(ModelPricing).count()
-            assert pricing_count == 0, "No pricing should be loaded when config is empty"
+            rows = [(row.kind, row.model_key, row.origin) for row in test_db.query(ModelPricing)]
+            # The one row on a fresh database is the migration's price of 0 for the built-in fetcher.
+            assert rows == [("fetch", "builtin_fetch", "migration")], "No pricing should be loaded when config is empty"
     finally:
         dispose_override()
 

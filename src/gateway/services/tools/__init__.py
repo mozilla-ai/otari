@@ -17,6 +17,7 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
 ``tools_to_price`` and ``configured_tools_to_price`` say which pricing rows ``require_pricing`` checks for a
 request's gateway-run tools, and for the deployment's at startup, and ``unpriced_tool_detail`` what its refusal says.
+``deployment_tool_rate_keys`` names the own price row of each of the deployment's search and fetch tools.
 ``search_provider_catalog`` lists the providers a search or fetch tool may name.
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
@@ -24,6 +25,7 @@ request's gateway-run tools, and for the deployment's at startup, and ``unpriced
 ``web_search_configured`` answers whether the in-loop default yields a search, and ``warn_about_tool_instances``
 logs at startup what the instance rules let load but an operator should fix.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
+``search_resolves`` and ``fetch_resolves`` whether a declared search or fetch finds anything to run on,
 ``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
 and ``builtin_fetch_resolved`` answers ``builtin_fetch``'s without a config. ``WebFetchBackend`` runs the fetch
 tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds one for a request, and
@@ -108,6 +110,7 @@ from gateway.services.tools._tool_prices import (
     PricedTool,
     admitted_tools,
     configured_tools_to_price,
+    deployment_tool_rate_keys,
     tools_to_price,
     unpriced_tool_detail,
 )
@@ -158,6 +161,7 @@ from gateway.services.tools._web_search import (
     SearchQuery,
     WebSearchBackend,
     builtin_fetch_resolved,
+    fetch_resolves,
     filter_hits_by_domain,
     page_budget_chars,
     pick_direct_search_instance,
@@ -167,6 +171,7 @@ from gateway.services.tools._web_search import (
     resolve_in_loop_search,
     resolve_search,
     run_direct_search,
+    search_resolves,
     warn_about_tool_instances,
     web_search_configured,
 )
@@ -208,6 +213,7 @@ __all__ = [
     "PricedTool",
     "admitted_tools",
     "configured_tools_to_price",
+    "deployment_tool_rate_keys",
     "tools_to_price",
     "unpriced_tool_detail",
     "NO_WEB_TOOLS",
@@ -300,7 +306,9 @@ __all__ = [
     "pick_direct_search_instance",
     "refuse_unpriced_direct_search",
     "resolve_direct_search",
+    "fetch_resolves",
     "run_direct_search",
+    "search_resolves",
     "warn_about_tool_instances",
     "web_search_configured",
 ]

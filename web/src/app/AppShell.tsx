@@ -795,7 +795,10 @@ function AppShellChrome() {
   const backgroundInert = isMobile && mobileNavOpen ? true : undefined
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden">
+    // NOTE: This clips rather than hides. `overflow: hidden` makes a box a
+    // scroll container, and a control's real input is positioned against this
+    // box, so one past the fold gives it a scroll range that focus scrolls.
+    <div className="relative flex h-full flex-col overflow-clip">
       {/* The first tab stop: a keyboard user can jump straight to the page body
           instead of tabbing through the whole nav on every route. Visually hidden
           until focused, then pinned top-left over the header (z above it). Goes

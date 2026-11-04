@@ -19,7 +19,7 @@ async def load_catalog_metadata(config: GatewayConfig, *, cached_only: bool = Fa
     :func:`~gateway.services.model_catalog_service.cached_models_dev_catalog`.
     """
     if cached_only:
-        return cached_models_dev_catalog(config)
+        return cached_models_dev_catalog()
     return await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
 
 

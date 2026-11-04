@@ -54,3 +54,54 @@ async def test_an_unpriced_model_is_remembered_as_unpriced(monkeypatch: pytest.M
     assert await prices.resolve(None, "local", "free") is None  # type: ignore[arg-type]
     assert await prices.resolve(None, "local", "free") is None  # type: ignore[arg-type]
     assert lookup.await_count == 1
+
+
+@pytest.mark.parametrize(
+    ("unit", "missing"),
+    [("tokens", False), ("requests", False), ("images", False), ("second", True), ("minute", True)],
+)
+def test_a_rate_in_a_unit_with_no_completion_meter_is_pricing_required(unit: str, *, missing: bool) -> None:
+    from decimal import Decimal
+
+    from gateway.models.pricing import ModelPricing
+
+    rate = ModelPricing(
+        model_key="openai:gpt-4o", input_price_per_million=Decimal(1), output_price_per_million=Decimal(1), unit=unit
+    )
+
+    assert pricing_service.pricing_required_but_missing(rate, require_pricing=True) is missing
+    assert not pricing_service.pricing_required_but_missing(rate, require_pricing=False)
+
+
+def test_no_rate_is_pricing_required_only_when_pricing_is_required() -> None:
+    assert pricing_service.pricing_required_but_missing(None, require_pricing=True)
+    assert not pricing_service.pricing_required_but_missing(None, require_pricing=False)
+
+
+def test_the_refusal_names_the_unit_no_completion_meter_reads() -> None:
+    detail = pricing_service.no_pricing_error_detail("openai:gpt-4o", unit="second")
+
+    assert detail.startswith("Model 'openai:gpt-4o' is priced per second, which no completion meter reads yet")
+    assert "No pricing is configured" not in detail
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_in_a_unit_with_no_completion_meter_estimates_as_unpriced() -> None:
+    """Its estimate would be nothing, and nothing ranks cheapest; ``None`` keeps it behind every priced candidate."""
+    from decimal import Decimal
+
+    from gateway.models.pricing import ModelPricing
+    from gateway.services.pricing_service import ResolvedPricing
+
+    prices = RequestPrices(None, Mock(spec=OrganizationModelPricingRepository))
+    tokens = ModelPricing(model_key="openai:a", input_price_per_million=Decimal(1), output_price_per_million=Decimal(1))
+    seconds = ModelPricing(
+        model_key="openai:b", input_price_per_million=Decimal(1), output_price_per_million=Decimal(1), unit="second"
+    )
+    prices._resolved[("openai", "a", False)] = ResolvedPricing(tokens, "deployment", "openai:a")  # noqa: SLF001
+    prices._resolved[("openai", "b", False)] = ResolvedPricing(seconds, "deployment", "openai:b")  # noqa: SLF001
+    prices._resolved[("openai", "c", False)] = None  # noqa: SLF001
+
+    costs = await prices.estimate_candidates([("openai", "a"), ("openai", "b"), ("openai", "c")], lambda _: Decimal(2))
+
+    assert costs == {"openai:a": Decimal(2), "openai:b": None, "openai:c": None}

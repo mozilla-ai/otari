@@ -20,6 +20,7 @@ from gateway.api.routes import (
     budgets,
     catalog,
     chat,
+    code_execution,
     country_database,
     decisions,
     embeddings,
@@ -59,7 +60,6 @@ from gateway.api.routes import (
     responses,
     retired_root,
     routing,
-    routing_memory,
     scoped_budgets,
     search,
     search_tools,
@@ -150,6 +150,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # since the harness dispatches the subagent to its own provider.
     agent_routing.router,
     search.router,
+    code_execution.router,
     batches.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
@@ -214,10 +215,6 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     aliases.router,
     provider_endpoints.router,
     routing.router,
-    # Both under /routing: the operator's teach any user's memory, the key's only
-    # its own user's.
-    routing_memory.operator_router,
-    routing_memory.key_router,
     # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     pricing.operator_router,

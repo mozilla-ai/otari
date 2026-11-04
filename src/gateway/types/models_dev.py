@@ -4,6 +4,8 @@ models.dev (https://models.dev, MIT licensed) publishes what each provider serve
 model's modalities, flags, limits, prices and dates. The gateway reads it in three
 places, the metadata a listing shows, the price index and the stored price snapshot,
 and all three read it through this module, so a change upstream is one change here.
+The gateway also stores the whole typed catalog (:func:`catalog_document`), so a
+restart or an offline deployment still has the facts.
 
 models.dev publishes two documents. v2 is the full one, and v1 is a reduced copy
 made from it. Both read into the same types: the v2 reader fills every field the
@@ -17,14 +19,16 @@ snapshot is cut with the same rules as every snapshot the gateway stores.
 
 import math
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass, fields, is_dataclass
 from types import MappingProxyType
 from typing import Any
 
 __all__ = [
+    "CATALOG_FORMAT",
     "LISTING_PREFIX",
     "MAX_ISSUE_EXAMPLES",
     "MODELS_DEV_SOURCES",
+    "MODELS_DEV_UNITS",
     "RATE_FIELDS",
     "REFUSE_DAMAGED_SHARE",
     "ModelsDevApi",
@@ -42,10 +46,12 @@ __all__ = [
     "ModelsDevSource",
     "ModelsDevTier",
     "ModelsDevUnitPrice",
+    "catalog_document",
     "models_dev_provider_id",
     "models_dev_provider_ids",
     "parse_catalog",
     "parse_catalog_v2",
+    "read_catalog_document",
     "snapshot_document",
 ]
 
@@ -60,11 +66,20 @@ MAX_ISSUE_EXAMPLES = 5
 # broken provider stays under it, while a format change upstream damages most.
 REFUSE_DAMAGED_SHARE = 0.25
 
+# The version of the stored catalog format, in ``_meta.format``. A document
+# without it is a price snapshot in the shape of a v1 ``api.json``.
+CATALOG_FORMAT = 2
+_META_KEY = "_meta"
+
 # A key longer than this is cut and quoted in an issue path.
 _MAX_SEGMENT = 64
 
 # The rate fields of a ``cost`` block and of each tier in it, USD per million tokens.
 RATE_FIELDS = ("input", "output", "cache_read", "cache_write")
+
+# The units a v2 price can be in (``CostUnitV2Values`` in models.dev's
+# ``packages/core/src/schema-v2.ts``). A price that names none is per ``token``.
+MODELS_DEV_UNITS = ("token", "character", "image", "megapixel", "second", "minute")
 
 # models.dev spells a handful of providers differently from any-llm. Looked up
 # by the any-llm implementation name; a provider absent here is spelled the same
@@ -172,9 +187,10 @@ class ModelsDevOverride:
 class ModelsDevUnitPrice:
     """One v2 price: an input, an output or ``web_search``.
 
-    ``unit`` is ``None`` where the document gives none, which models.dev reads
-    as ``token``. A ``token`` or ``character`` price is per million, and every
-    other unit is per one. ``explicit_cache`` is the document's
+    ``unit`` is the document's, ``None`` where it gives none, which models.dev
+    reads as ``token``. One not in ``MODELS_DEV_UNITS`` is kept and named in the
+    catalog's issues, and ``gateway.types.price_unit`` says what one price buys.
+    ``explicit_cache`` is the document's
     ``cache.explicit``: the prices of explicit caching where a host prices it
     apart from implicit caching. ``malformed`` names each field present but not
     a number, by its path (``price``, ``cache.read``, ``cache.explicit.write``).
@@ -256,8 +272,12 @@ class ModelsDevModel:
     last_updated: str | None = None
     cost: ModelsDevCost | None = None
     """The per-token text prices, as v1 shows them."""
-    type: str = "chat"
-    """What the model does (``chat``, ``image``, ``embedding``...); a document that gives none means ``chat``."""
+    type: str | None = "chat"
+    """What the model does (``chat``, ``image``, ``embedding``...); a v2 model that gives none is ``chat``.
+
+    ``None`` for a v1 model: v1 has no type, and calling every v1 model ``chat``
+    would call its embedding models chat models too.
+    """
     api: tuple[ModelsDevApi, ...] = ()
     """The protocols the host takes, in its order of preference. v2 only."""
     pricing: ModelsDevPricing | None = None
@@ -282,19 +302,25 @@ class ModelsDevIssues:
     first few as ``path: expected <type>``. A path names keys and types only,
     never a value, because the document is fetched data. ``models`` counts the
     model entries the document lists, and ``damaged_models`` those left out or
-    read with a field missing.
+    read with a field missing. ``unknown_units`` names each v2 price unit the
+    document uses that ``MODELS_DEV_UNITS`` does not, once, in document order.
+    Such a price keeps its unit and prices nothing here, so it is not damage,
+    and a unit added upstream never refuses the document.
     """
 
     count: int = 0
     examples: tuple[str, ...] = ()
     models: int = 0
     damaged_models: int = 0
+    unknown_units: tuple[str, ...] = ()
 
     def describe(self) -> str:
-        """The issues for a log line: how many, in how many models, and the first few paths."""
-        return "; ".join(
-            (f"{self.count} unreadable values in {self.damaged_models} of {self.models} models", *self.examples)
-        )
+        """The issues for a log line: how many, in how many models, the first few paths, and the units not known."""
+        parts = [f"{self.count} unreadable values in {self.damaged_models} of {self.models} models", *self.examples]
+        if self.unknown_units:
+            # Fetched text, bounded and quoted the way a path segment is.
+            parts.append(f"price units not known here: {', '.join(_segment(unit) for unit in self.unknown_units)}")
+        return "; ".join(parts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,6 +386,7 @@ class _Reader:
     def __init__(self) -> None:
         self.count = 0
         self.examples: list[str] = []
+        self.unknown_units: list[str] = []
 
     def note(self, path: str, expected: str) -> None:
         self.count += 1
@@ -466,7 +493,7 @@ class _Reader:
             release_date=self.text(raw, "release_date", path),
             last_updated=self.text(raw, "last_updated", path),
             cost=self.cost(raw, path),
-            type=self.text(raw, "type", path) or "chat",
+            type=None,
         )
 
     def model_v2(self, key: str, raw: dict[str, Any], path: str) -> ModelsDevModel:
@@ -605,9 +632,12 @@ class _Reader:
         reasoning = self.price(entry, "reasoning", path, malformed)
         cache, explicit = self.cache(entry, path, malformed)
         overrides = [self.override(item, at) for at, item in self.objects(entry, "overrides", path)]
+        unit = self.text(entry, "unit", path)
+        if unit is not None and unit not in MODELS_DEV_UNITS and unit not in self.unknown_units:
+            self.unknown_units.append(unit)
         return ModelsDevUnitPrice(
             price=price,
-            unit=self.text(entry, "unit", path),
+            unit=unit,
             reasoning=reasoning,
             cache=cache,
             explicit_cache=explicit,
@@ -820,7 +850,13 @@ def _parse(raw: object, read_model: Callable[[_Reader, str, dict[str, Any], str]
             doc=reader.text(provider, "doc", path),
             models=MappingProxyType(models),
         )
-    issues = ModelsDevIssues(count=reader.count, examples=tuple(reader.examples), models=seen, damaged_models=damaged)
+    issues = ModelsDevIssues(
+        count=reader.count,
+        examples=tuple(reader.examples),
+        models=seen,
+        damaged_models=damaged,
+        unknown_units=tuple(reader.unknown_units),
+    )
     return ModelsDevCatalog(providers=MappingProxyType(providers), issues=issues)
 
 
@@ -888,3 +924,125 @@ def snapshot_document(catalog: ModelsDevCatalog) -> dict[str, Any]:
         entry["models"] = {model_key: _model_document(model_key, model) for model_key, model in provider.models.items()}
         document[key] = entry
     return document
+
+
+def _encoded(value: object) -> object:
+    """A catalog value as JSON: a dataclass without the fields left at their default, a tuple as a list."""
+    if is_dataclass(value) and not isinstance(value, type):
+        document: dict[str, object] = {}
+        for field in fields(value):
+            item = getattr(value, field.name)
+            if field.default is MISSING or item != field.default:
+                document[field.name] = _encoded(item)
+        return document
+    if isinstance(value, Mapping):
+        return {key: _encoded(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_encoded(item) for item in value]
+    return value
+
+
+def catalog_document(catalog: ModelsDevCatalog, **meta: object) -> dict[str, Any]:
+    """The catalog as JSON with every field it has, for :func:`read_catalog_document` to read back.
+
+    ``meta`` joins the format marker under ``_meta``.
+    """
+    document = _encoded(catalog)
+    assert isinstance(document, dict)
+    return {_META_KEY: {"format": CATALOG_FORMAT, **meta}, **document}
+
+
+def _load[T](cls: Callable[..., T], raw: object, **read: Callable[[Any], object]) -> T:
+    """``cls`` from a stored object: ``read`` reads each field that holds catalog types, and the rest read frozen."""
+    if not isinstance(raw, dict):
+        raise TypeError("expected an object")
+    return cls(**{name: read[name](value) if name in read else _frozen(value) for name, value in raw.items()})
+
+
+def _each[T](read: Callable[[Any], T]) -> Callable[[Any], tuple[T, ...]]:
+    return lambda raw: tuple(read(item) for item in raw)
+
+
+def _keyed[T](read: Callable[[Any], T]) -> Callable[[Any], Mapping[str, T]]:
+    return lambda raw: MappingProxyType({str(key): read(item) for key, item in raw.items()})
+
+
+def _stored_rates(raw: object) -> ModelsDevRates:
+    return _load(ModelsDevRates, raw)
+
+
+def _stored_tier(raw: object) -> ModelsDevTier:
+    return _load(ModelsDevTier, raw, rates=_stored_rates)
+
+
+def _stored_cost(raw: object) -> ModelsDevCost:
+    return _load(ModelsDevCost, raw, rates=_stored_rates, tiers=_each(_stored_tier), context_over_200k=_stored_rates)
+
+
+def _stored_cache(raw: object) -> ModelsDevCachePrices:
+    return _load(ModelsDevCachePrices, raw)
+
+
+def _stored_override(raw: object) -> ModelsDevOverride:
+    return _load(ModelsDevOverride, raw, cache=_stored_cache, explicit_cache=_stored_cache)
+
+
+def _stored_unit_price(raw: object) -> ModelsDevUnitPrice:
+    return _load(
+        ModelsDevUnitPrice, raw, cache=_stored_cache, explicit_cache=_stored_cache, overrides=_each(_stored_override)
+    )
+
+
+def _stored_modality(raw: object) -> ModelsDevModalityCost:
+    return _load(ModelsDevModalityCost, raw, input=_stored_unit_price, output=_stored_unit_price)
+
+
+def _stored_multiplier(raw: object) -> ModelsDevMultiplier:
+    return _load(ModelsDevMultiplier, raw)
+
+
+def _stored_pricing(raw: object) -> ModelsDevPricing:
+    return _load(
+        ModelsDevPricing,
+        raw,
+        modalities=_keyed(_stored_modality),
+        web_search=_stored_unit_price,
+        multipliers=_each(_stored_multiplier),
+    )
+
+
+def _stored_api(raw: object) -> ModelsDevApi:
+    return _load(ModelsDevApi, raw)
+
+
+def _stored_model(raw: object) -> ModelsDevModel:
+    return _load(ModelsDevModel, raw, cost=_stored_cost, api=_each(_stored_api), pricing=_stored_pricing)
+
+
+def _stored_provider(raw: object) -> ModelsDevProvider:
+    return _load(ModelsDevProvider, raw, models=_keyed(_stored_model))
+
+
+def _stored_issues(raw: object) -> ModelsDevIssues:
+    return _load(ModelsDevIssues, raw)
+
+
+def read_catalog_document(raw: object) -> ModelsDevCatalog:
+    """Read a document :func:`catalog_document` wrote, or an older price snapshot, which has no format marker.
+
+    The marker, not the shape, says which it is. A stored catalog is the
+    gateway's own copy, so it is read whole or not at all: anything this
+    version cannot read, a newer format included, raises ``ValueError``.
+    """
+    if not isinstance(raw, Mapping):
+        raise ValueError("The stored models.dev catalog is not a JSON object")
+    body = {key: value for key, value in raw.items() if key != _META_KEY}
+    meta = raw.get(_META_KEY)
+    if not isinstance(meta, Mapping) or "format" not in meta:
+        return parse_catalog(body)
+    if meta["format"] != CATALOG_FORMAT:
+        raise ValueError(f"The stored models.dev catalog has format {meta['format']!r}, not {CATALOG_FORMAT}")
+    try:
+        return _load(ModelsDevCatalog, body, providers=_keyed(_stored_provider), issues=_stored_issues)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(f"The stored models.dev catalog cannot be read: {type(exc).__name__}") from exc

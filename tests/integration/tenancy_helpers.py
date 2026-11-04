@@ -5,6 +5,7 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
+from collections.abc import Collection
 from typing import Any, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +50,16 @@ NO_TERMS = InvitationClaimSettings(terms_url=None)
 
 # No invitation mail limit, for a test that is not about it.
 NO_MAIL_LIMIT = InvitationMailLimit(None, per_organization=None, per_address=None)
+
+
+class _NoBlockedAddresses:
+    """A blocklist that blocks nothing, for a test that is not about it."""
+
+    async def blocked_among(self, emails: Collection[str]) -> set[str]:
+        return set()
+
+
+NO_BLOCKED_ADDRESSES = _NoBlockedAddresses()
 
 
 def claim_writes(db: AsyncSession) -> dict[str, Any]:

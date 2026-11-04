@@ -44,16 +44,19 @@ describe("defaultTargetOf", () => {
 })
 
 describe("isEditableInForm", () => {
-  it.each(["knn", " KNN "])("keeps %s policies read-only", (router) => {
-    expect(
-      isEditableInForm({
-        select: [
-          { router, candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
-          { default: "openai:gpt-5" },
-        ],
-      }),
-    ).toBe(false)
-  })
+  it.each(["cheapest", " CHEAPEST "])(
+    "keeps %s policies read-only",
+    (router) => {
+      expect(
+        isEditableInForm({
+          select: [
+            { router, candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
+            { default: "openai:gpt-5" },
+          ],
+        }),
+      ).toBe(false)
+    },
+  )
 })
 
 describe("candidatesOf", () => {
@@ -93,7 +96,7 @@ describe("initialPool", () => {
 
 describe("normalizedBackend", () => {
   it("matches the server's own strip-and-lower", () => {
-    expect(normalizeBackend(" KNN ")).toBe("knn")
+    expect(normalizeBackend(" Weighted ")).toBe("weighted")
   })
 
   it("passes undefined through", () => {

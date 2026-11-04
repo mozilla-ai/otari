@@ -6,11 +6,12 @@ the services that build those entries. ``PricedKind`` carries the rules a price
 row's kind adds, for the deployment's and the organizations' request bodies.
 """
 
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel, Field, model_validator
 
 from gateway.models.pricing import MODEL_KIND, PricingKind, is_tool_price_key
+from gateway.types.price_unit import PriceUnit
 
 PRICING_KIND_DESCRIPTION = (
     "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, "
@@ -29,7 +30,7 @@ class PricedKind(BaseModel):
 
     if TYPE_CHECKING:
         model_key: str
-        unit: Literal["tokens", "requests", "images"]
+        unit: PriceUnit
 
     @property
     def row_kind(self) -> PricingKind:

@@ -25,8 +25,11 @@ context and calls the adapter.
 2. **Write the adapter.** Build the request from the shared parameters and the native options,
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
-   - Send with `self._http.request`, which uses the host's client and the provider's timeout and
-     turns a transport failure into a `ProviderError` without its text.
+   - Send with `self._http.request`, which uses the host's client and the provider's timeout,
+     names the library in the request's `User-Agent` (`any-search/<version>` or
+     `any-fetch/<version>`) and turns a transport failure into a `ProviderError` without its
+     text. An adapter sets no `User-Agent` of its own, even where the provider's SDK names
+     itself: that header is the one exception to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
@@ -45,6 +48,8 @@ context and calls the adapter.
    - A date without a zone is UTC.
    - The cost is the provider's reported figure only, as a `Decimal`, with `cost_source` set.
    - `api_base` replaces the endpoint for every provider; strip its trailing slash.
+   - Bump the package's `__version__` (`<import name>/__init__.py`): it names the library in
+     every request's `User-Agent`, so a provider can tie a change in its traffic to a release.
 3. **Record fixtures and test.** Record one fixture per case (below) with
    `uv run python <package>/scripts/record_fixture.py`. Keep them small: ask for few results and
    little text. Check the key is not in them. Then add:
@@ -90,7 +95,9 @@ The four cases a fixture can record:
   native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
   `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
 - A hit needs a URL. Drop an item without one only when the provider's documentation allows such
-  an item; otherwise it is `unexpected_response`. `title` and `snippet` are strings, never `None`.
+  an item; otherwise it is `unexpected_response`. When the provider is seen to send a string that
+  is not an http(s) URL with a host, such as Serply's Google redirect tokens, drop that item too
+  and fill the count from the items after it. `title` and `snippet` are strings, never `None`.
   `snippet` is the provider's short text; `text` is page text, when it came back.
 - List the fields the adapter checks in the module's docstring and the README's section on the
   provider.
@@ -243,3 +250,33 @@ provider with no empty page.
   (`?spm=a2c6h`, `#1`); the adapter passes them as they are.
 - Fixture recipes: an empty search with `site:` set to a domain that does not exist; a refused
   key as any `sk-` string of the right length.
+
+### 2026-11-03, Serply (any-search)
+
+The first search provider with the query in the URL and the key in a header, and the first that
+returns a scraped results page.
+
+- Set `query_in_url` without `key_in_url` when only the query travels in the URL; the real-socket
+  log test still applies, since httpx logs the URL with the query in it.
+- A native option can be a request header: Serply's `X-Proxy-Location` and `X-User-Agent` keep
+  the provider's header names and go out as headers, and the key is set after them, so no option
+  replaces it.
+- A provider can pass parameters through that its documentation does not list: Serply forwards
+  Google's own `tbs` and `tbm`, which is how `time_range` is mapped. Check each one live before
+  offering it, and say in the docstring when it was checked: `tbm=nws` works, `tbm=isch` returned
+  no `results`.
+- A result can carry a value of the right type that is not what the field promises: Serply
+  sometimes returns an opaque Google token in `link` in place of a URL. Drop such an item rather
+  than failing the whole search, and fill the count from the items after it.
+- A provider can choose the region a search runs from unless an option pins it. Without `gl`,
+  Serply answered a news query with Swedish relative times, and the same English web result came
+  dated `May 27, 2026` on one call and `27.05.2026` on another. Say in the option's description
+  and in the pricing note which option an operator should set on the instance.
+- A results page shows its dates as text in the language of the region that served it: Serply's
+  come in `metadata.published_time` (`Oct 7, 2026`, `17 hours ago`) or `metadata.attributes`
+  (`27.05.2026`, `vor 23 Stunden`). Such a field stays in `raw`, as Tabstack's PDF dates do: a
+  parser for the one form a fixture shows dates some hits and silently drops the rest. Probe with
+  several queries rather than one repeated, since Serply answered a repeated query identically.
+- A documentation's default can be wrong: Serply documents `desktop` as its `X-User-Agent`
+  default, but its answers reported `mobile`. Describe an option by what it does, not by a default
+  you have not seen.

@@ -11,11 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdRate
-
-# The vocabulary of ``ModelPricing.unit`` and ``OrganizationModelPricing.unit``.
-# Every per-unit reader (``services/pricing_service`` helpers, the catalog) keys
-# on these spellings, and the request schemas validate against them.
-PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
+from gateway.types.price_unit import PriceUnit
 
 # The counts an attempt reports in a unit other than tokens, keyed by meter. They
 # are the keys of ``billing_meters`` on the row a count settles.
@@ -128,10 +124,10 @@ class ModelPricing(Base):
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # What ``input_price_per_million`` is a rate per: ``tokens`` for a model,
     # ``requests`` for a gateway-run tool, a moderation call or a completion model
-    # billed per call, ``images`` for
-    # image generation. The rate columns are shared by all three and a reader
-    # cannot tell which from the number, so the row says (``PRICING_UNITS``).
-    unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
+    # billed per call, ``images`` for image generation. The rate columns are
+    # shared by every unit and a reader cannot tell which from the number, so
+    # the row says (``gateway.types.price_unit.PriceUnit``).
+    unit: Mapped[PriceUnit] = mapped_column(String(16), default="tokens", server_default="tokens")
     # Which path wrote the row: ``config`` (the file's ``pricing:`` block),
     # ``api`` (``POST /v1/pricing``), ``migration``, or ``seed`` (a community
     # default stored on a hosted model's behalf). NULL on a row written before
@@ -279,7 +275,7 @@ class OrganizationModelPricing(Base):
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # The same two columns ``ModelPricing`` carries, for the same reasons: an
     # override is read as a ``ModelPricing`` and has to say what it is per.
-    unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
+    unit: Mapped[PriceUnit] = mapped_column(String(16), default="tokens", server_default="tokens")
     origin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # ``UtcDateTime``, not ``DateTime(timezone=True)``, and this is the one place
     # in this file where that distinction is load-bearing. The flag is a no-op on

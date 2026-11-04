@@ -60,6 +60,7 @@ from gateway.core.usage import (
     cache_write_tokens_of,
 )
 from gateway.log_config import logger
+from gateway.types.price_unit import PriceUnit
 
 RATE_FIELDS: tuple[str, ...] = (
     "input_price_per_million",
@@ -366,7 +367,7 @@ def _charge_line(meter: str, units: int, rate: Decimal, cost: Decimal) -> Charge
     return {"meter": meter, "units": units, "rate_per_million": float(rate), "cost": float(cost)}
 
 
-REQUESTS_UNIT = "requests"
+REQUESTS_UNIT: PriceUnit = "requests"
 
 
 def priced_per_request(pricing: typing.Any) -> bool:

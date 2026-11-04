@@ -433,3 +433,68 @@ def test_session_on_one_own_key_holds_over_another(router: AutomaticRouter) -> N
     assert first.automatic is not None
     first.automatic.start(first.attempts[1]).finish(success=True)
     assert _rank(router, own=own, costs={"us:model": Decimal(1), "eu:model": Decimal(2)}).head.instance == "eu"
+
+
+def _credential(name: str) -> Attempt:
+    """Build one offering whose credential fingerprint is distinct per name."""
+    return Attempt(1, name, LLMProvider.OPENAI, "model", {"api_key": f"{name}-secret"})
+
+
+def test_full_health_table_evicts_the_least_recent_idle_entry(
+    router: AutomaticRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new credential replaces the least recently used idle one, so the table never grows past its bound."""
+    monkeypatch.setattr("gateway.services.routing._automatic._LIMIT", 2)
+    plan = _rank(router)
+    assert plan.automatic is not None
+    first, second, third = (_credential(name) for name in ("a", "b", "c"))
+    plan.automatic.start(first).finish(success=True)
+    plan.automatic.start(second).finish(success=True)
+    plan.automatic.start(first).finish(success=True)
+    plan.automatic.start(third).finish(success=True)
+    assert list(router.health) == [router.candidate_key(first), router.candidate_key(third)]
+
+
+def test_full_health_table_of_active_calls_evicts_nothing(
+    router: AutomaticRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A call beyond the bound goes untracked rather than dropping the load of one still in flight."""
+    monkeypatch.setattr("gateway.services.routing._automatic._LIMIT", 1)
+    plan = _rank(router, anchor="")
+    assert plan.automatic is not None
+    busy = plan.automatic.start(_credential("a"))
+    untracked = plan.automatic.start(_credential("b"))
+    assert untracked.health is None
+    untracked.finish(success=True)
+    assert list(router.health) == [router.candidate_key(_credential("a"))]
+    assert router.health[router.candidate_key(_credential("a"))].active == 1
+    busy.finish()
+    assert router.health[router.candidate_key(_credential("a"))].active == 0
+
+
+def test_full_affinity_table_drops_the_oldest_session(router: AutomaticRouter, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A new session binding past the bound evicts the binding refreshed longest ago."""
+    monkeypatch.setattr("gateway.services.routing._automatic._LIMIT", 2)
+    for anchor in ("first", "second", "third"):
+        plan = _rank(router, anchor=anchor)
+        assert plan.automatic is not None
+        plan.automatic.start(plan.attempts[1]).finish(success=True)
+    assert len(router.affinities) == 2
+    assert _rank(router, anchor="first").head.instance == "us"
+    assert _rank(router, anchor="second").head.instance == "eu"
+    assert _rank(router, anchor="third").head.instance == "eu"
+
+
+def test_close_releases_outstanding_calls_without_binding(router: AutomaticRouter) -> None:
+    """Closing a selection frees every unfinished call's load once and records no session or cooldown."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    plan.automatic.start(plan.attempts[0])
+    plan.automatic.start(plan.attempts[1])
+    done = plan.automatic.start(plan.attempts[1])
+    done.finish()
+    plan.automatic.close()
+    plan.automatic.close()
+    assert all(health.active == 0 for health in router.health.values())
+    assert all(health.cooldown == 0 for health in router.health.values())
+    assert not router.affinities

@@ -6,7 +6,7 @@ Scope: entire repo.
 `CLAUDE.md` is a one-line `@AGENTS.md` import of this file, not a symlink, so it survives Windows clones (Git for Windows checks symlinks out as plain text files by default). Always edit `AGENTS.md` directly; never modify `CLAUDE.md`. The same pairing is used in `web/` and `src/gateway/`.
 
 ## Project Snapshot
-- Project: `otari`, an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is named `gateway` (not `otari`): the `otari` distribution name on PyPI belongs to the Otari client SDK, which `any-llm-sdk` depends on, so a top-level `otari` import package here would collide with it. User-facing names (CLI, env vars, docs, OpenAPI title) are `otari`; only the internal import path stays `gateway`. The laptop-side code (the Agent Guardrails evaluator, the Claude Code transcript parser) lives in a uv workspace member at `cli/` (distribution `otari-agent`, import package `otari_agent`), which the gateway depends on and which may not import the gateway back.
+- Project: `otari`, an AI gateway (API key management, budget enforcement, usage tracking). The Python package is named `gateway` (not `otari`): the `otari` distribution name on PyPI belongs to the Otari client SDK, which `any-llm-sdk` depends on, so a top-level `otari` import package here would collide with it. User-facing names (CLI, env vars, docs, OpenAPI title) are `otari`; only the internal import path stays `gateway`. The laptop-side code (the Agent Guardrails evaluator, the Claude Code transcript parser) lives in a uv workspace member at `cli/` (distribution `otari-agent`, import package `otari_agent`), which the gateway depends on and which may not import the gateway back.
 - Claude Code plugins live under `plugins/<name>/`, and `.claude-plugin/marketplace.json` at the repository root lists them, so the repository is a plugin marketplace (`/plugin marketplace add mozilla-ai/otari`). `claude plugin validate` and `claude plugin test` cover a plugin where Claude Code is installed; `tests/unit/test_otari_router_plugin.py` pins that the marketplace file, a manifest and its hooks file agree. A plugin installed from GitHub is pinned by its manifest's `version`, so a change to one bumps it.
 - Provider calls go through the `any-llm` SDK (`any_llm`), not hand-rolled HTTP clients. A change to how a provider call is made may not belong in this repo. Decide that before implementing, and say which side you landed on: [CONTRIBUTING.md](CONTRIBUTING.md#is-this-an-otari-change-or-an-any-llm-change).
 - Web search and web fetch providers are reached through two more workspace members, `any-search/` and `any-fetch/` (import packages `any_search` and `any_fetch`), libraries built the way any-llm is that depend on httpx and pydantic alone and may not import the gateway, its server stack or each other; each one's README says how to call it.
@@ -149,15 +149,20 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   future mcp adds), so the cost is paid here rather than in the response shape.
 
 ## Docs
-`docs/` is the published documentation, and [docs/index.md](docs/index.md) is its map,
-grouped by reader: start here, operators, integrators, platform builders, contributors.
+`docs/` is the published documentation. Write each page as one [Diátaxis](https://diataxis.fr)
+kind (tutorial, how-to guide, reference or explanation), and put a section of another kind on
+the page of that kind rather than beside it.
 Read the page covering the area you are changing before you change it, and update that
 page in the same PR when behavior moves. Nothing fails when a docs page goes stale,
 unlike the artifacts above, so a reader finds the drift rather than CI.
 
 The GitBook site publishes the pages [docs/SUMMARY.md](docs/SUMMARY.md) lists, on each
 release (`otari-docs.yml`, see [RELEASE.md](RELEASE.md)). A new page under `docs/` therefore owes
-a `SUMMARY.md` entry, and `tests/unit/test_gitbook_site.py` fails until it has one. A page for
+a `SUMMARY.md` entry, and `tests/unit/test_gitbook_site.py` fails until it has one. Each `#`
+heading of `SUMMARY.md` is one entry of the site's top bar (Home, Guides, Self-Hosting,
+Reference), which [docs/gitbook-docs.yaml](docs/gitbook-docs.yaml) declares; the build writes each
+as its own GitBook space, so a new top-bar entry owes both files. A page's URL is its top-bar
+entry, its `##` group and its file name, so moving or renaming a page changes its URL. A page for
 contributors rather than users belongs outside `docs/`, as `ARCHITECTURE.md` and `DOMAINS.md` do.
 
 Some pages bind code rather than describe it:

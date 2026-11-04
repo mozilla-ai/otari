@@ -724,6 +724,7 @@ describe("a table is a region, not a card", () => {
   const PLACES = [
     "otari-accounts-table",
     "otari-activity-table",
+    "otari-blocked-emails-table",
     "otari-breakdown",
     "otari-budgets-table",
     "otari-domains-table",
