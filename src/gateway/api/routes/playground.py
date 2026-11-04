@@ -323,18 +323,16 @@ async def upload_playground_file(
     else's. ``POST /api/v1/files`` takes an API key, which a dashboard session
     does not hold; this is the session's way in.
     """
+    principal = await playground_service.resolve_playground_principal(db, identity=identity, workspace_id=workspace_id)
+    # Commits the spend row the principal may have staged, which the file row's
+    # foreign key needs, and frees the connection while the bytes stream in.
+    await release_session(db)
     async with bounded_request(
         raw_request,
         max_bytes=config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
         detail="File upload request exceeds the configured maximum size.",
     ).form() as form:
         file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
-        principal = await playground_service.resolve_playground_principal(
-            db, identity=identity, workspace_id=workspace_id
-        )
-        # Commits the spend row the principal may have staged, which the file row's
-        # foreign key needs, and frees the connection while the bytes stream in.
-        await release_session(db)
         record = await files.store(
             NewFile(
                 user_id=principal.user_id,

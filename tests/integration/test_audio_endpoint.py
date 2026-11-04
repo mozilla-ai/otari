@@ -8,8 +8,10 @@ import pytest
 from any_llm.types.audio import Transcription
 from fastapi import Request
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
+from gateway.core.database import release_session
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
@@ -62,6 +64,38 @@ def test_transcription_body_over_the_route_limit_is_refused_before_parsing(
         data={"model": "openai:whisper-1"},
     )
     assert response.status_code == 413
+
+
+def test_transcription_frees_the_auth_connection_before_reading_the_body(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow client must not pin the connection authentication checked out."""
+    events: list[str] = []
+    release = release_session
+    form = Request.form
+
+    async def recording_release(session: AsyncSession) -> bool:
+        events.append("release")
+        return await release(session)
+
+    def recording_form(self: Request, **kwargs: Any) -> Any:
+        events.append("form")
+        return form(self, **kwargs)
+
+    monkeypatch.setattr("gateway.api.deps.release_session", recording_release)
+    monkeypatch.setattr(Request, "form", recording_form)
+    with patch(
+        "gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=_mock_transcription_response()
+    ):
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+            data={"model": "openai:whisper-1"},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200
+    assert events == ["release", "form"]
 
 
 def test_transcription_with_api_key(

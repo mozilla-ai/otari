@@ -11,7 +11,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import (
+    get_config,
+    get_db,
+    get_log_writer,
+    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_for_upload,
+)
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, bounded_request, form_field
 from gateway.api.routes._schema_derive import derive_request_base
@@ -96,7 +102,7 @@ def _named_audio(data: bytes, upload: UploadFile) -> io.BytesIO:
 async def create_transcription(
     raw_request: Request,
     response: Response,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key_for_upload)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
@@ -108,7 +114,6 @@ async def create_transcription(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
     """
-
     async with bounded_request(
         raw_request,
         max_bytes=_MAX_AUDIO_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES,

@@ -30,7 +30,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response, StreamingResponse
 from pydantic import TypeAdapter
 
-from gateway.api.deps import FileServiceDep, get_config, verify_api_key_or_master_key
+from gateway.api.deps import (
+    FileServiceDep,
+    get_config,
+    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_for_upload,
+)
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, bounded_request, form_field
 from gateway.core.config import GatewayConfig
@@ -222,7 +227,7 @@ def _content_disposition(filename: str) -> str:
 )
 async def create_file(
     raw_request: Request,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key_for_upload)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
 ) -> OpenAIFileObject | AnthropicFileMetadata:

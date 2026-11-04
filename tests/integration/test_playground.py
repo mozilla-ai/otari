@@ -38,10 +38,12 @@ import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi import Request, status
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.database import release_session
 from gateway.models.budgets import SCOPE_WORKSPACE, Budget, ScopedBudget
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceWebSearchConfig
@@ -1187,6 +1189,29 @@ def test_upload_body_over_the_route_limit_is_refused_before_parsing(
     monkeypatch.setattr(test_config, "files_max_bytes", 16)
     code, _ = _upload(client, world, "member", data=b"x" * (16 + 1024 * 1024 + 1))
     assert code == status.HTTP_413_CONTENT_TOO_LARGE
+
+
+def test_an_upload_frees_its_connection_before_reading_the_body(
+    client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    release = release_session
+    form = Request.form
+
+    async def recording_release(session: AsyncSession) -> bool:
+        events.append("release")
+        return await release(session)
+
+    def recording_form(self: Request, **kwargs: Any) -> Any:
+        events.append("form")
+        return form(self, **kwargs)
+
+    monkeypatch.setattr("gateway.api.routes.playground.release_session", recording_release)
+    monkeypatch.setattr(Request, "form", recording_form)
+    code, _ = _upload(client, world, "member")
+
+    assert code == status.HTTP_200_OK
+    assert events == ["release", "form"]
 
 
 def test_an_upload_resolves_in_the_caller_s_own_completion(
