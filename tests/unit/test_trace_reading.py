@@ -358,3 +358,15 @@ def test_a_call_whose_two_spans_fall_in_two_turns_counts_in_one() -> None:
 
     assert sum(turn.input_tokens for turn in turns) == 500
     assert sum(turn.llm_calls for turn in turns) == 1
+
+
+def test_a_copy_of_a_call_no_turn_holds_never_takes_the_call_out_of_its_turn() -> None:
+    spans = [
+        _span("turn", "step", opens_turn=True),
+        replace(_span("in-turn", "llm", "turn", request_id="msg_1", input_tokens=500), origin="otlp"),
+        replace(_span("orphan", "llm", request_id="msg_1", input_tokens=900), origin="otlp"),
+    ]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.llm_calls, turn.input_tokens) == (1, 500)

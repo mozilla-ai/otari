@@ -263,8 +263,6 @@ def counted_once(llm: list[SpanRecord]) -> list[SpanRecord]:
 
 
 def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -> tuple[TurnView, ...]:
-    # Over the whole session, so a call whose two spans fall in two turns counts in one.
-    counted = {span.span_id for span in counted_once([span for span in spans if span.kind == "llm"])}
     steps = sorted((span for span in spans if span.kind == "step"), key=_moment)
     turns: list[_Turn] = []
     owner: dict[str, _Turn] = {}
@@ -276,6 +274,10 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
     for span in spans:
         if span.kind != "step" and span.parent_span_id in owner:
             owner[span.parent_span_id].children.append(span)
+    # Over every turn at once, so a call whose two spans fall in two turns counts in one,
+    # and only over spans in a turn, so a copy no turn holds never displaces one that is.
+    in_turns = [span for turn in turns for span in turn.children if span.kind == "llm"]
+    counted = {span.span_id for span in counted_once(in_turns)}
     # A gateway tool loop records each model round as an unbilled LLM span under the billed one.
     llm_ids = {span.span_id for span in spans if span.kind == "llm"}
     rounds: dict[str, int] = {}

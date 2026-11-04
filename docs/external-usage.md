@@ -171,8 +171,9 @@ token is booked once even though a request repeats its usage on several spans:
   except from a streamed request's SDK span, which splits out only the writes
   made before the first output token, so all of its writes bill at the
   cache-write rate. When the SDK and the API both export the request, it is
-  booked once: in one export, from the span that splits out the 1-hour writes,
-  and otherwise from whichever arrives first.
+  booked once. In one export it is booked from the span that splits out the
+  1-hour writes, or failing that from the one reporting more tokens; across
+  exports, from whichever arrives first.
 - A Managed Agents session is booked from its `anthropic.model_request` spans,
   labeled with the session id, which also groups the session's threads into one
   agent trace.

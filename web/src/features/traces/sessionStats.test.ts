@@ -452,4 +452,33 @@ describe("sessionStats", () => {
     expect(stats.tokens.input).toBe(1_000)
     expect(stats.cost?.input).toBeCloseTo(1_000 * (3 / 1_000_000))
   })
+
+  it("tallies a call reported twice under the model its priced copy names", () => {
+    const spans = [
+      traceSpan({
+        span_id: "priced",
+        kind: "llm",
+        origin: "otlp",
+        model: "sonnet",
+        request_id: "msg_1",
+        otel_span_id: "priced",
+        input_tokens: 100,
+        cost: 0.25,
+        attributes: RATES,
+      }),
+      traceSpan({
+        span_id: "fuller",
+        kind: "llm",
+        origin: "otlp",
+        model: null,
+        request_id: "msg_1",
+        otel_span_id: "fuller",
+        input_tokens: 1_000,
+      }),
+    ]
+
+    const stats = sessionStats(traceSummary(), traceDetail({ spans }))
+
+    expect(stats.models).toEqual([{ model: "sonnet", requests: 1, cost: 0.25 }])
+  })
 })

@@ -115,9 +115,9 @@ function rates(
  * The model requests whose tokens count: one per call an agent exported. Two
  * instrumentations of one process can each describe the same call, sharing its
  * response id, and the span reporting the most tokens is counted, carrying the
- * rates its call was priced at from whichever span holds them. A gateway
- * request's spans share its request id across calls, and a span's own id stands
- * in where it carried no response id, so neither is matched.
+ * rates its call was priced at, and its model, from whichever span holds them.
+ * A gateway request's spans share its request id across calls, and a span's own
+ * id stands in where it carried no response id, so neither is matched.
  */
 export function countedOnce(llm: readonly TraceSpan[]): TraceSpan[] {
   const shared = (span: TraceSpan) =>
@@ -150,22 +150,26 @@ export function countedOnce(llm: readonly TraceSpan[]): TraceSpan[] {
     }
     if (richest.get(span.request_id) !== span) continue
     const rated = priced.get(span.request_id)
-    counted.push(
-      rated && !rates(span)
-        ? {
-            ...span,
-            attributes: {
-              ...span.attributes,
-              ...Object.fromEntries(
-                METERS.map((meter) => [
-                  `otari.llm.rate.${meter}`,
-                  rated.attributes[`otari.llm.rate.${meter}`],
-                ]),
-              ),
-            },
-          }
-        : span,
-    )
+    if (!rated || rated === span) {
+      counted.push(span)
+      continue
+    }
+    // The priced copy also names the model its cost is tallied under.
+    counted.push({
+      ...span,
+      model: span.model ?? rated.model,
+      attributes: rates(span)
+        ? span.attributes
+        : {
+            ...span.attributes,
+            ...Object.fromEntries(
+              METERS.map((meter) => [
+                `otari.llm.rate.${meter}`,
+                rated.attributes[`otari.llm.rate.${meter}`],
+              ]),
+            ),
+          },
+    })
   }
   return counted
 }
