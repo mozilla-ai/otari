@@ -26,7 +26,7 @@ from decimal import Decimal
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing
+from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing, rates_of
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.types.price_unit import PriceUnit
 
@@ -118,6 +118,7 @@ class DeploymentPricingService:
                     pricing_tiers=default.pricing_tiers or [],
                     unit=default.unit or "token",
                     origin=SEED_ORIGIN,
+                    rates=rates_of(default),
                 )
             await self.pricing.flush()
 
