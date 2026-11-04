@@ -129,6 +129,8 @@ export const STATUS_OPTIONS: { label: string; value: string }[] = [
   // rendered and styled distinctly, so an operator who spots one has to be able
   // to filter to the rest of them.
   { label: "Absorbed", value: "absorbed" },
+  // A stream the client abandoned, billed from an estimate.
+  { label: "Incomplete", value: "incomplete" },
 ]
 
 export const PRICED_OPTIONS: { label: string; value: string }[] = [
@@ -204,6 +206,7 @@ export function resolveExtentWindow(
 const STATUS_LABELS: Record<string, string> = {
   error: "Error",
   absorbed: "Absorbed",
+  incomplete: "Incomplete",
   skipped: "Skipped",
   success: "Success",
 }
