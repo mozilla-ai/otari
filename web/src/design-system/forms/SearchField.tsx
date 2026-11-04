@@ -103,17 +103,24 @@ export function SearchField({
       </HeroSearchField.Group>
     </HeroSearchField.Root>
   )
+  const count =
+    resultCount === undefined || value.trim() === ""
+      ? ""
+      : `${formatNumber(resultCount)} ${resultCount === 1 ? "match" : "matches"}`
   // One shape with or without a count, so a count that arrives with the first
   // response does not move the field and remount the input being typed in.
   return (
-    <div className={`flex items-center gap-3 ${className}`}>
+    <div className={`flex items-center ${className}`}>
       {field}
       {/* Mounted before it speaks, even with no count yet: a live region added
-          with its text already in it is not reliably announced. */}
-      <span role="status" className="shrink-0 text-caption">
-        {resultCount === undefined || value.trim() === ""
-          ? ""
-          : `${formatNumber(resultCount)} ${resultCount === 1 ? "match" : "matches"}`}
+          with its text already in it is not reliably announced. Spaced off the
+          field only while it says something, so a field nobody counts keeps
+          its width. */}
+      <span
+        role="status"
+        className={`shrink-0 text-caption ${count ? "ms-3" : ""}`}
+      >
+        {count}
       </span>
     </div>
   )

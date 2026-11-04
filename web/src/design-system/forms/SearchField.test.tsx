@@ -253,4 +253,21 @@ describe("SearchField resultCount", () => {
     expect(screen.getByRole("status")).toBe(region)
     expect(region).toHaveTextContent("2 matches")
   })
+
+  it("takes no room beside the field until it has a count to say", () => {
+    const { rerender } = render(
+      <SearchField label="Search" value="gpt" onChange={() => {}} />,
+    )
+    const region = screen.getByRole("status")
+    expect(region).not.toHaveClass("ms-3")
+    rerender(
+      <SearchField
+        label="Search"
+        value="gpt"
+        onChange={() => {}}
+        resultCount={2}
+      />,
+    )
+    expect(region).toHaveClass("ms-3")
+  })
 })
