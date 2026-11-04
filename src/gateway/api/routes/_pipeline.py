@@ -275,7 +275,7 @@ from gateway.services.model_access import (
 )
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.policy_store import resolve_effective_policy
-from gateway.services.pricing import estimate_settles, price_completion, tool_rate_lookup
+from gateway.services.pricing import estimate_settles, price_completion
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     RequestPrices,
@@ -289,6 +289,7 @@ from gateway.services.pricing_service import (
     pricing_required_but_missing,
     resolve_model_pricing,
     resolve_tool_rate,
+    tool_unit_rate,
 )
 from gateway.services.provider_kwargs import (
     MissingCredential,
@@ -2437,24 +2438,10 @@ class ReservationToolGate:
         return True
 
     async def _unit_cost(self, call: LabelCalls) -> Decimal:
-        """What one call under ``call``'s label costs with no reported cost, looked up once per label.
-
-        The rate as settlement resolves it, before any rounding.
-        """
+        """What one call under ``call``'s label costs with no reported cost, looked up once per label."""
         key = (call.tool, call.label, call.rate_keys, call.deployment_paid)
         if key not in self._unit_costs:
-            lookup = tool_rate_lookup(replace(call, calls=1, unreported_calls=1))
-            rate = (
-                await resolve_tool_rate(
-                    self._ctx.db,
-                    lookup.rate_keys,
-                    deployment_paid=lookup.operator_set_only,
-                    organization_id=self._ctx.organization_id,
-                )
-                if lookup is not None and lookup.rate_keys
-                else None
-            )
-            self._unit_costs[key] = rate.unit_rate if rate is not None else ZERO
+            self._unit_costs[key] = await tool_unit_rate(self._ctx.db, call, organization_id=self._ctx.organization_id)
             # The lookup's connection must not be held across the next provider call either.
             await release_session(self._ctx.db)
         return self._unit_costs[key]

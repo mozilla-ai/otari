@@ -14,8 +14,7 @@ import pytest
 import gateway.api.routes._pipeline as pipeline
 from gateway.core.config import GatewayConfig
 from gateway.services.budgets import ReservationHandle
-from gateway.services.pricing import ToolRate
-from gateway.types.tool_charges import LabelCalls, RateKey
+from gateway.types.tool_charges import LabelCalls
 
 _UNIT = Decimal("0.0000004")
 
@@ -52,20 +51,18 @@ def _ctx() -> Any:
 
 
 @pytest.fixture
-def priced(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[RateKey, ...], bool]]:
-    """Resolve every lookup to a rate of ``_UNIT`` a call, below what a cost rounds to, and keep each lookup."""
-    asked: list[tuple[tuple[RateKey, ...], bool]] = []
+def priced(monkeypatch: pytest.MonkeyPatch) -> list[LabelCalls]:
+    """Price every call at ``_UNIT``, below what a cost rounds to, and keep each call the rate was asked for."""
+    asked: list[LabelCalls] = []
 
-    async def fake_resolve(
-        _db: Any, rate_keys: tuple[RateKey, ...], *, deployment_paid: bool, organization_id: Any
-    ) -> ToolRate:
-        asked.append((rate_keys, deployment_paid))
-        return ToolRate(rate_keys[0], _UNIT, "deployment")
+    async def fake_rate(_db: Any, call: LabelCalls, *, organization_id: Any) -> Decimal:
+        asked.append(call)
+        return _UNIT
 
     async def fake_release(_db: Any) -> None:
         pass
 
-    monkeypatch.setattr(pipeline, "resolve_tool_rate", fake_resolve)
+    monkeypatch.setattr(pipeline, "tool_unit_rate", fake_rate)
     monkeypatch.setattr(pipeline, "release_session", fake_release)
     return asked
 
@@ -85,22 +82,21 @@ def holds(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Decimal, int]]:
 
 @pytest.mark.asyncio
 async def test_the_hold_is_asked_for_the_calls_the_tally_asked_for_at_the_unrounded_rate(
-    priced: list[tuple[tuple[RateKey, ...], bool]], holds: list[tuple[Decimal, int]]
+    priced: list[LabelCalls], holds: list[tuple[Decimal, int]]
 ) -> None:
     """Twenty pages at a rate below a micro-dollar are held at that rate, which rounding one call would lose."""
     ctx = _ctx()
+    pages = _call(calls=20)
 
-    assert await pipeline.ReservationToolGate(ctx).admit(_call(calls=20))
+    assert await pipeline.ReservationToolGate(ctx).admit(pages)
 
     assert holds == [(_UNIT, 20)]
     assert ctx.tool_hold == Decimal("0.000008"), "what the budgets domain held"
-    assert priced == [(("fake:fake-fetch",), True)], "the rate is resolved as settlement resolves it"
+    assert priced == [pages]
 
 
 @pytest.mark.asyncio
-async def test_a_labels_rate_is_resolved_once(
-    priced: list[tuple[tuple[RateKey, ...], bool]], holds: list[tuple[Decimal, int]]
-) -> None:
+async def test_a_labels_rate_is_resolved_once(priced: list[LabelCalls], holds: list[tuple[Decimal, int]]) -> None:
     gate = pipeline.ReservationToolGate(_ctx())
 
     assert await gate.admit(_call(calls=2))
@@ -112,7 +108,7 @@ async def test_a_labels_rate_is_resolved_once(
 
 @pytest.mark.asyncio
 async def test_a_hold_that_does_not_fit_refuses_the_calls_and_holds_nothing(
-    priced: list[tuple[tuple[RateKey, ...], bool]], monkeypatch: pytest.MonkeyPatch
+    priced: list[LabelCalls], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def refuse(_db: Any, _handle: Any, _amount: Decimal, *, strategy: str, calls: int) -> None:
         return None
@@ -127,7 +123,7 @@ async def test_a_hold_that_does_not_fit_refuses_the_calls_and_holds_nothing(
 
 @pytest.mark.asyncio
 async def test_a_reservation_that_holds_nothing_admits_every_call(
-    priced: list[tuple[tuple[RateKey, ...], bool]], holds: list[tuple[Decimal, int]]
+    priced: list[LabelCalls], holds: list[tuple[Decimal, int]]
 ) -> None:
     ctx = _ctx()
     ctx.reservation.reservation_id = None
