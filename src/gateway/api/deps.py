@@ -2053,7 +2053,7 @@ async def routed_trace_content(
     if content is None or not content.sealing:
         return None
     try:
-        return await build_trace_service(uow, content, DatabaseSessionOwners(db)).routed_content(
+        return await get_trace_service(uow, request, db).routed_content(
             workspace_id, user_id, tool_output=config.trace_content_tool_output
         )
     except DATABASE_ERRORS as exc:
