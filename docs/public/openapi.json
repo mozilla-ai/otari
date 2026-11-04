@@ -4289,6 +4289,7 @@
                 "/responses",
                 "/messages",
                 "/images/generations",
+                "/images/edits",
                 "/embeddings",
                 "/audio/speech",
                 "/audio/transcriptions",

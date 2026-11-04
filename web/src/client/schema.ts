@@ -9492,7 +9492,7 @@ export interface components {
              * Endpoints
              * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
              */
-            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
+            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/images/edits" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /**
