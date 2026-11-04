@@ -426,6 +426,11 @@ def estimate_tokens(
     return prompt_tokens + max(output_tokens, 0)
 
 
+def estimate_output_tokens(streamed_chars: int) -> int:
+    """Tokens for ``streamed_chars`` of output text, at the same ``chars / 4`` as the prompt estimate."""
+    return (max(streamed_chars, 0) + 3) // 4
+
+
 def estimate_cost(
     pricing: ModelPricing | None,
     *,
