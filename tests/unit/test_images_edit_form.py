@@ -5,10 +5,11 @@ from any_llm.types.image import ImageEditParams
 from gateway.api.routes import images
 from gateway.api.routes._schema_derive import PARAM_FIELD_RENAMES
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.schemas.inference import ImageEditForm
 
 
 def _accepted() -> set[str]:
-    return {*images.ImageEditForm.model_fields, *images.EDIT_FILE_FIELDS}
+    return {*ImageEditForm.model_fields, *images.EDIT_FILE_FIELDS}
 
 
 def test_edit_form_accepts_every_image_edit_param() -> None:

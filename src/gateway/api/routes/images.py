@@ -7,7 +7,7 @@ from any_llm import aimage_edit, aimage_generation
 from any_llm.types.image import ImageGenerationParams, ImagesResponse, sniff_image_format
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import FormData, UploadFile
 from starlette.requests import ClientDisconnect
@@ -20,6 +20,7 @@ from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
+from gateway.schemas.inference import ImageEditForm
 from gateway.services.budgets import count_estimate
 from gateway.services.inference import IMAGES_BILLING
 from gateway.services.log_writer import LogWriter
@@ -118,26 +119,6 @@ async def create_image(
         relabel=False,
     )
     return outcome.result.model_dump()
-
-
-class ImageEditForm(BaseModel):
-    """The text fields of an image edit request.
-
-    Declared by hand: ``derive_request_base`` cannot build a model from
-    ``ImageEditParams``, whose ``image`` is a file type pydantic has no schema
-    for. ``test_edit_form_accepts_every_image_edit_param`` fails when any-llm
-    adds a field this route does not accept.
-    """
-
-    model: str
-    prompt: str
-    n: int | None = Field(default=None, ge=1)
-    size: str | None = None
-    quality: str | None = None
-    # any-llm types this as a ``Literal['url', 'b64_json']``; keep the permissive
-    # ``str`` the generation route accepts.
-    response_format: str | None = None
-    user: str | None = None
 
 
 # ``image[]`` is how OpenAI's SDKs send several images.
