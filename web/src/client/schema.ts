@@ -9382,6 +9382,11 @@ export interface components {
             unpriced_count: number;
             /** Vendor */
             vendor: string | null;
+            /**
+             * Zero Data Retention Providers
+             * @description The provider instances offering it that are declared to keep no prompt or completion data, sorted.
+             */
+            zero_data_retention_providers?: string[];
         };
         /**
          * CatalogModelSummary
@@ -9485,6 +9490,11 @@ export interface components {
             unpriced_count: number;
             /** Vendor */
             vendor: string | null;
+            /**
+             * Zero Data Retention Providers
+             * @description The provider instances offering it that are declared to keep no prompt or completion data, sorted.
+             */
+            zero_data_retention_providers?: string[];
         };
         /**
          * CatalogOffering
@@ -9551,6 +9561,12 @@ export interface components {
              */
             short_selector?: string | null;
             usage_30d?: components["schemas"]["OfferingUsage"] | null;
+            /**
+             * Zero Data Retention
+             * @description Whether whoever holds the serving key declared that the provider keeps no prompt or completion data: the operator for a `hosted` offering, the organization for one on its own keys, where every usable key of the provider must declare it. A declaration, not something the gateway can verify.
+             * @default false
+             */
+            zero_data_retention: boolean;
         };
         /**
          * CatalogResponse
@@ -12546,6 +12562,8 @@ export interface components {
          *     whether or not something prices it. ``supported_countries`` keeps the
          *     provider to requests from those ISO country codes, checked as well as
          *     ``provider_supported_countries``; null serves every country.
+         *     ``zero_data_retention`` declares that the upstream keeps no prompt or
+         *     completion data; the catalog shows it and nothing enforces it.
          * @example {
          *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
@@ -12578,6 +12596,11 @@ export interface components {
             serves_unlisted_models: boolean;
             /** Supported Countries */
             supported_countries?: string[] | null;
+            /**
+             * Zero Data Retention
+             * @default false
+             */
+            zero_data_retention: boolean;
         };
         /**
          * HostedProviderPublic
@@ -12600,7 +12623,8 @@ export interface components {
          *     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
          *     ``serves_unlisted_models`` is true for one that serves a model its roster
          *     does not list. ``supported_countries`` is null for one that serves every
-         *     country.
+         *     country. ``zero_data_retention`` is the operator's declaration that the
+         *     upstream keeps no prompt or completion data.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -12653,6 +12677,11 @@ export interface components {
             supported_countries?: string[] | null;
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Zero Data Retention
+             * @default false
+             */
+            zero_data_retention: boolean;
         };
         /**
          * HostedProviderTestPublic
@@ -12739,6 +12768,8 @@ export interface components {
             serves_unlisted_models?: boolean | null;
             /** Supported Countries */
             supported_countries?: string[] | null;
+            /** Zero Data Retention */
+            zero_data_retention?: boolean | null;
         };
         /**
          * HostedProvidersPublic
@@ -14050,6 +14081,12 @@ export interface components {
             name: string;
             /** Provider */
             provider: string;
+            /**
+             * Zero Data Retention
+             * @description The organization's declaration that the provider account behind this key keeps no prompt or completion data. The catalog shows it and filters on it; nothing is enforced on it.
+             * @default false
+             */
+            zero_data_retention: boolean;
         };
         /**
          * OrgProviderKeyModelCreateRequest
@@ -14189,6 +14226,11 @@ export interface components {
              * @description False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.
              */
             usable: boolean;
+            /**
+             * Zero Data Retention
+             * @default false
+             */
+            zero_data_retention: boolean;
         };
         /**
          * OrgProviderKeyUpdateRequest
@@ -14205,6 +14247,8 @@ export interface components {
             } | null;
             /** Name */
             name?: string | null;
+            /** Zero Data Retention */
+            zero_data_retention?: boolean | null;
         };
         /** OrgProviderKeysPublic */
         OrgProviderKeysPublic: {
@@ -21806,6 +21850,8 @@ export interface operations {
                 max_input?: number | null;
                 pricing?: "all" | "custom" | "default" | "priced" | "unpriced";
                 source?: "all" | "discovered" | "custom";
+                /** @description Only models at least one provider declared to keep no prompt or completion data offers. */
+                zero_data_retention?: boolean;
                 /** @description Release window ending today (UTC); zero disables it. Unknown and future releases do not match. */
                 released_within_days?: number;
                 sort?: "name" | "released" | "input" | "output" | "context" | "providers";

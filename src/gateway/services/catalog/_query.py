@@ -77,6 +77,8 @@ def _matching_models(
             return False
         if not _pricing_matches(model, query.pricing) or not _source_matches(model, query.source):
             return False
+        if query.zero_data_retention and not model.zero_data_retention_providers:
+            return False
         return not query.released_within_days or (
             model.release_date is not None and released_after <= model.release_date <= released_before
         )

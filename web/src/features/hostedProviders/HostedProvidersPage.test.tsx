@@ -53,6 +53,7 @@ function hostedProvider(
     restricted_to_organization_id: null,
     serves_unlisted_models: false,
     supported_countries: null,
+    zero_data_retention: false,
     created_at: "2026-10-01T00:00:00Z",
     updated_at: null,
     ...overrides,
@@ -551,6 +552,59 @@ describe("HostedProvidersPage", () => {
     })
   })
 
+  it("adds a provider declared zero data retention", async () => {
+    const requests = mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
+    await user.click(
+      within(dialog).getByRole("checkbox", { name: "Zero data retention" }),
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    )
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "POST")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "POST")[0].body).toMatchObject({
+      zero_data_retention: true,
+    })
+  })
+
+  it("marks a provider declared zero data retention and lets an edit lift it", async () => {
+    const requests = mockApi({
+      providers: [hostedProvider({ zero_data_retention: true })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    expect(await screen.findByText("Zero data retention")).toBeInTheDocument()
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    const dialog = await screen.findByRole("dialog")
+    const box = within(dialog).getByRole("checkbox", {
+      name: "Zero data retention",
+    })
+    expect(box).toBeChecked()
+    await user.click(box)
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "PATCH")[0].body).toEqual({
+      api_base: "",
+      zero_data_retention: false,
+    })
+  })
+
   it("adds a provider that serves only some countries", async () => {
     const requests = mockApi({ providers: [] })
     const user = userEvent.setup()
@@ -764,6 +818,7 @@ describe("HostedProvidersPage", () => {
       provider: "anthropic",
       api_key: "sk-ant-secret",
       serves_unlisted_models: false,
+      zero_data_retention: false,
     })
   })
 

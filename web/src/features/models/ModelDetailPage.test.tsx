@@ -94,6 +94,7 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
     provider_type: "nebius",
     credential: "deployment",
     discovered: true,
+    zero_data_retention: false,
     context_window: 200_000,
     max_output_tokens: 128_000,
     quantization: null,
@@ -121,6 +122,7 @@ const GLM_DETAIL: CatalogModelDetail = {
       short_selector: "fireworks:z-ai/glm-5.3",
       provider: "fireworks",
       provider_type: "fireworks",
+      zero_data_retention: true,
       context_window: 131_072,
       max_output_tokens: 16_384,
       pricing: {
@@ -285,6 +287,21 @@ describe("ModelDetailPage", () => {
         expect(row.querySelector("svg")).not.toBeNull()
       }
     })
+  })
+
+  it("says which offerings are declared zero data retention", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const offerings = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const marked = within(offerings)
+      .getAllByRole("row")
+      .slice(1)
+      .filter((row) => row.textContent?.includes("Zero data retention"))
+    expect(marked).toHaveLength(1)
+    expect(marked[0]).toHaveTextContent("Fireworks")
   })
 
   it("names each offering's model ID under its provider", async () => {

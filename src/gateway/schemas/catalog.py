@@ -58,6 +58,12 @@ class CatalogModelSummary(BaseModel):
     offering_count: int
     provider_count: int
     providers: list[str] = Field(description="The provider instances offering it, sorted.")
+    zero_data_retention_providers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The provider instances offering it that are declared to keep no prompt or completion data, sorted."
+        ),
+    )
     selectors: list[str] = Field(description="Every offering's selector, so the list can be searched by one.")
     price_sources: list[PriceSource] = Field(
         description="Which price lists the priced offerings came from, distinct and sorted."
@@ -120,6 +126,10 @@ class CatalogQuery(BaseModel):
     )
     pricing: Literal["all", "custom", "default", "priced", "unpriced"] = "all"
     source: Literal["all", "discovered", "custom"] = "all"
+    zero_data_retention: bool = Field(
+        default=False,
+        description="Only models at least one provider declared to keep no prompt or completion data offers.",
+    )
     released_within_days: int = Field(
         default=0,
         ge=0,

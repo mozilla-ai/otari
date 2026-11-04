@@ -251,6 +251,27 @@ class _Resolved:
     def source(self, kind: str) -> _Source:
         return _Source(kind, self.data, self.mime, self.filename, None, self.staged is not None, self.staged)
 
+    def attachment(self) -> _Source:
+        """The source of a file block, which is an image when its bytes are one.
+
+        An image is rewritten to the image part a provider reads, because no
+        provider's document part takes one.
+        """
+        if image_type := _image_type(self.mime):
+            return replace(self.source(_IMAGE), mime=image_type, needs_inline=True)
+        return self.source(_DOCUMENT)
+
+
+# The image formats every provider's image part takes. Any other image (SVG,
+# TIFF, BMP) stays a document and goes through extraction.
+_PROVIDER_IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+
+
+def _image_type(mime: str) -> str | None:
+    """``mime`` without parameters when it is one of those formats, the bare type Anthropic's ``media_type`` takes."""
+    bare = mime.split(";", 1)[0].strip().lower()
+    return bare if bare in _PROVIDER_IMAGE_TYPES else None
+
 
 async def _resolve_from_ref(
     ref: dict[str, Any],
@@ -348,16 +369,16 @@ async def _classify(
                 return _Source(_DOCUMENT, str(src.get("data", "")).encode("utf-8"), "text/plain", None, None)
             if src.get("type") == "base64":
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
-                return _Source(_DOCUMENT, data, src.get("media_type", "application/pdf"), None, None)
+                return _Resolved(data, src.get("media_type", "application/pdf"), None).attachment()
             if src.get("type") == "file":
                 resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
                 if resolved:
-                    return resolved.source(_DOCUMENT)
+                    return resolved.attachment()
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
         resolved = await _resolve_from_ref(ref, files=files, user_id=user_id, workspace_id=workspace_id)
         if resolved:
-            return resolved.source(_DOCUMENT)
+            return resolved.attachment()
         return None
 
     return None
@@ -637,7 +658,10 @@ async def _normalize_block(
         if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
             return _sandbox_file_text(fmt, staged.filename)
-        src.kind = _DOCUMENT
+        if image_type := _image_type(src.mime):
+            src.kind, src.mime, src.needs_inline = _IMAGE, image_type, True
+        else:
+            src.kind = _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf and _is_native_document(src)
     if native:

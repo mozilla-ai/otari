@@ -633,6 +633,29 @@ describe("OrganizationProvidersPage", () => {
     expect(patch?.body).not.toHaveProperty("api_key")
   })
 
+  it("marks a key declared zero data retention and lets an edit change it", async () => {
+    const requests = mockApi({
+      keys: [orgProviderKey({ zero_data_retention: true })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    expect(await screen.findByText("ZERO DATA RETENTION")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    const box = await screen.findByRole("checkbox", {
+      name: "Zero data retention",
+    })
+    expect(box).toBeChecked()
+    await user.click(box)
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "PATCH")).toBe(true)
+    })
+    const patch = requests.find((request) => request.method === "PATCH")
+    expect(patch?.body).toMatchObject({ zero_data_retention: false })
+  })
+
   it("makes a key the organization default", async () => {
     const requests = mockApi({ keys: [orgProviderKey()] })
     const user = userEvent.setup()

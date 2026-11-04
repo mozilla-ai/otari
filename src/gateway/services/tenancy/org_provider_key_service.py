@@ -158,7 +158,7 @@ def key_is_usable(key: OrgProviderKey) -> bool:
 
 def has_credential(key: OrgProviderKey) -> bool:
     """Whether this key holds an API key or a base URL, and its secret decrypts."""
-    return (key.encrypted_api_key is not None or key.api_base is not None) and key_is_usable(key)
+    return (key.encrypted_api_key is not None or bool(key.api_base)) and key_is_usable(key)
 
 
 def cached_org_provider_kwargs(workspace_id: uuid.UUID, provider: str) -> dict[str, Any] | None:
@@ -488,6 +488,7 @@ class OrgProviderKeyService:
                 last4=last4,
                 api_base=request.api_base,
                 client_args=request.client_args,
+                zero_data_retention=request.zero_data_retention,
             )
             await self.db.commit()
         except IntegrityError:
@@ -517,6 +518,9 @@ class OrgProviderKeyService:
             raise OrgProviderKeyArchivedError(key_id)
 
         update_data = request.model_dump(exclude_unset=True)
+        # A declaration is true or false; an explicit null changes nothing.
+        if update_data.get("zero_data_retention", False) is None:
+            del update_data["zero_data_retention"]
         if "name" in update_data:
             new_name = _validated_name(update_data["name"])
             update_data["name"] = new_name
@@ -947,6 +951,27 @@ class OrgProviderKeyService:
                 (chosen := active[workspace_id].get(provider)) is not None and chosen.id in credentialed
                 for workspace_id in workspace_ids
             )
+        )
+
+    async def get_zero_data_retention_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        """Returns the providers whose every usable key in the organization declares zero data retention.
+
+        Every key rather than any: which key serves a workspace depends on its
+        defaults and overrides, so one undeclared key means a request may go
+        out on an account that keeps data. A key with no credential serves
+        nothing and does not count. Checking one costs a decryption, so a
+        provider with no declared key is never checked, and the checks stop
+        at the first answer.
+        """
+        by_provider: dict[str, list[OrgProviderKey]] = defaultdict(list)
+        for key in await self.keys.list_live_keys(organization_id):
+            by_provider[key.provider].append(key)
+        return frozenset(
+            provider
+            for provider, keys in by_provider.items()
+            if any(key.zero_data_retention for key in keys)
+            and not any(has_credential(key) for key in keys if not key.zero_data_retention)
+            and any(has_credential(key) for key in keys if key.zero_data_retention)
         )
 
 

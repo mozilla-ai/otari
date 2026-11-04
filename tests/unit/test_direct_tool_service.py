@@ -90,7 +90,7 @@ class _Ledger:
 
 
 class _Gates:
-    def __init__(self, *, failing_writer: bool = False) -> None:
+    def __init__(self, *, failing_writer: Exception | None = None) -> None:
         self.failing_writer = failing_writer
         self.rows: list[DirectToolUsage] = []
         self.tracked: list[str] = []
@@ -105,8 +105,8 @@ class _Gates:
         self.tracked.append(model)
 
     async def record(self, usage: DirectToolUsage) -> None:
-        if self.failing_writer:
-            raise RuntimeError("the writer is gone")
+        if self.failing_writer is not None:
+            raise self.failing_writer
         self.rows.append(usage)
 
 
@@ -202,9 +202,10 @@ async def test_an_unknown_tool_is_refused_before_anything_is_held_and_logged_und
 
 
 @pytest.mark.asyncio
-async def test_a_refusal_whose_row_cannot_be_written_answers_all_the_same() -> None:
+@pytest.mark.parametrize("error", [RuntimeError("the writer is gone"), TimeoutError()], ids=["writer", "database"])
+async def test_a_refusal_whose_row_cannot_be_written_answers_all_the_same(error: Exception) -> None:
     with pytest.raises(DirectToolCallError) as refused:
-        await _search(tool="nope", gates=_Gates(failing_writer=True))
+        await _search(tool="nope", gates=_Gates(failing_writer=error))
 
     assert refused.value.status_code == 400
 

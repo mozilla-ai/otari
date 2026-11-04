@@ -3742,6 +3742,14 @@
               }
             ],
             "title": "Vendor"
+          },
+          "zero_data_retention_providers": {
+            "description": "The provider instances offering it that are declared to keep no prompt or completion data, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Zero Data Retention Providers",
+            "type": "array"
           }
         },
         "required": [
@@ -4003,6 +4011,14 @@
               }
             ],
             "title": "Vendor"
+          },
+          "zero_data_retention_providers": {
+            "description": "The provider instances offering it that are declared to keep no prompt or completion data, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Zero Data Retention Providers",
+            "type": "array"
           }
         },
         "required": [
@@ -4189,6 +4205,12 @@
                 "type": "null"
               }
             ]
+          },
+          "zero_data_retention": {
+            "default": false,
+            "description": "Whether whoever holds the serving key declared that the provider keeps no prompt or completion data: the operator for a `hosted` offering, the organization for one on its own keys, where every usable key of the provider must declare it. A declaration, not something the gateway can verify.",
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10622,7 +10644,7 @@
         "type": "object"
       },
       "HostedProviderCreateRequest": {
-        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.",
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.\n``zero_data_retention`` declares that the upstream keeps no prompt or\ncompletion data; the catalog shows it and nothing enforces it.",
         "example": {
           "api_key": "<your OpenAI API key>",
           "provider": "openai"
@@ -10720,6 +10742,11 @@
               }
             ],
             "title": "Supported Countries"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10729,7 +10756,7 @@
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry.",
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry. ``zero_data_retention`` is the operator's declaration that the\nupstream keeps no prompt or completion data.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -10867,6 +10894,11 @@
               }
             ],
             "title": "Updated At"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -11073,6 +11105,17 @@
               }
             ],
             "title": "Supported Countries"
+          },
+          "zero_data_retention": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zero Data Retention"
           }
         },
         "title": "HostedProviderUpdateRequest",
@@ -13876,6 +13919,12 @@
             "maxLength": 255,
             "title": "Provider",
             "type": "string"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "description": "The organization's declaration that the provider account behind this key keeps no prompt or completion data. The catalog shows it and filters on it; nothing is enforced on it.",
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -14174,6 +14223,11 @@
             "description": "False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.",
             "title": "Usable",
             "type": "boolean"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -14239,6 +14293,17 @@
               }
             ],
             "title": "Name"
+          },
+          "zero_data_retention": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zero Data Retention"
           }
         },
         "title": "OrgProviderKeyUpdateRequest",
@@ -30794,6 +30859,18 @@
               ],
               "title": "Source",
               "type": "string"
+            }
+          },
+          {
+            "description": "Only models at least one provider declared to keep no prompt or completion data offers.",
+            "in": "query",
+            "name": "zero_data_retention",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only models at least one provider declared to keep no prompt or completion data offers.",
+              "title": "Zero Data Retention",
+              "type": "boolean"
             }
           },
           {
