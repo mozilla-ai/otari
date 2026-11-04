@@ -102,7 +102,11 @@ from gateway.services.tools._direct_tool_call import (
 )
 from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
-from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
+from gateway.services.tools._mcp_admission import (
+    admit_mcp_servers,
+    declares_provider_mcp,
+    refuse_shadowed_builtin_tools,
+)
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -272,6 +276,7 @@ __all__ = [
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
     "admit_mcp_servers",
+    "declares_provider_mcp",
     "admit_web_access",
     "apply_web_access_policy",
     "web_access_disabled_refusal",

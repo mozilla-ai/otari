@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
 from gateway.exceptions.tools_exceptions import McpServerConfigurationError, McpServerDeclarationError
@@ -89,6 +89,15 @@ async def _validate_mcp_server_urls(
         raise McpServerConfigurationError(MCP_SERVER_URL_UNSAFE_DETAIL) from exc
 
 
+def declares_provider_mcp(tools: Sequence[object] | None) -> bool:
+    """Whether a request's tools ask its provider to connect to an MCP server itself (a ``type: "mcp"`` tool).
+
+    That is a server named by the request as surely as an ``mcp_servers`` entry is, only one the provider dials
+    rather than Otari, so the workspace's request-server switch covers it too.
+    """
+    return any(isinstance(tool, dict) and tool.get("type") == "mcp" for tool in tools or ())
+
+
 async def admit_mcp_servers(
     inline_servers: list[McpServerConfig] | None,
     server_ids: list[uuid.UUID] | None,
@@ -96,12 +105,14 @@ async def admit_mcp_servers(
     servers: WorkspaceMcpServers,
     workspace_id: uuid.UUID,
     access: McpAccess,
+    provider_mcp: bool = False,
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name.
 
     ``access`` is the caller's MCP access. A stored ID whose access list grants the caller nothing is
     answered as an unknown one, and the servers returned carry the tool patterns the caller holds on
-    them. A request's own servers are refused where the workspace has turned them off.
+    them. A request's own servers, including a ``provider_mcp`` tool its provider would dial, are refused
+    where the workspace has turned them off.
 
     Raises:
         McpServerDeclarationError: the request's own servers cannot be reached as declared.
@@ -109,7 +120,7 @@ async def admit_mcp_servers(
         WorkspaceMcpServerNotFoundError: an ID names no server this workspace holds, or none the caller may reach.
     """
     mcp_servers = inline_servers
-    if mcp_servers and not access.may_declare_servers:
+    if (mcp_servers or provider_mcp) and not access.may_declare_servers:
         raise McpServerDeclarationError(INLINE_MCP_SERVER_REFUSED_DETAIL)
     for inline in mcp_servers or []:
         inline.caller_tool_patterns = None

@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -602,6 +603,33 @@ def test_a_workspace_can_refuse_servers_a_request_names_itself(
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
 
+
+
+def test_the_switch_also_refuses_an_mcp_server_the_provider_would_dial(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+) -> None:
+    """A Responses ``type: "mcp"`` tool names a server by URL as an ``mcp_servers`` entry does."""
+    workspace = _workspace_id(test_db, api_key_obj)
+    switched = client.patch(
+        f"{API_ROOT}/workspaces/{workspace}", json={"request_mcp_servers_allowed": False}, headers=master_key_header
+    )
+    assert switched.status_code == 200, switched.text
+    body = {
+        "model": "openai:gpt-4o-mini",
+        "input": "hi",
+        "tools": [{"type": "mcp", "server_label": "mine", "server_url": PUBLIC_URL, "require_approval": "never"}],
+    }
+
+    with patch("gateway.api.routes.responses.aresponses") as provider:
+        refused = client.post(f"{API_ROOT}/responses", json=body, headers=api_key_header)
+
+    assert refused.status_code == 400, refused.text
+    assert "does not let a request name MCP servers" in refused.text
+    provider.assert_not_called()
 
 # --------------------------------------------------------------------------- #
 # Traces of POST /mcp/execute

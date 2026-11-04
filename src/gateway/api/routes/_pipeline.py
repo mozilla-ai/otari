@@ -389,6 +389,7 @@ from gateway.services.tools import (
     decide_candidate_tools,
     declare_code_execution,
     declares_code_execution,
+    declares_provider_mcp,
     extract_web_tools,
     native_rendering,
     read_web_declarations,
@@ -4446,12 +4447,13 @@ async def _admit_mcp_servers(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, servers: WorkspaceMcpServers
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
+    provider_mcp = declares_provider_mcp(declared.tools)
     try:
         access = (
             await resolve_request_mcp_access(
                 ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
             )
-            if declared.mcp_servers or declared.mcp_server_ids
+            if declared.mcp_servers or declared.mcp_server_ids or provider_mcp
             else McpAccess()
         )
         return await admit_mcp_servers(
@@ -4460,6 +4462,7 @@ async def _admit_mcp_servers(
             servers=servers,
             workspace_id=ctx.workspace_id,
             access=access,
+            provider_mcp=provider_mcp,
         )
     except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
         raise domain_error(adapter, exc) from exc

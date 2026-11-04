@@ -219,6 +219,8 @@ read-only.
   by URL, which no ACL covers. A workspace allows it by default; turning off
   `request_mcp_servers_allowed` with `PATCH /api/v1/workspaces/{workspace_id}` refuses
   such a request with a `400`, so that a workspace's ACLs cannot be stepped around.
+  The switch covers a provider's own remote MCP too: a Responses tool of
+  `type: "mcp"` asks the provider to dial a server, so it is refused the same way.
   The master key may still name servers; a dashboard session may not.
 
 The ACL is managed under
