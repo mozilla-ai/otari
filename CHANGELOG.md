@@ -4,6 +4,33 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.38.0](https://github.com/mozilla-ai/otari/releases/tag/v0.38.0) - 2026-11-04
+
+
+
+### Bug Fixes
+
+- **health-checks:** Switch off a model its provider refuses during a run in [#2846](https://github.com/mozilla-ai/otari/pull/2846) by [@daavoo](https://github.com/daavoo) ([`11e2b45`](https://github.com/mozilla-ai/otari/commit/11e2b45888727baf31bbd1a9f9f22bc32c66fcd2))
+- **web:** Give Amazon Bedrock its own provider mark in [#2828](https://github.com/mozilla-ai/otari/pull/2828) by [@jigjigjig](https://github.com/jigjigjig) ([`afa6284`](https://github.com/mozilla-ai/otari/commit/afa62845b85fd160d3c255f47f61673cc7df6af0))
+- **web:** Keep focus in the table after a confirmed delete in [#2852](https://github.com/mozilla-ai/otari/pull/2852) by [@jigjigjig](https://github.com/jigjigjig) ([`e3c089f`](https://github.com/mozilla-ai/otari/commit/e3c089f1f50f294213387a06265b71b1937f97b3))
+
+
+### Features
+
+- **BREAKING:** **pricing:** Spell every price unit as models.dev does by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`aad0587`](https://github.com/mozilla-ai/otari/commit/aad05873fe9bb09f3a6b896552632eab85562cd2))
+- **dashboard:** Name a price unit as the API does in [#2820](https://github.com/mozilla-ai/otari/pull/2820) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`887ec8e`](https://github.com/mozilla-ai/otari/commit/887ec8e8bb9991483ec2dde925336e9371df5373))
+- **tools:** Bill the pages a search reads as fetches on the instance that read them in [#2831](https://github.com/mozilla-ai/otari/pull/2831) by [@aittalam](https://github.com/aittalam) ([`21296f1`](https://github.com/mozilla-ai/otari/commit/21296f1e03fdd2ffabb6b4f7a7190b9d89679d21))
+- **BREAKING:** **tools:** Refuse a search whose pages an unpriced fetch tool would read in [#2832](https://github.com/mozilla-ai/otari/pull/2832) by [@aittalam](https://github.com/aittalam) ([`fa0876a`](https://github.com/mozilla-ai/otari/commit/fa0876ac32ca16cc14133e8b83c563919f984f59))
+- **traces:** Keep the content of routed requests that ask for it in [#2685](https://github.com/mozilla-ai/otari/pull/2685) by [@agpituk](https://github.com/agpituk) ([`d849d42`](https://github.com/mozilla-ai/otari/commit/d849d426b284c537fbd5de5e437c2dd86691531c))
+- **images:** Add the image edit endpoint in [#2868](https://github.com/mozilla-ai/otari/pull/2868) by [@KevinGallaccio](https://github.com/KevinGallaccio) ([`bff9dab`](https://github.com/mozilla-ai/otari/commit/bff9dab802097b90a6891a305cb7cd0f2bfc7d59))
+
+
+
+### New Contributors
+
+- [@KevinGallaccio](https://github.com/KevinGallaccio) made their first contribution in [#2868](https://github.com/mozilla-ai/otari/pull/2868)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.37.0...v0.38.0
 ## [0.37.0](https://github.com/mozilla-ai/otari/releases/tag/v0.37.0) - 2026-11-04
 
 
