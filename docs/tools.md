@@ -716,8 +716,10 @@ is unacceptable.
 A fetch instance, under `fetch_tools` (see [Search tools](configuration.md#search-tools)),
 names a provider for `otari_web_fetch` and for enriching search results.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
-that enriches search results unless the search instance names its own
-`fetch_tool`, so setting it moves enrichment too. `POST
+that enriches search results, so setting it moves enrichment too. A workspace
+whose organization has a [fetch key](#organization-search-keys) runs both on
+that key instead, and a search instance that names its own `fetch_tool` is
+enriched by that instance whatever the key or the default say. `POST
 /api/v1/search-tools/{name}/test` with a `url` tries an instance.
 
 On a fetch instance, the provider fetches the page and follows its redirects on
@@ -786,9 +788,10 @@ searches, so a second search's first result follows the first search's last, and
 each shows its date as an ISO date, or date and time when the provider gives one.
 
 A result that comes without page text is enriched through the fetch instance the
-search instance names in `fetch_tool`, else `web_fetch_default_tool`, else the
+search instance names in `fetch_tool`, else the organization's
+[fetch key](#organization-search-keys), else `web_fetch_default_tool`, else the
 built-in fetcher, for the first 20 such results of a search; the rest show their
-snippets. Each page read is billed as a fetch on that instance, and the pages of
+snippets. Each page read is billed as a fetch on what read it, and the pages of
 one search are held against the caller's budgets together before any is read
 (see [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). The built-in
 fetcher's page replaces the result's snippet, as
