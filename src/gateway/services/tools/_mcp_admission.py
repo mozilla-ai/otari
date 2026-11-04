@@ -97,12 +97,13 @@ _PROVIDER_MCP_FIELDS = frozenset({"mcp_servers", "mcpServers"})
 def declares_provider_mcp(tools: Sequence[object] | None) -> bool:
     """Whether a request's tools ask its provider to connect to an MCP server itself.
 
-    An OpenAI Responses tool of ``type: "mcp"``, or a Gemini tool carrying MCP servers. Either names a server as
+    An OpenAI Responses tool of ``type: "mcp"``, or a Gemini tool carrying MCP servers; an empty or null Gemini
+    field carries none, so a tool declaring one alongside, say, Google Search is not refused. Either names a server as
     surely as an ``mcp_servers`` entry does, only one the provider dials rather than Otari, so the workspace's
     request-server switch covers it too.
     """
     return any(
-        isinstance(tool, dict) and (tool.get("type") == "mcp" or not _PROVIDER_MCP_FIELDS.isdisjoint(tool))
+        isinstance(tool, dict) and (tool.get("type") == "mcp" or any(tool.get(field) for field in _PROVIDER_MCP_FIELDS))
         for tool in tools or ()
     )
 

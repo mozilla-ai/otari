@@ -221,7 +221,8 @@ read-only.
   such a request with a `400`, so that a workspace's ACLs cannot be stepped around.
   The switch covers a provider's own remote MCP too: a Responses tool of
   `type: "mcp"`, or a Gemini tool carrying `mcp_servers` (`mcpServers`), asks the
-  provider to dial a server, so it is refused the same way.
+  provider to dial a server, so it is refused the same way. A Gemini field that
+  is empty or null names no server and is let through.
   The master key may still name servers; a dashboard session may not.
 
 The ACL is managed under
@@ -389,9 +390,9 @@ one with a `$ref` pointing outside itself:
 A tool name outside the 1–256-character execution limit is omitted with
 `mcp_tool_name_unsupported`, so every tool returned by discovery can be sent
 back to the execution endpoint. So is a name containing `*` or `,`, starting
-with `@`, or with a leading or trailing space, which an access rule would read
-as a pattern (or, trimmed, as `@read`) and the dashboard's allow-list field would
-split, rather than as one name; such a tool is also left
+with `@`, or holding any whitespace or control character, which an access rule
+would read as a pattern (or, trimmed, as `@read`) and the dashboard's allow-list
+field would split, rather than as one name; such a tool is also left
 out of the tools a connection check lists, including a list stored before this
 rule.
 

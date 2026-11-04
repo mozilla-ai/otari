@@ -987,11 +987,9 @@ class WorkspaceMcpServerService:
         pairs = await WorkspaceMemberRepository(self.db).get_active_pairs([workspace_id], list(identities))
         eligible = {identity for _, identity in pairs}
         if workspace is not None:
-            members = OrganizationMemberRepository(self.db)
-            for identity in identities.keys() - eligible:
-                membership = await members.get_active_by_organization_and_user(workspace.organization_id, identity)
-                if membership is not None and membership.role in MANAGEMENT_ROLES:
-                    eligible.add(identity)
+            eligible |= await OrganizationMemberRepository(self.db).active_with_roles(
+                workspace.organization_id, identities.keys() - eligible, MANAGEMENT_ROLES
+            )
         return await provision_attribution_users(self.db, [identities[identity] for identity in eligible])
 
     async def add_grants(

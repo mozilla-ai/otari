@@ -13,17 +13,19 @@ export const ALL_TOOLS = "*"
 export const READ_TOOLS = "@read"
 
 /**
- * Whether a server's tool name means only itself in a rule. A name that is a
- * wildcard or a preset, even once trimmed, would be saved as one, and one with
- * a comma would be split by the allow-list field, so none is offered as a
- * choice; a manager types a pattern on purpose instead.
+ * Whether a server's tool name means only itself once picked, the gateway's
+ * own rule (`reads_as_pattern`): not empty, no wildcard, comma or leading `@`,
+ * and no whitespace or control character anywhere, since this side and the
+ * gateway disagree on what trimming removes. Anything else is never offered as
+ * a choice; a manager types a pattern on purpose instead.
  */
 export function isLiteralToolName(name: string): boolean {
   return (
-    name === name.trim() &&
+    name !== "" &&
     !name.includes("*") &&
     !name.includes(",") &&
-    !name.startsWith("@")
+    !name.startsWith("@") &&
+    !/[\s\p{C}\p{Z}]/u.test(name)
   )
 }
 

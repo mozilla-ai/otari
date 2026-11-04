@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
+import unicodedata
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -285,15 +286,23 @@ def _walk(schema: dict[str, Any]) -> tuple[int, int, bool]:
 
 
 def reads_as_pattern(name: str) -> bool:
-    """Whether a tool name would mean something other than itself once picked: a pattern, or more than one name.
+    """Whether a tool name could mean something other than itself once picked, so it is never offered as a choice.
 
-    A server's tool names are untrusted, and one named ``*``, ``search*`` or `` @read`` that a manager ticks would be
+    A server's tool names are untrusted. One named ``*``, ``search*`` or `` @read`` that a manager ticks would be
     stored, trimmed, as a wildcard or a preset reaching tools the server never named; one with a comma is split by
-    the dashboard's allow-list field into other names, or into none, which exposes every tool. MCP's tool-name
-    charset has none of these characters or spaces, so such a tool is left out of discovery and of the checked
-    catalog rather than offered.
+    the dashboard's allow-list field into other names, or into none, which exposes every tool; an empty one reads as
+    no choice at all. Any whitespace or control character is refused outright rather than only at the edges, since
+    Python and JavaScript disagree on what trimming removes (U+0085, for one). The dashboard applies the same rule
+    (``isLiteralToolName``), and MCP's tool-name charset has none of these, so such a tool is left out of discovery
+    and of the checked catalog rather than offered.
     """
-    return name != name.strip() or "*" in name or "," in name or name.startswith("@")
+    return (
+        not name
+        or "*" in name
+        or "," in name
+        or name.startswith("@")
+        or any(char.isspace() or unicodedata.category(char)[0] in "CZ" for char in name)
+    )
 
 
 def screen_tool(tool: MCPTool) -> str | None:

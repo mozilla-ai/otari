@@ -8,18 +8,22 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent, ToolAnnotations
 from mcp.types import Tool as MCPTool
-from sqlalchemy import func, select, update
+from sqlalchemy import event, func, select, update
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
@@ -32,10 +36,10 @@ from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
 from gateway.models.traces import Trace, TraceSpan
 from gateway.models.users import User as BillingUser
 from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
-from gateway.repositories.users_repository import lock_live_users
+from gateway.repositories.users_repository import lock_live_users, provision_attribution_users
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CODE_SERVER_NOT_FOUND, CODE_TOOL_NOT_ALLOWED
-from gateway.services.model_access import resolve_request_mcp_access
+from gateway.services.model_access import resolve_request_mcp_access, revoke_user_mcp_grants
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import workspace_mcp_server_service
 
@@ -706,6 +710,103 @@ def test_an_organization_admin_with_no_workspace_row_can_be_given_a_rule(
     assert refused.status_code == 400, refused.text
 
 
+def test_naming_many_outsiders_costs_no_more_organization_lookups_than_naming_one(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github")
+
+    def lookups_naming(count: int) -> int:
+        seen: list[str] = []
+
+        def record(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+            if "FROM organization_member" in statement:
+                seen.append(statement)
+
+        event.listen(Engine, "before_cursor_execute", record)
+        try:
+            refused = client.post(
+                f"{_servers(row.workspace_id)}/{row.id}/access/grants",
+                json={"user_ids": [str(uuid.uuid4()) for _ in range(count)], "tools": []},
+                headers=master_key_header,
+            )
+        finally:
+            event.remove(Engine, "before_cursor_execute", record)
+        assert refused.status_code == 400, refused.text
+        return len(seen)
+
+    assert lookups_naming(50) == lookups_naming(1)
+
+
+def test_a_grant_sent_while_the_user_is_deleted_waits_and_is_refused(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Through the real endpoints: the deletion pauses after removing the user's grants, and a grant arrives."""
+    created = client.post(f"{API_ROOT}/users", json={"user_id": "victim"}, headers=master_key_header)
+    assert created.status_code in (200, 201), created.text
+    key = _new_key(client, master_key_header, user_id="victim")
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=[])
+    reached, release = threading.Event(), threading.Event()
+    revoke = revoke_user_mcp_grants
+
+    async def paused_revoke(db: Any, user_id: str) -> None:
+        await revoke(db, user_id)
+        reached.set()
+        await anyio.to_thread.run_sync(release.wait)
+
+    monkeypatch.setattr("gateway.api.routes.users.revoke_user_mcp_grants", paused_revoke)
+    answers: dict[str, Any] = {}
+    deleting = threading.Thread(
+        target=lambda: answers.update(deleted=client.delete(f"{API_ROOT}/users/victim", headers=master_key_header))
+    )
+    granting = threading.Thread(
+        target=lambda: answers.update(
+            granted=client.post(
+                f"{_servers(row.workspace_id)}/{row.id}/access/grants",
+                json={"user_ids": ["victim"], "tools": ["*"]},
+                headers=master_key_header,
+            )
+        )
+    )
+    deleting.start()
+    assert reached.wait(10)
+    granting.start()
+    granting.join(0.5)
+    still_waiting = granting.is_alive()
+    release.set()
+    deleting.join(10)
+    granting.join(10)
+
+    assert still_waiting
+    assert answers["deleted"].status_code in (200, 204), answers["deleted"].text
+    assert answers["granted"].status_code == 400, answers["granted"].text
+    recreated = client.post(f"{API_ROOT}/users", json={"user_id": "victim"}, headers=master_key_header)
+    assert recreated.status_code in (200, 201), recreated.text
+    assert _listed(client, _new_key(client, master_key_header, user_id="victim")) == []
+
+
+@pytest.mark.asyncio
+async def test_minting_a_member_s_row_never_revives_one_deleted_meanwhile(postgres_url: str) -> None:
+    """The row is created and deleted by another transaction while the insert waits; the insert leaves it so."""
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as other, sessions() as granting:
+            other.add(BillingUser(user_id="raced", alias=None, deleted_at=datetime.now(UTC)))
+            await other.flush()
+            minting = asyncio.ensure_future(provision_attribution_users(granting, ["raced"]))
+            await asyncio.sleep(0.3)
+            await other.commit()
+
+            assert await asyncio.wait_for(minting, timeout=10) == set()
+            await granting.rollback()
+        async with sessions() as check:
+            stored = await check.get(BillingUser, "raced")
+            assert stored is not None and stored.deleted_at is not None
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_a_grant_and_the_user_s_deletion_cannot_interleave(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session], postgres_url: str
@@ -871,6 +972,34 @@ def test_the_switch_also_refuses_mcp_servers_handed_to_gemini(
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
     provider.assert_not_called()
+
+
+@pytest.mark.parametrize("empty", [[], None])
+def test_an_empty_gemini_mcp_field_is_not_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    empty: list[Any] | None,
+) -> None:
+    """A Gemini tool whose MCP field names no server asks the provider to dial nothing."""
+    workspace = _workspace_id(test_db, api_key_obj)
+    switched = client.patch(
+        f"{API_ROOT}/workspaces/{workspace}", json={"request_mcp_servers_allowed": False}, headers=master_key_header
+    )
+    assert switched.status_code == 200, switched.text
+    body = {
+        "model": "gemini:gemini-2.5-flash",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [{"google_search": {}, "mcp_servers": empty}],
+    }
+
+    with patch("gateway.api.routes.chat.acompletion") as provider:
+        answered = client.post(f"{API_ROOT}/chat/completions", json=body, headers=api_key_header)
+
+    assert "does not let a request name MCP servers" not in answered.text
+    assert provider.called
 
 
 # --------------------------------------------------------------------------- #

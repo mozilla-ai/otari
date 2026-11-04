@@ -438,14 +438,15 @@ async def delete_user(
 ) -> None:
     """Delete a user in the caller's organization, and erase their telemetry and agent traces."""
     user = await _load_user_in_organization(db, user_id, organization_id)
-    # Before anything is erased, so a grant to this user committing meanwhile waits and is then refused.
-    await lock_live_users(db, [user_id])
 
     # Explicit erasure, not a database ON DELETE cascade: this endpoint
     # soft-deletes the user (deleted_at), so the users row is never hard-deleted
     # and the telemetry FK's SET NULL never fires here regardless of its setting.
     await erase_user_records(request, storage, traces, user_id)
 
+    # After the erasure, which commits, so the lock is held by the transaction that removes the user's grants and
+    # marks them deleted: a grant to this user committing meanwhile waits for it and is then refused.
+    await lock_live_users(db, [user_id])
     await db.execute(
         update(APIKey)
         .where(APIKey.user_id == user_id)

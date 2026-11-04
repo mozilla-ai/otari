@@ -148,6 +148,9 @@ describe("isLiteralToolName", () => {
     "list_issues ",
     ",",
     "get_issue,delete_issue",
+    "",
+    "\u0085@read",
+    "list issues",
   ])(
     "keeps %j out of the choices, since a rule would read it as a pattern",
     (name) => {

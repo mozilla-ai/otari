@@ -7,6 +7,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { Dot } from "@/design-system/indicators/Dot"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { isLiteralToolName } from "@/features/tools/mcpAccess"
 import {
   healthDetail,
   healthNeedsAttention,
@@ -62,7 +63,7 @@ export function McpExposedTools({
   )
   const [picked, setPicked] = useState<string[]>(stored ?? [])
   const health = server.health
-  const offered = health?.tools ?? []
+  const offered = (health?.tools ?? []).filter(isLiteralToolName)
   const next = exposure === "all" ? null : picked
   const isChanged = JSON.stringify(next) !== JSON.stringify(stored)
   // `[]` would expose nothing, which the gateway reads as a deny-all; the way

@@ -52,6 +52,9 @@ def test_a_tool_name_at_the_execution_limit_is_admitted() -> None:
         "list_issues ",
         ",",
         "get_issue,delete_issue",
+        "\u0085@read",
+        "list issues",
+        "list\u200bissues",
     ],
 )
 def test_a_tool_name_execution_or_an_access_rule_cannot_take_is_omitted(name: str) -> None:

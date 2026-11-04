@@ -150,21 +150,27 @@ async def lock_live_users(db: AsyncSession, user_ids: Sequence[str]) -> set[str]
 
 
 async def provision_attribution_users(db: AsyncSession, user_ids: Sequence[str]) -> set[str]:
-    """Mint a request-plane row for each of ``user_ids`` that has none, and return the ids that are usable.
+    """Mint a request-plane row for each of ``user_ids`` that has none, and return the ids whose row is live.
 
     For a member who has neither a key nor a Playground request yet, so something can name them before they
-    first act. Unlike :func:`get_or_create_attribution_user`, a soft-deleted row is left deleted and its id is
-    not returned: deleting a user is an operator's revocation, which this must not undo. The caller owns the commit.
+    first act. Unlike :func:`get_or_create_attribution_user`, nothing here revives a row: an insert that finds one
+    already there, including one created and deleted by another transaction since, leaves it as it is, because
+    deleting a user is an operator's revocation. What is returned is read under :func:`lock_live_users`, so it
+    holds until the caller commits.
     """
     if not user_ids:
         return set()
-    rows = await db.execute(select(User.user_id, User.deleted_at).where(User.user_id.in_(list(user_ids))))
-    deleted_at = {user_id: deleted for user_id, deleted in rows.tuples().all()}
+    existing = set((await db.execute(select(User.user_id).where(User.user_id.in_(list(user_ids))))).scalars().all())
     for user_id in dict.fromkeys(user_ids):
-        if user_id not in deleted_at:
-            await get_or_create_attribution_user(db, user_id=user_id, alias=None)
-            deleted_at[user_id] = None
-    return {user_id for user_id, deleted in deleted_at.items() if deleted is None}
+        if user_id in existing:
+            continue
+        try:
+            async with db.begin_nested():
+                db.add(User(user_id=user_id, alias=None))
+                await db.flush()
+        except IntegrityError:
+            continue
+    return await lock_live_users(db, user_ids)
 
 
 async def attribution_spend(db: AsyncSession, user_ids: Sequence[str]) -> dict[str, User]:
