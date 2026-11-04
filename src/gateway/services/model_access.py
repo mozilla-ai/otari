@@ -387,6 +387,11 @@ async def resolve_request_mcp_access(
     )
 
 
+async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> None:
+    """Stage the removal of a deleted user's MCP grants, which a soft delete leaves behind otherwise."""
+    await WorkspaceMcpServerGrantRepository(db).remove_for_user(user_id)
+
+
 def tool_not_allowed_detail(
     tool: str, legacy_key: str, legacy_models: Sequence[list[str]] = (), *, kind: ToolKind = "search"
 ) -> str:

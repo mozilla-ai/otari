@@ -28,7 +28,7 @@ from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
 from gateway.services.budgets import budget_window
-from gateway.services.model_access import validate_allowed_models, validate_allowed_tools
+from gateway.services.model_access import revoke_user_mcp_grants, validate_allowed_models, validate_allowed_tools
 from gateway.services.organizations import AccessLists
 
 router = APIRouter(
@@ -444,6 +444,7 @@ async def delete_user(
         .values(is_active=False)
         .execution_options(synchronize_session=False)
     )
+    await revoke_user_mcp_grants(db, user_id)
     user.deleted_at = datetime.now(UTC)
 
     try:

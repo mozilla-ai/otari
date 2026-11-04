@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -94,3 +94,11 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         """Stage a grant's removal."""
         await self.db.delete(grant)
         await self.db.flush()
+
+    async def remove_for_user(self, user_id: str) -> None:
+        """Stage the removal of every grant naming a user, on any server.
+
+        A user is soft-deleted, so the foreign key's cascade never fires; a user recreated under the same ID must
+        not find the deleted one's grants waiting for it.
+        """
+        await self.db.execute(delete(WorkspaceMcpServerGrant).where(WorkspaceMcpServerGrant.user_id == user_id))

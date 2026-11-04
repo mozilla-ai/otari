@@ -566,6 +566,25 @@ def test_a_keys_summary_covers_every_server_of_its_workspace(
     assert client.get(f"{_servers(workspace)}/keys/no-such-key/access", headers=master_key_header).status_code == 400
 
 
+def test_a_deleted_user_s_grants_do_not_come_back_with_a_user_recreated_under_its_id(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    created = client.post(f"{API_ROOT}/users", json={"user_id": "alice"}, headers=master_key_header)
+    assert created.status_code in (200, 201), created.text
+    key = _new_key(client, master_key_header, user_id="alice")
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=[])
+    _grant(client, master_key_header, row, ["*"], users=["alice"])
+    assert _listed(client, key) == ["github"]
+
+    deleted = client.delete(f"{API_ROOT}/users/alice", headers=master_key_header)
+    recreated = client.post(f"{API_ROOT}/users", json={"user_id": "alice"}, headers=master_key_header)
+    fresh = _new_key(client, master_key_header, user_id="alice")
+
+    assert deleted.status_code in (200, 204), deleted.text
+    assert recreated.status_code in (200, 201), recreated.text
+    assert _listed(client, fresh) == []
+
+
 def test_renaming_a_server_keeps_its_grants(
     client: TestClient, master_key_header: dict[str, str], test_db: Session
 ) -> None:
