@@ -65,6 +65,14 @@ export function FeedbackDialog({
   const thanksId = useId()
   const thanksRef = useRef<HTMLDivElement>(null)
   const fieldRef = useRef<HTMLTextAreaElement>(null)
+  // Set the moment a send starts: `isPending` is state, so a second press in
+  // the same frame, as a double click lands, would still read it false.
+  const sendingRef = useRef(false)
+  const composeRef = useRef<HTMLFormElement>(null)
+  // The compose's height when the thanks replaced it, which the thanks keep so
+  // the frame does not shrink under the reader: the consent line wraps to one,
+  // two or three lines with the address it names.
+  const [heldHeight, setHeldHeight] = useState<number | null>(null)
   const [message, setMessage] = useState("")
   const [isEmptySend, setIsEmptySend] = useState(false)
   const [isSent, setIsSent] = useState(false)
@@ -94,6 +102,8 @@ export function FeedbackDialog({
     setIsEmptySend(false)
     setIsSent(false)
     setSentTo(null)
+    setHeldHeight(null)
+    sendingRef.current = false
     reset()
   }, [isOpen, reset])
 
@@ -106,7 +116,7 @@ export function FeedbackDialog({
   }, [isSent])
 
   function send() {
-    if (isPending || guard.isGuarding) return
+    if (sendingRef.current || isPending || guard.isGuarding) return
     const trimmed = message.trim()
     if (trimmed === "") {
       setIsEmptySend(true)
@@ -115,14 +125,19 @@ export function FeedbackDialog({
     // The address the consent line named, which the gateway sends only when it
     // is still the session's own.
     const repliesTo = shareable
+    sendingRef.current = true
     mutate(
       repliesTo
         ? { message: trimmed, share_email: repliesTo }
         : { message: trimmed },
       {
         onSuccess: () => {
+          setHeldHeight(composeRef.current?.offsetHeight ?? null)
           setSentTo(repliesTo)
           setIsSent(true)
+        },
+        onSettled: () => {
+          sendingRef.current = false
         },
       },
     )
@@ -170,10 +185,8 @@ export function FeedbackDialog({
               <div
                 ref={thanksRef}
                 data-feedback-view="sent"
-                // The compose's height, which the email line adds 40px to.
-                className={`flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24 ${
-                  shareable ? "min-h-[18.75rem]" : "min-h-[16.25rem]"
-                }`}
+                style={heldHeight ? { minHeight: heldHeight } : undefined}
+                className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-10 max-sm:px-6 max-sm:pt-0 max-sm:pb-24"
               >
                 {/* The hook is on a wrapper because `ProductMark` passes no
                     attribute but `className` through to its `<svg>`. */}
@@ -202,6 +215,7 @@ export function FeedbackDialog({
               </div>
             ) : (
               <form
+                ref={composeRef}
                 data-feedback-view="compose"
                 noValidate
                 aria-busy={isPending}

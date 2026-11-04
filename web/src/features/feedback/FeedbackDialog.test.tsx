@@ -306,6 +306,31 @@ describe("FeedbackDialog", () => {
     expect(field()).toHaveValue("Idea")
   })
 
+  it("sends once when Send is pressed twice before the first send renders", async () => {
+    const { fetch, user } = setup({ email: "ada@example.com" })
+    await user.type(field(), "Idea")
+    const send = screen.getByRole("button", { name: SEND })
+    // Both presses in one act, as a double click lands before React re-renders
+    // with the first send pending.
+    act(() => {
+      send.click()
+      send.click()
+    })
+    await screen.findByRole("heading", { name: "Thank you!" })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it("sends again after a failed send", async () => {
+    const { fetch, user } = setup()
+    fetch.mockResolvedValueOnce(new Response(null, { status: 503 }))
+    await user.type(field(), "Idea")
+    await user.click(screen.getByRole("button", { name: SEND }))
+    await screen.findByRole("alert")
+    await user.click(screen.getByRole("button", { name: SEND }))
+    await screen.findByRole("heading", { name: "Thank you!" })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
   it("caps the field at the gateway's 4,000", () => {
     setup()
     expect(field()).toHaveAttribute("maxlength", "4000")
