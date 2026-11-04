@@ -14123,6 +14123,169 @@
         "title": "OAuthSessionResponse",
         "type": "object"
       },
+      "OIDCConnectionDomain": {
+        "description": "One of the organization's email domains.",
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether the domain's claim is turned on.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "proof_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the domain's DNS proof stops being acted on, or None when it has never been verified.",
+            "title": "Proof Expires At"
+          }
+        },
+        "required": [
+          "domain",
+          "proof_expires_at",
+          "enabled"
+        ],
+        "title": "OIDCConnectionDomain",
+        "type": "object"
+      },
+      "OIDCConnectionPublic": {
+        "description": "An organization's own sign-in connection, as its admins see it.\n\nCarries ``client_secret_last4`` and never the secret itself.",
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret_last4": {
+            "title": "Client Secret Last4",
+            "type": "string"
+          },
+          "default_role": {
+            "title": "Default Role",
+            "type": "string"
+          },
+          "discovered_at": {
+            "description": "When the provider's configuration was last read.",
+            "format": "date-time",
+            "title": "Discovered At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domains": {
+            "description": "Every one of the organization's email domains, each with its DNS proof's expiry and whether its claim is enabled. Only a domain that is both enabled and has an unexpired proof admits a sign-in.",
+            "items": {
+              "$ref": "#/components/schemas/OIDCConnectionDomain"
+            },
+            "title": "Domains",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "issuer": {
+            "description": "The organization's own claim.",
+            "title": "Issuer",
+            "type": "string"
+          },
+          "resolved_issuer": {
+            "description": "What discovery confirmed the issuer to be.",
+            "title": "Resolved Issuer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "issuer",
+          "resolved_issuer",
+          "client_id",
+          "client_secret_last4",
+          "display_name",
+          "default_role",
+          "enabled",
+          "discovered_at",
+          "domains"
+        ],
+        "title": "OIDCConnectionPublic",
+        "type": "object"
+      },
+      "OIDCConnectionRequest": {
+        "description": "What an organization administrator submits to configure its own sign-in connection.",
+        "properties": {
+          "client_id": {
+            "description": "The OAuth client ID this deployment authenticates with.",
+            "maxLength": 255,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The OAuth client secret. Stored encrypted and never served back. Leave it out to keep the one already stored, which is refused unless the issuer and the client ID are both unchanged.",
+            "title": "Client Secret"
+          },
+          "default_role": {
+            "default": "member",
+            "description": "The role given to a person's first sign-in through this connection.",
+            "enum": [
+              "member",
+              "viewer"
+            ],
+            "title": "Default Role",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "The identity provider's name, as shown to people signing in.",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "description": "Whether this connection currently admits sign-in.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "issuer": {
+            "description": "The identity provider's issuer URL, as the organization's own claim.",
+            "maxLength": 255,
+            "title": "Issuer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issuer",
+          "client_id",
+          "display_name"
+        ],
+        "title": "OIDCConnectionRequest",
+        "type": "object"
+      },
       "OfferingUsage": {
         "description": "What the viewer's organization actually paid for one offering, last 30 days.\n\nThe listed rate is what a token costs; this is what the tokens cost, which is\nlower wherever prompt caching hit. Absent for a visitor and for an offering\nthe organization never called.",
         "properties": {
@@ -17138,6 +17301,33 @@
           "count"
         ],
         "title": "OrganizationScopedBudgetsPublic",
+        "type": "object"
+      },
+      "OrganizationSsoPublic": {
+        "description": "An organization's own OIDC connection, and what to register at the provider.",
+        "properties": {
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OIDCConnectionPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's own connection, or null until one is saved."
+          },
+          "redirect_uri": {
+            "description": "This deployment's fixed callback path. Register it at the identity provider, whether or not a connection is saved yet.",
+            "title": "Redirect Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_uri",
+          "connection"
+        ],
+        "title": "OrganizationSsoPublic",
         "type": "object"
       },
       "OutputShape": {
@@ -42226,6 +42416,135 @@
         "summary": "Update Organization Spend Ceiling",
         "tags": [
           "organization-budgets"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/sso": {
+      "delete": {
+        "description": "Remove the caller's organization's own sign-in connection. Owners and admins only.\n\nRefused with 404 when the organization has not saved a connection yet.",
+        "operationId": "organization-sso-delete_organization_sso",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      },
+      "get": {
+        "description": "Read the caller's organization's own sign-in connection. Owners and admins only.\n\n``connection`` is null until the organization saves one.",
+        "operationId": "organization-sso-get_organization_sso",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      },
+      "put": {
+        "description": "Discover the submitted issuer and save the caller's organization's own sign-in connection.\n\nOwners and admins only. Replaces any existing connection. The client secret is\nencrypted at rest and never served back.",
+        "operationId": "organization-sso-put_organization_sso",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OIDCConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/sso/test": {
+      "post": {
+        "description": "Re-discover the caller's organization's own issuer and store the result. Owners and admins only.\n\nRefused with 404 when the organization has not saved a connection yet.",
+        "operationId": "organization-sso-test_organization_sso",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSsoPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Organization Sso",
+        "tags": [
+          "organization-sso"
         ]
       }
     },
