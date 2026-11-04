@@ -81,7 +81,7 @@ export function FilterChips({
           ) : null}
         </div>
         {chips.length > 0 ? (
-          <div className="otari-toolbar flex flex-wrap items-center gap-2">
+          <div className="otari-toolbar flex flex-wrap items-center gap-2 pointer-coarse:gap-y-5">
             {chipRow}
           </div>
         ) : null}
@@ -94,7 +94,7 @@ export function FilterChips({
       {/* `otari-toolbar`: this row IS the named dense place, so its controls
           take the 38px height a filter above a table sits at. It was a toolbar
           in everything but the class. */}
-      <div className="otari-toolbar flex flex-wrap items-center gap-2">
+      <div className="otari-toolbar flex flex-wrap items-center gap-2 pointer-coarse:gap-y-5">
         {start}
         <Button
           size="sm"
