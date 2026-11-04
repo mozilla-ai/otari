@@ -24,8 +24,7 @@ import {
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
 import { formatRate } from "@/shared/helpers/format"
-import { useDebounced } from "@/shared/hooks/useDebounced"
-import { SEARCH_MAX_LENGTH } from "@/shared/hooks/useListSearch"
+import { SEARCH_MAX_LENGTH, useSearchTerm } from "@/shared/hooks/useListSearch"
 
 import { HostedModelForm } from "./HostedModelForm"
 import { refreshOutcome } from "./refreshOutcome"
@@ -88,8 +87,7 @@ export function HostedProviderModelsPanel({
   // In component state, not the URL, like the page and the open provider it
   // belongs to: a term in the URL would outlive the panel on a reload.
   const [query, setQuery] = useState("")
-  const typed = query.trim().slice(0, SEARCH_MAX_LENGTH)
-  const term = useDebounced(typed)
+  const { term, isSettled } = useSearchTerm(query)
   const models = useHostedModels(provider.name, page, pageSize, term)
   const update = useUpdateHostedModel(provider.name)
   const refresh = useRefreshHostedModels(provider.name)
@@ -275,7 +273,7 @@ export function HostedProviderModelsPanel({
                 setPage(0)
               }}
               resultCount={
-                term === typed && !models.isPlaceholderData
+                isSettled && !models.isPlaceholderData
                   ? models.data?.count
                   : undefined
               }
@@ -292,8 +290,7 @@ export function HostedProviderModelsPanel({
               // term's, held as placeholder data or waiting out the pause.
               isLoading={
                 models.isLoading ||
-                (rows.length === 0 &&
-                  (models.isPlaceholderData || term !== typed))
+                (rows.length === 0 && (models.isPlaceholderData || !isSettled))
               }
               // Not over a failed read: the banner above says what happened,
               // and "no match" would read as a search that ran and found none.
