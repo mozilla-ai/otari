@@ -25,6 +25,7 @@ from gateway.api.routes import (
     decisions,
     embeddings,
     end_users,
+    fetch,
     files,
     health,
     hook_guardrails,
@@ -150,6 +151,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # since the harness dispatches the subagent to its own provider.
     agent_routing.router,
     search.router,
+    fetch.router,
     code_execution.router,
     batches.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
