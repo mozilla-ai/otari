@@ -30,7 +30,8 @@ On the way through, it:
 
 ## Two ways to run it
 
-Run Otari yourself with the [Self-hosted quickstart](self-hosted-quickstart.md).
+You can use our hosted version at [otari.ai](https://otari.ai), or
+run Otari yourself (see [Self-hosted quickstart](self-hosted-quickstart.md)). 
 
 
 ### Integrations
