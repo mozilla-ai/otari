@@ -16,17 +16,20 @@ import json
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Never, cast
 from unittest.mock import patch
 
 import httpx2
 import pytest
 from anthropic import Anthropic, BadRequestError
+from fastapi import Request
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, API_VERSION, GatewayConfig
+from gateway.core.database import release_session
 from gateway.models.files import FileObject
 from gateway.services.file_extractors import ExtractionResult
 
@@ -63,7 +66,11 @@ def _make_completion() -> Any:
     )
 
 
-def test_upload_requires_auth(client: TestClient) -> None:
+def test_upload_requires_auth_before_reading_the_body(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the body was parsed before authentication")
+
+    monkeypatch.setattr(Request, "form", unread)
     resp = client.post(f"{API_ROOT}/files", files={"file": ("a.txt", b"x", "text/plain")})
     assert resp.status_code == 401
 
@@ -87,6 +94,50 @@ def test_upload_too_large_rejected(
         files={"file": ("big.bin", b"x" * 64, "application/octet-stream")},
     )
     assert resp.status_code == 413
+
+
+def test_upload_body_over_the_route_limit_is_refused_before_parsing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "files_max_bytes", 16)
+
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the oversized body was parsed")
+
+    monkeypatch.setattr(Request, "form", unread)
+    resp = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("big.bin", b"x" * (16 + 1024 * 1024 + 1), "application/octet-stream")},
+    )
+    assert resp.status_code == 413
+
+
+def test_upload_frees_the_auth_connection_before_reading_the_body(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow client must not pin the connection authentication checked out."""
+    events: list[str] = []
+    release = release_session
+    form = Request.form
+
+    async def recording_release(session: AsyncSession) -> bool:
+        events.append("release")
+        return await release(session)
+
+    def recording_form(self: Request, **kwargs: Any) -> Any:
+        events.append("form")
+        return form(self, **kwargs)
+
+    monkeypatch.setattr("gateway.api.deps.release_session", recording_release)
+    monkeypatch.setattr(Request, "form", recording_form)
+    resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"x", "text/plain")})
+
+    assert resp.status_code == 200
+    assert events == ["release", "form"]
 
 
 def test_files_are_user_scoped(

@@ -851,6 +851,19 @@ async def verify_api_key_or_master_key(
     return api_key, False
 
 
+async def verify_api_key_or_master_key_for_upload(
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> tuple[APIKey | None, bool]:
+    """:func:`verify_api_key_or_master_key`, then free its connection before the route reads the body.
+
+    A route that parses its own upload does so after authentication, so a slow
+    client would otherwise pin the pooled connection the key lookup checked out.
+    """
+    await release_session(db)
+    return auth_result
+
+
 async def verify_catalog_reader(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
