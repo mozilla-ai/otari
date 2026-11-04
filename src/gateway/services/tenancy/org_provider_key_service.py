@@ -158,7 +158,7 @@ def key_is_usable(key: OrgProviderKey) -> bool:
 
 def has_credential(key: OrgProviderKey) -> bool:
     """Whether this key holds an API key or a base URL, and its secret decrypts."""
-    return (key.encrypted_api_key is not None or key.api_base is not None) and key_is_usable(key)
+    return (key.encrypted_api_key is not None or bool(key.api_base)) and key_is_usable(key)
 
 
 def cached_org_provider_kwargs(workspace_id: uuid.UUID, provider: str) -> dict[str, Any] | None:

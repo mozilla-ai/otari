@@ -204,6 +204,10 @@ async def test_a_provider_counts_as_zero_data_retention_only_while_every_key_dec
 
     await service.create_key_for_user(user=owner, request=_create_request(name="keyless", api_key=None))
     assert await declared() == frozenset({"openai"}), "a key with no credential serves nothing"
+    await service.create_key_for_user(
+        user=owner, request=OrgProviderKeyCreateRequest(provider="openai", name="blank base", api_base="")
+    )
+    assert await declared() == frozenset({"openai"}), "an empty base URL is no credential either"
 
 
 async def test_delete_requires_archived_first(async_db: AsyncSession) -> None:
