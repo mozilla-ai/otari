@@ -93,8 +93,9 @@ def test_the_columns_land_on_both_tables_with_the_model_s_shape(sqlite_before: t
         assert columns["unit"]["nullable"] is False, table
         assert str(columns["origin"]["type"]) == "VARCHAR(16)", table
         assert columns["origin"]["nullable"] is True, table
-        # The model has since dropped the 1h rate column and added ``kind``; this revision predates both.
-        expected = (set(SQLModel.metadata.tables[table].columns.keys()) - {"kind"}) | {
+        # The model has since dropped the 1h rate column and added ``kind`` and ``rates``; this revision
+        # predates all three.
+        expected = (set(SQLModel.metadata.tables[table].columns.keys()) - {"kind", "rates"}) | {
             "cache_write_1h_price_per_million"
         }
         assert set(columns) == expected, table
