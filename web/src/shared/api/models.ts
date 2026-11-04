@@ -34,7 +34,14 @@ export function useCatalog(
     queryFn: ({ signal }) =>
       apiFetch<CatalogResponse>(`/catalog/models?${search}`, { signal }),
     staleTime: 60_000,
-    placeholderData: keepPreviousData,
+    // The previous page stands in while a filter or a page changes, never
+    // across workspaces: another workspace's list names models this one may
+    // not call.
+    placeholderData: (previous, previousQuery) =>
+      (previousQuery?.queryKey[2] as CatalogQueryParams | undefined)
+        ?.workspace_id === params.workspace_id
+        ? previous
+        : undefined,
     enabled,
   })
 }

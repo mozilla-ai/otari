@@ -83,6 +83,19 @@ function mockApi(
         data: catalog.map((id) => ({ id, owned_by: id.split(":")[0] })),
       })
     }
+    if (url.startsWith(`${API_ROOT}/catalog/models`)) {
+      // The dialog reads one provider's models from the grouped catalog, each
+      // as a selector; no vendor, so the name before a slash stands in.
+      const provider = new URL(url, "http://localhost").searchParams.get(
+        "provider",
+      )
+      return jsonResponse({
+        models: catalog
+          .filter((id) => id.startsWith(`${provider}:`))
+          .map((id) => ({ selectors: [id], vendor: null })),
+        count: catalog.length,
+      })
+    }
     if (url.includes("/provider-policy")) {
       if (method !== "GET")
         return jsonResponse(init?.body ? JSON.parse(String(init.body)) : {})

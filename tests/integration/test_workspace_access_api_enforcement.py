@@ -294,3 +294,22 @@ def test_the_policy_reads_back_and_starts_off(client: TestClient, master_key_hea
     policy = _ok(client.get(f"{API_ROOT}/workspaces/{workspace_id}/provider-policy", headers=master_key_header))
 
     assert policy == {"require_zero_data_retention": False}
+
+
+def test_an_alias_to_a_hosted_model_the_workspace_refuses_is_not_listed(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The workspace's rule reaches an alias through its target, as dispatch reaches it."""
+    _hosted_openai(client, master_key_header)
+    workspace_id, headers = _workspace_and_key(client, master_key_header)
+    _ok(client.post(f"{API_ROOT}/aliases", json={"name": "fast", "target": "openai:gpt-4o"}, headers=master_key_header))
+    url = f"{API_ROOT}/workspaces/{workspace_id}/hosted-providers/openai"
+
+    def listed() -> set[str]:
+        return {model["id"] for model in _ok(client.get(f"{API_ROOT}/models", headers=headers))["data"]}
+
+    assert "fast" in listed()
+    _ok(client.put(url, json={"enabled": False}, headers=master_key_header))
+    assert "fast" not in listed()
+    _ok(client.delete(url, headers=master_key_header))
+    assert "fast" in listed()

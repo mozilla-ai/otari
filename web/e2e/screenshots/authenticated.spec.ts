@@ -213,7 +213,9 @@ test.describe("organization rail", () => {
     // way an admin reaches it, so the capture needs no workspace id up front.
     await login(page)
     await gotoRoute(page, "/workspaces")
+    // Scoped to the page body: the rail's own links name workspaces too.
     await page
+      .getByRole("main")
       .getByRole("link")
       .filter({ hasText: /workspace/i })
       .first()

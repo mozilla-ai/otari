@@ -63,6 +63,9 @@ class WorkspaceHostedAccessDeniedError(HostedAccessDeniedError):
 _rules: dict[uuid.UUID, dict[str, WorkspaceHostedRule]] = {}
 # The workspaces that require zero data retention of every provider serving them.
 _zero_retention_workspaces: frozenset[uuid.UUID] = frozenset()
+# Refreshes started, and the number of the newest one applied.
+_refresh_count = 0
+_applied_refresh = 0
 
 
 def workspace_requires_zero_data_retention(workspace_id: uuid.UUID | None) -> bool:
@@ -106,6 +109,15 @@ def ensure_workspace_may_use_hosted(workspace_id: uuid.UUID | None, provider: st
         )
 
 
+def workspace_may_use_hosted(workspace_id: uuid.UUID, provider: str, model: str | None) -> bool:
+    """Whether :func:`ensure_workspace_may_use_hosted` lets the dispatch through, for a reader that lists."""
+    try:
+        ensure_workspace_may_use_hosted(workspace_id, provider, model)
+    except WorkspaceHostedAccessDeniedError:
+        return False
+    return True
+
+
 def narrow_hosted_models(hosted: HostedModels, workspace_id: uuid.UUID | None) -> HostedModels:
     """``hosted`` as one workspace may use it, for a catalog that answers for that workspace.
 
@@ -140,23 +152,32 @@ def _rule_of(row: WorkspaceHostedProviderAccess) -> WorkspaceHostedRule:
 
 
 async def refresh_workspace_hosted_access_cache(uow: UnitOfWork) -> None:
-    """Reload every row and policy, and swap the cache in one step."""
-    global _rules, _zero_retention_workspaces  # noqa: PLW0603
+    """Reload every row and policy, and swap the cache in one step.
 
+    Numbered before the read, so a refresh whose read began earlier never
+    replaces what a later one already applied: a write refreshes after it
+    commits, and the periodic refresher must not undo that with an older read.
+    """
+    global _rules, _zero_retention_workspaces, _refresh_count, _applied_refresh  # noqa: PLW0603
+
+    _refresh_count += 1
+    number = _refresh_count
     async with uow:
         rows = await WorkspaceHostedAccessRepository(uow).list_all()
         zero_retention = await WorkspaceProviderPolicyRepository(uow).zero_data_retention_workspaces()
+    if number < _applied_refresh:
+        return
     rules: dict[uuid.UUID, dict[str, WorkspaceHostedRule]] = {}
     for row in rows:
         rules.setdefault(row.workspace_id, {})[row.provider] = _rule_of(row)
-    _rules, _zero_retention_workspaces = rules, zero_retention
+    _rules, _zero_retention_workspaces, _applied_refresh = rules, zero_retention, number
 
 
 def reset_workspace_hosted_access_cache() -> None:
     """Drop the cache so the next load starts clean (startup and tests)."""
-    global _rules, _zero_retention_workspaces  # noqa: PLW0603
+    global _rules, _zero_retention_workspaces, _applied_refresh  # noqa: PLW0603
 
-    _rules, _zero_retention_workspaces = {}, frozenset()
+    _rules, _zero_retention_workspaces, _applied_refresh = {}, frozenset(), 0
 
 
 async def _refresh_on_a_session_of_its_own() -> None:
@@ -269,7 +290,10 @@ class WorkspaceHostedAccessService:
         hosted = await self.hosted_models(workspace.organization_id)
         if provider not in hosted:
             raise WorkspaceHostedProviderNotFoundError(provider)
-        models = _validated_models(request.models, hosted[provider])
+        # Switching off checks no name against the roster: the list it keeps may
+        # name a model the deployment has since dropped, and that must not hold
+        # the provider on.
+        models = _validated_models(request.models, hosted[provider] if request.enabled else None)
         async with self.uow:
             if request.enabled and models is None:
                 await self.rules.delete_for(workspace.id, provider)

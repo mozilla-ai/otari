@@ -1,6 +1,6 @@
 import type { WorkspaceHostedProvider } from "@/client"
 import { ModelSelectionDialog } from "@/features/workspaces/access/ModelSelectionDialog"
-import { useModelVendors } from "@/features/workspaces/access/modelVendors"
+import { useProviderCatalog } from "@/features/workspaces/access/modelVendors"
 import { useSetWorkspaceHostedProvider } from "@/shared/api/workspaces"
 
 /** Which models of one hosted provider a workspace may call: one stored rule, saved at once. */
@@ -14,7 +14,7 @@ export function HostedModelsDialog({
   onClose: () => void
 }) {
   const save = useSetWorkspaceHostedProvider()
-  const vendors = useModelVendors(row.provider, true)
+  const { vendors } = useProviderCatalog(row.provider, true)
   return (
     <ModelSelectionDialog
       isOpen

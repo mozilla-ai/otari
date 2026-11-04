@@ -1,7 +1,7 @@
 import { useState } from "react"
 
 import { ModelSelectionDialog } from "@/features/workspaces/access/ModelSelectionDialog"
-import { useModelVendors } from "@/features/workspaces/access/modelVendors"
+import { useProviderCatalog } from "@/features/workspaces/access/modelVendors"
 import {
   useAddWorkspaceProviderKeyModel,
   useRemoveWorkspaceProviderKeyModel,
@@ -19,7 +19,6 @@ export function KeyModelsDialog({
   keyName,
   provider,
   allowed,
-  served,
   validateEntry,
   onClose,
 }: {
@@ -29,8 +28,6 @@ export function KeyModelsDialog({
   /** The key's provider, or empty for a key whose provider this caller cannot read. */
   provider: string
   allowed: readonly string[]
-  /** What the catalog lists for the provider; empty where it lists nothing, and names are typed. */
-  served: readonly string[]
   validateEntry: (name: string) => string | undefined
   onClose: () => void
 }) {
@@ -38,7 +35,9 @@ export function KeyModelsDialog({
   const remove = useRemoveWorkspaceProviderKeyModel()
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<unknown>(null)
-  const vendors = useModelVendors(provider, provider !== "")
+  // The provider's models as the catalog lists them, by the bare name the list
+  // stores. Where it lists none, the names are typed instead.
+  const catalog = useProviderCatalog(provider, provider !== "")
 
   const save = async (next: string[] | null) => {
     const wanted = new Set(next ?? [])
@@ -63,13 +62,17 @@ export function KeyModelsDialog({
     }
   }
 
+  // Held until the catalog answers, so the dialog does not open on a typed
+  // list and switch to checkboxes under the caller.
+  if (catalog.isPending) return null
+
   return (
     <ModelSelectionDialog
       isOpen
       onClose={onClose}
       title={`Models on ${keyName}`}
-      models={served.length > 0 ? served : null}
-      vendors={vendors}
+      models={catalog.models.length > 0 ? catalog.models : null}
+      vendors={catalog.vendors}
       initial={allowed.length > 0 ? allowed : null}
       isPending={isSaving}
       error={error}

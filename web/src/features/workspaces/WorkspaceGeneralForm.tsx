@@ -185,7 +185,14 @@ export function WorkspaceGeneralForm({
             type="submit"
             variant="primary"
             isPending={update.isPending || savingDefault}
-            isDisabled={!canManage || !isDirty || trimmed === ""}
+            // Held while the defaults load: until they answer, the aggregate
+            // reads as absent and a save would create a second one.
+            isDisabled={
+              !canManage ||
+              !isDirty ||
+              trimmed === "" ||
+              (isOperator && defaults.isPending)
+            }
           >
             Save
           </Button>
@@ -200,6 +207,7 @@ export function WorkspaceGeneralForm({
             budgets={budgets.data ?? []}
             narrowed={narrowed}
             providers={providers}
+            isReadOnly={!canManage}
           />
         </section>
       ) : null}

@@ -49,23 +49,26 @@ export function groupModelsByVendor(
 }
 
 /**
- * Each model the catalog lists on `provider`, keyed by its bare name, with its
- * vendor. Read only while a dialog that needs it is open.
+ * What the catalog lists on `provider`: each model by the bare name a
+ * workspace's list stores, and its vendor where the catalog knows it. Read only
+ * while a dialog that needs it is open.
  */
-export function useModelVendors(
-  provider: string,
-  enabled: boolean,
-): ReadonlyMap<string, string> {
+export function useProviderCatalog(provider: string, enabled: boolean) {
   const catalog = useCatalog({ provider: [provider], limit: 1000 }, enabled)
+  const prefix = `${provider}:`
+  const models = new Set<string>()
   const vendors = new Map<string, string>()
   for (const model of catalog.data?.models ?? []) {
-    if (!model.vendor) continue
     for (const selector of model.selectors) {
-      const prefix = `${provider}:`
-      if (selector.startsWith(prefix)) {
-        vendors.set(selector.slice(prefix.length), model.vendor)
-      }
+      if (!selector.startsWith(prefix)) continue
+      const name = selector.slice(prefix.length)
+      models.add(name)
+      if (model.vendor) vendors.set(name, model.vendor)
     }
   }
-  return vendors
+  return {
+    models: [...models],
+    vendors: vendors as ReadonlyMap<string, string>,
+    isPending: enabled && catalog.isPending,
+  }
 }

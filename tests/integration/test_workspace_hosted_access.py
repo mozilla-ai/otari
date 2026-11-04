@@ -251,11 +251,13 @@ async def _workspace(db: AsyncSession, organization: Organization, *, owner: Use
     return workspace
 
 
-def _service(db: AsyncSession, *, own_key: frozenset[str] = frozenset()) -> WorkspaceHostedAccessService:
+def _service(
+    db: AsyncSession, *, own_key: frozenset[str] = frozenset(), served: HostedModels = SERVED
+) -> WorkspaceHostedAccessService:
     uow = UnitOfWork(db)
 
     async def hosted_models(_organization_id: uuid.UUID | None) -> HostedModels:
-        return SERVED
+        return served
 
     async def byo_providers(_workspace_id: uuid.UUID) -> frozenset[str]:
         return own_key
@@ -315,6 +317,39 @@ async def test_storing_the_inherited_state_stores_no_row(async_db: AsyncSession)
     assert result.customized is False
     async with UnitOfWork(async_db) as uow:
         assert list(await WorkspaceHostedAccessRepository(uow).list_for_workspace(workspace.id)) == []
+
+
+@pytest.mark.asyncio
+async def test_a_provider_whose_list_names_a_dropped_model_can_still_be_switched_off(
+    async_db: AsyncSession,
+) -> None:
+    org = await _organization(async_db, slug="hosted-stale")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, owner=owner)
+    await _service(async_db).set_access(
+        user=owner,
+        workspace_id=workspace.id,
+        provider="openai",
+        request=WorkspaceHostedProviderAccessRequest(enabled=True, models=["gpt-4o"]),
+    )
+    # The deployment has since stopped serving gpt-4o.
+    dropped = _service(async_db, served={"openai": frozenset({"gpt-4o-mini"})})
+
+    off = await dropped.set_access(
+        user=owner,
+        workspace_id=workspace.id,
+        provider="openai",
+        request=WorkspaceHostedProviderAccessRequest(enabled=False, models=["gpt-4o"]),
+    )
+
+    assert off.enabled is False
+    with pytest.raises(WorkspaceHostedModelsInvalidError):
+        await dropped.set_access(
+            user=owner,
+            workspace_id=workspace.id,
+            provider="openai",
+            request=WorkspaceHostedProviderAccessRequest(enabled=True, models=["gpt-4o"]),
+        )
 
 
 @pytest.mark.asyncio

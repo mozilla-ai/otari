@@ -456,6 +456,32 @@ def organization_key_refusal(
     return org_model_refusal(workspace_id, provider, model, selector=selector, through_alias=through_alias)
 
 
+def workspace_serves_target(config: GatewayConfig, workspace_id: uuid.UUID, target: str) -> bool:
+    """Whether the workspace's own narrowing lets a request billed to it reach ``target`` (``instance:model``).
+
+    The gates dispatch applies, in its order: the organization key's, which
+    also holds a configured instance to the workspace's zero data retention
+    requirement, then the hosted provider's where no key of the organization's
+    serves the workspace. A target that names nothing passes, since what it
+    resolves to is not this check's to decide.
+    """
+    split = split_selector(target)
+    if split is None:
+        return True
+    instance, model = split
+    if (
+        organization_key_refusal(config, workspace_id, instance, instance, model, selector=target, through_alias=True)
+        is not None
+    ):
+        return False
+    if instance in config.providers or cached_org_provider_kwargs(workspace_id, instance) is not None:
+        return True
+    # Imported here: the providers package imports this module through model discovery.
+    from gateway.services.providers import workspace_may_use_hosted
+
+    return workspace_may_use_hosted(workspace_id, instance, model)
+
+
 def org_model_refusal(
     workspace_id: uuid.UUID, provider: str, model: str, *, selector: str, through_alias: bool
 ) -> ModelRefusal | None:

@@ -21,7 +21,6 @@ import { KeyModelsDialog } from "@/features/workspaces/access/KeyModelsDialog"
 import {
   keyLabel,
   keyModelProblem,
-  useKeyModelSuggestions,
 } from "@/features/workspaces/access/keyModels"
 import {
   ACCESS_FILTERS,
@@ -117,7 +116,6 @@ export function InferenceAccessSection({
   const [filter, setFilter] = useState<AccessFilter>("all")
 
   const keys = (orgKeys.data ?? []).filter((key) => key.archived_at === null)
-  const suggestions = useKeyModelSuggestions(keys)
   const byId = new Map(keys.map((key) => [key.id, key]))
   const keysPerProvider = keys.reduce(
     (counts, key) =>
@@ -126,6 +124,11 @@ export function InferenceAccessSection({
   )
   const keyRows = overrides.data ?? []
   const hostedRows = hosted.data ?? []
+  // What a typed model name's prefix is checked against.
+  const knownProviders: ReadonlySet<string> = new Set([
+    ...keys.map((key) => key.provider),
+    ...hostedRows.map((row) => row.provider),
+  ])
   const isPending =
     setOverride.isPending ||
     resetOverride.isPending ||
@@ -225,7 +228,8 @@ export function InferenceAccessSection({
           })
         }
         onOpenScope={() => setOpen({ kind: "key", id: entry.id })}
-        onReset={() => void resetKey(entry.row)}
+        // A refused write is shown by its mutation's own error, in the banner.
+        onReset={() => resetKey(entry.row).catch(() => undefined)}
       />
     ) : (
       <HostedRow
@@ -366,34 +370,26 @@ export function InferenceAccessSection({
         </>
       )}
 
-      {/* Keyed on the stored list, so a dialog opened after a save seeds from
-          what was saved rather than from the draft before it. */}
-      {openKey && !suggestions.isPending ? (
+      {/* Keyed on the source alone: a dialog mounts only while open and seeds
+          from what is stored when it does, and a key's save refetches its list
+          between writes, which must not remount the dialog mid-save. */}
+      {openKey ? (
         <KeyModelsDialog
-          key={`${openKey.org_provider_key_id}:${openKey.allowed_models.join(",")}`}
+          key={openKey.org_provider_key_id}
           workspaceId={workspaceId}
           keyId={openKey.org_provider_key_id}
           keyName={keyLabel(openKeyRecord, openKey.org_provider_key_id)}
           provider={openKeyRecord?.provider ?? ""}
           allowed={openKey.allowed_models}
-          served={
-            openKeyRecord
-              ? (suggestions.byProvider.get(openKeyRecord.provider) ?? [])
-              : []
-          }
           validateEntry={(name) =>
-            keyModelProblem(
-              name,
-              openKeyRecord?.provider,
-              suggestions.knownProviders,
-            )
+            keyModelProblem(name, openKeyRecord?.provider, knownProviders)
           }
           onClose={() => setOpen(undefined)}
         />
       ) : null}
       {openHosted ? (
         <HostedModelsDialog
-          key={`${openHosted.provider}:${JSON.stringify(openHosted.models)}`}
+          key={openHosted.provider}
           workspaceId={workspaceId}
           row={openHosted}
           onClose={() => setOpen(undefined)}

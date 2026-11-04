@@ -75,11 +75,14 @@ export function NarrowedDefaults({
   budgets,
   narrowed,
   providers,
+  isReadOnly = false,
 }: {
   workspaceId: string
   budgets: Budget[]
   narrowed: WorkspaceBudgetDefault[]
   providers: string[]
+  /** Shown to a caller who may not change the workspace, every control held. */
+  isReadOnly?: boolean
 }) {
   const createDefault = useCreateWorkspaceBudgetDefault()
   const updateDefault = useUpdateWorkspaceBudgetDefault()
@@ -94,6 +97,7 @@ export function NarrowedDefaults({
     createDefault.isPending ||
     updateDefault.isPending ||
     deleteDefault.isPending
+  const isHeld = isPending || isReadOnly
 
   return (
     <div className="flex flex-col gap-2">
@@ -122,7 +126,7 @@ export function NarrowedDefaults({
                   })
                 }
                 options={budgetChoices(budgets)}
-                disabled={isPending}
+                disabled={isHeld}
               />
               <Button
                 size="sm"
@@ -130,7 +134,7 @@ export function NarrowedDefaults({
                 // Named per row, as the picker beside it is: this is a list of
                 // providers, not a table with a row header to lean on.
                 aria-label={`Remove default for ${row.provider_key_id}`}
-                isDisabled={isPending}
+                isDisabled={isHeld}
                 onPress={() => setPendingDelete(row)}
               >
                 Remove
@@ -165,7 +169,7 @@ export function NarrowedDefaults({
           <Button
             size="sm"
             variant="ghost"
-            isDisabled={isPending || provider === "" || budgetId === ""}
+            isDisabled={isHeld || provider === "" || budgetId === ""}
             onPress={() =>
               createDefault.mutate(
                 {

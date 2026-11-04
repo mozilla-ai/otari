@@ -1,5 +1,4 @@
 import type { OrgProviderKey } from "@/client"
-import { useModels } from "@/shared/api/models"
 
 // One workspace's model allow-list on one of its organization's keys is per
 // (workspace, key) and narrows rather than widens: no entries means every model
@@ -40,24 +39,4 @@ export function keyModelProblem(
   return prefix === provider
     ? `Name the model without its "${prefix}:" prefix.`
     : `"${prefix}:" names another provider. Name a model this key serves.`
-}
-
-/** Every model the catalog lists for each provider, by bare name, and every provider name. */
-export function useKeyModelSuggestions(keys: OrgProviderKey[]) {
-  const catalog = useModels()
-  const byProvider = (catalog.data?.data ?? []).reduce((groups, model) => {
-    const separator = model.id.indexOf(":")
-    if (separator === -1) return groups
-    const provider = model.id.slice(0, separator)
-    const name = model.id.slice(separator + 1)
-    const entries = groups.get(provider)
-    if (entries) entries.push(name)
-    else groups.set(provider, [name])
-    return groups
-  }, new Map<string, string[]>())
-  const knownProviders: ReadonlySet<string> = new Set([
-    ...byProvider.keys(),
-    ...keys.map((key) => key.provider),
-  ])
-  return { byProvider, knownProviders, isPending: catalog.isPending }
 }

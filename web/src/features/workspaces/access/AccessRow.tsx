@@ -1,5 +1,4 @@
 import { Dropdown, Label } from "@heroui/react"
-import type { ReactNode } from "react"
 import { FiMoreHorizontal } from "react-icons/fi"
 
 import { Button } from "@/design-system/actions/Button"
@@ -73,7 +72,7 @@ export function AccessRow({
   onOpenScope?: () => void
   isCustomized: boolean
   onReset?: () => void
-  note?: ReactNode
+  note?: string
   /** Greys the name, for a row something upstream keeps from being used. */
   isMuted?: boolean
   /** Holds every control, while a write is in flight or for a reader. */

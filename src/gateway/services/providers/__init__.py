@@ -71,6 +71,7 @@ from gateway.services.providers._workspace_hosted_access import (
     refresh_workspace_hosted_access_cache,
     reset_workspace_hosted_access_cache,
     run_workspace_hosted_access_refresher,
+    workspace_may_use_hosted,
     workspace_requires_zero_data_retention,
 )
 
@@ -125,5 +126,6 @@ __all__ = [
     "run_workspace_hosted_access_refresher",
     "serve_on_hosted_provider",
     "unpriced_model_refusal",
+    "workspace_may_use_hosted",
     "workspace_requires_zero_data_retention",
 ]

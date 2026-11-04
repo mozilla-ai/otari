@@ -31,7 +31,7 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
 from gateway.services.catalog import ModelArchitecture, ModelType, apply_model_metadata, load_catalog_metadata
-from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
+from gateway.services.model_access import is_model_allowed, resolve_request_allowlist, workspace_serves_target
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
 from gateway.services.policy_store import effective_policies
 from gateway.services.pricing_service import (
@@ -999,6 +999,23 @@ async def build_merged_catalog(
             return is_model_allowed(key_allowlist, normalize_pricing_key(config, target))
 
         merged = {mid: obj for mid, obj in merged.items() if _permitted(mid)}
+
+    # The workspace's own narrowing reaches an alias or a policy only through its
+    # target, which the scope above never sees, so each is judged by the gate
+    # dispatch applies to that target.
+    narrowing_workspace = caller_workspace_id if session_identity is None else workspace_id
+    if narrowing_workspace is not None and provider is None:
+        named = {alias: [aliases[alias]] for alias in aliases if alias in merged}
+        named.update({name: list(spec.static_selectors()) for name, spec in dynamic_policies.items() if name in merged})
+        merged = {
+            mid: obj
+            for mid, obj in merged.items()
+            if mid not in named
+            or any(
+                workspace_serves_target(config, narrowing_workspace, normalize_pricing_key(config, target))
+                for target in named[mid]
+            )
+        }
 
     for obj in merged.values():
         mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
