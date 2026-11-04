@@ -752,6 +752,33 @@ describe("WorkspaceMcpServersCard", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
+  it("ends its page's search once a new server is added", async () => {
+    mockApi({
+      servers: [workspaceMcpServer({ name: "linear" })],
+      written: workspaceMcpServer({ health: health() }),
+    })
+    const user = userEvent.setup()
+    await renderCard("page", "/?q=zzz")
+    await screen.findByText("No MCP servers match this search.")
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.type(screen.getByLabelText("Name"), "github")
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
+    )
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
+
+    expect(await screen.findByText("linear")).toBeInTheDocument()
+    expect(
+      screen.getByRole("searchbox", { name: "Search MCP servers" }),
+    ).toHaveValue("")
+  })
+
   it("says so when an edit's check could not run, even on a server never checked", async () => {
     // The gateway had no free check slot, so the row comes back with no health
     // at all: the same as before the edit, which is why "did a check run" is

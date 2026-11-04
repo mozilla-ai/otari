@@ -431,6 +431,33 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  it("ends a search once a key is added, and not when the form is cancelled", async () => {
+    mockApi({
+      keys: [orgProviderKey({ id: "k-1", name: "Backup", provider: "gemini" })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+    const search = await screen.findByRole("searchbox", {
+      name: "Search provider keys",
+    })
+    await user.type(search, "zzz")
+
+    await user.click(screen.getByRole("button", { name: "Add provider key" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(search).toHaveValue("zzz")
+
+    await user.click(screen.getByRole("button", { name: "Add provider key" }))
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Production")
+    await user.type(screen.getByLabelText("API key"), "sk-secret")
+    await user.click(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    )
+
+    await waitFor(() => expect(search).toHaveValue(""))
+  })
+
   it("asks Bedrock for its region by name and sends it in client_args", async () => {
     const requests = mockApi({ catalog: [{ id: "bedrock", name: "Bedrock" }] })
     const user = userEvent.setup()

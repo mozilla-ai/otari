@@ -155,11 +155,14 @@ function KeyForm({
   isOpen,
   editing,
   onClose,
+  onCreated,
 }: {
   isOpen: boolean
   /** The key being edited, or null when the form is creating one. */
   editing: OrgProviderKey | null
   onClose: () => void
+  /** Fired once a create is written, which closing the form is not. */
+  onCreated?: () => void
 }) {
   const create = useCreateOrgProviderKey()
   const update = useUpdateOrgProviderKey()
@@ -216,7 +219,12 @@ function KeyForm({
       api_base: apiBase === "" ? null : apiBase,
       client_args: clientArgs,
     }
-    create.mutate(body, { onSuccess: onClose })
+    create.mutate(body, {
+      onSuccess: () => {
+        onClose()
+        onCreated?.()
+      },
+    })
   }
 
   return (
@@ -662,6 +670,8 @@ export function OrganizationProvidersPage() {
         isOpen={adding && secretKeyConfigured}
         editing={null}
         onClose={() => setAdding(false)}
+        // A new key the search does not match would vanish with the dialog.
+        onCreated={() => search.onChange("")}
       />
       {editing ? (
         // Remounted per row: the draft is seeded from the key once, so editing a

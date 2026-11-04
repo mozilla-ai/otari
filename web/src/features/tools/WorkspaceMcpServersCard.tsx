@@ -231,6 +231,8 @@ export function WorkspaceMcpServersCard({
         return
       }
       setDialogOpen(false)
+      // A new server the search does not match would vanish with the dialog.
+      if (!editing && isPage) search.onChange("")
     }
     const onDone = { onSuccess: settle }
     if (editing) {
