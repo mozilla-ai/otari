@@ -5757,11 +5757,13 @@ async def open_stream(
 
 
 def _streamed_text_chars(chunk: Any) -> int:
-    """Characters of output text a Chat chunk or a Responses event carries."""
+    """Characters of output text a Chat chunk, a Responses event or a Messages event carries."""
     if choices := getattr(chunk, "choices", None):
         text = getattr(getattr(choices[0], "delta", None), "content", None)
     elif str(getattr(chunk, "type", "")).endswith("output_text.delta"):
         text = getattr(chunk, "delta", None)
+    elif getattr(chunk, "type", None) == "content_block_delta" and getattr(chunk.delta, "type", None) == "text_delta":
+        text = getattr(chunk.delta, "text", None)
     else:
         return 0
     return len(text) if isinstance(text, str) else 0

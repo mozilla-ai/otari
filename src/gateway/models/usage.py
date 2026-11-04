@@ -166,8 +166,8 @@ class UsageLog(Base):
     calculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # "success", "error", "incomplete" (a stream the client abandoned, billed on an
-    # estimate), or "absorbed".
-    # ``absorbed`` is a failed attempt that a routing policy recovered from by trying the next candidate: the request
+    # estimate), or "absorbed". ``absorbed`` is a failed attempt that a
+    # routing policy recovered from by trying the next candidate: the request
     # itself succeeded (or failed on a later attempt), so counting it as an error
     # would make a working fallback chain look like an outage. Every error metric
     # in the product counts ``status == "error"`` exactly, and ``request_count``
@@ -179,7 +179,8 @@ class UsageLog(Base):
     # failed mid-stream) or "client" (the caller disconnected). Null for every other
     # row, and for rows written before the column existed: null reads as "not cut".
     # It lets a stream cut by the provider be listed for a refund or a report without
-    # substring-matching ``error_message``.
+    # substring-matching ``error_message``. A provider-cut row is an "error" and may carry
+    # estimated tokens and cost, billed under ``stream_missing_usage_policy`` "estimate".
     stream_cut_by: Mapped[str | None] = mapped_column(String(16))
 
     # Routing attribution. All nullable: a request that named a plain model was not
