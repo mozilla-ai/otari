@@ -195,6 +195,32 @@ describe("ProviderModelsPanel", () => {
     expect(search).toBeInTheDocument()
   })
 
+  it("ends a search once a model is offered, so the new one is on screen", async () => {
+    mockApi({ models: [orgProviderModel({ id: "m-1", model: "gpt-4o" })] })
+    const user = userEvent.setup()
+    await renderPanel(true, vi.fn(), {}, "/?models_q=zzz")
+    expect(
+      await screen.findByText("No models match this search."),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Add model" }))
+    const dialog = await screen.findByRole("dialog")
+    const field = within(dialog).getByRole("combobox")
+    await user.type(field, "o3-mini")
+    // An open popover hides the rest of the dialog; see OfferModelDialog.test.
+    if (field.getAttribute("aria-expanded") === "true") {
+      await user.keyboard("{Escape}")
+    }
+    await user.click(
+      within(dialog).getByRole("button", { name: "Offer model" }),
+    )
+
+    expect(await screen.findByText("gpt-4o")).toBeInTheDocument()
+    expect(
+      screen.getByRole("searchbox", { name: "Search models on Production" }),
+    ).toHaveValue("")
+  })
+
   it("lists a model with its rate and where the rate came from", async () => {
     mockApi()
     await renderPanel()

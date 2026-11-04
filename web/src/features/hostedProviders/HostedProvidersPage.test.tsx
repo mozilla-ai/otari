@@ -261,7 +261,9 @@ function mockApi(
       })
     }
     if (url.includes("/models")) {
-      if (method === "PATCH") return jsonResponse({ ...models[0], ...body })
+      if (method === "PATCH" || method === "POST") {
+        return jsonResponse({ ...models[0], ...body })
+      }
       // Narrowed the way the route narrows a search: by name, ignoring case.
       const term = (
         new URL(url, "http://localhost").searchParams.get("search") ?? ""
@@ -920,6 +922,38 @@ describe("HostedProvidersPage", () => {
         request.url.includes("/models?skip=0&limit=25&search=o9"),
       ),
     ).toBe(true)
+  })
+
+  it("ends a provider's models search once a model is added", async () => {
+    mockApi({ models: [hostedModel()] })
+    const user = userEvent.setup()
+    await renderPage()
+    await user.click(
+      await screen.findByRole("button", { name: "Models on openai" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on openai",
+    })
+    const search = await within(panel).findByRole("searchbox", {
+      name: "Search models on openai",
+    })
+    await user.type(search, "zzz")
+    expect(
+      await within(panel).findByText("No models match this search."),
+    ).toBeInTheDocument()
+
+    await user.click(within(panel).getByRole("button", { name: "Add model" }))
+    const dialog = await screen.findByRole("dialog")
+    const field = within(dialog).getByRole("combobox", { name: /^Model/ })
+    await user.type(field, "o9-preview")
+    // An open popover hides the rest of the dialog; see OfferModelDialog.test.
+    if (field.getAttribute("aria-expanded") === "true") {
+      await user.keyboard("{Escape}")
+    }
+    await user.click(within(dialog).getByRole("button", { name: "Add model" }))
+
+    await waitFor(() => expect(search).toHaveValue(""))
+    expect(await within(panel).findByText("gpt-4o")).toBeInTheDocument()
   })
 
   it("opens a provider's models with their price source and a serving switch", async () => {

@@ -321,7 +321,12 @@ export function HostedProviderModelsPanel({
         editing={undefined}
         isOpen={isAdding}
         onClose={() => setIsAdding(false)}
-        onSaved={() => refresh.reset()}
+        onSaved={() => {
+          refresh.reset()
+          // A new model the search does not match would vanish with the form.
+          setQuery("")
+          setPage(0)
+        }}
       />
       {editing ? (
         // Remounted per row, so a second row's editor cannot open with the

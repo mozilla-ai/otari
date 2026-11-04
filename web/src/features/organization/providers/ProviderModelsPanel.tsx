@@ -440,6 +440,8 @@ export function ProviderModelsPanel({
         onOffered={() => {
           clearOutcome()
           setIsOffering(false)
+          // A new model the search does not match would vanish with the dialog.
+          search.onChange("")
         }}
       />
 

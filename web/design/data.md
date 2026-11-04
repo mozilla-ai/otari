@@ -197,7 +197,7 @@ TablePagination    the narrowed total, when the list pages
   The exception is a page with no other sign that a create worked, where a new
   row the search does not match would look like nothing happened: there,
   making one ends the search (Workspaces, Routing, a workspace's Members, MCP
-  servers, provider keys).
+  servers, provider keys, a provider's models).
   A second list on the same page names its own param and pager
   (`useListSearch({ param: "models_q", pageParam: "models_page" })`). A panel
   whose page and open state live in component state keeps its term there too,
