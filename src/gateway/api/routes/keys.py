@@ -116,8 +116,8 @@ class CreateKeyRequest(BaseModel):
     )
     allowed_tools: list[str] | None = Field(
         default=None,
-        description="Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, "
-        "or search tool names ('*' for every search tool). A model wildcard never grants a tool.",
+        description="Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, "
+        "[] = no tool, or search and fetch tool names ('*' for every tool). A model wildcard never grants a tool.",
     )
     exclude_from_budget: bool = Field(
         default=False,

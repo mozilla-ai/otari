@@ -26,7 +26,7 @@ scaffolds record a rejection identically.
 Two more scaffolds follow the same steps for calls ``run_passthrough`` cannot
 resolve, since neither is a model on an any-llm provider: :func:`run_decision`
 for a decisions request, and :func:`run_direct_tool` for a direct call of a
-gateway-run web tool, which the search route builds on.
+gateway-run web tool, which the search and fetch routes build on.
 """
 
 from __future__ import annotations
@@ -1800,6 +1800,10 @@ async def run_direct_tool(
     try:
         result = await call.run()
     except Exception as exc:
+        if isinstance(exc, TenancyError) and not isinstance(exc, DirectToolFailedError) and exc.status_code < 500:
+            # The call's own checks refused it after the hold, as a fetch refuses the
+            # URL a provider found the page at: a refusal, not a provider failure.
+            raise await refused_after_reservation(exc.message, exc.status_code) from exc
         if isinstance(exc, DirectToolFailedError):
             # The failure's safe fields ride as headers (decision 67); the detail stays generic.
             failed, row_status, headers = exc.message, exc.upstream_status or status.HTTP_502_BAD_GATEWAY, exc.headers

@@ -135,8 +135,9 @@ class CreateOwnKeyRequest(BaseModel):
     )
     allowed_tools: list[str] | None = Field(
         default=None,
-        description="Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, "
-        "or search tool names ('*' for every search tool). A key can only narrow your own tool access.",
+        description="Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, "
+        "[] = no tool, or search and fetch tool names ('*' for every tool). "
+        "A key can only narrow your own tool access.",
     )
     reject_user_mismatch: bool | None = Field(
         default=None,
