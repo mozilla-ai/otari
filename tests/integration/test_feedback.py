@@ -22,6 +22,25 @@ from gateway.services.feedback import FeedbackService
 from .conftest import build_test_client
 
 
+@pytest.fixture(autouse=True)
+def _never_the_real_receiver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A send no test stubbed fails here instead of reaching api.otari.ai and the team's channel."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"a test reached the real feedback receiver at {request.url}")
+
+    original = FeedbackService.__init__
+
+    def guarded(self: FeedbackService, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        original(self, transport=transport or httpx.MockTransport(refuse))
+
+    monkeypatch.setattr(FeedbackService, "__init__", guarded)
+
+
+def test_an_unstubbed_receiver_is_refused_locally() -> None:
+    assert isinstance(FeedbackService()._transport, httpx.MockTransport)
+
+
 @pytest.fixture
 def deliveries(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
     calls: list[httpx.Request] = []
