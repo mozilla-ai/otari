@@ -10,7 +10,7 @@ Every request is charged to the balance when it finishes. While a request is run
 
 When nothing is available, requests are refused until funds arrive. A request that was already running is allowed to finish, so the balance can end slightly below zero.
 
-A new organization starts with $2, so its first requests work before anyone adds funds.
+A new organization gets $2 once the person who created it answers every question in the welcome questionnaire, so its first requests work before anyone adds funds.
 
 ## Three ways to add funds
 
@@ -21,6 +21,17 @@ A new organization starts with $2, so its first requests work before anyone adds
 | **Recurring top-up** | On a schedule: every day, every week, or on a day of the month. | The cardholder. |
 
 Payment happens on Stripe. Every charge adds a 4.5% service fee on top of the amount, and VAT is added at checkout based on the billing address. Only the amount itself is added to the balance. The person who paid receives the receipt by email, and each deposit is listed under **Transactions** with its receipt.
+
+## Redeeming a voucher
+
+A voucher is a code from otari.ai that adds a fixed credit to the balance. Any owner or admin can redeem one: on the Billing page, enter the code under **Redeem a voucher** and select **Redeem**. The credit goes to the organization the dashboard is showing.
+
+* Each person can redeem a voucher once, whichever organization they redeem it into. Another owner or admin of the same organization can redeem it too.
+* A voucher has an expiry date, and some can be redeemed only a set number of times in total.
+* A voucher works only in the region it was issued for.
+* Credit from a voucher is spent before paid funds, and it does not expire once it is on the balance.
+
+Credits, including vouchers and the $2 welcome credit, are listed under **Transactions** beside deposits. They have no receipt, since nothing was paid.
 
 ## Auto top-up
 

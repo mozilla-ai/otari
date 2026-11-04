@@ -274,7 +274,7 @@ such a rate by its unit, for example "$0.002 per request". The same choice is on
 the Requests view's "Price this model", offered on a served request that carried no cost
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
-an image generation. What each unit bills is in
+an image generation or edit. What each unit bills is in
 [Per-request pricing](https://docs.otari.ai/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
 
 ## Playground
@@ -450,4 +450,4 @@ privacy notice live. The account menu links each row it has an address for; see
 
 The dashboard source is under `web/`. The published Docker image includes the
 bundle. A source checkout needs `make dashboard` for the gateway to serve it, or
-`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.37.0/web/README.md).
+`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.38.0/web/README.md).

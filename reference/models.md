@@ -388,7 +388,7 @@ Each offering also lists the Otari routes its models.dev protocols map to, in
 | `chat-completions` | `/chat/completions` |
 | `responses` | `/responses` |
 | `messages` | `/messages` |
-| `images` | `/images/generations` |
+| `images` | `/images/generations`, `/images/edits` |
 | `embeddings` | `/embeddings` |
 | `speech` | `/audio/speech` |
 | `transcriptions` | `/audio/transcriptions` |
@@ -396,6 +396,10 @@ Each offering also lists the Otari routes its models.dev protocols map to, in
 | `moderations` | `/moderations` |
 | `decisions` | `/decisions` |
 | `systemone` | `/systemone` |
+
+models.dev does not say which image models can edit, so every offering with
+the `images` protocol lists both image routes. An edit to a model that only
+generates, such as `dall-e-3`, is refused by the provider.
 
 `/decisions` and `/systemone` take only a selector whose provider is a
 `decision_providers` entry. An offering from another provider instance lists

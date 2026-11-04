@@ -4172,6 +4172,7 @@
                 "/responses",
                 "/messages",
                 "/images/generations",
+                "/images/edits",
                 "/embeddings",
                 "/audio/speech",
                 "/audio/transcriptions",
@@ -4411,7 +4412,7 @@
         "type": "object"
       },
       "ChatCompletionRequest": {
-        "description": "OpenAI-compatible chat completion request.\n\nThe completion-param fields are derived from any-llm's ``CompletionParams``\n(see ``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Fields below either tighten a derived field (``messages``,\n``response_format``), declare an OpenAI wire param ``CompletionParams`` does\nnot model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add\ngateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,\n``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped\nbefore the request is forwarded upstream, or restate a derived field\nunchanged to document it (``max_completion_tokens``), which is only worth\ndoing where the wire contract is not guessable from the field itself.",
+        "description": "OpenAI-compatible chat completion request.\n\nThe completion-param fields are derived from any-llm's ``CompletionParams``\n(see ``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Fields below either tighten a derived field (``messages``,\n``response_format``), add gateway-internal behavior (``mcp_servers``,\n``mcp_server_ids``, ``guardrails``, ``tools_header``,\n``max_tool_iterations``) that is stripped before the request is forwarded\nupstream, or restate a derived field unchanged to document it\n(``max_completion_tokens``), which is only worth doing where the wire\ncontract is not guessable from the field itself.",
         "properties": {
           "frequency_penalty": {
             "anyOf": [
@@ -10262,9 +10263,9 @@
             "anyOf": [
               {
                 "enum": [
-                  "tokens",
-                  "requests",
-                  "images",
+                  "token",
+                  "request",
+                  "image",
                   "character",
                   "megapixel",
                   "second",
@@ -10490,9 +10491,9 @@
             "anyOf": [
               {
                 "enum": [
-                  "tokens",
-                  "requests",
-                  "images",
+                  "token",
+                  "request",
+                  "image",
                   "character",
                   "megapixel",
                   "second",
@@ -13230,11 +13231,11 @@
             "type": "array"
           },
           "unit": {
-            "default": "tokens",
+            "default": "token",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -13859,7 +13860,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelPublic": {
-        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: tokens, requests\nor images, so a per-request rate is not read as a per-token one.",
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: token, request\nor image, so a per-request rate is not read as a per-token one.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -13957,11 +13958,11 @@
             "title": "Pricing Id"
           },
           "unit": {
-            "default": "tokens",
+            "default": "token",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -15859,7 +15860,7 @@
             "type": "string"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens; unused by a rate in requests or images",
+            "description": "Price per 1M output tokens; unused by a rate per request or per image",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -15880,12 +15881,12 @@
             "title": "Pricing Tiers"
           },
           "unit": {
-            "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
+            "default": "token",
+            "description": "What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -16069,7 +16070,7 @@
             "type": "number"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens; unused by a rate in requests or images",
+            "description": "Price per 1M output tokens; unused by a rate per request or per image",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -16090,12 +16091,12 @@
             "title": "Pricing Tiers"
           },
           "unit": {
-            "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
+            "default": "token",
+            "description": "What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -17873,7 +17874,7 @@
                 "type": "null"
               }
             ],
-            "description": "USD for each request, for a rate in requests; null for any other unit.",
+            "description": "USD for each request, for a rate per request; null for any other unit.",
             "title": "Price Per Request"
           },
           "pricing_tiers": {
@@ -17884,7 +17885,7 @@
             "type": "array"
           },
           "unit": {
-            "description": "What the rates are per: tokens, requests, or images.",
+            "description": "What the rates are per: token for a model, request or image for a non-token endpoint.",
             "title": "Unit",
             "type": "string"
           },
@@ -21246,7 +21247,7 @@
             "type": "string"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens; unused by a rate in requests or images",
+            "description": "Price per 1M output tokens; unused by a rate per request or per image",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -21261,7 +21262,7 @@
                 "type": "null"
               }
             ],
-            "description": "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.",
+            "description": "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'request' with input_price_per_million at a million times this; not combined with token prices.",
             "title": "Price Per Request"
           },
           "pricing_tiers": {
@@ -21280,12 +21281,12 @@
             "title": "Pricing Tiers"
           },
           "unit": {
-            "default": "tokens",
-            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
+            "default": "token",
+            "description": "What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.",
             "enum": [
-              "tokens",
-              "requests",
-              "images",
+              "token",
+              "request",
+              "image",
               "character",
               "megapixel",
               "second",
@@ -21416,7 +21417,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.",
+            "description": "What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, tool.output), only where the workspace keeps content, the client sent it or Otari ran the tool that produced it, and the reader may open it. Empty otherwise.",
             "title": "Content",
             "type": "object"
           },
@@ -22409,10 +22410,16 @@
             "description": "Days after it started that a session is deleted, however active it still is.",
             "title": "Session Max Age Days",
             "type": "integer"
+          },
+          "tool_output": {
+            "description": "Whether content also keeps what each tool returned, on a request routed through the gateway. Never true where content_available is false.",
+            "title": "Tool Output",
+            "type": "boolean"
           }
         },
         "required": [
           "content_available",
+          "tool_output",
           "platform_break_glass",
           "retention_days",
           "session_max_age_days"
@@ -26953,6 +26960,12 @@
             "title": "Trace Content Enabled",
             "type": "boolean"
           },
+          "trace_content_tool_output": {
+            "default": true,
+            "description": "Whether this workspace also keeps what each tool returned, where it keeps content and the deployment keeps tool output.",
+            "title": "Trace Content Tool Output",
+            "type": "boolean"
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -27012,6 +27025,18 @@
             ],
             "description": "Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.",
             "title": "Trace Content Enabled"
+          },
+          "trace_content_tool_output": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Also keep what each tool returned, where this workspace keeps content and the deployment keeps tool output. Turning it off keeps none from the next request on, whatever the deployment allows.",
+            "title": "Trace Content Tool Output"
           }
         },
         "title": "WorkspaceUpdate",
@@ -27555,9 +27580,9 @@
     }
   },
   "info": {
-    "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
+    "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.37.0"
+    "version": "0.38.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -33460,6 +33485,141 @@
         "summary": "Update Hosted Model",
         "tags": [
           "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/images/edits": {
+      "post": {
+        "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names an existing user.\n- API key: usage and spend go to the key's own user. A ``user`` naming a\n  different user is refused with 403, or ignored when mismatch rejection is off.",
+        "operationId": "images-edit_image",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "image": {
+                    "description": "The image or images to edit.",
+                    "items": {
+                      "contentMediaType": "application/octet-stream",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "image[]": {
+                    "description": "Same as image.",
+                    "items": {
+                      "contentMediaType": "application/octet-stream",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "mask": {
+                    "contentMediaType": "application/octet-stream",
+                    "description": "Where to edit: the transparent areas of this PNG.",
+                    "type": "string"
+                  },
+                  "model": {
+                    "title": "Model",
+                    "type": "string"
+                  },
+                  "n": {
+                    "anyOf": [
+                      {
+                        "minimum": 1.0,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "N"
+                  },
+                  "prompt": {
+                    "title": "Prompt",
+                    "type": "string"
+                  },
+                  "quality": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Quality"
+                  },
+                  "response_format": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Response Format"
+                  },
+                  "size": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Size"
+                  },
+                  "user": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "User"
+                  }
+                },
+                "required": [
+                  "model",
+                  "prompt"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "413": {
+            "description": "The upload is larger than 50 MB."
+          },
+          "422": {
+            "description": "A required field is missing, or a field is the wrong type."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Edit Image",
+        "tags": [
+          "images"
         ]
       }
     },
@@ -45396,7 +45556,7 @@
     },
     "/api/v1/rerank": {
       "post": {
-        "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: requests``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\n``usage`` carries what the gateway metered: the provider's tokens, the\nsearch units billed when the model is priced per request, and, when the\nrequest was priced, ``cost_usd`` and ``pricing_source`` as a completion's\nusage does. ``meta`` is the provider's own billing report, unchanged.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: request``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\n``usage`` carries what the gateway metered: the provider's tokens, the\nsearch units billed when the model is priced per request, and, when the\nrequest was priced, ``cost_usd`` and ``pricing_source`` as a completion's\nusage does. ``meta`` is the provider's own billing report, unchanged.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "rerank-create_rerank",
         "requestBody": {
           "content": {
@@ -51155,7 +51315,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.\n\nTurning content off keeps nothing new from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
+        "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.\n\nTurning either off keeps nothing new of it from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
         "operationId": "workspaces-update_workspace",
         "parameters": [
           {
