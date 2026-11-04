@@ -7,11 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from any_llm.exceptions import UnsupportedParameterError
 from any_llm.types.image import Image, ImagesResponse
+from fastapi import Request
 from fastapi.testclient import TestClient
 from openai.types.images_response import Usage, UsageInputTokensDetails
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import ClientDisconnect
 
 from gateway.core.config import API_ROOT
+from gateway.core.database import release_session
 
 from .conftest import held_reservations
 
@@ -63,6 +66,32 @@ def test_edits_single_image(client: TestClient, api_key_header: dict[str, str]) 
     assert kwargs["provider"] == "openai"
     assert kwargs["prompt"] == "make it green"
     assert kwargs["image"] == ("cat.png", _PNG, "image/png")
+
+
+def test_edits_frees_the_auth_connection_before_reading_the_body(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow client must not pin the connection authentication checked out."""
+    events: list[str] = []
+    form = Request.form
+
+    async def recording_release(session: AsyncSession) -> bool:
+        events.append("release")
+        return await release_session(session)
+
+    def recording_form(self: Request, **kwargs: Any) -> Any:
+        events.append("form")
+        return form(self, **kwargs)
+
+    monkeypatch.setattr("gateway.api.deps.release_session", recording_release)
+    monkeypatch.setattr(Request, "form", recording_form)
+    with patch(_PATCH_TARGET, new_callable=AsyncMock, return_value=_edit_response()):
+        resp = client.post(
+            _EDITS_URL, data=_form(), files={"image": ("cat.png", _PNG, "image/png")}, headers=api_key_header
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert events == ["release", "form"]
 
 
 @pytest.mark.parametrize("field", ["image", "image[]"])

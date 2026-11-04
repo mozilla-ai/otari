@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import FormData, UploadFile
 from starlette.requests import ClientDisconnect
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import (
+    get_config,
+    get_db,
+    get_log_writer,
+    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_for_upload,
+)
 from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
@@ -217,7 +223,7 @@ async def _upload_part(upload: UploadFile, field: str) -> tuple[str, bytes, str 
 async def edit_image(
     raw_request: Request,
     response: Response,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key_for_upload)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],

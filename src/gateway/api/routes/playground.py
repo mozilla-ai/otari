@@ -44,7 +44,6 @@ from typing import Annotated, Any
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     HTTPException,
     Query,
     Request,
@@ -52,7 +51,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -69,6 +68,8 @@ from gateway.api.deps import (
     get_unit_of_work,
     verify_master_key,
 )
+from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.api.routes.chat import ChatCompletionRequest, run_chat_completion
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
@@ -276,6 +277,14 @@ async def _require_playground_files(offer: PlaygroundToolOfferDep) -> None:
 
 
 _PLAYGROUND_FILES = [Depends(_require_playground_files)]
+_UPLOAD_FILE_ADAPTER: TypeAdapter[UploadFile] = TypeAdapter(UploadFile)
+
+_PLAYGROUND_FILE_UPLOAD_SCHEMA = {
+    "title": "Body_playground-upload_playground_file",
+    "type": "object",
+    "properties": {"file": {"contentMediaType": "application/octet-stream", "title": "File", "type": "string"}},
+    "required": ["file"],
+}
 
 
 async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
@@ -283,12 +292,29 @@ async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
         yield chunk
 
 
-@router.post("/files", dependencies=_PLAYGROUND_FILES)
+@router.post(
+    "/files",
+    dependencies=_PLAYGROUND_FILES,
+    responses={
+        413: {"description": "The upload exceeds the configured maximum size."},
+        422: {
+            "description": "Validation Error",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},
+        },
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _PLAYGROUND_FILE_UPLOAD_SCHEMA}},
+        }
+    },
+)
 async def upload_playground_file(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     files: FileServiceDep,
-    file: Annotated[UploadFile, File()],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    raw_request: Request,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> OpenAIFileObject:
     """Upload a file for the caller, in a workspace they belong to.
@@ -302,17 +328,23 @@ async def upload_playground_file(
     # Commits the spend row the principal may have staged, which the file row's
     # foreign key needs, and frees the connection while the bytes stream in.
     await release_session(db)
-    record = await files.store(
-        NewFile(
-            user_id=principal.user_id,
-            workspace_id=principal.workspace_id,
-            filename=file.filename,
-            content_type=file.content_type,
-            purpose=_FILE_PURPOSE,
-            chunks=_upload_chunks(file),
+    async with bounded_body(
+        raw_request,
+        config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
+        "File upload request exceeds the configured maximum size.",
+    ).form() as form:
+        file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
+        record = await files.store(
+            NewFile(
+                user_id=principal.user_id,
+                workspace_id=principal.workspace_id,
+                filename=file.filename,
+                content_type=file.content_type,
+                purpose=_FILE_PURPOSE,
+                chunks=_upload_chunks(file),
+            )
         )
-    )
-    return OpenAIFileObject.of(record)
+        return OpenAIFileObject.of(record)
 
 
 @router.get("/files", dependencies=_PLAYGROUND_FILES)

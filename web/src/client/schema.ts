@@ -8781,40 +8781,6 @@ export interface components {
             /** Data */
             data: components["schemas"]["BlockedEmailPublic"][];
         };
-        /** Body_audio-create_transcription */
-        "Body_audio-create_transcription": {
-            /** File */
-            file: string;
-            /** Language */
-            language?: string | null;
-            /** Model */
-            model: string;
-            /** Prompt */
-            prompt?: string | null;
-            /** Response Format */
-            response_format?: string | null;
-            /** Temperature */
-            temperature?: number | null;
-            /** User */
-            user?: string | null;
-        };
-        /** Body_files-create_file */
-        "Body_files-create_file": {
-            /** File */
-            file: string;
-            /**
-             * Purpose
-             * @default user_data
-             */
-            purpose: string;
-            /** User */
-            user?: string | null;
-        };
-        /** Body_playground-upload_playground_file */
-        "Body_playground-upload_playground_file": {
-            /** File */
-            file: string;
-        };
         /**
          * BreakGlassCreate
          * @description Why you are opening a session's content without its owner's share. Recorded with the opening.
@@ -20703,7 +20669,22 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_audio-create_transcription"];
+                "multipart/form-data": {
+                    /** File */
+                    file: string;
+                    /** Language */
+                    language?: string | null;
+                    /** Model */
+                    model: string;
+                    /** Prompt */
+                    prompt?: string | null;
+                    /** Response Format */
+                    response_format?: string | null;
+                    /** Temperature */
+                    temperature?: number | null;
+                    /** User */
+                    user?: string | null;
+                };
             };
         };
         responses: {
@@ -20715,6 +20696,13 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description The audio upload exceeds the maximum request size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -22540,7 +22528,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_files-create_file"];
+                "multipart/form-data": {
+                    /** File */
+                    file: string;
+                    /**
+                     * Purpose
+                     * @default user_data
+                     */
+                    purpose?: string;
+                    /** User */
+                    user?: string | null;
+                };
             };
         };
         responses: {
@@ -22552,6 +22550,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OpenAIFileObject"] | components["schemas"]["AnthropicFileMetadata"];
                 };
+            };
+            /** @description The upload exceeds the configured maximum size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -28550,7 +28555,10 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_playground-upload_playground_file"];
+                "multipart/form-data": {
+                    /** File */
+                    file: string;
+                };
             };
         };
         responses: {
@@ -28562,6 +28570,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OpenAIFileObject"];
                 };
+            };
+            /** @description The upload exceeds the configured maximum size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
