@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.pricing import PricingResponse
 from gateway.schemas.budgets import BudgetResponse, OrganizationBudgetPublic
+from gateway.services.api_keys import resolve_user_id
 
 
 def _make_error(detail: str, status_code: int = 400) -> HTTPException:

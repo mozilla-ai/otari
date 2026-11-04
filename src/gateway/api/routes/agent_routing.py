@@ -23,7 +23,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from gateway.api.deps import AgentModelRecommenderPortDep, get_config, verify_api_key_or_master_key
 from gateway.api.routes._passthrough import (
     ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,
-    PASSTHROUGH_PROVIDER_ERROR_DETAIL,
     DecisionCallError,
     DecisionOutcome,
     DecisionQuote,
@@ -44,6 +43,7 @@ from gateway.models.api_keys import APIKey
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort, ModelRecommendation, SubagentSpawn
 from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest, RecommendationRefusal
 from gateway.services.routing import ROUTER_LABEL, build_decision_request, candidates_for
+from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
 
 router = APIRouter(prefix="/routing", tags=["routing"])
 

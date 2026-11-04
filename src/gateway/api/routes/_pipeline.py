@@ -99,7 +99,7 @@ from gateway.api.routes._attempts import (
     PrepareKwargs,
     walk_attempts,
 )
-from gateway.api.routes._helpers import apply_input_guardrails, country_gate_for, country_not_supported, resolve_user_id
+from gateway.api.routes._helpers import apply_input_guardrails, country_gate_for, country_not_supported
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
     IDEMPOTENCY_KEY_REUSED_DETAIL,
@@ -199,7 +199,7 @@ from gateway.models.tools import (
     WebTool,
 )
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, BillingPort, InsufficientFundsError
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import (
@@ -208,8 +208,10 @@ from gateway.rate_limit import (
     RateLimitInfo,
     admit_rate_limit_rules,
     check_rate_limit,
+    rate_limit_headers,
 )
 from gateway.schemas.inference import SettledCost
+from gateway.services.api_keys import names_end_user, resolve_user_id
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
@@ -404,7 +406,7 @@ from gateway.services.traces import (
     read_turn_content,
     resolve_session,
 )
-from gateway.services.upstream_redaction import redact_upstream_message
+from gateway.services.upstream_redaction import redacted_upstream_detail
 from gateway.services.web_retrieval_backend import (
     WebRetrievalBackend,
     WebRetrievalCounter,
@@ -514,7 +516,6 @@ ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
 # says nothing about hosted inference or about which adapter answered: that is a
 # defect in this build, not something a caller can act on.
 HOSTED_CREDENTIAL_UNUSABLE_DETAIL = "No upstream provider is available to serve this model"
-FUNDS_CHECK_UNAVAILABLE_DETAIL = "This organization's funds could not be checked. Retry later."
 SANDBOX_UNREACHABLE_DETAIL = (
     "code_execution sandbox unreachable. Check the sandbox URL in the dashboard's "
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
@@ -581,17 +582,8 @@ def _unsupported_feature_detail(exc: BaseException) -> str:
         if isinstance(candidate, UnsupportedParameterError):
             # AnyLLMError.__str__ prefixes the provider to ``message``. Feeding
             # both through upstream_error_message would repeat the same reason.
-            return _redacted_upstream_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
+            return redacted_upstream_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
     return _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
-
-
-def _redacted_upstream_detail(message: str, fallback: str) -> str:
-    """Return redacted explanatory text, or a fixed detail when none remains."""
-    redacted = redact_upstream_message(message)
-    explanatory = redacted.replace("[redacted]", "")
-    if not any(char.isalpha() for char in explanatory):
-        return fallback
-    return redacted
 
 
 _UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
@@ -720,7 +712,7 @@ def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
     body_messages = upstream_body_messages(exc)
     if body_messages is not None:
         for body_message in body_messages:
-            if detail := _redacted_upstream_detail(body_message, ""):
+            if detail := redacted_upstream_detail(body_message, ""):
                 return detail
         return fallback
     wrapper_message: str | None = None
@@ -730,11 +722,11 @@ def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
             continue
         if getattr(candidate, "original_exception", None) is not None:
             wrapper_message = wrapper_message or message
-        elif detail := _redacted_upstream_detail(message, ""):
+        elif detail := redacted_upstream_detail(message, ""):
             return detail
-    if wrapper_message is not None and (detail := _redacted_upstream_detail(wrapper_message, "")):
+    if wrapper_message is not None and (detail := redacted_upstream_detail(wrapper_message, "")):
         return detail
-    return _redacted_upstream_detail(upstream_error_message(exc), fallback)
+    return redacted_upstream_detail(upstream_error_message(exc), fallback)
 
 
 def _carried_message(exc: BaseException) -> str | None:
@@ -1053,14 +1045,6 @@ def failure_status_code(exc: BaseException, *, request_params: Collection[str] =
         return status_code
     mapping = classify_provider_error(exc, request_params=request_params)
     return mapping.status_code if mapping is not None else status.HTTP_502_BAD_GATEWAY
-
-
-def rate_limit_headers(info: RateLimitInfo) -> dict[str, str]:
-    return {
-        "X-RateLimit-Limit": str(info.limit),
-        "X-RateLimit-Remaining": str(info.remaining),
-        "X-RateLimit-Reset": str(int(info.reset)),
-    }
 
 
 class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
@@ -2575,17 +2559,6 @@ async def _compile_request_plan(
         raise adapter.error(exc.status_code, exc.caller_detail, ErrorKind.PERMISSION) from exc
 
 
-def _names_end_user(api_key: APIKey | None, user_id_from_request: str | None) -> bool:
-    """Whether a request names an end user of its service key: anyone but the key's own user."""
-    return bool(
-        api_key is not None
-        and api_key.is_service_key
-        and api_key.user_id
-        and user_id_from_request
-        and user_id_from_request != api_key.user_id
-    )
-
-
 async def _resolve_keyed_user_id(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -2616,7 +2589,7 @@ async def _resolve_keyed_user_id(
     users, which is found or created here rather than checked as a mismatch, on
     the budget ``Otari-End-User-Budget`` names when it is new.
     """
-    if api_key is not None and user_id_from_request and _names_end_user(api_key, user_id_from_request):
+    if api_key is not None and user_id_from_request and names_end_user(api_key, user_id_from_request):
         try:
             end_user = await get_budget_service(uow, db).resolve_end_user(
                 api_key=api_key,
@@ -2825,7 +2798,7 @@ async def resolve_request_context(
     # around it.
     api_key: APIKey | None = None
     is_master_key = False
-    names_end_user = False
+    end_user_named = False
     if session_principal is not None:
         workspace_id = session_principal.workspace_id
         user_id = session_principal.user_id
@@ -2846,8 +2819,8 @@ async def resolve_request_context(
         # Limited before the end user is resolved, because resolving one may
         # create it: the limit is what bounds how fast a service key can add
         # end users, and it is its owner's, shared by all of them.
-        names_end_user = _names_end_user(api_key, user_id_from_request)
-        if names_end_user and api_key is not None:
+        end_user_named = names_end_user(api_key, user_id_from_request)
+        if end_user_named and api_key is not None:
             rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
         user_id, end_user_budget_id = await _resolve_keyed_user_id(
             adapter=adapter,
@@ -2874,7 +2847,7 @@ async def resolve_request_context(
         # over to a forbidden model would be an access-control bypass. The gate
         # itself stays where it was, so a plain model name is unaffected.
         key_allowlist = await resolve_request_allowlist(db, api_key)
-    if not names_end_user:
+    if not end_user_named:
         rate_limit_info = await check_rate_limit(raw_request, user_id)
     # Never refused here: a request always has a workspace and a user.
     upstream_user = _end_user(
@@ -4755,7 +4728,7 @@ def _stored_error_message(error: str | None) -> str | None:
     """
     if error is None:
         return None
-    return _redacted_upstream_detail(error, PROVIDER_ERROR_DETAIL)
+    return redacted_upstream_detail(error, PROVIDER_ERROR_DETAIL)
 
 
 # Per-process memory of when each unpriced model was last warned about, so a busy
