@@ -109,21 +109,27 @@ export function patternMatches(pattern: string, tool: string): boolean {
 export function keyAccessLabel(access: WorkspaceMcpServerKeyAccess): string {
   const mode = accessMode(access.tools)
   if (mode === "none") return "No access"
-  // The key-access answer does not carry the server's labels, so the preset is named rather than listed.
-  if (mode === "read") return "Read tools"
   const ceiling = access.allowed_tools
   if (mode === "all") {
     return ceiling === null ? "All tools" : ceiling.join(", ") || "No access"
   }
-  if (ceiling === null) return access.tools.join(", ")
-  const reachable = access.tools.flatMap((pattern) =>
-    pattern.endsWith("*")
-      ? ceiling.filter((tool) => patternMatches(pattern, tool))
-      : ceiling.includes(pattern)
-        ? [pattern]
-        : [],
+  // `@read` stands for the server's labeled read tools, which reach exactly as named ones do.
+  const patterns = access.tools.flatMap((pattern) =>
+    pattern === READ_TOOLS ? (access.read_tools ?? []) : [pattern],
   )
-  return [...new Set(reachable)].join(", ") || "No access"
+  const reachable =
+    ceiling === null
+      ? patterns
+      : patterns.flatMap((pattern) =>
+          pattern.endsWith("*")
+            ? ceiling.filter((tool) => patternMatches(pattern, tool))
+            : ceiling.includes(pattern)
+              ? [pattern]
+              : [],
+        )
+  const names = [...new Set(reachable)].join(", ")
+  if (!names) return "No access"
+  return mode === "read" ? `Read tools: ${names}` : names
 }
 
 /** Which rule decided a key's access, as the key editor says it. */

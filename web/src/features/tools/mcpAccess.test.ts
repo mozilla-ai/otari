@@ -76,6 +76,36 @@ describe("mcpAccess", () => {
     )
   })
 
+  it("expands the read preset into the tools labeled read", () => {
+    const base = {
+      server_id: "s",
+      name: "github",
+      enabled: true,
+      decided_by: "key" as const,
+      grant_id: "g",
+      read_tools: ["list_issues", "get_issue"],
+    }
+    // The only tool the server exposes comes from the preset, not the named one.
+    expect(
+      keyAccessLabel({
+        ...base,
+        tools: ["@read", "create_issue"],
+        allowed_tools: ["list_issues"],
+      }),
+    ).toBe("list_issues")
+    expect(
+      keyAccessLabel({ ...base, tools: ["@read"], allowed_tools: null }),
+    ).toBe("Read tools: list_issues, get_issue")
+    expect(
+      keyAccessLabel({
+        ...base,
+        tools: ["@read"],
+        allowed_tools: null,
+        read_tools: [],
+      }),
+    ).toBe("No access")
+  })
+
   it("says which rule a trace matched", () => {
     const options = { ruleOwner: "Bo's laptop", serverEnabled: true }
     expect(

@@ -595,7 +595,7 @@ def test_a_keys_summary_covers_every_server_of_its_workspace(
 ) -> None:
     key = _new_key(client, master_key_header, user_id="ana")
     workspace = _workspace_id(test_db, key)
-    github = _store(test_db, workspace, "github")
+    github = _store(test_db, workspace, "github", read_tools=["list_issues"])
     jira = _store(test_db, workspace, "jira", everyone=[], allowed_tools=["search"])
     _grant(client, master_key_header, jira, ["search"], users=["ana"])
 
@@ -606,6 +606,8 @@ def test_a_keys_summary_covers_every_server_of_its_workspace(
     assert summary["github"]["decided_by"] == "everyone"
     assert summary["github"]["tools"] == ["*"]
     assert summary["github"]["server_id"] == str(github.id)
+    # What '@read' in a rule would stand for, so the key editor can say which tools that reaches.
+    assert summary["github"]["read_tools"] == ["list_issues"]
     assert (summary["jira"]["decided_by"], summary["jira"]["tools"], summary["jira"]["allowed_tools"]) == (
         "user",
         ["search"],

@@ -27106,6 +27106,14 @@
             "title": "Name",
             "type": "string"
           },
+          "read_tools": {
+            "description": "The server's tools labeled read, which '@read' in tools stands for",
+            "items": {
+              "type": "string"
+            },
+            "title": "Read Tools",
+            "type": "array"
+          },
           "server_id": {
             "format": "uuid",
             "title": "Server Id",

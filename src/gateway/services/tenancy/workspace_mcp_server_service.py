@@ -402,6 +402,9 @@ class WorkspaceMcpServerKeyAccess(BaseModel):
     grant_id: uuid.UUID | None
     tools: list[str] = Field(description="The deciding rule's tool patterns; [] means the key cannot reach the server")
     allowed_tools: list[str] | None = Field(description="The server's own ceiling; null exposes every tool")
+    read_tools: list[str] = Field(
+        default_factory=list, description="The server's tools labeled read, which '@read' in tools stands for"
+    )
 
 
 class McpServerSummary(BaseModel):
@@ -1141,6 +1144,7 @@ class WorkspaceMcpServerService:
                     grant_id=grant_id,
                     tools=patterns,
                     allowed_tools=server.allowed_tools,
+                    read_tools=server.read_tools,
                 )
             )
         return result
