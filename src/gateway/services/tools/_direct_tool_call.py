@@ -27,6 +27,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 from gateway.core.config import END_USER_BUDGET_HEADER
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions import TenancyError
@@ -267,7 +268,7 @@ def _elapsed_ms(started_at: float) -> int:
 
 
 class DirectToolService:
-    """Runs a direct tool call for the route that serves one: :meth:`search` and :meth:`fetch`."""
+    """Runs direct tool calls: :meth:`search` on a configured search tool, :meth:`fetch` on a fetch tool."""
 
     def __init__(
         self,
@@ -420,6 +421,14 @@ class DirectToolService:
                         error_message=redacted_upstream_detail(detail, PASSTHROUGH_PROVIDER_ERROR_DETAIL),
                         status_code=status_code,
                     )
+                )
+            except DATABASE_ERRORS as exc:
+                # The error's own text can carry the row's values, so the log names the failure only.
+                logger.error(
+                    "Failed to record gateway rejection for %s on %s: %s",
+                    user_id,
+                    endpoint,
+                    describe_database_error(exc),
                 )
             except Exception:
                 logger.exception("Failed to record gateway rejection for %s on %s", user_id, endpoint)

@@ -194,6 +194,7 @@ from gateway.services.tool_settings_service import load_overrides, stage_overrid
 from gateway.services.tools import (
     DirectCaller,
     DirectToolCall,
+    DirectToolLedger,
     DirectToolService,
     DirectToolUsage,
     SearchToolService,
@@ -2524,81 +2525,82 @@ class _DirectToolAccounts:
         return await self._api_keys.tool_refusal(self._config, api_key, kind=kind, provider=provider, tool=tool)
 
 
-class _DirectToolLedger:
-    """The direct tool service's ledger: the budget, pricing and funding functions that take the request's session."""
+def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) -> DirectToolLedger:
+    """The direct tool service's ledger: the budget, pricing and funding functions that take the request's session.
 
-    def __init__(self, db: AsyncSession, config: GatewayConfig, billing: BillingPort) -> None:
-        self._db = db
-        self._config = config
-        self._billing = billing
+    Its methods close over that session.
+    """
 
-    async def workspace_of(self, api_key_id: str | None) -> uuid.UUID:
-        return await workspace_for_key_id(self._db, api_key_id)
+    class Ledger:
+        async def workspace_of(self, api_key_id: str | None) -> uuid.UUID:
+            return await workspace_for_key_id(db, api_key_id)
 
-    async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
-        return await organization_for_key_id(self._db, api_key_id)
+        async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
+            return await organization_for_key_id(db, api_key_id)
 
-    async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
-        rate = await resolve_tool_rate(
-            self._db,
-            call.rate_keys,
-            label=call.label,
-            deployment_paid=call.deployment_paid,
-            organization_id=organization_id,
-        )
-        return rate.unit_rate if rate is not None else None
-
-    async def hold(
-        self, user_id: str, amount: Decimal, *, api_key: APIKey | None, provider: str, counts_toward_budget: bool
-    ) -> object:
-        return await reserve_budget(
-            self._db,
-            user_id,
-            amount,
-            # Not the pricing key: ``model`` only drives reserve_budget's free-model
-            # shortcut through any-llm, which a tool is not, and a tool named like an
-            # any-llm provider could skip the reservation through it.
-            model=None,
-            strategy=self._config.budget_strategy,
-            counts_toward_budget=counts_toward_budget,
-            # A tool is not a model, but it is billed to a workspace like one, so
-            # the scope carries the tool's provider as the narrowing axis.
-            scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider),
-        )
-
-    async def refund(self, hold: object) -> None:
-        await refund_reservation(self._db, cast(ReservationHandle, hold))
-
-    async def settle(self, hold: object, cost: Decimal) -> None:
-        await reconcile_reservation(self._db, cast(ReservationHandle, hold), cost)
-
-    async def admit_funding(
-        self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
-    ) -> object | None:
-        try:
-            return await admit_deployment_paid(
-                self._billing,
-                deployment_paid=True,
+        async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
+            rate = await resolve_tool_rate(
+                db,
+                call.rate_keys,
+                label=call.label,
+                deployment_paid=call.deployment_paid,
                 organization_id=organization_id,
-                api_key_id=api_key_id,
-                user_id=user_id,
-                request_id=request_id,
             )
-        except InsufficientFundsError:
-            raise
-        except Exception as exc:
-            # Ends the transaction the port may have left failed, rolling it back
-            # when it cannot commit, so the refund that follows has a usable session.
-            await release_session(self._db)
-            raise FundsCheckFailedError(describe_port_error(exc)) from exc
+            return rate.unit_rate if rate is not None else None
 
-    async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
-        await cast(DeploymentCharge, funding).settle(
-            cost, model=model, description=description, expects_cost=False, savepoint=self._db.begin_nested
-        )
+        async def hold(
+            self, user_id: str, amount: Decimal, *, api_key: APIKey | None, provider: str, counts_toward_budget: bool
+        ) -> object:
+            return await reserve_budget(
+                db,
+                user_id,
+                amount,
+                # Not the pricing key: ``model`` only drives reserve_budget's free-model
+                # shortcut through any-llm, which a tool is not, and a tool named like an
+                # any-llm provider could skip the reservation through it.
+                model=None,
+                strategy=config.budget_strategy,
+                counts_toward_budget=counts_toward_budget,
+                # A tool is not a model, but it is billed to a workspace like one, so
+                # the scope carries the tool's provider as the narrowing axis.
+                scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider),
+            )
 
-    async def release(self) -> bool:
-        return await release_session(self._db)
+        async def refund(self, hold: object) -> None:
+            await refund_reservation(db, cast(ReservationHandle, hold))
+
+        async def settle(self, hold: object, cost: Decimal) -> None:
+            await reconcile_reservation(db, cast(ReservationHandle, hold), cost)
+
+        async def admit_funding(
+            self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
+        ) -> object | None:
+            try:
+                return await admit_deployment_paid(
+                    billing,
+                    deployment_paid=True,
+                    organization_id=organization_id,
+                    api_key_id=api_key_id,
+                    user_id=user_id,
+                    request_id=request_id,
+                )
+            except InsufficientFundsError:
+                raise
+            except Exception as exc:
+                # Ends the transaction the port may have left failed, rolling it back
+                # when it cannot commit, so the refund that follows has a usable session.
+                await release_session(db)
+                raise FundsCheckFailedError(describe_port_error(exc)) from exc
+
+        async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
+            await cast(DeploymentCharge, funding).settle(
+                cost, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
+            )
+
+        async def release(self) -> bool:
+            return await release_session(db)
+
+    return Ledger()
 
 
 class _DirectToolGates:
@@ -2654,7 +2656,7 @@ def get_direct_tool_service(
     return DirectToolService(
         config=config,
         accounts=_DirectToolAccounts(config, api_keys, budgets),
-        ledger=_DirectToolLedger(db, config, billing),
+        ledger=_ledger_on(db, config, billing),
         gates=_DirectToolGates(request, config, budgets, log_writer),
         policies=policies,
         web_client=web_client,

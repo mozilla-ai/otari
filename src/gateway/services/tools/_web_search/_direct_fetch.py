@@ -1,10 +1,10 @@
 """Direct fetch: pick the instance, resolve the call, name an unpriced one's row, and run it.
 
-``POST /api/v1/fetch`` calls the four functions below in that order, inside
-the direct tool scaffold, which gates, bills and logs the call.
+:meth:`DirectToolService.fetch` calls the four functions below in that order,
+and gates, bills and logs the call.
 
-- :func:`pick_direct_fetch_instance` returns the instance named in the path
-  or in ``fetch_tool_name``, else the one ``web_fetch_default_tool`` names,
+- :func:`pick_direct_fetch_instance` returns the instance the request names,
+  else the one ``web_fetch_default_tool`` names,
   else ``builtin_fetch``. A deployment with ``web_fetch_enabled`` off serves
   none: the switch covers every page the gateway fetches.
 - :func:`resolve_direct_fetch` returns the :class:`DirectFetch`. A call that

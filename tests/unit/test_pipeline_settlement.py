@@ -22,9 +22,11 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
+import anyio
 import pytest
 from any_llm import LLMProvider
 from any_llm.types.completion import (
@@ -67,7 +69,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig, WebTool
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.rate_limit import RateLimitInfo
-from gateway.services.budgets import ReservationHandle
+from gateway.services.budgets import ReservationHandle, estimate_output_tokens, settle_abandoned_stream
 from gateway.services.inference import DeploymentCharge
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
@@ -361,6 +363,7 @@ def _build(
     deployment_charge: DeploymentCharge | None = None,
     db: Any = None,
     source_label: str | None = None,
+    prompt_chars: int | None = None,
 ) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
@@ -380,6 +383,7 @@ def _build(
         request_id=request_id,
         deployment_charge=deployment_charge,
         source_label=source_label,
+        prompt_chars=prompt_chars,
     )
 
 
@@ -629,6 +633,72 @@ async def test_client_disconnect_after_reported_usage_bills_it(monkeypatch: pyte
     (logged,) = settlement.logged
     assert logged["usage_override"].prompt_tokens == 120
     assert logged["request_id"] == "req-1"
+
+
+def test_estimate_output_tokens_rounds_chars_over_four_up() -> None:
+    assert [estimate_output_tokens(n) for n in (-5, 0, 1, 4, 5, 400)] == [0, 0, 1, 1, 2, 100]
+
+
+def test_streamed_text_chars_reads_chat_deltas_and_responses_text_events() -> None:
+    event = SimpleNamespace(type="response.output_text.delta", delta="abc")
+    other = SimpleNamespace(type="response.created")
+    assert [pipeline._streamed_text_chars(c) for c in (_text_chunk("abcd"), _chunk(), event, other)] == [4, 0, 3, 0]
+
+
+def test_streamed_text_chars_tolerates_a_chunk_without_a_delta() -> None:
+    chunk = SimpleNamespace(choices=[SimpleNamespace(delta=None)])
+    assert pipeline._streamed_text_chars(chunk) == 0
+
+
+def _text_chunk(text: str) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id="c1",
+        choices=[ChunkChoice(delta=ChoiceDelta(content=text), index=0)],
+        created=0,
+        model="m",
+        object="chat.completion.chunk",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("policy", "rows"), [("estimate", 1), ("allow_free", 0)])
+async def test_abandoned_stream_before_usage_writes_an_incomplete_estimated_row(
+    monkeypatch: pytest.MonkeyPatch, policy: str, rows: int
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        for _ in range(10):
+            await asyncio.sleep(0.01)
+            yield _text_chunk("abcd" * 2)
+        yield _chunk(_PARTIAL_USAGE)
+
+    response = _build(stream(), GatewayConfig(stream_missing_usage_policy=policy), prompt_chars=40, request_id="req-1")
+    seen = 0
+
+    async def consume() -> None:
+        nonlocal seen
+        async for _ in response.body_iterator:
+            seen += 1
+
+    # A client disconnect cancels the response's scope, which is what the task group's cancel does here.
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(consume)
+        while seen < 3:
+            await asyncio.sleep(0.001)
+        tg.cancel_scope.cancel()
+
+    assert len(settlement.logged) == rows
+    if rows:
+        (logged,) = settlement.logged
+        usage = logged["usage_override"]
+        assert (usage.prompt_tokens, usage.completion_tokens) == (10, 6)
+        assert logged["incomplete"] is True
+        assert logged["error"] is None
+        assert settlement.settled_tokens == [16]
+    else:
+        assert settlement.refunded == 1
 
 
 @pytest.mark.asyncio
@@ -2796,3 +2866,21 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
     assert all(health.active == 0 for health in router.health.values())
 
     assert bool(router.affinities) is (outcome in {"on_complete", "on_no_usage"})
+
+
+def test_abandoned_stream_row_reads_as_incomplete_only_when_estimated() -> None:
+    args: dict[str, Any] = {"policy": "estimate", "prompt_chars": 400, "streamed_chars": 10, "has_tool_work": False}
+    estimated = settle_abandoned_stream(**args, reported_usage=None)
+    assert estimated is not None
+    assert (estimated.incomplete, estimated.error) == (True, None)
+    assert estimated.usage is not None and estimated.usage.total_tokens == 103
+
+    reported = CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    disconnected = settle_abandoned_stream(**args, reported_usage=reported)
+    assert disconnected is not None
+    assert (disconnected.usage, disconnected.incomplete) == (reported, False)
+    assert disconnected.error == "client disconnected before the stream completed"
+
+    ignored = {**args, "policy": "ignore"}
+    assert settle_abandoned_stream(**ignored, reported_usage=None) is None
+    assert settle_abandoned_stream(**{**ignored, "has_tool_work": True}, reported_usage=None) is not None
