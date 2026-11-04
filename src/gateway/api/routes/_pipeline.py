@@ -4962,8 +4962,9 @@ async def record_usage(
     # A model priced per request owes its flat rate for a successful call whether
     # or not the provider reported usage, and nothing for a failed one, so the
     # rate is resolved for a success even without usage. A model priced per token
-    # is priced only from reported usage, as it always has been.
-    succeeded = error is None
+    # is priced only from reported usage, as it always has been. An incomplete
+    # row did not finish, so it is billed on its estimated tokens alone.
+    succeeded = error is None and not incomplete
     resolved: ResolvedPricing | None = None
     if usage_data or succeeded or cost_override is not None:
         # The organization comes off the key, via the workspace already resolved
@@ -6105,12 +6106,14 @@ def build_streaming_response(
                 latency_ms=_elapsed_ms(started_at),
                 ttft_ms=_ttft_ms(started_at, first_chunk_at),
                 counts_toward_budget=_handle_counts_toward_budget(reservation),
+                attribution=attribution,
                 tool_tally=tool_tally,
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
                 safety_identifier=safety_identifier,
+                prices=prices,
                 deployment_paid=deployment_paid,
             )
             await _charge(logged, expects_cost=row.usage is not None)
