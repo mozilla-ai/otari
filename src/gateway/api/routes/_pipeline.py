@@ -5750,7 +5750,7 @@ async def open_stream(
 def _streamed_text_chars(chunk: Any) -> int:
     """Characters of output text a Chat chunk or a Responses event carries."""
     if choices := getattr(chunk, "choices", None):
-        text = getattr(choices[0].delta, "content", None)
+        text = getattr(getattr(choices[0], "delta", None), "content", None)
     elif str(getattr(chunk, "type", "")).endswith("output_text.delta"):
         text = getattr(chunk, "delta", None)
     else:
@@ -6101,7 +6101,7 @@ def build_streaming_response(
                 endpoint=adapter.endpoint,
                 user_id=user_id,
                 usage_override=reported_usage or estimated,
-                error=None if estimated else "client disconnected before the stream completed",
+                error=None if estimated is not None else "client disconnected before the stream completed",
                 incomplete=estimated is not None,
                 latency_ms=_elapsed_ms(started_at),
                 ttft_ms=_ttft_ms(started_at, first_chunk_at),
