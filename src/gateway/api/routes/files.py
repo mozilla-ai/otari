@@ -30,7 +30,6 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import Response, StreamingResponse
 
 from gateway.api.deps import FileServiceDep, get_config, verify_api_key_or_master_key
-from gateway.api.routes._helpers import resolve_user_id
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import FilesDisabledError
 from gateway.models.api_keys import APIKey
@@ -42,6 +41,7 @@ from gateway.schemas.files import (
     OpenAIFileList,
     OpenAIFileObject,
 )
+from gateway.services.api_keys import resolve_user_id
 from gateway.services.files import (
     DEFAULT_LIST_LIMIT,
     MAX_LIST_LIMIT,

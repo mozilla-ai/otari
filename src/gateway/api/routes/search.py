@@ -71,16 +71,12 @@ from gateway.api.deps import (
 )
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._passthrough import (
-    PASSTHROUGH_PROVIDER_ERROR_DETAIL,
     resolve_passthrough_user_id,
 )
 from gateway.api.routes._pipeline import (
-    FUNDS_CHECK_UNAVAILABLE_DETAIL,
     _elapsed_ms,
-    _names_end_user,
     failure_status_code,
     log_gateway_rejection,
-    rate_limit_headers,
 )
 from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.database import release_session
@@ -103,10 +99,10 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tools import WebTool
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
-from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, BillingPort, InsufficientFundsError
+from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.schemas.tools import SearchRequest, SearchResponse
-from gateway.services.api_keys import ApiKeyService
+from gateway.services.api_keys import ApiKeyService, names_end_user
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -124,6 +120,7 @@ from gateway.services.tools import (
     resolve_direct_search,
     run_direct_search,
 )
+from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
@@ -272,7 +269,7 @@ async def _dispatch_search(
     # into users.spend, matching every other billed endpoint.
     budget_exempt = api_key is not None and api_key.exclude_from_budget
 
-    if api_key is not None and request.user and _names_end_user(api_key, request.user):
+    if api_key is not None and request.user and names_end_user(api_key, request.user):
         # As on chat: the owner's own rpm is checked before an end user is created for it.
         rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
         end_user = await budget_service.resolve_end_user(
