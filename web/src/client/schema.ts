@@ -4311,6 +4311,63 @@ export interface paths {
         patch: operations["organization-budgets-update_organization_spend_ceiling"];
         trace?: never;
     };
+    "/api/v1/organizations/me/sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Organization Sso
+         * @description Read the caller's organization's own sign-in connection. Owners and admins only.
+         *
+         *     ``connection`` is null until the organization saves one.
+         */
+        get: operations["organization-sso-get_organization_sso"];
+        /**
+         * Put Organization Sso
+         * @description Discover the submitted issuer and save the caller's organization's own sign-in connection.
+         *
+         *     Owners and admins only. Replaces any existing connection. The client secret is
+         *     encrypted at rest and never served back.
+         */
+        put: operations["organization-sso-put_organization_sso"];
+        post?: never;
+        /**
+         * Delete Organization Sso
+         * @description Remove the caller's organization's own sign-in connection. Owners and admins only.
+         *
+         *     Refused with 404 when the organization has not saved a connection yet.
+         */
+        delete: operations["organization-sso-delete_organization_sso"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/sso/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Organization Sso
+         * @description Re-discover the caller's organization's own issuer and store the result. Owners and admins only.
+         *
+         *     Refused with 404 when the organization has not saved a connection yet.
+         */
+        post: operations["organization-sso-test_organization_sso"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/switch": {
         parameters: {
             query?: never;
@@ -14638,6 +14695,107 @@ export interface components {
             user_id: string;
         };
         /**
+         * OIDCConnectionDomain
+         * @description One of the organization's email domains.
+         */
+        OIDCConnectionDomain: {
+            /** Domain */
+            domain: string;
+            /**
+             * Enabled
+             * @description Whether the domain's claim is turned on.
+             */
+            enabled: boolean;
+            /**
+             * Proof Expires At
+             * @description When the domain's DNS proof stops being acted on, or None when it has never been verified.
+             */
+            proof_expires_at: string | null;
+        };
+        /**
+         * OIDCConnectionPublic
+         * @description An organization's own sign-in connection, as its admins see it.
+         *
+         *     Carries ``client_secret_last4`` and never the secret itself.
+         */
+        OIDCConnectionPublic: {
+            /** Client Id */
+            client_id: string;
+            /** Client Secret Last4 */
+            client_secret_last4: string;
+            /** Default Role */
+            default_role: string;
+            /**
+             * Discovered At
+             * Format: date-time
+             * @description When the provider's configuration was last read.
+             */
+            discovered_at: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Domains
+             * @description Every one of the organization's email domains, each with its DNS proof's expiry and whether its claim is enabled. Only a domain that is both enabled and has an unexpired proof admits a sign-in.
+             */
+            domains: components["schemas"]["OIDCConnectionDomain"][];
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer
+             * @description The organization's own claim.
+             */
+            issuer: string;
+            /**
+             * Resolved Issuer
+             * @description What discovery confirmed the issuer to be.
+             */
+            resolved_issuer: string;
+        };
+        /**
+         * OIDCConnectionRequest
+         * @description What an organization administrator submits to configure its own sign-in connection.
+         */
+        OIDCConnectionRequest: {
+            /**
+             * Client Id
+             * @description The OAuth client ID this deployment authenticates with.
+             */
+            client_id: string;
+            /**
+             * Client Secret
+             * @description The OAuth client secret. Stored encrypted and never served back. Leave it out to keep the one already stored, which is refused unless the issuer and the client ID are both unchanged.
+             */
+            client_secret?: string | null;
+            /**
+             * Default Role
+             * @description The role given to a person's first sign-in through this connection.
+             * @default member
+             * @enum {string}
+             */
+            default_role: "member" | "viewer";
+            /**
+             * Display Name
+             * @description The identity provider's name, as shown to people signing in.
+             */
+            display_name: string;
+            /**
+             * Enabled
+             * @description Whether this connection currently admits sign-in.
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Issuer
+             * @description The identity provider's issuer URL, as the organization's own claim.
+             */
+            issuer: string;
+        };
+        /**
          * OfferingUsage
          * @description What the viewer's organization actually paid for one offering, last 30 days.
          *
@@ -16128,6 +16286,19 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrganizationScopedBudgetPublic"][];
+        };
+        /**
+         * OrganizationSsoPublic
+         * @description An organization's own OIDC connection, and what to register at the provider.
+         */
+        OrganizationSsoPublic: {
+            /** @description The organization's own connection, or null until one is saved. */
+            connection: components["schemas"]["OIDCConnectionPublic"] | null;
+            /**
+             * Redirect Uri
+             * @description This deployment's fixed callback path. Register it at the identity provider, whether or not a connection is saved yet.
+             */
+            redirect_uri: string;
         };
         /**
          * OutputShape
@@ -28683,6 +28854,97 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-get_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
+                };
+            };
+        };
+    };
+    "organization-sso-put_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-delete_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "organization-sso-test_organization_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPublic"];
                 };
             };
         };

@@ -457,6 +457,13 @@ POST /api/v1/organizations/me/guardrail-definitions                    # dashboa
 PATCH /api/v1/organizations/me/guardrail-definitions/{definition_id}   # dashboard-only
 DELETE /api/v1/organizations/me/guardrail-definitions/{definition_id}  # dashboard-only
 POST /api/v1/organizations/me/guardrail-definitions/{definition_id}/test  # dashboard-only
+# Scoped by the caller's dashboard session like the organization surfaces
+# above: an SDK caller holding a workspace key has no organization identity to
+# configure sign-in for.
+GET /api/v1/organizations/me/sso                                # dashboard-only
+PUT /api/v1/organizations/me/sso                                 # dashboard-only
+POST /api/v1/organizations/me/sso/test                           # dashboard-only
+DELETE /api/v1/organizations/me/sso                              # dashboard-only
 POST /api/v1/organizations/me/member-invitations                # dashboard-only
 POST /api/v1/organizations/me/member-invitations/bulk           # dashboard-only
 DELETE /api/v1/organizations/me/member-invitations/{invitation_id} # dashboard-only
