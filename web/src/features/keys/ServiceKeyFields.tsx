@@ -70,7 +70,7 @@ const NO_BUDGETS: readonly LabelableBudget[] = []
 
 // The "no default" choice, under a value that is not an id. `Select` reads an
 // empty value as nothing chosen and would show its placeholder, not this label.
-const NO_DEFAULT_BUDGET = "\u0000none"
+const NO_DEFAULT_BUDGET = "__none__"
 
 /**
  * The budgets a service key in this scope may start end users on. The
