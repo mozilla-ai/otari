@@ -873,8 +873,8 @@ async def test_an_estimate_settles_a_stream_without_usage_only_at_a_rate_with_a_
         )
         return ResolvedPricing(pricing, "deployment", "openai:gpt-4")
 
-    _stub_pricing(monkeypatch, rate("tokens"))
-    assert (await _settle_without_usage("tokens", Decimal("0.5"))).cost == Decimal("0.5")
+    _stub_pricing(monkeypatch, rate("token"))
+    assert (await _settle_without_usage("token", Decimal("0.5"))).cost == Decimal("0.5")
 
     # The rate held nothing, so the row keeps no cost rather than a zero that reads as priced.
     _stub_pricing(monkeypatch, rate("second"))
@@ -882,7 +882,7 @@ async def test_an_estimate_settles_a_stream_without_usage_only_at_a_rate_with_a_
 
     # An unpriced model records the zero its estimate was, as it always has.
     _stub_pricing(monkeypatch, None)
-    assert (await _settle_without_usage("tokens", Decimal(0))).cost == Decimal(0)
+    assert (await _settle_without_usage("token", Decimal(0))).cost == Decimal(0)
 
 
 @pytest.fixture

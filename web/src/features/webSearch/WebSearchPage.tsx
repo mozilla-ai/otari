@@ -97,22 +97,18 @@ export function WebSearchPage() {
   const readOf = new Map(
     priceKeys.map((key, index) => [toRowId(key), reads[index]]),
   )
+  const modelRead = (modelKey: string) =>
+    readOf.get(toRowId({ kind: "model", modelKey }))
   const toolPrice = (tool: WebToolRow): ToolPrice =>
     priceOf(
       tool,
       readOf.get(toRowId({ kind: tool.kind, modelKey: tool.name })),
-      readOf.get(toRowId({ kind: "model", modelKey: oldPriceKey(tool) })),
+      modelRead(oldPriceKey(tool)),
     )
   const hasOldKeyPrice = (tool: WebToolRow) =>
-    Boolean(
-      readOf.get(toRowId({ kind: "model", modelKey: oldPriceKey(tool) }))?.data,
-    )
+    Boolean(modelRead(oldPriceKey(tool))?.data)
   const organizationKeyPrice = (kind: WebToolKind): ToolPrice =>
-    rateOnly(
-      readOf.get(
-        toRowId({ kind: "model", modelKey: ORGANIZATION_KEY_RATE[kind] }),
-      ),
-    )
+    rateOnly(modelRead(ORGANIZATION_KEY_RATE[kind]))
   const rowsFor = (
     kind: WebToolKind,
     tools: readonly WebToolRow[],

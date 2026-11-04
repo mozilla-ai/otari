@@ -114,9 +114,8 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
     """Price a request's successful gateway-run tool calls, per tool and label.
 
     A label costs the costs its calls reported, plus the rate ``rates`` holds for
-    its :func:`tool_rate_lookup` for each call that reported none, plus what its
-    enrichment fetches reported. A label of ``None`` means the tool's own
-    ``otari:<tool>``.
+    its :func:`tool_rate_lookup` for each call that reported none. A label of
+    ``None`` means the tool's own ``otari:<tool>``.
 
     Charge lines use the shape ``calculate_metered_cost`` produces so both
     kinds share ``UsageLog.pricing_breakdown`` and the dashboard's renderer,
@@ -140,11 +139,7 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
         label = entry.label if entry.label is not None else gateway_tool_pricing_key(entry.tool)
         lookup = tool_rate_lookup(entry)
         rate = rates.get(lookup) if lookup is not None else None
-        cost = (
-            entry.reported_cost
-            + entry.unreported_calls * (rate.unit_rate if rate is not None else Decimal(0))
-            + entry.enrichment_cost
-        )
+        cost = entry.reported_cost + entry.unreported_calls * (rate.unit_rate if rate is not None else Decimal(0))
         line = (entry.tool, label, _deployment_paid(entry))
         units, label_cost = by_label.get(line, (0, Decimal(0)))
         by_label[line] = (units + entry.calls, label_cost + cost)

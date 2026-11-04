@@ -2405,7 +2405,8 @@ class ReservationToolGate:
     covers the model alone and one request could otherwise search its way past a
     spend ceiling. A call that does not fit is refused to the model, which carries on.
     A call whose provider reports its own cost and has no rate holds nothing, since
-    its price is not known until it returns.
+    its price is not known until it returns. The tally says how many calls one
+    hold covers, as it does for the pages a search reads together.
     """
 
     def __init__(self, ctx: RequestContext) -> None:
@@ -2422,7 +2423,7 @@ class ReservationToolGate:
                 return True
             # Ends whatever the request left pending, so a failed hold rolls back only the hold.
             await release_session(ctx.db)
-            held = await hold_tool_call(ctx.db, handle, unit, strategy=ctx.config.budget_strategy)
+            held = await hold_tool_call(ctx.db, handle, unit, strategy=ctx.config.budget_strategy, calls=call.calls)
         except DATABASE_ERRORS as exc:
             logger.error(
                 "Could not hold gateway tool call %s on the budget; not running it: %s",
@@ -2432,17 +2433,22 @@ class ReservationToolGate:
             with contextlib.suppress(*DATABASE_ERRORS):
                 await ctx.db.rollback()
             return False
-        if not held:
+        if held is None:
             logger.info("Gateway tool call %s refused: its price does not fit the request's budget", call.tool)
             return False
-        ctx.tool_hold += unit
+        ctx.tool_hold += held
         return True
 
     async def _unit_cost(self, call: LabelCalls) -> Decimal:
+        """What one call under ``call``'s label costs with no reported cost, looked up once per label.
+
+        The charge's unit rate is its cost over its calls with no rounding, so a
+        hold of several calls is their exact total.
+        """
         key = (call.tool, call.label, call.rate_keys, call.deployment_paid)
         if key not in self._unit_costs:
             charges = await price_tool_calls(self._ctx.db, [call], organization_id=self._ctx.organization_id)
-            self._unit_costs[key] = charges.total
+            self._unit_costs[key] = charges.unit_rates.get(call.tool, ZERO)
             # The lookup's connection must not be held across the next provider call either.
             await release_session(self._ctx.db)
         return self._unit_costs[key]
@@ -4372,7 +4378,10 @@ async def _admit_claims(
     if (unpriced := await _unpriced_tool(ctx, priced)) is not None:
         # The model gate's kind and code, so both no-pricing refusals have one wire shape per format.
         error = domain_error(
-            adapter, GatewayToolPricingRequiredError(unpriced_tool_detail(unpriced.name, unpriced.rate_keys[0]))
+            adapter,
+            GatewayToolPricingRequiredError(
+                unpriced_tool_detail(unpriced.name, unpriced.rate_keys[0], enrichment=unpriced.enrichment)
+            ),
         )
         return _ToolRefusal(error, unpriced_tool=unpriced)
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
@@ -4671,7 +4680,7 @@ async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: Re
         model=model,
         provider=provider,
         endpoint=adapter.endpoint,
-        detail=unpriced_tool_detail(tool.name, rate_key),
+        detail=unpriced_tool_detail(tool.name, rate_key, enrichment=tool.enrichment),
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         started_at=ctx.started_at,
         request_id=ctx.request_id,

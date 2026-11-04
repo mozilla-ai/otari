@@ -4,14 +4,16 @@ import re
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Text, Uuid
+from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator
 
 from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdRate
-from gateway.types.price_unit import PriceUnit
+from gateway.types.price_unit import PriceUnit, current_unit_name
 
 # The counts an attempt reports in a unit other than tokens, keyed by meter. They
 # are the keys of ``billing_meters`` on the row a count settles.
@@ -98,6 +100,21 @@ class PricingSnapshotHistory(Base):
     snapshot: Mapped[str] = mapped_column(Text)
 
 
+class PriceUnitName(TypeDecorator[str]):
+    """``unit`` read in its current spelling, whatever a row written before the names changed says.
+
+    The migration that renamed the units rewrote every row, so this covers only
+    a row an older writer adds beside it, for the one release the retired names
+    are read. The rendered DDL is exactly ``impl``'s.
+    """
+
+    impl = String(16)
+    cache_ok = True
+
+    def process_result_value(self, value: str | None, dialect: Dialect) -> str | None:
+        return cast(str | None, current_unit_name(value))
+
+
 class ModelPricing(Base):
     """Model pricing configuration."""
 
@@ -122,12 +139,12 @@ class ModelPricing(Base):
     # Ordered threshold rules. Each rule applies its supplied rates to the
     # entire request once ``total_input_tokens`` reaches ``min_input_tokens``.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    # What ``input_price_per_million`` is a rate per: ``tokens`` for a model,
-    # ``requests`` for a gateway-run tool, a moderation call or a completion model
-    # billed per call, ``images`` for image generation. The rate columns are
+    # What ``input_price_per_million`` is a rate per: ``token`` for a model,
+    # ``request`` for a gateway-run tool, a moderation call or a completion model
+    # billed per call, ``image`` for image generation. The rate columns are
     # shared by every unit and a reader cannot tell which from the number, so
     # the row says (``gateway.types.price_unit.PriceUnit``).
-    unit: Mapped[PriceUnit] = mapped_column(String(16), default="tokens", server_default="tokens")
+    unit: Mapped[PriceUnit] = mapped_column(PriceUnitName(), default="token", server_default="token")
     # Which path wrote the row: ``config`` (the file's ``pricing:`` block),
     # ``api`` (``POST /v1/pricing``), ``migration``, or ``seed`` (a community
     # default stored on a hosted model's behalf). NULL on a row written before
@@ -275,7 +292,7 @@ class OrganizationModelPricing(Base):
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # The same two columns ``ModelPricing`` carries, for the same reasons: an
     # override is read as a ``ModelPricing`` and has to say what it is per.
-    unit: Mapped[PriceUnit] = mapped_column(String(16), default="tokens", server_default="tokens")
+    unit: Mapped[PriceUnit] = mapped_column(PriceUnitName(), default="token", server_default="token")
     origin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # ``UtcDateTime``, not ``DateTime(timezone=True)``, and this is the one place
     # in this file where that distinction is load-bearing. The flag is a no-op on

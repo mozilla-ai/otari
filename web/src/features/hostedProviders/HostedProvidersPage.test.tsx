@@ -68,7 +68,7 @@ function hostedModel(overrides: Partial<HostedModel> = {}): HostedModel {
     output_price_per_million: 10,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    unit: "tokens",
+    unit: "token",
     price_source: "defaults",
     enabled: true,
     created_at: "2026-10-01T00:00:00Z",

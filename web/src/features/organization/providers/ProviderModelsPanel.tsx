@@ -75,7 +75,7 @@ function rate(value: number | undefined) {
 function inputRate(row: OrgProviderModel) {
   const unit = pricingUnitOf(row.unit)
   const value = row.input_price_per_million ?? undefined
-  if (unit === "tokens" || value === undefined) return rate(value)
+  if (unit === "token" || value === undefined) return rate(value)
   return (
     <span className="text-mono-caption tabular-nums">
       {formatPricedRate(value, unit)}
@@ -86,7 +86,7 @@ function inputRate(row: OrgProviderModel) {
 /** A rate that only a token price carries, as a dash on any other unit. */
 function tokenRate(row: OrgProviderModel, value: number | null | undefined) {
   return rate(
-    pricingUnitOf(row.unit) === "tokens" ? (value ?? undefined) : undefined,
+    pricingUnitOf(row.unit) === "token" ? (value ?? undefined) : undefined,
   )
 }
 

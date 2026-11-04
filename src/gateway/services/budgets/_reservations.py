@@ -1309,26 +1309,30 @@ async def increase_reservation(
             handle.token_estimate -= delta.token_estimate
 
 
-async def hold_tool_call(db: AsyncSession, handle: ReservationHandle, amount: Decimal, *, strategy: str) -> bool:
-    """Grow every leg of ``handle`` by ``amount`` before a gateway-run tool call runs, and commit.
+async def hold_tool_call(
+    db: AsyncSession, handle: ReservationHandle, amount: Decimal, *, strategy: str, calls: int = 1
+) -> Decimal | None:
+    """Grow every leg of ``handle`` by ``amount`` for each of ``calls`` calls before they run, and commit.
 
-    All or nothing: ``False`` where a budget or a ceiling has no room, with the
-    ceilings that had room given their growth back, so a refused call holds
-    nothing and the ledger still matches the counters. The commit ends the
-    transaction either way, so no budget row stays locked across the next
-    provider call. Work pending on ``db`` lands in that commit too.
+    One hold for all of them, all or nothing: the amount held, or ``None`` where
+    a budget or a ceiling has no room for it, with the ceilings that had room
+    given their growth back, so refused calls hold nothing and the ledger still
+    matches the counters. The commit ends the transaction either way, so no
+    budget row stays locked across the next provider call. Work pending on
+    ``db`` lands in that commit too.
 
     Raises:
         DATABASE_ERRORS: with ``handle`` restored to what it held before; the
             caller rolls ``db`` back.
     """
+    held = max(to_usd(amount), ZERO) * calls
     before = replace(handle)
     try:
         try:
             await increase_reservation(
                 db,
                 handle,
-                estimate=max(handle.estimate, handle.scoped_estimate) + max(to_usd(amount), ZERO),
+                estimate=max(handle.estimate, handle.scoped_estimate) + held,
                 model_is_free=False,
                 strategy=strategy,
             )
@@ -1339,10 +1343,10 @@ async def hold_tool_call(db: AsyncSession, handle: ReservationHandle, amount: De
             )
             handle.scoped_estimate = before.scoped_estimate
             await db.commit()
-            return False
+            return None
         await db.commit()
     except DATABASE_ERRORS:
         for item in fields(handle):
             setattr(handle, item.name, getattr(before, item.name))
         raise
-    return True
+    return held

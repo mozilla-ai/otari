@@ -155,7 +155,7 @@ def test_an_unknown_backend_resolves_to_none_rather_than_raising() -> None:
     # A build without the named backend must serve the policy's default target, not
     # fail every request through it.
     clear_router_backend_cache()
-    assert get_router_backend(GatewayConfig(), "cheapest") is None
+    assert get_router_backend("cheapest") is None
 
 
 @pytest.mark.asyncio
@@ -205,7 +205,7 @@ async def test_a_config_policy_naming_a_retired_router_serves_its_default(
 ) -> None:
     """A ``config.yml`` policy is not migrated, so a retired router is an unknown one: no ordering, one warning."""
     retired = _spec(backend=router)
-    assert get_router_backend(config, router) is None
+    assert get_router_backend(router) is None
 
     ordering = await decide_ordering(
         config, retired, policy_name="smart", user_id="u", allowlist=None, signal=_signal()
@@ -257,7 +257,7 @@ class _Recorder:
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     backend = _Recorder()
-    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: backend)
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda name: backend)
     return backend
 
 
@@ -351,7 +351,7 @@ async def test_a_backend_that_raises_declines_rather_than_failing_the_request(
         async def rank(self, ctx: RoutingContext) -> RoutingDecision:
             raise RuntimeError("the backend is on fire")
 
-    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: _Broken())
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda name: _Broken())
 
     ordering = await decide_ordering(
         config, _spec(), policy_name="smart", user_id="u", allowlist=None, signal=_signal()
@@ -374,7 +374,7 @@ async def test_a_backend_that_hangs_declines_at_the_deadline(
             await asyncio.sleep(60)
             raise AssertionError("should have been cancelled")
 
-    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: _Hangs())
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda name: _Hangs())
     monkeypatch.setattr("gateway.services.routing.decide.ROUTER_DEADLINE_SECONDS", 0.05)
 
     ordering = await decide_ordering(

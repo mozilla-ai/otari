@@ -36,7 +36,7 @@ const buildPerCallRate = (
   pricingResponse({
     model_key: modelKey,
     input_price_per_million: dollars * 1_000_000,
-    unit: "requests",
+    unit: "request",
     effective_at: "2026-10-01T09:30:00Z",
     ...overrides,
   })

@@ -97,7 +97,7 @@ async def decide_ordering(
     if signal.opted_out:
         return RouterOrdering([], rationale="caller sent Otari-Router: off")
 
-    backend = get_router_backend(config, backend_name)
+    backend = get_router_backend(backend_name)
     if backend is None:
         # This build has no such backend, which is the one "no ordering" case that
         # is a misconfiguration rather than normal operation, and the only one worth

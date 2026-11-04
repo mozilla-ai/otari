@@ -429,7 +429,7 @@ def test_an_estimate_never_prices_below_the_input_rate() -> None:
 
 
 def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> None:
-    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="request")
 
     cost, meters, lines = price_request(pricing)
 
@@ -441,30 +441,30 @@ def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> 
 
 def test_a_per_request_charge_line_agrees_with_the_settled_cost() -> None:
     """A rate below a micro-dollar per request rounds once, and the line shows the rounded amount."""
-    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("1.5"), unit="requests"))
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("1.5"), unit="request"))
 
     assert cost == Decimal("0.000002")
     assert lines == [{"meter": "request", "units": 1, "unit_rate": 0.000002, "cost": 0.000002}]
 
-    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("0.4"), unit="requests"))
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("0.4"), unit="request"))
 
     assert (cost, lines) == (Decimal("0"), [])
 
 
 def test_a_free_per_request_rate_writes_no_charge_line() -> None:
-    cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="requests"))
+    cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="request"))
 
     assert (cost, meters, lines) == (Decimal("0"), {"requests": 1}, [])
 
 
 def test_a_per_request_rate_refuses_an_unusable_rate() -> None:
     with pytest.raises(ValueError, match="no usable per-request rate"):
-        price_request(_pricing(input_price_per_million=None, unit="requests"))
+        price_request(_pricing(input_price_per_million=None, unit="request"))
 
 
 def test_a_per_request_rate_is_estimated_at_one_request() -> None:
     """The reservation holds what the request settles at, not a token estimate."""
-    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="request")
 
     estimate = estimate_metered_cost(pricing, estimated_input_tokens=1_000_000, estimated_output_tokens=4096)
 

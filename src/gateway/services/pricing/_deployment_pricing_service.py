@@ -116,7 +116,7 @@ class DeploymentPricingService:
                     cache_read_price_per_million=default.cache_read_price_per_million,
                     cache_write_price_per_million=default.cache_write_price_per_million,
                     pricing_tiers=default.pricing_tiers or [],
-                    unit=default.unit or "tokens",
+                    unit=default.unit or "token",
                     origin=SEED_ORIGIN,
                 )
             await self.pricing.flush()
@@ -179,7 +179,7 @@ class DeploymentPricingService:
                     cache_read_price_per_million=cache_rate("cache_read_price_per_million"),
                     cache_write_price_per_million=cache_rate("cache_write_price_per_million"),
                     pricing_tiers=tiers,
-                    unit=unit or (latest.unit if latest is not None else "tokens"),
+                    unit=unit or (latest.unit if latest is not None else "token"),
                     origin=API_ORIGIN,
                 )
             else:
