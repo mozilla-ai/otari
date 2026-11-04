@@ -655,6 +655,15 @@ def test_streamed_text_chars_reads_chat_deltas_and_responses_text_events() -> No
     assert [pipeline._streamed_text_chars(c) for c in (_text_chunk("abcd"), _chunk(), event, other)] == [4, 0, 3, 0]
 
 
+def test_streamed_text_chars_reads_a_messages_text_delta() -> None:
+    text = SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="text_delta", text="abcd"))
+    tool = SimpleNamespace(
+        type="content_block_delta", delta=SimpleNamespace(type="input_json_delta", partial_json="{}")
+    )
+    start = SimpleNamespace(type="message_start")
+    assert [pipeline._streamed_text_chars(c) for c in (text, tool, start)] == [4, 0, 0]
+
+
 def test_streamed_text_chars_tolerates_a_chunk_without_a_delta() -> None:
     chunk = SimpleNamespace(choices=[SimpleNamespace(delta=None)])
     assert pipeline._streamed_text_chars(chunk) == 0
