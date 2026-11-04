@@ -6,14 +6,19 @@ from typing import Annotated, Any
 from any_llm import aimage_edit, aimage_generation
 from any_llm.types.image import ImageGenerationParams, ImagesResponse, sniff_image_format
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import FormData, UploadFile
 from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._helpers import (
+    FILE_SCHEMA,
+    FORM_FIELD_SLACK,
+    FORM_FRAMING_BYTES,
+    bounded_body,
+    form_field_error,
+    form_fields,
+)
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -37,8 +42,7 @@ USAGE_ENDPOINT_EDITS = "/v1/images/edits"
 # that in memory, however many files it sends.
 _MAX_EDIT_IMAGES = 16
 _MAX_EDIT_UPLOAD_BYTES = 50 * 1024 * 1024
-# Room for the multipart framing and the text fields around the files.
-_MAX_EDIT_BODY_BYTES = _MAX_EDIT_UPLOAD_BYTES + 1024 * 1024
+_MAX_EDIT_BODY_BYTES = _MAX_EDIT_UPLOAD_BYTES + FORM_FRAMING_BYTES
 _EDIT_TOO_LARGE = f"The upload is larger than {_MAX_EDIT_UPLOAD_BYTES // (1024 * 1024)} MB"
 
 
@@ -125,37 +129,18 @@ async def create_image(
 EDIT_IMAGE_FIELDS = ("image", "image[]")
 EDIT_FILE_FIELDS = (*EDIT_IMAGE_FIELDS, "mask")
 
-_FILE_SCHEMA = {"type": "string", "contentMediaType": "application/octet-stream"}
 _EDIT_FORM_SCHEMA = ImageEditForm.model_json_schema()
 _EDIT_UPLOAD_SCHEMA = {
     "type": "object",
     "properties": {
         **_EDIT_FORM_SCHEMA["properties"],
-        "image": {"type": "array", "items": _FILE_SCHEMA, "description": "The image or images to edit."},
-        "image[]": {"type": "array", "items": _FILE_SCHEMA, "description": "Same as image."},
-        "mask": {**_FILE_SCHEMA, "description": "Where to edit: the transparent areas of this PNG."},
+        "image": {"type": "array", "items": FILE_SCHEMA, "description": "The image or images to edit."},
+        "image[]": {"type": "array", "items": FILE_SCHEMA, "description": "Same as image."},
+        "mask": {**FILE_SCHEMA, "description": "Where to edit: the transparent areas of this PNG."},
     },
     # ``image`` or ``image[]``, either one: the route checks that at least one file came.
     "required": _EDIT_FORM_SCHEMA["required"],
 }
-
-
-def _invalid(field: str, msg: str, error_type: str = "value_error") -> RequestValidationError:
-    return RequestValidationError([{"type": error_type, "loc": ("body", field), "msg": msg}])
-
-
-def _edit_fields(form: FormData) -> ImageEditForm:
-    """The text fields, refused the way FastAPI refuses a body it cannot validate."""
-    values = {name: form.get(name) for name in ImageEditForm.model_fields if name in form}
-    for name, value in values.items():
-        if not isinstance(value, str):
-            raise _invalid(name, "Expected a text field, not a file")
-    try:
-        return ImageEditForm.model_validate(values)
-    except ValidationError as exc:
-        raise RequestValidationError(
-            [{"type": e["type"], "loc": ("body", *e["loc"]), "msg": e["msg"]} for e in exc.errors()]
-        ) from exc
 
 
 def _edit_files(form: FormData) -> tuple[list[UploadFile], UploadFile | None]:
@@ -168,17 +153,17 @@ def _edit_files(form: FormData) -> tuple[list[UploadFile], UploadFile | None]:
     for name in EDIT_IMAGE_FIELDS:
         for value in form.getlist(name):
             if not isinstance(value, UploadFile):
-                raise _invalid("image", "Expected a file, not a text field")
+                raise form_field_error("image", "Expected a file, not a text field")
             uploads.append(value)
     if not uploads:
-        raise _invalid("image", "Field required", "missing")
+        raise form_field_error("image", "Field required", "missing")
     if len(uploads) > _MAX_EDIT_IMAGES:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"At most {_MAX_EDIT_IMAGES} images can be edited in one request"
         )
     mask = form.get("mask")
     if mask is not None and not isinstance(mask, UploadFile):
-        raise _invalid("mask", "Expected a file, not a text field")
+        raise form_field_error("mask", "Expected a file, not a text field")
     # The body cap leaves room for the form around the files, so the files get their own.
     files = [*uploads, *([mask] if mask is not None else [])]
     if sum(upload.size or 0 for upload in files) > _MAX_EDIT_UPLOAD_BYTES:
@@ -234,7 +219,7 @@ async def edit_image(
     # store more than one upload's limit.
     try:
         async with bounded_body(raw_request, _MAX_EDIT_BODY_BYTES, _EDIT_TOO_LARGE).form(
-            max_files=_MAX_EDIT_IMAGES + 1, max_fields=len(ImageEditForm.model_fields) + 16
+            max_files=_MAX_EDIT_IMAGES + 1, max_fields=len(ImageEditForm.model_fields) + FORM_FIELD_SLACK
         ) as form:
             return await _run_edit(raw_request, response, auth_result, db, config, log_writer, form)
     except ClientDisconnect:
@@ -250,7 +235,7 @@ async def _run_edit(
     log_writer: LogWriter,
     form: FormData,
 ) -> dict[str, Any]:
-    fields = _edit_fields(form)
+    fields = form_fields(form, ImageEditForm)
     uploads, mask = _edit_files(form)
 
     set_fields = fields.model_dump(exclude_unset=True, exclude={"model", "prompt"})

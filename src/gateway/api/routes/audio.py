@@ -6,16 +6,27 @@ from typing import Annotated, Any
 
 from any_llm import aspeech, atranscription
 from any_llm.types.audio import AudioSpeechParams, Transcription
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import FormData, UploadFile
+from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.routes._helpers import (
+    FORM_FIELD_SLACK,
+    FORM_FRAMING_BYTES,
+    bounded_body,
+    form_fields,
+    form_file,
+    multipart_request_body,
+)
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
+from gateway.schemas.inference import TranscriptionForm
 from gateway.services.inference import ONE_REQUEST_BILLING, TRANSCRIPTION_BILLING
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
@@ -28,6 +39,8 @@ USAGE_ENDPOINT_SPEECH = "/v1/audio/speech"
 
 # Maximum upload size for audio files (25 MB, matching OpenAI's limit)
 _MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024
+_MAX_AUDIO_BODY_BYTES = _MAX_AUDIO_UPLOAD_BYTES + FORM_FRAMING_BYTES
+_AUDIO_TOO_LARGE = f"Audio file exceeds maximum upload size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB"
 
 # Mapping from response_format to MIME type for speech endpoint
 _SPEECH_CONTENT_TYPES: dict[str | None, str] = {
@@ -56,7 +69,17 @@ def _named_audio(data: bytes, upload: UploadFile) -> io.BytesIO:
     return named
 
 
-@router.post("/audio/transcriptions", response_model=None)
+@router.post(
+    "/audio/transcriptions",
+    response_model=None,
+    responses={
+        413: {"description": f"{_AUDIO_TOO_LARGE}."},
+        422: {"description": "A required field is missing, or a field is the wrong type."},
+    },
+    openapi_extra=multipart_request_body(
+        TranscriptionForm, {"file": "The audio to transcribe."}, required_files=("file",)
+    ),
+)
 async def create_transcription(
     raw_request: Request,
     response: Response,
@@ -64,46 +87,54 @@ async def create_transcription(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    file: UploadFile = File(...),
-    model: str = Form(...),
-    language: str | None = Form(None),
-    prompt: str | None = Form(None),
-    response_format: str | None = Form(None),
-    temperature: float | None = Form(None),
-    user: str | None = Form(None),
 ) -> dict[str, Any]:
-    """OpenAI-compatible audio transcription endpoint.
+    """OpenAI-compatible audio transcription endpoint, taking ``multipart/form-data``.
 
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
     """
+    # Read here rather than as File parameters, which FastAPI parses before the
+    # auth check runs, and through a capped body, so nobody can make the gateway
+    # store more than one upload's limit.
+    try:
+        async with bounded_body(raw_request, _MAX_AUDIO_BODY_BYTES, _AUDIO_TOO_LARGE).form(
+            max_files=1, max_fields=len(TranscriptionForm.model_fields) + FORM_FIELD_SLACK
+        ) as form:
+            return await _run_transcription(raw_request, response, auth_result, db, config, log_writer, form)
+    except ClientDisconnect:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.") from None
+
+
+async def _run_transcription(
+    raw_request: Request,
+    response: Response,
+    auth_result: tuple[APIKey | None, bool],
+    db: AsyncSession,
+    config: GatewayConfig,
+    log_writer: LogWriter,
+    form: FormData,
+) -> dict[str, Any]:
+    fields = form_fields(form, TranscriptionForm)
+    file = form_file(form, "file")
+    # The body cap leaves room for the form around the file, so the file gets its own.
+    if (file.size or 0) > _MAX_AUDIO_UPLOAD_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, _AUDIO_TOO_LARGE)
+    forward = {name: value for name, value in fields.model_dump(exclude={"model", "user"}).items() if value is not None}
 
     async def call_provider(resolved: ResolvedProvider) -> Transcription:
+        # Read here, after the rate limit and budget gates, so a refused request
+        # never loads its file into memory.
         await file.seek(0)
         file_bytes = await file.read()
-        if len(file_bytes) > _MAX_AUDIO_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Audio file exceeds maximum upload size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB",
-            )
-
         transcription_kwargs: dict[str, Any] = {
             "model": resolved.model,
             "file": _named_audio(file_bytes, file),
             "provider": resolved.provider,
             **resolved.kwargs,
+            **forward,
         }
-        if language is not None:
-            transcription_kwargs["language"] = language
-        if prompt is not None:
-            transcription_kwargs["prompt"] = prompt
-        if response_format is not None:
-            transcription_kwargs["response_format"] = response_format
-        if temperature is not None:
-            transcription_kwargs["temperature"] = temperature
-
         return await atranscription(**transcription_kwargs)
 
     # Audio is exempt from require_pricing and has no measurable cost unit yet
@@ -122,19 +153,10 @@ async def create_transcription(
         db=db,
         config=config,
         log_writer=log_writer,
-        model=model,
-        user=user,
+        model=fields.model,
+        user=fields.user,
         call_provider=call_provider,
-        request_params=[
-            name
-            for name, value in (
-                ("language", language),
-                ("prompt", prompt),
-                ("response_format", response_format),
-                ("temperature", temperature),
-            )
-            if value is not None
-        ],
+        request_params=list(forward),
         lookup_pricing=True,
         pricing_use_defaults=False,
         reserve_before_resolve=True,

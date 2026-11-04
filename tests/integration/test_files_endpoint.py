@@ -17,13 +17,14 @@ from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 from anthropic import Anthropic, BadRequestError
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from starlette.requests import ClientDisconnect
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, API_VERSION, GatewayConfig
@@ -1010,3 +1011,116 @@ def test_vision_describe_side_call_row_carries_the_request_tags(
     rows = client.get(f"{API_ROOT}/usage", params={"user_id": "vision-tags-user"}, headers=master_key_header).json()
     assert sorted(row["model"] for row in rows) == ["gpt-4o-mini", "llama3"]
     assert all(row["tags"] == {"purpose": "vision"} for row in rows)
+
+
+# ---------------------------------------------------------------------------
+# The upload is read after auth, under the deployment's size cap
+# ---------------------------------------------------------------------------
+
+_FILES_URL = f"{API_ROOT}/files"
+
+
+def test_upload_parses_no_body_without_credentials(client: TestClient) -> None:
+    """The auth check answers before the body is read, so an anonymous upload is never stored."""
+    with patch("gateway.api.routes.files.bounded_body") as bounded:
+        resp = client.post(_FILES_URL, files={"file": ("big.bin", b"\x00" * 4096, "application/octet-stream")})
+    assert resp.status_code == 401
+    bounded.assert_not_called()
+
+
+def test_a_disabled_deployment_parses_no_upload(
+    files_off_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    with patch("gateway.api.routes.files.bounded_body") as bounded:
+        resp = files_off_client.post(
+            _FILES_URL, headers=master_key_header, files={"file": ("a.txt", b"x", "text/plain")}, data={"user": "u"}
+        )
+    assert resp.status_code == 404
+    bounded.assert_not_called()
+
+
+def test_upload_refuses_a_body_over_the_cap(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the cap the body is refused as it arrives, before the form is parsed and anything is stored."""
+    monkeypatch.setattr(test_config, "files_max_bytes", 16)
+    with (
+        patch("gateway.api.routes.files.FORM_FRAMING_BYTES", 0),
+        patch("gateway.api.routes.files.upload_chunks") as stored,
+    ):
+        resp = client.post(
+            _FILES_URL, headers=api_key_header, files={"file": ("big.bin", b"\x00" * 4096, "application/octet-stream")}
+        )
+    assert resp.status_code == 413
+    assert "maximum upload size" in resp.json()["detail"]
+    stored.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("use_master_key", "data", "status_code"),
+    [
+        pytest.param(True, {}, 400, id="master-key-without-user"),
+        pytest.param(False, {"user": "someone-else"}, 403, id="user-mismatch"),
+    ],
+)
+def test_upload_stores_nothing_for_a_refused_request(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    use_master_key: bool,
+    data: dict[str, str],
+    status_code: int,
+) -> None:
+    with patch("gateway.api.routes.files.upload_chunks") as stored:
+        resp = client.post(
+            _FILES_URL,
+            headers=master_key_header if use_master_key else api_key_header,
+            files={"file": ("a.txt", b"hello", "text/plain")},
+            data=data,
+        )
+    assert resp.status_code == status_code, resp.text
+    stored.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("data", "files", "field"),
+    [
+        pytest.param({"file": "/etc/passwd"}, [], "file", id="file-as-text"),
+        pytest.param({}, [], "file", id="missing-file"),
+    ],
+)
+def test_upload_refuses_a_field_of_the_wrong_shape(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    data: dict[str, str],
+    files: list[Any],
+    field: str,
+) -> None:
+    """The form is read by the route, so a bad field is still the 422 FastAPI gave."""
+    resp = client.post(_FILES_URL, headers=api_key_header, data=data, files=files)
+    assert resp.status_code == 422, resp.text
+    assert ["body", field] in [error["loc"] for error in resp.json()["detail"]]
+
+
+def test_upload_refuses_a_second_file(client: TestClient, api_key_header: dict[str, str], tmp_file_store: None) -> None:
+    """One file is read, so a text field sent as a file is one file too many rather than stored."""
+    files = [("file", ("a.txt", b"hello", "text/plain")), ("purpose", ("p.txt", b"assistants", "text/plain"))]
+    with patch("gateway.api.routes.files.upload_chunks") as stored:
+        resp = client.post(_FILES_URL, headers=api_key_header, files=files)
+    assert resp.status_code == 400
+    assert "Too many files" in resp.json()["detail"]
+    stored.assert_not_called()
+
+
+def test_upload_interrupted(client: TestClient, api_key_header: dict[str, str], tmp_file_store: None) -> None:
+    body = MagicMock(form=MagicMock(side_effect=ClientDisconnect()))
+    with patch("gateway.api.routes.files.bounded_body", return_value=body):
+        resp = client.post(_FILES_URL, headers=api_key_header, files={"file": ("a.txt", b"hello", "text/plain")})
+    assert resp.status_code == 400
+    assert "interrupted" in resp.json()["detail"]

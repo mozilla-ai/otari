@@ -369,7 +369,7 @@ export interface paths {
         put?: never;
         /**
          * Create Transcription
-         * @description OpenAI-compatible audio transcription endpoint.
+         * @description OpenAI-compatible audio transcription endpoint, taking ``multipart/form-data``.
          *
          *     Authentication modes:
          *     - Master key + user field: Use specified user (must exist)
@@ -8705,40 +8705,6 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["BlockedEmailPublic"][];
-        };
-        /** Body_audio-create_transcription */
-        "Body_audio-create_transcription": {
-            /** File */
-            file: string;
-            /** Language */
-            language?: string | null;
-            /** Model */
-            model: string;
-            /** Prompt */
-            prompt?: string | null;
-            /** Response Format */
-            response_format?: string | null;
-            /** Temperature */
-            temperature?: number | null;
-            /** User */
-            user?: string | null;
-        };
-        /** Body_files-create_file */
-        "Body_files-create_file": {
-            /** File */
-            file: string;
-            /**
-             * Purpose
-             * @default user_data
-             */
-            purpose: string;
-            /** User */
-            user?: string | null;
-        };
-        /** Body_playground-upload_playground_file */
-        "Body_playground-upload_playground_file": {
-            /** File */
-            file: string;
         };
         /**
          * BreakGlassCreate
@@ -20525,7 +20491,22 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_audio-create_transcription"];
+                "multipart/form-data": {
+                    /** @description The audio to transcribe. */
+                    file: string;
+                    /** Language */
+                    language?: string | null;
+                    /** Model */
+                    model: string;
+                    /** Prompt */
+                    prompt?: string | null;
+                    /** Response Format */
+                    response_format?: string | null;
+                    /** Temperature */
+                    temperature?: number | null;
+                    /** User */
+                    user?: string | null;
+                };
             };
         };
         responses: {
@@ -20538,14 +20519,19 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Validation Error */
+            /** @description Audio file exceeds maximum upload size of 25 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A required field is missing, or a field is the wrong type. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };
@@ -22293,7 +22279,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_files-create_file"];
+                "multipart/form-data": {
+                    /** @description The file to store. */
+                    file: string;
+                    /**
+                     * Purpose
+                     * @default user_data
+                     */
+                    purpose?: string;
+                    /** User */
+                    user?: string | null;
+                };
             };
         };
         responses: {
@@ -22306,14 +22302,19 @@ export interface operations {
                     "application/json": components["schemas"]["OpenAIFileObject"] | components["schemas"]["AnthropicFileMetadata"];
                 };
             };
-            /** @description Validation Error */
+            /** @description The file is larger than the deployment's ``files_max_bytes``. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body holds no file in the field ``file``, or a field is the wrong type. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };
@@ -28303,7 +28304,10 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_playground-upload_playground_file"];
+                "multipart/form-data": {
+                    /** @description The file to attach. */
+                    file: string;
+                };
             };
         };
         responses: {
@@ -28316,14 +28320,19 @@ export interface operations {
                     "application/json": components["schemas"]["OpenAIFileObject"];
                 };
             };
-            /** @description Validation Error */
+            /** @description The file is larger than the deployment's ``files_max_bytes``. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body holds no file in the field ``file``. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };

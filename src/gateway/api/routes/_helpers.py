@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
+from starlette.datastructures import FormData, UploadFile
 from starlette.types import Message
 
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER
@@ -131,6 +134,78 @@ def bounded_body(request: Request, max_bytes: int, too_large: str) -> Request:
         return message
 
     return Request(request.scope, receive)
+
+
+# Room for the multipart framing and the text fields around a route's files.
+FORM_FRAMING_BYTES = 1024 * 1024
+# Text fields a client may send past the ones a route reads, before its form is refused.
+FORM_FIELD_SLACK = 16
+FILE_SCHEMA = {"type": "string", "contentMediaType": "application/octet-stream"}
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+def form_field_error(field: str, msg: str, error_type: str = "value_error") -> RequestValidationError:
+    """The 422 FastAPI gives a body it cannot validate, for one field of a form a route reads itself."""
+    return RequestValidationError([{"type": error_type, "loc": ("body", field), "msg": msg}])
+
+
+def form_fields[M: BaseModel](form: FormData, model: type[M]) -> M:
+    """The text fields of ``form`` as ``model``, refused the way FastAPI refuses a body it cannot validate."""
+    values = {name: form.get(name) for name in model.model_fields if name in form}
+    for name, value in values.items():
+        if not isinstance(value, str):
+            raise form_field_error(name, "Expected a text field, not a file")
+    try:
+        return model.model_validate(values)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{"type": e["type"], "loc": ("body", *e["loc"]), "msg": e["msg"]} for e in exc.errors()]
+        ) from exc
+
+
+def form_file(form: FormData, field: str) -> UploadFile:
+    """The one file sent in ``field``, refused when missing or sent as text."""
+    value = form.get(field)
+    if value is None:
+        raise form_field_error(field, "Field required", "missing")
+    if not isinstance(value, UploadFile):
+        raise form_field_error(field, "Expected a file, not a text field")
+    return value
+
+
+def multipart_request_body(
+    fields: type[BaseModel] | None, files: Mapping[str, str], *, required_files: Collection[str] = ()
+) -> dict[str, Any]:
+    """The ``openapi_extra`` of a route that reads its own multipart form.
+
+    The body is the text fields of ``fields`` and one file per entry of ``files``
+    (name to description), which FastAPI cannot derive because the route reads
+    the form itself.
+    """
+    schema = fields.model_json_schema() if fields is not None else {}
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            **schema.get("properties", {}),
+                            **{name: {**FILE_SCHEMA, "description": about} for name, about in files.items()},
+                        },
+                        "required": [*schema.get("required", []), *required_files],
+                    }
+                }
+            },
+        }
+    }
+
+
+async def upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
+    """Read the upload off the request a chunk at a time, so it is never held whole."""
+    while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+        yield chunk
 
 
 def text_from_content(content: Any) -> str:

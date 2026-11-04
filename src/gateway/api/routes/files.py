@@ -22,22 +22,32 @@ The Anthropic flavor is its GA shape only, so a request for the Files API beta i
 """
 
 import uuid
-from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
+from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import FileServiceDep, get_config, verify_api_key_or_master_key
-from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._helpers import (
+    FORM_FIELD_SLACK,
+    FORM_FRAMING_BYTES,
+    bounded_body,
+    form_fields,
+    form_file,
+    multipart_request_body,
+    resolve_user_id,
+    upload_chunks,
+)
 from gateway.core.config import GatewayConfig
-from gateway.exceptions.files_exceptions import FilesDisabledError
+from gateway.exceptions.files_exceptions import FilesDisabledError, UploadTooLargeError
 from gateway.models.api_keys import APIKey
 from gateway.schemas.files import (
     AnthropicFileDeleted,
     AnthropicFileList,
     AnthropicFileMetadata,
+    FileUploadForm,
     OpenAIFileDeleted,
     OpenAIFileList,
     OpenAIFileObject,
@@ -84,8 +94,6 @@ _DEFAULT_PURPOSE = "user_data"
 
 # The most files ``ids[]`` may name in one page.
 _MAX_LIST_IDS = 100
-
-_READ_CHUNK_BYTES = 1024 * 1024
 
 
 def _dialect(raw_request: Request) -> FileDialect:
@@ -166,12 +174,6 @@ def _scope(auth_result: tuple[APIKey | None, bool], user: str | None, config: Ga
     )
 
 
-async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
-    """Read the upload off the request a chunk at a time, so it is never held whole."""
-    while chunk := await file.read(_READ_CHUNK_BYTES):
-        yield chunk
-
-
 def _content_disposition(filename: str) -> str:
     """Build a Content-Disposition header value that is safe from injection.
 
@@ -188,27 +190,45 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
 
-@router.post("/files")
+@router.post(
+    "/files",
+    responses={
+        413: {"description": "The file is larger than the deployment's ``files_max_bytes``."},
+        422: {"description": "The body holds no file in the field ``file``, or a field is the wrong type."},
+    },
+    openapi_extra=multipart_request_body(FileUploadForm, {"file": "The file to store."}, required_files=("file",)),
+)
 async def create_file(
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
-    file: UploadFile = File(...),
-    purpose: str = Form(_DEFAULT_PURPOSE),
-    user: str | None = Form(None),
 ) -> OpenAIFileObject | AnthropicFileMetadata:
     """Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers."""
-    record = await files.store(
-        NewFile(
-            user_id=_resolve_user(auth_result, user, config),
-            workspace_id=_request_workspace_id(auth_result),
-            filename=file.filename,
-            content_type=file.content_type,
-            purpose=purpose or _DEFAULT_PURPOSE,
-            chunks=_upload_chunks(file),
-        )
-    )
+    # Read here rather than as File parameters, which FastAPI parses before the
+    # auth check runs, and through a body capped at the deployment's file limit.
+    max_bytes = config.files_max_bytes
+    try:
+        async with bounded_body(
+            raw_request, max_bytes + FORM_FRAMING_BYTES, UploadTooLargeError(max_bytes).message
+        ).form(max_files=1, max_fields=len(FileUploadForm.model_fields) + FORM_FIELD_SLACK) as form:
+            fields = form_fields(form, FileUploadForm)
+            file = form_file(form, "file")
+            # The body cap leaves room for the form around the file, so the file gets its own.
+            if (file.size or 0) > max_bytes:
+                raise UploadTooLargeError(max_bytes)
+            record = await files.store(
+                NewFile(
+                    user_id=_resolve_user(auth_result, fields.user, config),
+                    workspace_id=_request_workspace_id(auth_result),
+                    filename=file.filename,
+                    content_type=file.content_type,
+                    purpose=fields.purpose or _DEFAULT_PURPOSE,
+                    chunks=upload_chunks(file),
+                )
+            )
+    except ClientDisconnect:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.") from None
     if _dialect(raw_request) is FileDialect.ANTHROPIC:
         return AnthropicFileMetadata.of(record)
     return OpenAIFileObject.of(record)

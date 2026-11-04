@@ -1129,8 +1129,31 @@ def test_an_upload_lists_for_its_owner_in_its_workspace_only(
 
 
 def test_a_viewer_cannot_upload(client: TestClient, world: _World, _file_store: None) -> None:
-    code, body = _upload(client, world, "viewer")
+    """The membership check answers before the body is read, so a viewer's upload is never stored."""
+    with patch("gateway.api.routes.playground.bounded_body") as bounded:
+        code, body = _upload(client, world, "viewer")
     assert code == status.HTTP_403_FORBIDDEN, body
+    bounded.assert_not_called()
+
+
+def test_an_anonymous_upload_is_not_parsed(client: TestClient, world: _World, _file_store: None) -> None:
+    client.cookies.clear()
+    with patch("gateway.api.routes.playground.bounded_body") as bounded:
+        response = client.post(
+            f"{_PREFIX}/files", params=_ws(world), files={"file": ("report.txt", b"\x00" * 4096, "text/plain")}
+        )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    bounded.assert_not_called()
+
+
+def test_an_upload_sent_as_text_answers_422(client: TestClient, world: _World, _file_store: None) -> None:
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["member"])
+    try:
+        response = client.post(f"{_PREFIX}/files", params=_ws(world), data={"file": "/etc/passwd"})
+    finally:
+        client.cookies.clear()
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert ["body", "file"] in [error["loc"] for error in response.json()["detail"]]
 
 
 def test_an_upload_into_a_workspace_that_is_not_the_caller_s_answers_404(
@@ -1163,9 +1186,30 @@ def test_an_oversized_upload_answers_413(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(test_config, "files_max_bytes", 4)
-    code, body = _upload(client, world, "member")
+    with patch("gateway.api.routes.playground.upload_chunks") as stored:
+        code, body = _upload(client, world, "member")
     assert code == status.HTTP_413_CONTENT_TOO_LARGE
     assert "maximum upload size" in body["detail"]
+    stored.assert_not_called()
+
+
+def test_an_upload_over_the_body_cap_is_refused_as_it_arrives(
+    client: TestClient,
+    world: _World,
+    _file_store: None,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the cap the body is refused before the form is parsed, so nothing is stored."""
+    monkeypatch.setattr(test_config, "files_max_bytes", 16)
+    with (
+        patch("gateway.api.routes.playground.FORM_FRAMING_BYTES", 0),
+        patch("gateway.api.routes.playground.upload_chunks") as stored,
+    ):
+        code, body = _upload(client, world, "member", data=b"\x00" * 4096)
+    assert code == status.HTTP_413_CONTENT_TOO_LARGE
+    assert "maximum upload size" in body["detail"]
+    stored.assert_not_called()
 
 
 def test_an_upload_resolves_in_the_caller_s_own_completion(
@@ -1231,8 +1275,10 @@ def test_files_switched_off_answer_404_and_report_why(
     assert body["files"]["configured"] is False
     assert body["files"]["reason"] is not None
 
-    code, _ = _upload(files_off_client, built, "member")
+    with patch("gateway.api.routes.playground.bounded_body") as bounded:
+        code, _ = _upload(files_off_client, built, "member")
     assert code == status.HTTP_404_NOT_FOUND
+    bounded.assert_not_called()
     code, _ = _request(files_off_client, built, "member", "GET", f"{_PREFIX}/files", params=_ws(built))
     assert code == status.HTTP_404_NOT_FOUND
 

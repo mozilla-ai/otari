@@ -115,3 +115,10 @@ class AnthropicFileDeleted(BaseModel):
 
     id: str
     type: Literal["file_deleted"] = "file_deleted"
+
+
+class FileUploadForm(BaseModel):
+    """The text fields of an upload. The file is read separately."""
+
+    purpose: str = "user_data"
+    user: str | None = None

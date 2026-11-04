@@ -277,6 +277,17 @@ class CountryDatabaseStatus(BaseModel):
     )
 
 
+class TranscriptionForm(BaseModel):
+    """The text fields of an audio transcription request. The file is read separately."""
+
+    model: str
+    language: str | None = None
+    prompt: str | None = None
+    response_format: str | None = None
+    temperature: float | None = None
+    user: str | None = None
+
+
 class ImageEditForm(BaseModel):
     """The text fields of an image edit request.
 

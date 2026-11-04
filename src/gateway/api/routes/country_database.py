@@ -5,14 +5,12 @@ mounting one into every container. The replica that served the upload reads it
 at once, and every other replica within 30 seconds.
 """
 
-from collections.abc import AsyncIterator
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from starlette.datastructures import UploadFile
 from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import InferenceServiceDep, require_deployment_operator
-from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._helpers import bounded_body, upload_chunks
 from gateway.schemas.inference import CountryDatabaseStatus
 
 router = APIRouter(
@@ -21,7 +19,6 @@ router = APIRouter(
     dependencies=[Depends(require_deployment_operator)],
 )
 
-_READ_CHUNK_BYTES = 1024 * 1024
 # The service's 32 MiB file limit, plus room for the multipart framing around the file.
 _MAX_BODY_BYTES = 33 * 1024 * 1024
 _TOO_LARGE = "The file is larger than 32 MiB"
@@ -36,11 +33,6 @@ _UPLOAD_SCHEMA = {
     },
     "required": ["file"],
 }
-
-
-async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
-    while chunk := await file.read(_READ_CHUNK_BYTES):
-        yield chunk
 
 
 @router.get("")
@@ -70,7 +62,7 @@ async def upload_country_database(request: Request, service: InferenceServiceDep
             file = form.get("file")
             if not isinstance(file, UploadFile):
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Send the country file in the field 'file'.")
-            return await service.store_country_database(_upload_chunks(file))
+            return await service.store_country_database(upload_chunks(file))
     except ClientDisconnect:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.") from None
 

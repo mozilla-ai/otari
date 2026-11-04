@@ -2,11 +2,12 @@
 
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from any_llm.types.audio import Transcription
 from fastapi.testclient import TestClient
+from starlette.requests import ClientDisconnect
 
 from gateway.core.config import API_ROOT
 from gateway.services.pricing_service import (
@@ -594,3 +595,137 @@ def test_transcription_param_the_provider_sdk_refuses(
         )
     assert resp.status_code == expected_status
     assert ("'language'" in resp.json()["detail"]) is (expected_status == 400)
+
+
+# === Transcription upload tests ===
+
+_TRANSCRIPTIONS_URL = f"{API_ROOT}/audio/transcriptions"
+_TRANSCRIPTION_PATCH_TARGET = "gateway.api.routes.audio.atranscription"
+
+
+def _clip(data: bytes = FAKE_AUDIO_BYTES) -> dict[str, Any]:
+    return {"file": ("clip.mp3", data, "audio/mpeg")}
+
+
+def test_transcription_parses_no_upload_without_credentials(client: TestClient) -> None:
+    """The auth check answers before the body is read, so an anonymous upload is never stored."""
+    with patch("gateway.api.routes.audio.bounded_body") as bounded:
+        resp = client.post(_TRANSCRIPTIONS_URL, files=_clip(b"\x00" * 4096), data={"model": "openai:whisper-1"})
+    assert resp.status_code == 401
+    bounded.assert_not_called()
+
+
+def test_transcription_refuses_an_upload_over_the_cap(client: TestClient, api_key_header: dict[str, str]) -> None:
+    with (
+        patch("gateway.api.routes.audio._MAX_AUDIO_BODY_BYTES", 2048),
+        patch(_TRANSCRIPTION_PATCH_TARGET, new_callable=AsyncMock) as mock,
+    ):
+        resp = client.post(
+            _TRANSCRIPTIONS_URL, files=_clip(b"\x00" * 4096), data={"model": "openai:whisper-1"}, headers=api_key_header
+        )
+    assert resp.status_code == 413
+    assert "maximum upload size" in resp.json()["detail"]
+    mock.assert_not_called()
+
+
+def test_transcription_refuses_a_file_over_the_cap_inside_the_body_cap(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """The body cap leaves room for the form framing, so a file just over its own cap is still refused."""
+    with (
+        patch("gateway.api.routes.audio._MAX_AUDIO_UPLOAD_BYTES", 16),
+        patch(_TRANSCRIPTION_PATCH_TARGET, new_callable=AsyncMock) as mock,
+    ):
+        resp = client.post(
+            _TRANSCRIPTIONS_URL, files=_clip(b"\x00" * 64), data={"model": "openai:whisper-1"}, headers=api_key_header
+        )
+    assert resp.status_code == 413
+    mock.assert_not_called()
+
+
+def _blocked_user(client: TestClient, headers: dict[str, str]) -> str:
+    assert client.post(f"{API_ROOT}/users", json={"user_id": "clip-user", "blocked": True}, headers=headers).is_success
+    return "clip-user"
+
+
+def _over_budget_user(client: TestClient, headers: dict[str, str]) -> str:
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0}, headers=headers).json()
+    created = client.post(
+        f"{API_ROOT}/users", json={"user_id": "clip-user", "budget_id": budget["budget_id"]}, headers=headers
+    )
+    assert created.is_success
+    return "clip-user"
+
+
+@pytest.mark.parametrize(
+    ("make_user", "status_code"),
+    [
+        pytest.param(lambda _client, _headers: None, 400, id="master-key-without-user"),
+        pytest.param(_blocked_user, 403, id="blocked-user"),
+        pytest.param(_over_budget_user, 403, id="over-budget-user"),
+    ],
+)
+def test_transcription_reads_no_file_for_a_refused_request(
+    client: TestClient, master_key_header: dict[str, str], make_user: Any, status_code: int
+) -> None:
+    """A request the gateway refuses before the provider call never loads its file."""
+    user = make_user(client, master_key_header)
+    form = {"model": "openai:whisper-1", **({} if user is None else {"user": user})}
+    upload = MagicMock(
+        size=len(FAKE_AUDIO_BYTES),
+        filename="clip.mp3",
+        content_type="audio/mpeg",
+        seek=AsyncMock(),
+        read=AsyncMock(return_value=FAKE_AUDIO_BYTES),
+    )
+    with (
+        patch("gateway.api.routes.audio.form_file", return_value=upload),
+        patch(_TRANSCRIPTION_PATCH_TARGET, new_callable=AsyncMock) as mock,
+    ):
+        resp = client.post(_TRANSCRIPTIONS_URL, files=_clip(), data=form, headers=master_key_header)
+    assert resp.status_code == status_code, resp.text
+    upload.read.assert_not_called()
+    mock.assert_not_called()
+
+
+def test_transcription_interrupted_upload(client: TestClient, api_key_header: dict[str, str]) -> None:
+    body = MagicMock(form=MagicMock(side_effect=ClientDisconnect()))
+    with patch("gateway.api.routes.audio.bounded_body", return_value=body):
+        resp = client.post(
+            _TRANSCRIPTIONS_URL, files=_clip(), data={"model": "openai:whisper-1"}, headers=api_key_header
+        )
+    assert resp.status_code == 400
+    assert "interrupted" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("data", "files", "field"),
+    [
+        pytest.param({"model": "openai:whisper-1", "file": "/etc/passwd"}, [], "file", id="file-as-text"),
+        pytest.param({"model": "openai:whisper-1", "temperature": "warm"}, [], "temperature", id="bad-temperature"),
+        pytest.param({}, [], "model", id="missing-model"),
+    ],
+)
+def test_transcription_refuses_a_field_of_the_wrong_shape(
+    client: TestClient, api_key_header: dict[str, str], data: dict[str, str], files: list[Any], field: str
+) -> None:
+    """The form is read by the route, so a bad field is still the 422 FastAPI gave."""
+    sent = [*files, *([("file", ("clip.mp3", FAKE_AUDIO_BYTES, "audio/mpeg"))] if "file" not in data else [])]
+    with patch(_TRANSCRIPTION_PATCH_TARGET, new_callable=AsyncMock) as mock:
+        resp = client.post(_TRANSCRIPTIONS_URL, data=data, files=sent, headers=api_key_header)
+    assert resp.status_code == 422, resp.text
+    assert ["body", field] in [error["loc"] for error in resp.json()["detail"]]
+    mock.assert_not_called()
+
+
+def test_transcription_refuses_a_second_file(client: TestClient, api_key_header: dict[str, str]) -> None:
+    """One file is read, so a text field sent as a file is one file too many rather than stored."""
+    files = [
+        ("file", ("clip.mp3", FAKE_AUDIO_BYTES, "audio/mpeg")),
+        ("model", ("m.txt", b"openai:whisper-1", "text/plain")),
+    ]
+    with patch(_TRANSCRIPTION_PATCH_TARGET, new_callable=AsyncMock) as mock:
+        resp = client.post(_TRANSCRIPTIONS_URL, files=files, headers=api_key_header)
+    assert resp.status_code == 400
+    assert "Too many files" in resp.json()["detail"]
+    mock.assert_not_called()

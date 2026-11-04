@@ -38,22 +38,20 @@ unreachable rather than merely fixed.
 """
 
 import uuid
-from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     HTTPException,
     Query,
     Request,
     Response,
-    UploadFile,
     status,
 )
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import (
     CurrentIdentity,
@@ -69,12 +67,20 @@ from gateway.api.deps import (
     get_unit_of_work,
     verify_master_key,
 )
+from gateway.api.routes._helpers import (
+    FORM_FIELD_SLACK,
+    FORM_FRAMING_BYTES,
+    bounded_body,
+    form_file,
+    multipart_request_body,
+    upload_chunks,
+)
 from gateway.api.routes.chat import ChatCompletionRequest, run_chat_completion
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.surface import Surface
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.files_exceptions import FilesDisabledError
+from gateway.exceptions.files_exceptions import FilesDisabledError, UploadTooLargeError
 from gateway.models.playground import (
     PlaygroundComparisonCreate,
     PlaygroundComparisonsPublic,
@@ -108,7 +114,6 @@ SURFACE = Surface("playground")
 
 _CONVERSATION_NOT_FOUND = "Conversation not found"
 _FILE_PURPOSE = "user_data"
-_READ_CHUNK_BYTES = 1024 * 1024
 _COMPARISON_NOT_FOUND = "Comparison not found"
 
 # A workspace parameter is optional everywhere it appears: the page sends the
@@ -278,17 +283,21 @@ async def _require_playground_files(offer: PlaygroundToolOfferDep) -> None:
 _PLAYGROUND_FILES = [Depends(_require_playground_files)]
 
 
-async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
-    while chunk := await file.read(_READ_CHUNK_BYTES):
-        yield chunk
-
-
-@router.post("/files", dependencies=_PLAYGROUND_FILES)
+@router.post(
+    "/files",
+    dependencies=_PLAYGROUND_FILES,
+    responses={
+        413: {"description": "The file is larger than the deployment's ``files_max_bytes``."},
+        422: {"description": "The body holds no file in the field ``file``."},
+    },
+    openapi_extra=multipart_request_body(None, {"file": "The file to attach."}, required_files=("file",)),
+)
 async def upload_playground_file(
+    raw_request: Request,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
-    file: Annotated[UploadFile, File()],
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> OpenAIFileObject:
     """Upload a file for the caller, in a workspace they belong to.
@@ -302,16 +311,29 @@ async def upload_playground_file(
     # Commits the spend row the principal may have staged, which the file row's
     # foreign key needs, and frees the connection while the bytes stream in.
     await release_session(db)
-    record = await files.store(
-        NewFile(
-            user_id=principal.user_id,
-            workspace_id=principal.workspace_id,
-            filename=file.filename,
-            content_type=file.content_type,
-            purpose=_FILE_PURPOSE,
-            chunks=_upload_chunks(file),
-        )
-    )
+    # Read here rather than as a File parameter, which FastAPI parses before the
+    # session check runs, and through a body capped at the deployment's file limit.
+    max_bytes = config.files_max_bytes
+    try:
+        async with bounded_body(
+            raw_request, max_bytes + FORM_FRAMING_BYTES, UploadTooLargeError(max_bytes).message
+        ).form(max_files=1, max_fields=FORM_FIELD_SLACK) as form:
+            file = form_file(form, "file")
+            # The body cap leaves room for the form around the file, so the file gets its own.
+            if (file.size or 0) > max_bytes:
+                raise UploadTooLargeError(max_bytes)
+            record = await files.store(
+                NewFile(
+                    user_id=principal.user_id,
+                    workspace_id=principal.workspace_id,
+                    filename=file.filename,
+                    content_type=file.content_type,
+                    purpose=_FILE_PURPOSE,
+                    chunks=upload_chunks(file),
+                )
+            )
+    except ClientDisconnect:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.") from None
     return OpenAIFileObject.of(record)
 
 
