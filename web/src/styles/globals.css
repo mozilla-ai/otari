@@ -24,6 +24,9 @@
    that file's header before adding a rule to either side. */
 @import "../design-system/design-system.css";
 
+/* Test files quote class names in comments and fixtures; scanning them ships those as utilities. */
+@source not "../**/*.test.{ts,tsx}";
+
 /* Both spellings of the dark theme, so the `dark:` variant tracks the same
    selector the theme block below is keyed on. The element itself has to match
    as well as its descendants: `<html class="dark">` carries the tokens, and a
