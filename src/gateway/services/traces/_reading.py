@@ -294,7 +294,7 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
                 ended_at=last.end_time,
                 step_ids=tuple(step.span_id for step in turn.steps),
                 tool_calls=sum(1 for span in turn.children if span.kind == "tool"),
-                llm_calls=sum(rounds.get(span.span_id, 1) for span in llm),
+                llm_calls=sum(rounds.get(span.span_id, 1) for span in calls),
                 errors=sum(1 for span in turn.children + turn.steps if span.outcome == "error" and not span.recovered),
                 input_tokens=sum(span.input_tokens or 0 for span in calls),
                 output_tokens=sum(span.output_tokens or 0 for span in calls),

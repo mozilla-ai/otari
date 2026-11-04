@@ -8,8 +8,9 @@ from typing import Any, cast
 import pytest
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValue
 
-from gateway.api.routes.otlp import _attributes
+from gateway.api.routes.otlp import _attributes, _one_booking_per_response
 from gateway.core.config import GatewayConfig
+from gateway.services.external_usage_service import CLAUDE_SOURCE, ExternalUsageEvent
 from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, SessionRef, TraceWriter, project_otlp_spans
 from gateway.services.traces._collector import call_id_digest
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, otlp_sessions, record_priced_requests
@@ -951,3 +952,42 @@ def test_a_call_two_instrumentations_exported_counts_the_tokens_of_the_one_repor
     growth = _growth((_WORKSPACE, write.trace_id), list(write.spans), _NOW)
 
     assert (growth.input_tokens, growth.output_tokens) == (500, 20)
+
+
+def _usage(
+    event_id: str, *, input_tokens: int = 0, output_tokens: int = 0, cache_read_tokens: int = 0
+) -> ExternalUsageEvent:
+    return ExternalUsageEvent(
+        source_event_id=event_id,
+        timestamp=_T0,
+        provider="anthropic",
+        model="claude-opus-4-8",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+    )
+
+
+def test_a_response_the_claude_sdk_booked_is_priced_on_its_span_even_where_another_span_came_first() -> None:
+    pairs, event_spans = _one_booking_per_response(
+        [
+            ("otel", _usage("msg_1", input_tokens=1300), ("t", "openllmetry")),
+            (CLAUDE_SOURCE, _usage("msg_1", input_tokens=1000), ("t", "sdk")),
+        ]
+    )
+
+    assert [source for source, _ in pairs] == [CLAUDE_SOURCE]
+    assert event_spans == {"msg_1": ("t", "sdk")}
+
+
+def test_a_response_two_libraries_booked_keeps_the_booking_reporting_most_tokens() -> None:
+    pairs, event_spans = _one_booking_per_response(
+        [
+            ("agent-a", _usage("msg_1", output_tokens=20), ("t", "wrapper")),
+            ("agent-b", _usage("msg_1", input_tokens=500, output_tokens=20, cache_read_tokens=300), ("t", "full")),
+            ("agent-a", _usage("msg_2", input_tokens=10), ("t", "other")),
+        ]
+    )
+
+    assert [(source, event.source_event_id) for source, event in pairs] == [("agent-b", "msg_1"), ("agent-a", "msg_2")]
+    assert event_spans == {"msg_1": ("t", "full"), "msg_2": ("t", "other")}

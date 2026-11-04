@@ -315,4 +315,4 @@ def test_a_call_two_instrumentations_both_exported_counts_its_tokens_once_in_its
 
     [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
 
-    assert (turn.input_tokens, turn.output_tokens, turn.cache_read_tokens) == (500, 20, 300)
+    assert (turn.llm_calls, turn.input_tokens, turn.output_tokens, turn.cache_read_tokens) == (1, 500, 20, 300)
