@@ -264,7 +264,9 @@ the repository's latest, and the release-triggered workflows (Docker image, SDK
 regeneration) do not run. Otari's `vX.Y.Z` tags and these `<package>-vX.Y.Z` tags
 share the repository, so everything that reads Otari's version from Git matches
 `v[0-9]*` only: `cliff.toml`, `otari-release.yml`, and the `describe_command` of
-the workspace members' setuptools-scm.
+the agent CLI's setuptools-scm (`cli/pyproject.toml`). `any-search` and
+`any-fetch` do not read Git: each holds its version as `__version__` in its
+package.
 
 Publishing uses PyPI trusted publishing, so no token is stored. Each project on
 PyPI trusts owner `mozilla-ai`, repository `otari`, workflow
