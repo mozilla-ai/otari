@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate assets/otari-demo.gif: seed a standalone gateway, drive the
+# Regenerate assets/otari-demo.gif: seed a gateway, drive the
 # dashboard through a full page sweep with Playwright, and encode the recording
 # to an optimized GIF.
 #

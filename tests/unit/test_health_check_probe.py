@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from gateway.services.health_checks._probe import HealthCheckOffering, is_chat_model, probe
+from gateway.types.model_type import ModelType
 
 _PROBE = "gateway.services.health_checks._probe"
 _TARGET = HealthCheckOffering(
@@ -56,6 +57,33 @@ async def test_a_wrapped_status_is_found_on_the_chain() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_provider_refusing_the_model_itself_is_kept_as_its_refusal() -> None:
+    refusal = (
+        "Unable to access non-serverless model gpt-test. Please visit https://api.together.ai/models/gpt-test "
+        "to create and start a new dedicated endpoint for the model."
+    )
+
+    async def refuse(**_kwargs: Any) -> object:
+        raise _StatusError(refusal, 400)
+
+    outcome = await _run(refuse)
+
+    assert (outcome.status, outcome.status_code) == ("fail", 400)
+    assert outcome.refusal is not None
+    assert "non-serverless model gpt-test" in outcome.refusal
+
+
+@pytest.mark.asyncio
+async def test_any_other_failure_carries_no_refusal() -> None:
+    async def refuse(**_kwargs: Any) -> object:
+        raise _StatusError("upstream said no", 400)
+
+    outcome = await _run(refuse)
+
+    assert (outcome.status, outcome.refusal) == ("fail", None)
+
+
+@pytest.mark.asyncio
 async def test_a_credential_quoted_in_an_error_is_not_stored() -> None:
     async def refuse(**_kwargs: Any) -> object:
         msg = "Incorrect API key provided: sk-proj-abcdefghijklmnop"
@@ -91,18 +119,25 @@ async def test_a_model_that_is_not_for_chat_is_skipped_without_a_call() -> None:
 
 
 @pytest.mark.parametrize(
-    ("model_id", "output_modalities", "chat"),
+    ("kind", "chat"),
     [
-        ("gpt-4o", ["text"], True),
-        ("gpt-4o", [], True),
-        ("text-embedding-3-small", [], False),
-        ("bge-m3", ["text"], False),
-        ("gpt-image-1", ["image"], False),
-        ("rerank-v3", [], False),
+        ("chat", True),
+        ("moderation", True),
+        ("decision", True),
+        # A model nobody gives a kind is probed as chat.
+        (None, True),
+        ("embedding", False),
+        ("rerank", False),
+        ("transcription", False),
+        ("image", False),
+        ("speech", False),
+        ("video", False),
+        ("realtime", False),
+        ("other", False),
     ],
 )
-def test_which_models_are_asked_for_a_chat_completion(model_id: str, output_modalities: list[str], chat: bool) -> None:
-    assert is_chat_model(model_id, output_modalities) is chat
+def test_which_models_are_asked_for_a_chat_completion(kind: ModelType | None, chat: bool) -> None:
+    assert is_chat_model(kind) is chat
 
 
 @pytest.mark.parametrize(
@@ -110,11 +145,15 @@ def test_which_models_are_asked_for_a_chat_completion(model_id: str, output_moda
     [
         ("bad key AIzaSyA-1234567890abcdefghijklmnopqrstu", "bad key [redacted]"),
         ("refused Authorization: Bearer abc.def-ghi", "refused Authorization: [redacted]"),
-        (
-            "GET https://api.example.com/v1/models?key=s3cr3t&alt=json failed",
-            "GET https://api.example.com/v1/models[redacted]&alt=json failed",
-        ),
-        ("POST /v1?api_key=s3cr3t", "POST /v1[redacted]"),
+        ("GET https://api.example.com/v1/models?key=s3cr3t&alt=json failed", "GET [redacted] failed"),
+        ("POST /v1?api_key=s3cr3t", "POST /v1?[redacted]"),
+        ("invalid key gsk_abcdefghijklmnopqrstuv1234", "invalid key [redacted]"),
+        ("rejected xai-abcdefghijklmnop1234", "rejected [redacted]"),
+        ("key 0123456789abcdef0123456789abcdef refused", "key [redacted] refused"),
+        ("Basic dXNlcjpwYXNzd29yZA== rejected", "[redacted] rejected"),
+        ("body api_key: hunter2hunter2", "body [redacted]"),
+        ("otari tk_abcdefghijklmnop", "otari [redacted]"),
+        ("Incorrect API key provided: key-abcdefgh12345678", "Incorrect API key provided: [redacted]"),
     ],
 )
 @pytest.mark.asyncio
@@ -125,3 +164,14 @@ async def test_other_credential_shapes_are_not_stored(message: str, stored: str)
     outcome = await _run(refuse)
 
     assert outcome.error == stored
+
+
+@pytest.mark.asyncio
+async def test_an_echoed_request_is_stored_as_the_error_class() -> None:
+    async def refuse(**_kwargs: Any) -> object:
+        msg = 'bad request: {"messages": [{"role": "user", "content": "ping"}]}'
+        raise _StatusError(msg, 400)
+
+    outcome = await _run(refuse)
+
+    assert outcome.error == "_StatusError"

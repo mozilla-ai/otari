@@ -385,7 +385,7 @@ def test_an_unknown_provider_is_refused_at_config_load() -> None:
 
 def test_a_provider_that_cannot_be_reached_is_refused_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hosted provider is advertised on the strength of the setting alone, so
-    a missing extra or credential has to fail the boot rather than every request."""
+    a missing extra has to fail the boot rather than every request."""
     hosted = GatewayConfig(sandbox_provider=SandboxProvider.E2B)
 
     def _no_sdk() -> Any:
@@ -395,13 +395,40 @@ def test_a_provider_that_cannot_be_reached_is_refused_at_startup(monkeypatch: py
     with pytest.raises(ValueError, match="requires the E2B SDK"):
         verify_code_execution_ready(hosted)
 
+
+def test_a_missing_environment_key_does_not_refuse_the_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The key can be stored through the dashboard, which the container is built before."""
     monkeypatch.setattr(e2b_adapter, "_sdk", lambda: _stub_sdk())
     monkeypatch.delenv("E2B_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="E2B_API_KEY"):
-        verify_code_execution_ready(hosted)
+    verify_code_execution_ready(GatewayConfig(sandbox_provider=SandboxProvider.E2B))
 
-    monkeypatch.setenv("E2B_API_KEY", "e2b_test_key")
-    verify_code_execution_ready(hosted)
+
+@pytest.mark.asyncio
+async def test_every_lease_asks_for_the_key_so_a_rotation_needs_no_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    keys = iter(["e2b_old", "e2b_new"])
+    sdk = _stub_sdk()
+    monkeypatch.setattr(e2b_adapter, "_sdk", lambda: sdk)
+    adapter = e2b_adapter.E2BCodeExecutionAdapter(lambda: next(keys))
+
+    async with adapter.open_session(timeout_s=30, session_ttl_s=120):
+        pass
+    assert sdk.made.created_with["api_key"] == "e2b_old"
+
+    async with adapter.open_session(timeout_s=30, session_ttl_s=120, resume="sbx_test"):
+        pass
+    assert sdk.made.connected_with[1]["api_key"] == "e2b_new"
+
+
+@pytest.mark.asyncio
+async def test_no_key_anywhere_is_an_unreachable_sandbox_not_a_call_to_e2b(monkeypatch: pytest.MonkeyPatch) -> None:
+    sdk = _stub_sdk()
+    monkeypatch.setattr(e2b_adapter, "_sdk", lambda: sdk)
+    adapter = e2b_adapter.E2BCodeExecutionAdapter(lambda: None)
+
+    with pytest.raises(SandboxNotReachableError, match="misconfigured"):
+        async with adapter.open_session(timeout_s=30, session_ttl_s=120):
+            pass
+    assert not hasattr(sdk.made, "created_with")
 
 
 def test_startup_says_nothing_about_a_deployment_that_configured_no_sandbox(

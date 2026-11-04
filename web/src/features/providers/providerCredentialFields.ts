@@ -27,8 +27,7 @@
 // `provider_kwargs.get_provider_kwargs`, which spreads it into `AnyLLM.create`.
 // `providerCredentialFields.test.ts` pins them against a silent edit here, not
 // against an upstream rename, which still surfaces as a provider error at
-// request time. `services/bedrock_gateway_auth.py` builds the same names on the
-// hybrid path, out of the platform's `extra_params` rather than out of these.
+// request time.
 
 import { REDACTED_SECRET } from "@/shared/helpers/redaction"
 
@@ -117,8 +116,25 @@ const BEDROCK: ProviderCredentialSpec = {
   ],
 }
 
+const HUGGINGFACE: ProviderCredentialSpec = {
+  // Hugging Face bills Inference Providers usage to the token's own account
+  // unless a request names an organization; any-llm sends `bill_to` as the
+  // X-HF-Bill-To header.
+  fields: [
+    {
+      key: "bill_to",
+      label: "Bill to organization",
+      isRequired: false,
+      placeholder: "my-org",
+      helpText:
+        "The Hugging Face organization that pays for this key's Inference Providers usage. Leave blank to bill the token's own account. The token's user must belong to the organization.",
+    },
+  ],
+}
+
 const PROVIDER_CREDENTIAL_SPECS: Record<string, ProviderCredentialSpec> = {
   bedrock: BEDROCK,
+  huggingface: HUGGINGFACE,
 }
 
 /** The credential spec for a provider, or undefined where api_key is the whole of it. */

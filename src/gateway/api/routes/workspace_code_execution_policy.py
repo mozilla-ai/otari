@@ -1,4 +1,4 @@
-"""Per-workspace code-execution policy (standalone mode only).
+"""Per-workspace code-execution policy.
 
 The deployment-wide sandbox configuration (its URL, its purpose hint) stays on
 ``/api/v1/tool-settings``; this surface says which workspaces on that deployment may

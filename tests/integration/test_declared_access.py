@@ -201,6 +201,16 @@ def test_changing_the_end_user_budgets_in_config_is_applied_at_the_next_start(te
         assert key["end_user_budget_id"] == "end-user-budget-memories"
 
 
+def test_a_declared_cap_on_end_users_is_applied_and_changed_at_the_next_start(test_config: GatewayConfig) -> None:
+    with _boot(_config(test_config, mlpa=_key(max_end_users=2))) as client:
+        (key,) = _declared_keys(client)
+        assert key["max_end_users"] == 2
+
+    with _boot(_config(test_config, mlpa=_key(max_end_users=None))) as client:
+        (key,) = _declared_keys(client)
+        assert key["max_end_users"] is None
+
+
 def test_changing_the_ceiling_in_config_moves_the_one_ceiling(test_config: GatewayConfig) -> None:
     with _boot(_config(test_config, mlpa=_key(ceiling=None))) as client:
         (key,) = _declared_keys(client)

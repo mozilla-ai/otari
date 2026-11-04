@@ -2,8 +2,7 @@
 
 The ``/api/v1/providers`` endpoint reports static, network-free metadata for every
 configured provider, and ``/api/v1/providers/health`` their reachability. They
-describe the gateway's own configuration, so their router is operator-gated;
-standalone-mode only (it is not mounted in hybrid).
+describe the gateway's own configuration, so their router is operator-gated.
 
 ``/api/v1/providers/catalog`` is the exception, on ``catalog_router``: it lists the
 providers any-llm knows, which is a property of the build rather than of this

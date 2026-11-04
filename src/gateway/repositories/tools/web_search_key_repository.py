@@ -1,17 +1,14 @@
-"""Data access for an organization's web search keys and its workspaces' overrides.
-
-:func:`resolve_web_search_key` decides which key a workspace searches with. It is a pure
-function over rows the repository already loaded, so it is tested without a database.
-"""
+"""Data access for an organization's web search and fetch keys and its workspaces' overrides."""
 
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS
+from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, session_for
 from gateway.models.tools import OrgWebSearchKey, WorkspaceWebSearchKeyOverride
 from gateway.repositories.base_repository import BaseRepository
@@ -19,7 +16,7 @@ from gateway.schemas.tools import OrgWebSearchKeyCreateRequest, OrgWebSearchKeyU
 
 
 class WebSearchKeyConflict(Exception):
-    """A write collided with a key of the same provider and name, or with a concurrent default.
+    """A write collided with a key of the same kind, provider and name, or with a concurrent default.
 
     Raised in place of ``IntegrityError``, so the service maps it without importing the database layer.
     """
@@ -27,28 +24,6 @@ class WebSearchKeyConflict(Exception):
 
 # One live key and this workspace's override of it, ``None`` where the workspace inherits.
 SearchKeyCandidate = tuple[OrgWebSearchKey, WorkspaceWebSearchKeyOverride | None]
-
-
-def resolve_web_search_key(
-    candidates: Sequence[SearchKeyCandidate], usable: Callable[[OrgWebSearchKey], bool]
-) -> OrgWebSearchKey | None:
-    """The key a workspace searches with, or ``None`` where it uses the deployment's search.
-
-    A request names no search provider, so one key is chosen across all of them:
-
-    1. The key the workspace pinned.
-    2. Otherwise an organization default, in ``WEB_SEARCH_PROVIDERS`` order.
-    3. Otherwise the organization's oldest key.
-
-    A key the workspace turned off, or one this deployment cannot decrypt, is passed over.
-    ``usable`` is asked of keys in that order and only until one passes.
-    ``candidates`` must be oldest-first, which is the order the repository returns.
-    """
-    live = [(key, override) for key, override in candidates if override is None or not override.disabled]
-    rank = {provider: index for index, provider in enumerate(WEB_SEARCH_PROVIDERS)}
-    pinned = [key for key, override in live if override is not None and override.is_default]
-    defaults = sorted((key for key, _ in live if key.is_org_default), key=lambda key: rank.get(key.provider, len(rank)))
-    return next((key for key in (*pinned, *defaults, *(key for key, _ in live)) if usable(key)), None)
 
 
 class OrgWebSearchKeyRepository(
@@ -74,10 +49,13 @@ class OrgWebSearchKeyRepository(
         )
         return result.scalars().first()
 
-    async def get_by_name(self, *, organization_id: uuid.UUID, provider: str, name: str) -> OrgWebSearchKey | None:
+    async def get_by_name(
+        self, *, organization_id: uuid.UUID, kind: str, provider: str, name: str
+    ) -> OrgWebSearchKey | None:
         result = await self.db.execute(
             select(OrgWebSearchKey).where(
                 OrgWebSearchKey.organization_id == organization_id,
+                OrgWebSearchKey.kind == kind,
                 OrgWebSearchKey.provider == provider,
                 OrgWebSearchKey.name == name,
             )
@@ -96,7 +74,9 @@ class OrgWebSearchKeyRepository(
             await self.db.execute(
                 select(OrgWebSearchKey)
                 .where(*filters)
-                .order_by(OrgWebSearchKey.provider, OrgWebSearchKey.created_at, OrgWebSearchKey.id)
+                .order_by(
+                    OrgWebSearchKey.kind, OrgWebSearchKey.provider, OrgWebSearchKey.created_at, OrgWebSearchKey.id
+                )
                 .offset(skip)
                 .limit(limit)
             )
@@ -104,19 +84,31 @@ class OrgWebSearchKeyRepository(
         return list(rows), count
 
     async def create_key(
-        self, *, organization_id: uuid.UUID, provider: str, name: str, encrypted_api_key: str, last4: str
+        self,
+        *,
+        organization_id: uuid.UUID,
+        kind: ToolKind,
+        provider: str,
+        name: str,
+        encrypted_api_key: str | None,
+        last4: str | None,
+        api_base: str | None,
+        options: dict[str, Any] | None,
     ) -> OrgWebSearchKey:
         """Stage a new key.
 
         Raises:
-            WebSearchKeyConflict: the organization has a key of that provider and name.
+            WebSearchKeyConflict: the organization has a key of that kind, provider and name.
         """
         key = OrgWebSearchKey(
             organization_id=organization_id,
+            kind=kind,
             provider=provider,
             name=name,
             encrypted_api_key=encrypted_api_key,
             last4=last4,
+            api_base=api_base,
+            options=options,
         )
         self.db.add(key)
         await self._flush_or_conflict()
@@ -127,7 +119,7 @@ class OrgWebSearchKeyRepository(
         """Stage changes to a key.
 
         Raises:
-            WebSearchKeyConflict: a rename collided with another key of the provider.
+            WebSearchKeyConflict: a rename collided with another key of the kind and provider.
         """
         for field, value in values.items():
             setattr(key, field, value)
@@ -141,7 +133,7 @@ class OrgWebSearchKeyRepository(
         await self.db.flush()
 
     async def set_org_default(self, key: OrgWebSearchKey) -> OrgWebSearchKey:
-        """Make ``key`` its provider's default, clearing the sibling default in the same flush.
+        """Make ``key`` its kind's default, clearing the other default of its kind in the same flush.
 
         Raises:
             WebSearchKeyConflict: a concurrent call made another key the default first.
@@ -150,7 +142,7 @@ class OrgWebSearchKeyRepository(
             update(OrgWebSearchKey)
             .where(
                 OrgWebSearchKey.organization_id == key.organization_id,
-                OrgWebSearchKey.provider == key.provider,
+                OrgWebSearchKey.kind == key.kind,
                 OrgWebSearchKey.id != key.id,
                 OrgWebSearchKey.is_org_default.is_(True),
             )
@@ -160,6 +152,14 @@ class OrgWebSearchKeyRepository(
         key.is_org_default = True
         await self._flush_or_conflict()
         await self.db.refresh(key)
+        return key
+
+    async def unset_org_default(self, key: OrgWebSearchKey) -> OrgWebSearchKey:
+        """Stop ``key`` being its kind's default. A key that is not the default is returned unchanged."""
+        if key.is_org_default:
+            key.is_org_default = False
+            await self.db.flush()
+            await self.db.refresh(key)
         return key
 
 
@@ -208,17 +208,20 @@ class WorkspaceWebSearchKeyOverrideRepository:
         await self.db.delete(override)
         await self.db.flush()
 
-    async def clear_other_pins(self, *, workspace_id: uuid.UUID, except_key_id: uuid.UUID) -> None:
-        """Unpin every other key of the workspace, so it holds at most one pin.
+    async def clear_other_pins(self, *, workspace_id: uuid.UUID, except_key_id: uuid.UUID, kind: str) -> None:
+        """Unpin the workspace's other keys of ``kind``, so it holds at most one pin per kind.
 
-        One pin per workspace rather than per provider, because a search request names no
-        provider. The caller holds the workspace lock across the clear and the new pin.
+        One pin per kind rather than per provider, because a request names no provider.
+        The caller holds the workspace lock across the clear and the new pin.
         """
         await self.db.execute(
             update(WorkspaceWebSearchKeyOverride)
             .where(
                 WorkspaceWebSearchKeyOverride.workspace_id == workspace_id,
                 WorkspaceWebSearchKeyOverride.org_web_search_key_id != except_key_id,
+                WorkspaceWebSearchKeyOverride.org_web_search_key_id.in_(
+                    select(OrgWebSearchKey.id).where(OrgWebSearchKey.kind == kind)
+                ),
                 WorkspaceWebSearchKeyOverride.is_default.is_(True),
             )
             .values(is_default=False)
@@ -226,10 +229,10 @@ class WorkspaceWebSearchKeyOverrideRepository:
         )
 
     def _candidates(
-        self, organization_id: uuid.UUID, workspace_id: uuid.UUID
-    ) -> Select[tuple[OrgWebSearchKey, WorkspaceWebSearchKeyOverride]]:
-        """The organization's live keys, each with this workspace's override or ``None``."""
-        return (
+        self, organization_id: uuid.UUID, workspace_id: uuid.UUID, kind: str | None = None
+    ) -> Select[OrgWebSearchKey, WorkspaceWebSearchKeyOverride]:
+        """The organization's live keys, of ``kind`` or every kind, each with this workspace's override or ``None``."""
+        query = (
             select(OrgWebSearchKey, WorkspaceWebSearchKeyOverride)
             .outerjoin(
                 WorkspaceWebSearchKeyOverride,
@@ -238,17 +241,18 @@ class WorkspaceWebSearchKeyOverrideRepository:
             )
             .where(OrgWebSearchKey.organization_id == organization_id, OrgWebSearchKey.archived_at.is_(None))
         )
+        return query if kind is None else query.where(OrgWebSearchKey.kind == kind)
 
     async def preferred_candidates(
-        self, *, organization_id: uuid.UUID, workspace_id: uuid.UUID
+        self, *, organization_id: uuid.UUID, workspace_id: uuid.UUID, kind: str | None
     ) -> list[SearchKeyCandidate]:
-        """The workspace's pin and the organization's defaults: at most one per provider and one more."""
+        """The workspace's pins and the organization's defaults, of ``kind`` or every kind: at most two keys a kind."""
         result = await self.db.execute(
-            self._candidates(organization_id, workspace_id).where(
+            self._candidates(organization_id, workspace_id, kind).where(
                 WorkspaceWebSearchKeyOverride.is_default.is_(True) | OrgWebSearchKey.is_org_default.is_(True)
             )
         )
-        return [(key, override) for key, override in result.tuples()]
+        return [(key, override) for key, override in result.all()]
 
     async def candidate_page(
         self,
@@ -257,18 +261,14 @@ class WorkspaceWebSearchKeyOverrideRepository:
         workspace_id: uuid.UUID,
         skip: int,
         limit: int,
-        enabled_only: bool = False,
+        kind: str | None = None,
     ) -> list[SearchKeyCandidate]:
-        """A page of the live keys, oldest-first; ``enabled_only`` leaves out those the workspace turned off."""
-        query = self._candidates(organization_id, workspace_id)
-        if enabled_only:
-            query = query.where(
-                WorkspaceWebSearchKeyOverride.disabled.is_(None) | WorkspaceWebSearchKeyOverride.disabled.is_(False)
-            )
+        """A page of the live keys of ``kind`` or every kind, oldest-first."""
+        query = self._candidates(organization_id, workspace_id, kind)
         result = await self.db.execute(
             query.order_by(OrgWebSearchKey.created_at, OrgWebSearchKey.id).offset(skip).limit(limit)
         )
-        return [(key, override) for key, override in result.tuples()]
+        return [(key, override) for key, override in result.all()]
 
     async def count_candidates(self, *, organization_id: uuid.UUID) -> int:
         """How many live keys the organization holds."""

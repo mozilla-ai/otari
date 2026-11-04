@@ -76,7 +76,6 @@ export function operatorContext(): Response {
       created_at: new Date().toISOString(),
       updated_at: null,
     },
-    byo_provider_keys_allowed: true,
     deployment_operator: true,
     provider_key_encryption_available: true,
     workspace_memberships: [],
@@ -99,6 +98,8 @@ export function mockApi(
     inFlight?: InFlightResponse | (() => InFlightResponse)
     workspace?: string
     deploymentOperator?: boolean
+    // The caller's organization role; the default is the owner the operator is.
+    role?: string
     members?: OrganizationMember[]
     // The trace explorer's reads: one page of sessions, and the one that opens.
     traces?: TraceSummary[]
@@ -189,6 +190,14 @@ export function mockApi(
           series: [],
         })
       }
+      // The catalog the Overview's setup guide gates on: one model, so a page
+      // under test has something to route to.
+      if (url.endsWith(`${API_ROOT}/models`)) {
+        return jsonResponse({
+          object: "list",
+          data: [{ id: "m", object: "model", created: 0, owned_by: "openai" }],
+        })
+      }
       if (url.includes("/traces/count")) {
         return jsonResponse({ count: (opts.traces ?? []).length })
       }
@@ -199,6 +208,9 @@ export function mockApi(
         return opts.requestTrace
           ? jsonResponse(opts.requestTrace)
           : jsonResponse({ detail: "No trace holds the request" }, 404)
+      }
+      if (url.includes("/traces/audit/break-glass")) {
+        return jsonResponse({ items: [], has_more: false })
       }
       if (/\/traces\/[^?]+/.test(url)) {
         return opts.traceDetail
@@ -244,7 +256,7 @@ export function mockApi(
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({
           organization_member_id: "om-1",
-          role: "owner",
+          role: opts.role ?? "owner",
           status: "active",
           organization: {
             id: "org-1",
@@ -254,13 +266,13 @@ export function mockApi(
             created_at: new Date().toISOString(),
             updated_at: null,
           },
-          byo_provider_keys_allowed: true,
           deployment_operator: opts.deploymentOperator ?? true,
           provider_key_encryption_available: true,
           workspace_memberships: opts.workspace
             ? [
                 {
                   workspace_id: opts.workspace,
+                  name: "Production",
                   workspace_name: "Production",
                   role: "owner",
                   status: "active",

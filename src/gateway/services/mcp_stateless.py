@@ -18,20 +18,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
 from typing import TYPE_CHECKING, Any, TypeVar
 
-import httpx
+import httpx2
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import MCPError
+from mcp.types import PaginatedRequestParams
 
 from gateway.log_config import logger
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Coroutine, MutableMapping
+    from collections.abc import AsyncIterator, Callable, Coroutine, Iterator, MutableMapping
 
     from mcp.types import CallToolResult
     from mcp.types import Tool as MCPTool
@@ -241,7 +244,7 @@ def _encode(value: Any) -> bytes:
 def _as_jsonable(value: Any) -> Any:
     """Render a Pydantic model the way the response would, or refuse to size it."""
     if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json", exclude_none=True)
+        return value.model_dump(mode="json", by_alias=True, exclude_none=True)
     raise TypeError(type(value).__name__)
 
 
@@ -296,7 +299,7 @@ def screen_tool(tool: MCPTool) -> str | None:
         return WARN_DESCRIPTION_TOO_LARGE
     if tool.annotations is not None and _oversized(tool.annotations, TOOL_ANNOTATIONS_MAX_BYTES):
         return WARN_ANNOTATIONS_TOO_LARGE
-    if not _schema_is_supported(tool.inputSchema):
+    if not _schema_is_supported(tool.input_schema):
         return WARN_SCHEMA_UNSUPPORTED
     return None
 
@@ -323,7 +326,7 @@ def arguments_within_bounds(arguments: dict[str, Any]) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-async def enforce_content_length(response: httpx.Response) -> None:
+async def enforce_content_length(response: httpx2.Response) -> None:
     """Install the decoded response ceiling before the body is read.
 
     Registered as an httpx response event hook, which runs with the headers
@@ -346,15 +349,15 @@ async def enforce_content_length(response: httpx.Response) -> None:
             if length > TRANSPORT_MAX_BYTES:
                 raise TransportResponseTooLarge
 
-    if not isinstance(response.stream, httpx.AsyncByteStream):  # pragma: no cover - async client invariant
+    if not isinstance(response.stream, httpx2.AsyncByteStream):  # pragma: no cover - async client invariant
         raise TypeError("Expected an asynchronous HTTP response stream")
     response.stream = _BoundedResponseStream(response.stream, TRANSPORT_MAX_BYTES)
 
 
-class _BoundedResponseStream(httpx.AsyncByteStream):
+class _BoundedResponseStream(httpx2.AsyncByteStream):
     """Count response bytes while preserving streaming and close behavior."""
 
-    def __init__(self, stream: httpx.AsyncByteStream, ceiling: int) -> None:
+    def __init__(self, stream: httpx2.AsyncByteStream, ceiling: int) -> None:
         self._stream = stream
         self._ceiling = ceiling
 
@@ -370,32 +373,38 @@ class _BoundedResponseStream(httpx.AsyncByteStream):
         await self._stream.aclose()
 
 
-def build_http_client_factory() -> Callable[..., httpx.AsyncClient]:
+def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., httpx2.AsyncClient]:
     """An MCP HTTP client factory with redirects disabled and a size pre-check.
 
-    The SDK's own factory sets ``follow_redirects=True``, which on a
-    credentialed request means httpx would replay the ``Authorization`` header,
-    and the request body, at whatever host the remote server names. Redirects
-    are excluded from the first version entirely: a later one
-    may follow them by validating each destination before anything is sent.
+    The SDK follows a redirect that stays on the endpoint's origin, up to the
+    client's ``max_redirects``, whatever its ``follow_redirects`` says. Redirects
+    are excluded from the first version entirely, so that budget is zero: a later
+    one may follow them by validating each destination before anything is sent.
+
+    ``screen_answers`` adds :func:`refuse_unusable_answer` ahead of the size
+    check, for a connection check that has to name why a server failed.
     """
+    response_hooks: list[Callable[[httpx2.Response], Coroutine[Any, Any, None]]] = [enforce_content_length]
+    if screen_answers:
+        response_hooks.insert(0, refuse_unusable_answer)
 
     def factory(
         headers: dict[str, str] | None = None,
-        timeout: httpx.Timeout | None = None,
-        auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient:
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
+    ) -> httpx2.AsyncClient:
         client_headers = dict(headers or {})
         client_headers["Accept-Encoding"] = "identity"
         kwargs: dict[str, Any] = {
             "follow_redirects": False,
-            "timeout": timeout if timeout is not None else httpx.Timeout(CONNECT_TIMEOUT_S, read=CALL_TIMEOUT_S),
-            "event_hooks": {"response": [enforce_content_length]},
+            "max_redirects": 0,
+            "timeout": timeout if timeout is not None else httpx2.Timeout(CONNECT_TIMEOUT_S, read=CALL_TIMEOUT_S),
+            "event_hooks": {"response": list(response_hooks)},
             "headers": client_headers,
         }
         if auth is not None:
             kwargs["auth"] = auth
-        return httpx.AsyncClient(**kwargs)
+        return httpx2.AsyncClient(**kwargs)
 
     return factory
 
@@ -466,7 +475,7 @@ async def _run_in_owner_task(operation: Coroutine[Any, Any, T]) -> T:
 
 
 @asynccontextmanager
-async def open_session(server: ResolvedMcpServer) -> AsyncIterator[ClientSession]:
+async def open_session(server: ResolvedMcpServer, *, screen_answers: bool = False) -> AsyncIterator[ClientSession]:
     """Open one size-bounded, redirect-disabled MCP session on a stored server.
 
     Connection and initialization share one deadline, so a server
@@ -476,15 +485,8 @@ async def open_session(server: ResolvedMcpServer) -> AsyncIterator[ClientSession
     headers = {"Authorization": f"Bearer {server.authorization_token}"} if server.authorization_token else None
     async with AsyncExitStack() as stack:
         async with asyncio.timeout(CONNECT_TIMEOUT_S):
-            read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(
-                    server.url,
-                    headers=headers,
-                    timeout=CONNECT_TIMEOUT_S,
-                    sse_read_timeout=CALL_TIMEOUT_S,
-                    httpx_client_factory=build_http_client_factory(),
-                )
-            )
+            client = await stack.enter_async_context(build_http_client_factory(screen_answers=screen_answers)(headers))
+            read, write = await stack.enter_async_context(streamable_http_client(server.url, http_client=client))
             session = await stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
         yield session
@@ -589,7 +591,7 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
     seen_cursors: set[str] = set()
 
     for _ in range(DISCOVERY_MAX_PAGES):
-        page = await session.list_tools(cursor)
+        page = await session.list_tools(params=None if cursor is None else PaginatedRequestParams(cursor=cursor))
         tools = getattr(page, "tools", None)
         if not isinstance(tools, list):
             raise McpDiscoveryRefused
@@ -615,7 +617,7 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
 
         if allowed is not None and allowed.issubset(collected):
             break
-        cursor = getattr(page, "nextCursor", None)
+        cursor = getattr(page, "next_cursor", None)
         if cursor is None:
             break
         if not isinstance(cursor, str) or cursor in seen_cursors:
@@ -627,6 +629,188 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
         raise McpDiscoveryRefused
 
     return list(collected.values())
+
+
+# --------------------------------------------------------------------------- #
+# Connection check
+# --------------------------------------------------------------------------- #
+
+
+class CheckFailure(StrEnum):
+    """Why a stored server failed its connection check.
+
+    Stored on the server's row and shown to whoever manages it, so each value
+    names a cause an operator can act on, and none carries anything the remote
+    server said. The first two are decided before any connection is opened.
+    """
+
+    UNSAFE_URL = "unsafe_url"
+    CREDENTIALS_UNAVAILABLE = "credentials_unavailable"
+    UNREACHABLE = "unreachable"
+    TLS_FAILED = "tls_failed"
+    TIMEOUT = "timeout"
+    REDIRECTED = "redirected"
+    UNAUTHORIZED = "unauthorized"
+    FORBIDDEN = "forbidden"
+    NOT_FOUND = "not_found"
+    SERVER_ERROR = "server_error"
+    HTTP_ERROR = "http_error"
+    NOT_MCP = "not_mcp"
+    LIMITS_EXCEEDED = "limits_exceeded"
+    CONNECTION_FAILED = "connection_failed"
+
+
+@dataclass(frozen=True, slots=True)
+class ServerCheck:
+    """What one connection check found.
+
+    ``tool_names`` lists the server's whole live catalog, whatever the stored
+    allowlist admits, and is empty on a failure. ``http_status`` is set when
+    the server refused with one.
+    """
+
+    tool_names: list[str]
+    failure: CheckFailure | None = None
+    http_status: int | None = None
+
+
+class _UnusableAnswer(Exception):
+    """A POST answer no MCP client can use, already named."""
+
+    def __init__(self, failure: CheckFailure, http_status: int | None) -> None:
+        super().__init__(failure.value)
+        self.failure = failure
+        self.http_status = http_status
+
+
+_MCP_CONTENT_TYPES = frozenset({"application/json", "text/event-stream"})
+
+
+def failure_for_status(http_status: int) -> CheckFailure:
+    """Name the cause behind a refusing HTTP status."""
+    if 300 <= http_status < 400:
+        return CheckFailure.REDIRECTED
+    if http_status == 401:
+        return CheckFailure.UNAUTHORIZED
+    if http_status == 403:
+        return CheckFailure.FORBIDDEN
+    if http_status in {404, 405}:
+        return CheckFailure.NOT_FOUND
+    if http_status >= 500:
+        return CheckFailure.SERVER_ERROR
+    return CheckFailure.HTTP_ERROR
+
+
+def _answers_a_request(request: httpx2.Request) -> bool:
+    """Whether a POST carried a JSON-RPC request, which is owed a body, rather than a notification."""
+    try:
+        return "id" in json.loads(request.content)
+    except (ValueError, TypeError, httpx2.RequestNotRead):
+        return True
+
+
+async def refuse_unusable_answer(response: httpx2.Response) -> None:
+    """Fail at the first POST answer an MCP client cannot use, naming why.
+
+    A response hook, so it runs before the SDK reads the answer. The SDK reports
+    two of these unhelpfully: a 404 becomes a "session terminated" protocol
+    error, and a body that is neither JSON nor an event stream is dropped while
+    ``initialize`` waits out the connect deadline. POST only: the event stream
+    the SDK opens with a GET after initialization may be refused.
+
+    Raises:
+        _UnusableAnswer: the status or content type the server answered with.
+    """
+    if response.request.method != "POST" or response.status_code == 202:
+        return
+    if not response.is_success:
+        raise _UnusableAnswer(failure_for_status(response.status_code), response.status_code)
+    content_type = response.headers.get("content-type", "").partition(";")[0].strip().lower()
+    if content_type not in _MCP_CONTENT_TYPES and _answers_a_request(response.request):
+        raise _UnusableAnswer(CheckFailure.NOT_MCP, None)
+
+
+def _leaves(exc: BaseException, _depth: int = 0) -> Iterator[BaseException]:
+    if isinstance(exc, BaseExceptionGroup) and _depth < _FAILURE_GROUP_MAX_DEPTH:
+        for inner in exc.exceptions:
+            yield from _leaves(inner, _depth + 1)
+    else:
+        yield exc
+
+
+def _caused_by_tls(exc: BaseException) -> bool:
+    cause = exc.__cause__ or exc.__context__
+    for _ in range(_FAILURE_GROUP_MAX_DEPTH):
+        if cause is None:
+            return False
+        if isinstance(cause, ssl.SSLError):
+            return True
+        cause = cause.__cause__ or cause.__context__
+    return False
+
+
+def classify_check_failure(exc: BaseException) -> tuple[CheckFailure, int | None]:
+    """Name a failed check by the most specific cause among its leaves.
+
+    The SDK raises from inside a task group, so the cause arrives as a leaf of a
+    group, beside the cancellations it set off. What the server answered beats
+    how the connection failed, which beats a deadline.
+    """
+    leaves = list(_leaves(exc))
+    for leaf in leaves:
+        if isinstance(leaf, _UnusableAnswer):
+            return leaf.failure, leaf.http_status
+        if isinstance(leaf, httpx2.HTTPStatusError):
+            return failure_for_status(leaf.response.status_code), leaf.response.status_code
+    for leaf in leaves:
+        if isinstance(leaf, httpx2.ConnectError):
+            return (CheckFailure.TLS_FAILED if _caused_by_tls(leaf) else CheckFailure.UNREACHABLE), None
+    for leaf in leaves:
+        if isinstance(leaf, (McpDiscoveryRefused, TransportResponseTooLarge)):
+            return CheckFailure.LIMITS_EXCEEDED, None
+        if isinstance(leaf, (httpx2.TimeoutException, TimeoutError)):
+            return CheckFailure.TIMEOUT, None
+        if isinstance(leaf, MCPError):
+            return CheckFailure.NOT_MCP, None
+    return CheckFailure.CONNECTION_FAILED, None
+
+
+async def check_stored_server(server: ResolvedMcpServer) -> ServerCheck:
+    """Connect to a server once and list its whole tool catalog.
+
+    The same bounded session discovery opens, with its failures named by cause
+    rather than collapsed into one code: the reader is whoever configured the
+    server, and the difference between a rejected token and a wrong path is
+    theirs to act on. The catalog ignores the allowlist, because the reader is
+    also choosing what to put on it. URL safety and the credential are the
+    caller's to settle first, as they are for discovery.
+
+    Raises:
+        McpCapacityUnavailable: no discovery slot freed up in time, so nothing was checked.
+    """
+    deadline = asyncio.timeout(DISCOVERY_TOTAL_TIMEOUT_S)
+    try:
+        async with deadline, DISCOVERY_GATE.slot():
+            return await _run_in_owner_task(_check_once(server))
+    except McpCapacityUnavailable:
+        raise
+    except BaseException as exc:
+        task = asyncio.current_task()
+        if isinstance(exc, asyncio.CancelledError) and task is not None and task.cancelling():
+            raise
+        failure, http_status = (CheckFailure.TIMEOUT, None) if deadline.expired() else classify_check_failure(exc)
+        logger.info("Stored MCP server check failed outcome=%s error_class=%s", failure, failure_class(exc))
+        return ServerCheck(tool_names=[], failure=failure, http_status=http_status)
+
+
+async def _check_once(server: ResolvedMcpServer) -> ServerCheck:
+    stack = AsyncExitStack()
+    try:
+        session = await stack.enter_async_context(open_session(server, screen_answers=True))
+        listed = await collect_tools(session, allowed_tools=None)
+        return ServerCheck(tool_names=[tool.name for tool in listed])
+    finally:
+        await _close_bounded(stack)
 
 
 # --------------------------------------------------------------------------- #

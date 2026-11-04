@@ -2,7 +2,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import ColumnElement, func, select, update
+from sqlalchemy import ColumnElement, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -17,9 +17,15 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
         super().__init__(uow, User)
 
     async def find(self, owner_user_id: str, external_id: str) -> User | None:
-        """Return the owner's end user named ``external_id``, soft-deleted or not."""
+        """Return the owner's end user named ``external_id``, soft-deleted or not.
+
+        Read fresh even when the session already holds the row, so a lookup made
+        after waiting on ``lock_owner`` sees what the request it waited on wrote.
+        """
         result = await self.db.execute(
-            select(User).where(User.parent_user_id == owner_user_id, User.external_id == external_id)
+            select(User)
+            .where(User.parent_user_id == owner_user_id, User.external_id == external_id)
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
@@ -71,6 +77,29 @@ class EndUserRepository(BaseRepository[User, Never, Never]):
             .group_by(User.budget_id)
         )
         return {str(budget_id): (int(total), int(blocked)) for budget_id, total, blocked in result.all()}
+
+    async def lock_owner(self, owner_user_id: str) -> None:
+        """Hold the owner's row until the Unit of Work ends, so one end user is admitted at a time.
+
+        Serializes admissions under a cap across replicas: each counts with no
+        other one between its count and its insert. A no-op on SQLite, which
+        has one writer anyway.
+        """
+        await self.db.execute(select(User.user_id).where(User.user_id == owner_user_id).with_for_update())
+
+    async def count_live_on_budgets(
+        self, owner_user_id: str, budget_ids: list[str] | None, *, with_unbudgeted: bool = False
+    ) -> int:
+        """Count the owner's live end users on these budgets, or on any budget when ``budget_ids`` is None.
+
+        ``with_unbudgeted`` also counts the ones on no budget.
+        """
+        conditions = _live_end_users(owner_user_id, external_id=None, budget_id=None, blocked=None)
+        if budget_ids is not None:
+            on_budgets = User.budget_id.in_(budget_ids)
+            conditions.append(or_(on_budgets, User.budget_id.is_(None)) if with_unbudgeted else on_budgets)
+        result = await self.db.execute(select(func.count()).select_from(User).where(*conditions))
+        return int(result.scalar_one())
 
     async def soft_delete(self, owner_user_id: str, user_ids: Collection[str], deleted_at: datetime) -> int:
         """Mark these live end users of the owner deleted, and return how many were.

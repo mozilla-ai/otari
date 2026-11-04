@@ -40,7 +40,6 @@ from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictErro
 from gateway.log_config import logger as gateway_logger
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import OAuthPendingState, Organization, User, WebAuthnCredential
-from gateway.models.tools import WorkspaceCodeExecutionPolicy
 from gateway.repositories.identity import DashboardSessionRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
@@ -494,29 +493,6 @@ def test_the_registered_identity_lands_the_tenancy_the_signup_form_lands(
     assert workspaces.json()["data"], "the registered tenant has no workspace"
 
 
-def test_a_hosted_open_signup_starts_its_workspace_with_code_execution_on(
-    client: TestClient,
-    oauth_configured: None,
-    signup_open: None,
-    test_config: GatewayConfig,
-    monkeypatch: pytest.MonkeyPatch,
-    db_session: Session,
-) -> None:
-    """A hosted control plane reads no policy as off, so the tenant this founds starts with one turned on."""
-    monkeypatch.setattr(test_config, "mode", "hosted")
-    stub_exchange(monkeypatch, email="stranger@example.com")
-
-    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
-    assert response.status_code == 200, response.text
-
-    workspaces = {uuid.UUID(row["id"]) for row in client.get(f"{API_ROOT}/workspaces").json()["data"]}
-    policies = {
-        row.workspace_id: row.enabled for row in db_session.execute(select(WorkspaceCodeExecutionPolicy)).scalars()
-    }
-    assert workspaces
-    assert all(policies.get(workspace) is True for workspace in workspaces)
-
-
 def test_a_registered_identity_holds_the_provider_and_a_verified_address_and_no_password(
     client: TestClient,
     oauth_configured: None,
@@ -567,6 +543,28 @@ def test_open_signup_registers_nobody_from_an_address_the_provider_would_not_ver
 
     assert response.status_code == 401
     assert db_session.execute(select(User).where(col(User.email) == "stranger@example.com")).first() is None
+
+
+def test_open_signup_registers_nobody_from_a_blocked_address(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # The identity provider provisions the account before the sign-in gate refuses it, so the refusal rolls it back.
+    blocked = client.post(f"{API_ROOT}/admin/blocked-emails", json={"value": "spam.example"}, headers=master_key_header)
+    assert blocked.status_code == 201, blocked.text
+    stub_exchange(monkeypatch, email="stranger@spam.example")
+    organizations_before = len(db_session.execute(select(Organization)).all())
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 403, response.text
+    assert SESSION_COOKIE_NAME not in response.cookies
+    assert db_session.execute(select(User).where(col(User.email) == "stranger@spam.example")).first() is None
+    assert len(db_session.execute(select(Organization)).all()) == organizations_before
 
 
 def test_open_signup_does_not_register_a_deactivated_identity_afresh(

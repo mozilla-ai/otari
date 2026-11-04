@@ -1,6 +1,6 @@
 """First boot: the default organization, its workspace, and the operator identity.
 
-Standalone Otari authenticates an operator with the master key, which proves
+Otari authenticates an operator with the master key, which proves
 possession of a deployment-wide credential and names no user. Every tenancy
 surface, on the other hand, reads off an identity with an active organization and
 a role. This module is the bridge: the first master-key-authenticated request
@@ -45,7 +45,6 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy.membership_listener import MembershipListener
-from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 # Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
 # runtime_settings_service ignores it exactly as it ignores the master-key hash
@@ -74,11 +73,8 @@ async def ensure_bootstrap_identity(
     *,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
-    workspace_listener: WorkspaceListener,
 ) -> User:
     """Return the operator identity, provisioning the tenancy root on first call.
-
-    ``workspace_listener`` sets up a workspace this provisions, inside the same transaction.
 
     Idempotent: the marker row makes the common path a single indexed lookup and
     the provisioning path run once per deployment. Commits, because it is the
@@ -95,7 +91,6 @@ async def ensure_bootstrap_identity(
             db,
             uow=uow,
             membership_listener=membership_listener,
-            workspace_listener=workspace_listener,
         )
     except IntegrityError:
         # Two first requests raced. Whichever lost re-reads the winner's work:
@@ -221,7 +216,6 @@ async def _provision(
     *,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
-    workspace_listener: WorkspaceListener,
 ) -> User:
     """Create the default organization, workspace, operator identity, and memberships.
 
@@ -262,7 +256,6 @@ async def _provision(
                 organization_id=organization.id,
                 created_by_user_id=operator.id,
             )
-            await workspace_listener.workspace_created(workspace.id)
         # Serialized against a concurrent ``create_default`` on this workspace, via
         # the same lock ``WorkspaceService.add_member`` takes and for the reason
         # ``WorkspaceRepository.lock`` gives: this path reads the workspace's

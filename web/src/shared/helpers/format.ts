@@ -204,6 +204,13 @@ export function formatUsd(value: number): string {
   return usdCompact.format(value)
 }
 
+// A session's spend and its parts, read at a glance: cents, as a tile shows them,
+// unless the amount is under a cent, where it keeps `formatCost`'s four places
+// rather than rounding a real cost down to "$0.00".
+export function formatSpend(value: number): string {
+  return Math.abs(value) >= 0.01 ? formatUsd(value) : formatCost(value)
+}
+
 const usdWhole = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",

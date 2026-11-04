@@ -296,7 +296,7 @@ async def run_tool_loop(
     returns successfully. Callers use it to lock in the chosen provider: once
     the model has produced any assistant output, the conversation state is
     provider-specific and subsequent failures must not silently swap
-    providers. See the hybrid-mode attempt loops in the route modules.
+    providers.
     ``check_first_response`` runs before it and may raise to refuse that
     response as a provider failure, which leaves the attempt free to fall over.
     """
@@ -351,6 +351,7 @@ async def run_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncGenerator[ChunkT, None]:
     """Streaming tool loop, generic over the wire format.
 
@@ -375,6 +376,10 @@ async def run_tool_loop_stream(
 
     The upstream stream is closed when the loop stops consuming it early;
     see :func:`_stream_scope`.
+
+    ``on_first_response`` is invoked once the first upstream stream has ended, as
+    :func:`run_tool_loop` invokes it: a round can run the gateway's tools without
+    forwarding anything, so this, not the first forwarded event, is the lock-in.
     """
     transcript, merged_tools, user_tools, base = _prepare(
         strategy.transcript_key,
@@ -404,6 +409,8 @@ async def run_tool_loop_stream(
                 if action is StreamAction.FORWARD:
                     yield visible
 
+        if iteration == 1 and on_first_response is not None:
+            on_first_response()
         if events == 0:
             # Nothing to continue from, so the loop exits with whatever it has sent.
             # The route decides whether that is a complete stream; this line says

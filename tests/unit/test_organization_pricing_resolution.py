@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TypeVar, cast
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -43,6 +44,7 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
     resolve_tool_rate,
+    tool_unit_rate,
 )
 from gateway.types.tool_charges import LabelCalls
 
@@ -742,6 +744,22 @@ async def _tool_price(session: AsyncSession, model_key: str, rate: float) -> Non
 _EXA = "exa:exa-search"
 
 
+def test_one_calls_rate_is_its_first_priced_rate_key_before_rounding() -> None:
+    """The reservation tool gate holds calls at this rate, so it is the rate settlement charges, unrounded."""
+
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, _EXA, 0.4)
+        await _tool_price(session, "otari:web_search", 10_000.0)
+
+        pages = await tool_unit_rate(session, _calls(label=_EXA, rate_keys=(_EXA, "otari:web_search"), calls=20))
+        unpriced = await tool_unit_rate(session, _calls(label="tabstack:tabstack", rate_keys=("tabstack:tabstack",)))
+
+        assert pages == pytest.approx(Decimal("0.0000004"))
+        assert unpriced == Decimal(0)
+
+    _run(scenario)
+
+
 def test_each_label_gets_a_line_priced_by_its_first_rate_key_with_a_row() -> None:
     async def scenario(session: AsyncSession) -> None:
         await _tool_price(session, _EXA, 20_000.0)
@@ -759,9 +777,30 @@ def test_each_label_gets_a_line_priced_by_its_first_rate_key_with_a_row() -> Non
         )
 
         assert charges.lines == [
-            {"meter": "web_fetch_calls", "label": "tabstack:tabstack", "units": 1, "unit_rate": 0.005, "cost": 0.005},
-            {"meter": "web_search_calls", "label": _EXA, "units": 2, "unit_rate": 0.02, "cost": 0.04},
-            {"meter": "web_search_calls", "label": "otari:web_search", "units": 3, "unit_rate": 0.01, "cost": 0.03},
+            {
+                "meter": "web_fetch_calls",
+                "label": "tabstack:tabstack",
+                "units": 1,
+                "unit_rate": 0.005,
+                "cost": 0.005,
+                "deployment_paid": True,
+            },
+            {
+                "meter": "web_search_calls",
+                "label": _EXA,
+                "units": 2,
+                "unit_rate": 0.02,
+                "cost": 0.04,
+                "deployment_paid": True,
+            },
+            {
+                "meter": "web_search_calls",
+                "label": "otari:web_search",
+                "units": 3,
+                "unit_rate": 0.01,
+                "cost": 0.03,
+                "deployment_paid": False,
+            },
         ]
         # 0.04 + 0.03 over five searches, so five times the rate is the tool's spend.
         assert charges.unit_rates == {"web_search": Decimal("0.014"), "web_fetch": Decimal("0.005")}
@@ -802,7 +841,14 @@ def test_a_reported_zero_is_billed_at_zero_although_a_rate_exists() -> None:
         )
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": _EXA, "units": 1, "unit_rate": 0.0, "cost": 0.0}
+            {
+                "meter": "web_search_calls",
+                "label": _EXA,
+                "units": 1,
+                "unit_rate": 0.0,
+                "cost": 0.0,
+                "deployment_paid": True,
+            }
         ]
         assert charges.total == 0
         assert charges.unpriced == []
@@ -845,7 +891,14 @@ def test_a_label_with_no_row_and_no_reported_cost_keeps_a_zero_line_and_names_it
         )
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": _EXA, "units": 2, "unit_rate": 0.0, "cost": 0.0}
+            {
+                "meter": "web_search_calls",
+                "label": _EXA,
+                "units": 2,
+                "unit_rate": 0.0,
+                "cost": 0.0,
+                "deployment_paid": True,
+            }
         ]
         assert charges.unpriced == [UnpricedToolLabel("web_search", _EXA, _EXA, 2)]
 
@@ -893,14 +946,21 @@ def test_an_organization_key_label_is_priced_under_the_fallback_row_and_never_lo
         )
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": "org:tavily", "units": 1, "unit_rate": 0.01, "cost": 0.01}
+            {
+                "meter": "web_search_calls",
+                "label": "org:tavily",
+                "units": 1,
+                "unit_rate": 0.01,
+                "cost": 0.01,
+                "deployment_paid": False,
+            }
         ]
 
     _run(scenario)
 
 
 def test_empty_rate_keys_price_nothing_and_warn_about_nothing() -> None:
-    """A hybrid credential's calls carry no rate keys (design K): only a reported cost would count."""
+    """Calls that carry no rate keys (design K) price nothing: only a reported cost would count."""
 
     async def scenario(session: AsyncSession) -> None:
         await _tool_price(session, "otari:web_search", 10_000.0)
@@ -908,7 +968,14 @@ def test_empty_rate_keys_price_nothing_and_warn_about_nothing() -> None:
         charges = await price_tool_calls(session, [_calls(rate_keys=())], as_of=_NOW)
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": "otari:web_search", "units": 1, "unit_rate": 0.0, "cost": 0.0}
+            {
+                "meter": "web_search_calls",
+                "label": "otari:web_search",
+                "units": 1,
+                "unit_rate": 0.0,
+                "cost": 0.0,
+                "deployment_paid": False,
+            }
         ]
         assert charges.total == 0
         assert charges.unpriced == []
@@ -929,7 +996,14 @@ def test_two_records_of_one_label_settle_as_one_line() -> None:
         )
 
         assert charges.lines == [
-            {"meter": "web_search_calls", "label": "otari:web_search", "units": 3, "unit_rate": 0.01, "cost": 0.03}
+            {
+                "meter": "web_search_calls",
+                "label": "otari:web_search",
+                "units": 3,
+                "unit_rate": 0.01,
+                "cost": 0.03,
+                "deployment_paid": False,
+            }
         ]
 
     _run(scenario)
@@ -1365,3 +1439,45 @@ def test_a_provider_the_port_does_not_serve_is_asked_once_for_all_its_models() -
     assert supplied == {"openai:gpt-4o"}
     assert [ask for ask in port.asked if ask[0] == "nebius"] == [("nebius", None)]
     assert ("openai", "gpt-off") in port.asked
+
+
+def test_batched_request_prices_match_single_lookup_and_keep_payer_isolation() -> None:
+    """Batch pricing preserves lookup precedence and payer isolation with two reusable queries."""
+    from gateway.repositories.pricing import OrganizationModelPricingRepository
+    from gateway.services.pricing_service import RequestPrices, resolve_model_pricing
+
+    async def scenario(session: AsyncSession) -> None:
+        """Compare batched and individual pricing across overrides, tenants and deployment payment."""
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        await _override(session, organization_id, rate=0, origin=API_ORIGIN)
+        await _override(session, organization_id, model_key="openai/legacy", rate=3)
+        await _override(session, organization_id, model_key="openai/dual", rate=5)
+        await _override(session, organization_id, model_key="openai:dual", rate=7)
+        other_id = await _organization(session, "other")
+        await _override(session, other_id, model_key="openai:missing", rate=1)
+        candidates = [("openai", name) for name in ("gpt-4o", "legacy", "dual", "missing")]
+        prices = RequestPrices(organization_id, OrganizationModelPricingRepository(session))
+        with patch.object(session, "execute", wraps=session.execute) as execute:
+            await prices.prime(candidates)
+            assert execute.await_count == 2
+            await prices.prime(candidates)
+            for provider, model in candidates:
+                await prices.resolve(session, provider, model)
+            assert execute.await_count == 2
+        for provider, model in candidates:
+            batched = await prices.resolve(session, provider, model)
+            single = await resolve_model_pricing(session, provider, model, organization_id=organization_id)
+            assert (batched is None) == (single is None)
+            if single is not None and batched is not None:
+                assert (batched.source, batched.reference, batched.pricing.input_price_per_million) == (
+                    single.source,
+                    single.reference,
+                    single.pricing.input_price_per_million,
+                )
+        paid = await prices.resolve(session, "openai", "gpt-4o", deployment_paid=True)
+        assert paid is not None
+        assert paid.source == "deployment"
+        assert paid.pricing.input_price_per_million == _DEPLOYMENT_INPUT_RATE
+
+    _run(scenario)

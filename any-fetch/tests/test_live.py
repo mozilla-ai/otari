@@ -12,10 +12,11 @@ production provider joins it as it joins the conformance scenarios.
 
 import os
 from dataclasses import dataclass
+from typing import Literal
 
 import pytest
 
-from any_fetch import AnyFetch
+from any_fetch import AnyFetch, ProviderError
 
 live = pytest.mark.skipif(os.environ.get("ANY_FETCH_LIVE") != "1", reason="set ANY_FETCH_LIVE=1 to run")
 
@@ -36,14 +37,17 @@ class Expected:
     reports_cost: bool
     # It returns the page's title.
     titles: bool
-    # It reports a page the site answered with an error as an error inside the
-    # answer; otherwise it returns the text of the site's own error page.
-    page_errors: bool
+    # What it does with a page the site answered with an error: report it as an
+    # error inside the answer, return the text of the site's own error page, or
+    # fail the call.
+    missing_page: Literal["in_body_error", "site_page", "fails"]
 
 
 EXPECTED: dict[str, Expected] = {
-    "exa": Expected(reports_cost=True, titles=True, page_errors=True),
-    "tabstack": Expected(reports_cost=False, titles=True, page_errors=False),
+    # DeepSeek fails the call with a 404 for any page it cannot turn into markdown.
+    "deepseek": Expected(reports_cost=False, titles=True, missing_page="fails"),
+    "exa": Expected(reports_cost=True, titles=True, missing_page="in_body_error"),
+    "tabstack": Expected(reports_cost=False, titles=True, missing_page="site_page"),
 }
 
 
@@ -80,9 +84,16 @@ async def test_a_live_fetch_returns_the_page_text(provider: str) -> None:
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_a_live_fetch_of_a_missing_page_is_an_error_or_the_sites_error_page(provider: str) -> None:
     _require_key(provider)
+    missing_page = EXPECTED[provider].missing_page
     async with AnyFetch.create(provider) as fetcher:
+        if missing_page == "fails":
+            with pytest.raises(ProviderError) as raised:
+                await fetcher.fetch(MISSING_URL, max_chars=500)
+            # DeepSeek's status, the only provider that fails the call so far.
+            assert raised.value.status == 404
+            return
         page = await fetcher.fetch(MISSING_URL, max_chars=500)
-    if EXPECTED[provider].page_errors:
+    if missing_page == "in_body_error":
         assert page.error is not None
         assert page.text == ""
     else:

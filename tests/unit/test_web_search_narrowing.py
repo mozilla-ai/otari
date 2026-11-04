@@ -25,7 +25,6 @@ from gateway.services.tenancy.workspace_web_search_service import (
     WorkspaceWebSearchConfigUpdate,
     _normalize_domains,
     _stored_domains,
-    read_web_search_policy,
 )
 from gateway.services.tools._web_access import narrow_web_search_tool_entry
 from gateway.services.tools._web_admission import _canonicalize_request_domains
@@ -111,8 +110,6 @@ def test_every_source_refuses_the_same_domain_list(value: list[Any]) -> None:
     with pytest.raises(InvalidStoredWebSearchDomainError):
         _stored_domains(value)
     with pytest.raises(ValueError):
-        read_web_search_policy({"enabled": True, "allowed_domains": value})
-    with pytest.raises(ValueError):
         _canonicalize_request_domains({"allowed_domains": value})
 
 
@@ -123,7 +120,6 @@ def test_every_source_reads_the_same_domain_list() -> None:
 
     assert tuple(_normalize_domains(value) or ()) == expected
     assert _stored_domains(value) == expected
-    assert read_web_search_policy({"enabled": True, "allowed_domains": value}).allowed_domains == expected
     _canonicalize_request_domains(request_entry)
     assert tuple(request_entry["allowed_domains"]) == expected
     assert tuple(request_entry["blocked_domains"]) == expected
@@ -141,8 +137,6 @@ def test_a_blank_entry_is_refused_unless_a_caller_wrote_it() -> None:
     assert _normalize_domains(["", "example.com"]) == ["example.com"]
     with pytest.raises(InvalidStoredWebSearchDomainError):
         _stored_domains(["", "example.com"])
-    with pytest.raises(ValueError):
-        read_web_search_policy({"enabled": True, "allowed_domains": ["", "example.com"]})
 
 
 def test_a_row_that_narrows_nothing_leaves_the_entry_alone() -> None:
@@ -329,7 +323,7 @@ def test_a_hint_fills_a_gap_and_never_overrides_the_request_s_own() -> None:
 
 
 def test_provider_options_merge_per_key_with_the_request_winning() -> None:
-    """The one field that keeps the hybrid precedence: an opaque bag has no narrowing relation."""
+    """The one field where the request wins: an opaque bag has no narrowing relation."""
     entry: dict[str, object] = {"type": "otari_web_search", "provider_options": {"topic": "news"}}
 
     narrowed = _narrow(entry, _config(provider_options={"topic": "general", "search_depth": "basic"}))
@@ -345,72 +339,6 @@ def _card_constant(name: str) -> int:
     match = re.search(rf"^(?:export )?const {name} = (\d+)$", _CARD.read_text(), re.MULTILINE)
     assert match is not None, f"{name} is no longer declared in {_CARD.name}; update this test with it"
     return int(match.group(1))
-
-
-def test_a_control_plane_answer_reads_into_the_same_value_as_a_stored_row() -> None:
-    config = read_web_search_policy(
-        {
-            "enabled": True,
-            "max_results": 7,
-            "purpose_hint": "docs only",
-            "allowed_domains": [".Docs.Python.org", "docs.python.org"],
-            "blocked_domains": [],
-            "provider_options": {"search_depth": "advanced"},
-        }
-    )
-    assert config == ResolvedWebSearchConfig(
-        enabled=True,
-        max_results=7,
-        purpose_hint="docs only",
-        allowed_domains=("docs.python.org",),
-        blocked_domains=None,
-        provider_options={"search_depth": "advanced"},
-        authorized_tools=None,
-    )
-
-
-def test_a_control_plane_answer_with_only_enabled_narrows_nothing() -> None:
-    assert read_web_search_policy({"enabled": True}) == _config()
-
-
-def test_a_disabled_control_plane_answer_carries_the_veto() -> None:
-    assert read_web_search_policy({"enabled": False}) == _config(enabled=False)
-
-
-def test_a_whitespace_only_hint_from_the_control_plane_reads_as_absent() -> None:
-    assert read_web_search_policy({"enabled": True, "purpose_hint": "   "}).purpose_hint is None
-
-
-@pytest.mark.parametrize(
-    "answer",
-    [
-        pytest.param({}, id="enabled-missing"),
-        pytest.param({"enabled": "yes"}, id="enabled-not-bool"),
-        pytest.param({"enabled": True, "max_results": "5"}, id="max-results-string"),
-        pytest.param({"enabled": True, "max_results": True}, id="max-results-bool"),
-        pytest.param({"enabled": True, "max_results": 0}, id="max-results-zero"),
-        pytest.param({"enabled": True, "purpose_hint": 5}, id="hint-not-string"),
-        pytest.param({"enabled": True, "purpose_hint": "x" * 2049}, id="hint-too-long"),
-        pytest.param({"enabled": True, "provider_options": []}, id="options-not-object"),
-        pytest.param({"enabled": True, "provider_options": {"k": "x" * 5000}}, id="options-too-large"),
-        pytest.param({"enabled": True, "allowed_domains": "example.com"}, id="domains-not-list"),
-        pytest.param({"enabled": True, "blocked_domains": [1]}, id="domain-not-string"),
-        pytest.param({"enabled": True, "allowed_domains": ["https://example.com/path"]}, id="domain-not-host"),
-        pytest.param({"enabled": True, "blocked_domains": [".".join(["a" * 60] * 5)]}, id="domain-too-long"),
-        pytest.param(
-            {"enabled": True, "allowed_domains": [f"d{i}.example" for i in range(MAX_WEB_SEARCH_DOMAINS + 1)]},
-            id="too-many-domains",
-        ),
-    ],
-)
-def test_a_malformed_control_plane_answer_fails_closed(answer: dict[str, Any]) -> None:
-    with pytest.raises(ValueError):
-        read_web_search_policy(answer)
-
-
-def test_a_control_plane_ceiling_above_20_is_read() -> None:
-    """The gateway sets no ceiling of its own (decision 65), so the control plane's is taken as it is."""
-    assert read_web_search_policy({"enabled": True, "max_results": 50}).max_results == 50
 
 
 def test_a_stored_ceiling_above_20_is_accepted_up_to_what_its_column_holds() -> None:

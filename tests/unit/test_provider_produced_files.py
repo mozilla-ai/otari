@@ -14,13 +14,14 @@ from typing import Any, cast
 import httpx
 import pytest
 from any_llm import LLMProvider
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice
 from any_llm.types.files import AsyncFileDownload
+from any_llm.utils.messages_compat import chat_completion_to_message_response
 
 from gateway.adapters.provider_file_adapter import (
     _TIMEOUT,
     AnyLlmProviderFiles,
     _AnyLlmFileSession,
-    _container_file_request,
     _declared_size,
 )
 from gateway.exceptions.files_exceptions import FileOverBudgetError, ProviderFileUnavailableError
@@ -28,6 +29,7 @@ from gateway.services.files._provider_files import (
     anthropic_produced_files,
     produced_files_for,
     responses_produced_files,
+    store_inline_outputs,
 )
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.provider_file import ProviderFile
@@ -110,22 +112,6 @@ def test_only_providers_otari_can_read_back_are_recorded() -> None:
     assert not AnyLlmProviderFiles().serves(LLMProvider.NEBIUS)
 
 
-def test_openai_download_is_keyed_on_the_container() -> None:
-    url, headers = _container_file_request(
-        ProviderFile(file_id="cfile_1", container_id="cntr_1"), ResolvedCredential(api_key="sk-test")
-    )
-
-    assert url == "https://api.openai.com/v1/containers/cntr_1/files/cfile_1/content"
-    assert headers == {"Authorization": "Bearer sk-test"}
-
-
-def test_an_openai_file_with_no_container_cannot_be_read() -> None:
-    # The download is keyed on the container, so a row without one has no URL
-    # to build; refusing here is what keeps ``containers/None/...`` off the wire.
-    with pytest.raises(ProviderFileUnavailableError, match="names no container"):
-        _container_file_request(ProviderFile(file_id="cfile_1"), ResolvedCredential(api_key="sk-test"))
-
-
 def test_a_streamed_messages_result_block_names_its_files() -> None:
     reply = _anthropic_reply([{"file_id": "file_01abc"}])
     event = SimpleNamespace(type="content_block_start", index=0, content_block=reply.content[0])
@@ -172,12 +158,19 @@ def test_a_citation_field_that_is_not_text_is_dropped() -> None:
     assert produced_files_for("responses", event) == [ProviderFile(file_id="cfile_1")]
 
 
-def test_an_id_stays_one_path_segment() -> None:
-    url, _ = _container_file_request(
-        ProviderFile(file_id="../cfile_1", container_id="cntr/1"), ResolvedCredential(api_key="sk-test")
-    )
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("file_id", "container_id"), [("../cfile_1", "cntr_1"), ("cfile_1", "cntr/1")])
+async def test_an_openai_id_that_could_escape_its_path_reaches_no_provider(
+    monkeypatch: pytest.MonkeyPatch, file_id: str, container_id: str
+) -> None:
+    # any-llm rejects these rather than Otari, as on the Anthropic path below.
+    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
 
-    assert url == "https://api.openai.com/v1/containers/cntr%2F1/files/..%2Fcfile_1/content"
+    with pytest.raises(ProviderFileUnavailableError):
+        await _read_all(
+            _client("openai").read(ProviderFile(file_id=file_id, container_id=container_id), budget_bytes=5)
+        )
+    assert seen == []
 
 
 @pytest.mark.asyncio
@@ -195,8 +188,7 @@ async def test_an_anthropic_id_that_could_escape_its_path_reaches_no_provider(
 
 
 def test_a_provider_whose_files_otari_cannot_read_is_refused() -> None:
-    # The adapter names the set it serves; refusing here is what stops a third provider's
-    # credential reaching OpenAI's container endpoint.
+    # The adapter names the set it serves, and reads back from no other provider.
     with pytest.raises(LookupError, match="nebius"):
         _AnyLlmFileSession(
             provider=LLMProvider.NEBIUS, provider_instance="nebius", credential=ResolvedCredential(api_key="sk-test")
@@ -208,16 +200,16 @@ async def test_both_providers_read_under_one_timeout(monkeypatch: pytest.MonkeyP
     _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
     anthropic, openai = _client(), _client("openai")
 
-    # Without this the Anthropic path would inherit the SDK's own 600s read timeout.
-    assert cast("Any", anthropic._llm).client.timeout == _TIMEOUT
-    assert anthropic._connection.timeout == _TIMEOUT
-    assert openai._connection.timeout == _TIMEOUT
+    # Without this each path would inherit its SDK's own 600s read timeout.
+    for client in (anthropic, openai):
+        assert cast("Any", client._llm).client.timeout == _TIMEOUT
+        assert client._connection.timeout == _TIMEOUT
 
 
 @pytest.mark.asyncio
 async def test_a_failed_read_is_tried_once(monkeypatch: pytest.MonkeyPatch) -> None:
     # The copy shares one deadline across every file of a request, so retrying
-    # here spends the time the remaining files need. The OpenAI path never retries.
+    # here spends the time the remaining files need.
     seen = _serving(monkeypatch, lambda request: httpx.Response(500))
 
     with pytest.raises(ProviderFileUnavailableError):
@@ -413,6 +405,39 @@ async def test_read_raises_when_the_connection_fails(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_an_openai_download_is_keyed_on_the_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+
+    data = await _read_all(
+        _client("openai").read(ProviderFile(file_id="cfile_1", container_id="cntr_1"), budget_bytes=5)
+    )
+
+    assert data == b"chart"
+    assert str(seen[0].url) == "https://api.openai.com/v1/containers/cntr_1/files/cfile_1/content"
+    assert seen[0].headers["authorization"] == "Bearer sk-test"
+
+
+@pytest.mark.asyncio
+async def test_an_openai_api_base_is_where_the_container_download_goes(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+
+    client = _client("openai", api_base="https://openai.internal/v1")
+    await _read_all(client.read(ProviderFile(file_id="cfile_1", container_id="cntr_1"), budget_bytes=5))
+
+    assert str(seen[0].url) == "https://openai.internal/v1/containers/cntr_1/files/cfile_1/content"
+
+
+@pytest.mark.asyncio
+async def test_an_openai_refusal_is_unavailable_and_tried_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    # With unified exceptions off any-llm re-raises the OpenAI SDK's own error.
+    seen = _serving(monkeypatch, lambda request: httpx.Response(404, json={"error": {"message": "gone"}}))
+
+    with pytest.raises(ProviderFileUnavailableError):
+        await _read_all(_client("openai").read(ProviderFile(file_id="cfile_1", container_id="cntr_1"), budget_bytes=5))
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
 async def test_read_refuses_an_openai_file_with_no_container() -> None:
     # The reason reaches the caller, which is what an operator reads in the log.
     with pytest.raises(ProviderFileUnavailableError, match="names no container"):
@@ -472,3 +497,104 @@ async def test_a_lookup_that_fails_otherwise_keeps_the_file_held(monkeypatch: py
     _serving(monkeypatch, lambda request: httpx.Response(500, json=error))
 
     assert await _client().holds("file_01abc") is True
+
+
+_PNG = "iVBORw0KGgo="  # base64 of the PNG signature, eight bytes
+
+
+def _gemini_completion() -> ChatCompletion:
+    """A chat completion carrying Gemini code execution with one produced image."""
+    items = [
+        {"type": "executable_code", "id": "code_exec_0", "language": "PYTHON", "code": "plot()"},
+        {"type": "code_execution_result", "id": "code_exec_0", "outcome": "OUTCOME_OK", "output": "done"},
+        {"type": "code_execution_output", "id": "code_exec_0", "mime_type": "image/png", "data": _PNG},
+    ]
+    message = ChatCompletionMessage(
+        role="assistant", content="Here it is.", extra_content={"google": {"code_execution": items}}
+    )
+    return ChatCompletion(
+        id="c",
+        choices=[Choice(index=0, finish_reason="stop", message=message)],
+        created=0,
+        model="m",
+        object="chat.completion",
+    )
+
+
+class _Store:
+    def __init__(self, answer: str | None = "file-1") -> None:
+        self.answer = answer
+        self.stored: list[tuple[bytes, str]] = []
+
+    async def __call__(self, data: bytes, mime_type: str) -> str | None:
+        self.stored.append((data, mime_type))
+        return self.answer
+
+
+def _execution_result(reply: Any) -> dict[str, Any]:
+    result = next(block for block in reply.content if block.type == "code_execution_tool_result")
+    return cast(dict[str, Any], result.model_dump()["content"])
+
+
+@pytest.mark.asyncio
+async def test_a_bridged_gemini_reply_names_its_produced_file_like_anthropic_does() -> None:
+    reply = chat_completion_to_message_response(_gemini_completion())
+    store = _Store()
+
+    await store_inline_outputs("messages", reply, store)
+
+    dumped = _execution_result(reply)
+    assert store.stored == [(b"\x89PNG\r\n\x1a\n", "image/png")]
+    assert dumped["content"] == [{"type": "code_execution_output", "file_id": "file-1"}]
+    assert "inline_outputs" not in dumped
+    assert [file.file_id for file in produced_files_for("messages", reply)] == ["file-1"]
+
+
+@pytest.mark.asyncio
+async def test_a_bridged_output_that_could_not_be_stored_keeps_its_bytes() -> None:
+    reply = chat_completion_to_message_response(_gemini_completion())
+
+    await store_inline_outputs("messages", reply, _Store(answer=None))
+
+    dumped = _execution_result(reply)
+    assert dumped["content"] == []
+    assert dumped["inline_outputs"] == [{"mime_type": "image/png", "data": _PNG}]
+
+
+@pytest.mark.asyncio
+async def test_a_gemini_chat_reply_keeps_the_file_id_instead_of_the_bytes() -> None:
+    completion = _gemini_completion()
+    store = _Store()
+
+    await store_inline_outputs("chat", completion, store)
+
+    output = completion.choices[0].message.extra_content["google"]["code_execution"][2]  # type: ignore[index]
+    assert output == {
+        "type": "code_execution_output",
+        "id": "code_exec_0",
+        "mime_type": "image/png",
+        "file_id": "file-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_output_that_could_not_be_stored_is_left_as_sent() -> None:
+    completion = _gemini_completion()
+
+    await store_inline_outputs("chat", completion, _Store(answer=None))
+
+    output = completion.choices[0].message.extra_content["google"]["code_execution"][2]  # type: ignore[index]
+    assert output["data"] == _PNG
+    assert "file_id" not in output
+
+
+@pytest.mark.asyncio
+async def test_undecodable_bytes_and_other_dialects_store_nothing() -> None:
+    completion = _gemini_completion()
+    completion.choices[0].message.extra_content["google"]["code_execution"][2]["data"] = "not base64!"  # type: ignore[index]
+    store = _Store()
+
+    await store_inline_outputs("chat", completion, store)
+    await store_inline_outputs("responses", _gemini_completion(), store)
+
+    assert store.stored == []

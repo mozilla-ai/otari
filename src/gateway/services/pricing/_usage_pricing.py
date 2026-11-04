@@ -2,10 +2,11 @@
 
 The rate's ``unit`` chooses the meter. A ``tokens`` rate prices tokens, an
 ``images`` rate an ``images`` count, and a ``requests`` rate a ``requests`` or
-``search_units`` count, or one request for an attempt that reported neither. A
-rate prices nothing else, so a count never meets a rate written for another
-unit. Standalone settlement and a hybrid gateway's control plane both price
-through :func:`price_usage`, which is how one request costs the same on either.
+``search_units`` count, or one request for an attempt that reported neither.
+The one exception is a ``tokens`` rate on an endpoint billed per image or per
+request, which is read in that endpoint's unit, as the configuration guide
+documented before the rate's unit decided. Settlement prices through
+:func:`price_usage`.
 """
 
 from collections.abc import Mapping
@@ -13,11 +14,16 @@ from dataclasses import dataclass
 from decimal import Decimal
 from math import ceil, isfinite
 
+from any_llm.types.completion import CompletionUsage
+
 from gateway.core.metered_pricing import (
     BillableUsage,
     ChargeLine,
+    calculate_metered_cost,
     meter_cost,
     price_billable_usage,
+    price_request,
+    priced_per_request,
     quantize_cost,
     to_decimal,
 )
@@ -26,7 +32,7 @@ from gateway.models.pricing import MAX_REPORTED_UNITS, UNIT_METERS, ModelPricing
 
 _REQUESTS, _SEARCH_UNITS, _IMAGES = UNIT_METERS
 
-# The (model key, meter) pairs the legacy reading has already warned about.
+# The (model key, meter) pairs read in the endpoint's unit that have already been warned about.
 _LEGACY_WARNED: set[tuple[str, str]] = set()
 
 
@@ -67,14 +73,11 @@ def price_usage(
     *,
     tokens: BillableUsage | None,
     units: Mapping[str, object],
-    legacy_unit_reading: bool,
 ) -> UsageCharge | None:
     """What one successful attempt costs at ``rate``, or ``None`` when ``rate`` prices nothing it reported.
 
-    ``legacy_unit_reading`` keeps a standalone gateway's older reading of a
-    ``tokens`` rate on the endpoints billed per image or per request: the rate is
-    read in that endpoint's unit, as the configuration guide documented before
-    the rate's unit decided. It warns once per model and meter.
+    A ``tokens`` rate on an attempt that reported images or requests is read in
+    that unit, warning once per model and meter that the rate should name it.
 
     Raises:
         ValueError: ``units`` carries an invalid count (see :func:`validated_units`).
@@ -90,11 +93,10 @@ def price_usage(
         return _per_unit(_IMAGES, counts[_IMAGES], _image_rate(rate)) if _IMAGES in counts else None
     if unit != "tokens":
         return None
-    if legacy_unit_reading:
-        for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
-            if meter in counts:
-                _warn_legacy(rate, meter)
-                return _per_unit(meter, counts[meter], unit_rate(rate))
+    for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
+        if meter in counts:
+            _warn_legacy(rate, meter)
+            return _per_unit(meter, counts[meter], unit_rate(rate))
     if to_decimal(rate.input_price_per_million) is None:
         return None
     if tokens is None or (tokens.total_input_tokens <= 0 and tokens.completion_tokens <= 0):
@@ -103,7 +105,53 @@ def price_usage(
     return UsageCharge(cost, meters, lines)
 
 
-def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: bool, legacy_unit_reading: bool) -> bool:
+# The rates the token meters read: a rate in ``tokens``, and an ``images`` rate
+# on a completion, which is read in tokens as it always was.
+_TOKEN_METERED_UNITS: frozenset[str] = frozenset({"tokens", "images"})
+
+
+def has_completion_meter(rate: ModelPricing | None) -> bool:
+    """Whether a completion can be settled at ``rate``: per request, or by the token meters.
+
+    A rate in another unit (``second``, ``minute``) is stored ahead of its meter,
+    so a completion at it is unpriced: refused under ``require_pricing``, and
+    otherwise served and recorded with no cost. It is never billed as tokens.
+    """
+    if rate is None:
+        return False
+    return priced_per_request(rate) or (rate.unit or "tokens") in _TOKEN_METERED_UNITS
+
+
+def estimate_settles(rate: ModelPricing | None) -> bool:
+    """Whether a reservation's estimate can settle a completion that reported no usage.
+
+    It can for an unpriced model, whose estimate is zero, and for any rate a
+    completion meter reads. A rate in a unit no completion meter reads held
+    nothing and settles nothing, so the row keeps no cost and the needs-pricing
+    view still lists it.
+    """
+    return rate is None or has_completion_meter(rate)
+
+
+def price_completion(
+    rate: ModelPricing, usage: CompletionUsage | None, *, succeeded: bool
+) -> tuple[Decimal, dict[str, int], list[ChargeLine]] | None:
+    """What one completion costs at ``rate``, or ``None`` when ``rate`` prices nothing it reported.
+
+    A per-request rate settles one request for a call that succeeded, whatever
+    the tokens, and nothing for one that failed. Any other rate the token meters
+    read settles the reported usage, a failed call's included. A rate in a unit
+    no completion meter reads (``second``, ``minute``) prices nothing, so the
+    row records its tokens with no cost rather than billing them as tokens.
+    """
+    if priced_per_request(rate):
+        return price_request(rate) if succeeded else None
+    if usage is None or not has_completion_meter(rate):
+        return None
+    return calculate_metered_cost(rate, usage)
+
+
+def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: bool) -> bool:
     """Whether ``rate`` could price an attempt that reports ``meter`` and, when ``reports_tokens``, tokens.
 
     The ``require_pricing`` gate asks this before dispatch, so a rate the
@@ -118,7 +166,7 @@ def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: b
         return meter == _IMAGES
     if unit != "tokens":
         return False
-    return reports_tokens or (legacy_unit_reading and meter in (_IMAGES, _REQUESTS))
+    return reports_tokens or meter in (_IMAGES, _REQUESTS)
 
 
 def request_rate(rate: ModelPricing | None) -> Decimal:

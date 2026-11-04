@@ -23,29 +23,21 @@ https://exa.ai/docs/admin/pricing.
 
 import copy
 import math
-import re
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from typing import Any
 
 import httpx
 
 from any_search._api import AnySearch
-from any_search._errors import ProviderError
-from any_search._types import OptionSpec, ProviderMetadata, SearchHit, SearchResult, TimeRange
+from any_search._errors import ProviderError, safe_tag
+from any_search._types import TIME_RANGE_SPANS, OptionSpec, ProviderMetadata, SearchHit, SearchResult, TimeRange
 
 MAX_RESULTS = 100
 """The most results Exa's public API returns for one search."""
 
 DEFAULT_CONTENTS: dict[str, Any] = {"text": {"maxCharacters": 10_000}}
 """What Exa's Python SDK asks for when its caller names no contents."""
-
-_TIME_RANGE = {
-    "day": timedelta(days=1),
-    "week": timedelta(weeks=1),
-    "month": timedelta(days=30),
-    "year": timedelta(days=365),
-}
 
 # Native options copied into the request as they are. ``type``, ``numResults``
 # and ``contents`` have rules of their own, below.
@@ -59,10 +51,6 @@ _PASSED_THROUGH = (
     "moderation",
     "additionalQueries",
 )
-
-# An error tag is kept only when it looks like one, so no text from the body
-# reaches an exception.
-_TAG = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 class ExaProvider(AnySearch):
@@ -184,7 +172,7 @@ def _since(time_range: TimeRange) -> str:
     Exa often dates a page by its day alone, as midnight, so a start taken to
     the second would leave out pages from the range's first day.
     """
-    start = datetime.combine((datetime.now(UTC) - _TIME_RANGE[time_range]).date(), time(), UTC)
+    start = datetime.combine((datetime.now(UTC) - TIME_RANGE_SPANS[time_range]).date(), time(), UTC)
     return start.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
@@ -196,15 +184,10 @@ def _body(response: httpx.Response) -> dict[str, Any]:
         body = None
     if response.status_code >= 400:
         tag = body.get("tag") if isinstance(body, dict) else None
-        raise ProviderError(ExaProvider.METADATA.name, response.status_code, _tag(tag) or "http_error")
+        raise ProviderError(ExaProvider.METADATA.name, response.status_code, safe_tag(tag) or "http_error")
     if not isinstance(body, dict):
         raise ProviderError(ExaProvider.METADATA.name, response.status_code, "invalid_response")
     return body
-
-
-def _tag(value: Any) -> str | None:
-    """Exa's error tag when it looks like a code, else ``None``, so no body text reaches an error."""
-    return value if isinstance(value, str) and _TAG.fullmatch(value) else None
 
 
 def _unexpected(response: httpx.Response) -> ProviderError:

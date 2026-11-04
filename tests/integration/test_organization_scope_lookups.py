@@ -14,7 +14,6 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import create_member, create_organization, create_workspace
 
@@ -46,7 +45,7 @@ async def _identity(db: AsyncSession, organization: Organization) -> User:
 
 
 def _service(db: AsyncSession) -> OrganizationService:
-    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    return OrganizationService(db, membership_listener=None)
 
 
 async def test_a_workspace_resolves_to_its_organization(async_db: AsyncSession) -> None:

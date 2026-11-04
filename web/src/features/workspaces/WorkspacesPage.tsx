@@ -21,6 +21,7 @@ import { budgetLabeler, shortBudgetId } from "@/features/budgets/budgetLabel"
 import { canManage } from "@/features/organization/roles"
 import { departureSummary } from "@/features/workspaces/providerKeyDepartures"
 import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
+import { WorkspaceTraceContent } from "@/features/workspaces/WorkspaceTraceContent"
 import { useBudgets } from "@/shared/api/budgets"
 import { ApiError } from "@/shared/api/client"
 import {
@@ -677,6 +678,9 @@ function EditWorkspaceForm({
           to its organization arm because the key names come from the
           organization-gated list. */}
       <WorkspaceProviderKeys workspaceId={workspace.id} />
+      {/* Writes when flipped, like the provider keys above, so it holds no
+          unsaved work. The same managers this form opens to may change it. */}
+      <WorkspaceTraceContent workspace={workspace} />
     </FormDialog>
   )
 }
@@ -756,12 +760,10 @@ export function WorkspacesPage() {
       : [],
   )
   // And dropped again where no workspace has a key to depart from, which is
-  // every standalone deployment: organization-owned provider keys are a hosted
-  // surface (`organization_providers`), so the column would otherwise be a
-  // header over blank cells on the single-tenant product. Read from the answer
-  // rather than from the surface, because the routes behind those keys are
-  // mounted on standalone too and an upgraded deployment can hold rows the
-  // dashboard never offered a page for.
+  // the usual state of a deployment whose organization holds no provider keys
+  // of its own, so the column would otherwise be a header over blank cells.
+  // Read from the answer rather than from the surface, because the surface is
+  // published whether or not any key exists.
   const holdsProviderKeys = [...providerKeys.data.values()].some(
     (rows) => rows.length > 0,
   )

@@ -34,23 +34,6 @@ async def test_with_the_workspace_known_the_row_is_written_beside_the_walk() -> 
 
 
 @pytest.mark.asyncio
-async def test_without_a_workspace_the_row_is_written_inline() -> None:
-    written: list[str] = []
-
-    async def write() -> None:
-        written.append("row")
-
-    ctx: Any = SimpleNamespace(workspace_id=None)
-    pending: list[asyncio.Task[None]] = []
-
-    await pipeline._write_absorbed_row(ctx, pending, write())
-
-    # The write would need the request's session, which only one task may use.
-    assert written == ["row"]
-    assert pending == []
-
-
-@pytest.mark.asyncio
 async def test_a_cancelled_wait_leaves_the_write_running() -> None:
     release = asyncio.Event()
     finished: list[bool] = []

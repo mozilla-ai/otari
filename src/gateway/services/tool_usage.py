@@ -31,15 +31,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Protocol
 
 from gateway.core.metered_pricing import to_decimal
 from gateway.models.money import MAX_USD_COST
-from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, provider_web_search_label
+from gateway.types.tool_charges import PROVIDER_WEB_SEARCH_TOOL, LabelCalls, RateKey, provider_web_search_label
 
 # Every tool backend marks a recoverable failure by prefixing the string it hands
 # back to the model. The tool loop's own error path uses the same prefix, so this
 # is the single vocabulary for "the call ran but did not work".
 TOOL_ERROR_SENTINEL = "[tool error]"
+
+# What the model sees for a call :meth:`ToolUsageTally.admit` refused. It carries the
+# sentinel, so the refused call is counted and never billed.
+TOOL_BUDGET_EXCEEDED_TEXT = (
+    f"{TOOL_ERROR_SENTINEL} budget_exceeded: this call would take the request past a spend limit, so it was not run"
+)
 
 # The meter namespace inside ``UsageLog.billing_meters``. Tool meters are nested
 # under one reserved key rather than sitting flat next to the token meters:
@@ -57,6 +64,14 @@ MAX_TOOL_NAME_CHARS = 64
 # caller-supplied server, and a server with a tool literally named "other" would
 # otherwise have its counts merged into the overflow bucket.
 OVERFLOW_TOOL_NAME = "_other"
+
+
+class ToolSpendGate(Protocol):
+    """Holds one gateway-run call's price on the request's budgets before the call runs."""
+
+    async def admit(self, call: LabelCalls) -> bool:
+        """Whether ``call``, one call with no reported cost, fits; a call that does not must not run."""
+        ...
 
 
 def is_tool_error(result: str) -> bool:
@@ -85,12 +100,42 @@ class ToolUsageTally:
     money, so both are counted: the bill follows the work, not the winner.
     """
 
-    __slots__ = ("_counts", "_labels", "_overflowed")
+    __slots__ = ("_counts", "_labels", "_overflowed", "spend_gate")
 
     def __init__(self) -> None:
         self._counts: dict[str, dict[str, int]] = {}
-        self._labels: dict[tuple[str, str | None, tuple[str, ...] | None, bool | None], _LabelTotals] = {}
+        self._labels: dict[tuple[str, str | None, tuple[RateKey, ...] | None, bool | None], _LabelTotals] = {}
         self._overflowed = False
+        # Set by the request that owns the tally, where a budget or ceiling applies to it.
+        self.spend_gate: ToolSpendGate | None = None
+
+    async def admit(
+        self,
+        tool: str,
+        *,
+        label: str | None = None,
+        rate_keys: tuple[RateKey, ...] | None = None,
+        deployment_paid: bool | None = None,
+    ) -> bool:
+        """Whether one more call of ``tool`` may run, priced as :meth:`record_result` would record it.
+
+        A backend asks before a billed call and answers a refusal with
+        :data:`TOOL_BUDGET_EXCEEDED_TEXT`: settlement prices the call only after it
+        ran, so without the hold one request could spend past its cap.
+        """
+        if self.spend_gate is None:
+            return True
+        call = LabelCalls(
+            tool=(tool or OVERFLOW_TOOL_NAME)[:MAX_TOOL_NAME_CHARS],
+            label=label,
+            rate_keys=rate_keys,
+            calls=1,
+            unreported_calls=1,
+            reported_cost=Decimal(0),
+            enrichment_cost=Decimal(0),
+            deployment_paid=deployment_paid,
+        )
+        return await self.spend_gate.admit(call)
 
     def record_result(
         self,
@@ -98,9 +143,10 @@ class ToolUsageTally:
         text: str,
         *,
         label: str | None = None,
-        rate_keys: tuple[str, ...] | None = None,
+        rate_keys: tuple[RateKey, ...] | None = None,
         cost: Decimal | None = None,
         enrichment_cost: Decimal | None = None,
+        deployment_paid: bool | None = None,
     ) -> None:
         """Record a call that returned, classifying it on the sentinel.
 
@@ -110,13 +156,15 @@ class ToolUsageTally:
         prices the call. A failed call's costs are dropped, since it is never
         billed. A cost that is negative, not finite, or more than a cost column
         holds is unusable: the call reads as unreported, and an enrichment cost
-        as none.
+        as none. ``deployment_paid`` says whose account ran the call, which
+        decides whose prices count and whether the organization's funds pay for
+        it; ``None`` reads it off the label.
         """
         failed = is_tool_error(text)
         key = self._record(tool, failed=failed)
         if failed:
             return
-        totals = self._labels.setdefault((key, label, rate_keys, None), _LabelTotals())
+        totals = self._labels.setdefault((key, label, rate_keys, deployment_paid), _LabelTotals())
         totals.calls += 1
         reported = _usable_cost(cost)
         if reported is None:

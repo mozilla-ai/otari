@@ -49,6 +49,7 @@ from gateway.services.tools import (
     NativeCall,
     ToolUseBudget,
     is_capped_call,
+    mcp_entry,
     native_rendering,
     owning_backend,
 )
@@ -143,6 +144,24 @@ def _accumulate_tool_call_deltas(slots: dict[int, dict[str, Any]], deltas: list[
                 slot["function"]["name"] += fn.name
             if getattr(fn, "arguments", None):
                 slot["function"]["arguments"] += fn.arguments
+        if extra_content := getattr(delta, "extra_content", None):
+            slot["extra_content"] = extra_content
+
+
+def _tool_call_dict(tc: Any) -> dict[str, Any]:
+    """Transcript form of a completed SDK tool call.
+
+    ``extra_content`` carries provider state the next request must echo back, such as
+    Gemini's ``thought_signature``; without it any-llm substitutes a validator bypass.
+    """
+    out: dict[str, Any] = {
+        "id": tc.id,
+        "type": "function",
+        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+    }
+    if extra_content := getattr(tc, "extra_content", None):
+        out["extra_content"] = extra_content
+    return out
 
 
 def _with_tool_calls(event: ChatCompletionChunk, tool_calls: list[Any] | None) -> ChatCompletionChunk | None:
@@ -216,10 +235,10 @@ async def _run_owned_calls(
     A call past ``budget`` is refused the same way, as a tool error the model reads.
 
     For a call to one of ``native_tools``, the request's tools announced in
-    ``otari_tool_calls``, this yields ``(False, entries)`` just before the call runs
-    and ``(True, entries)`` right after it returns, so a stream can send each while
-    the call waits or before the next one starts. A refused call yields only its
-    ended entries, since nothing ran.
+    ``otari_tool_calls``, or to an MCP server's tool, this yields ``(False, entries)``
+    just before the call runs and ``(True, entries)`` right after it returns, so a
+    stream can send each while the call waits or before the next one starts. A
+    refused call yields only its ended entries, since nothing ran.
     """
     for tc in mcp_calls:
         name = tc["function"]["name"]
@@ -235,9 +254,12 @@ async def _run_owned_calls(
             if rendering is not None:
                 yield True, rendering.refused(call)
             continue
+        owner = owning_backend(pool, name)
+        server = _mcp_server(owner, name) if rendering is None else None
         if rendering is not None:
             yield False, rendering.started(call)
-        owner = owning_backend(pool, name)
+        elif server is not None:
+            yield False, [mcp_entry(call, server, "in_progress")]
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
@@ -257,6 +279,14 @@ async def _run_owned_calls(
         results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
         if rendering is not None:
             yield True, rendering.ran(replace(call, failed=is_tool_error(text)), owner)
+        elif server is not None:
+            yield True, [mcp_entry(call, server, "failed" if is_tool_error(text) else "completed", text)]
+
+
+def _mcp_server(backend: ToolBackend, name: str) -> str | None:
+    """The MCP server ``backend`` calls ``name`` on, or ``None`` for a tool no MCP server supplied."""
+    server_name_for_tool = getattr(backend, "server_name_for_tool", None)
+    return server_name_for_tool(name) if callable(server_name_for_tool) else None
 
 
 async def _execute_mcp_calls(
@@ -483,15 +513,7 @@ class _ChatToolLoopStrategy:
         # function tool-call. We avoid `isinstance` here because `acompletion`'s
         # return type uses the OpenAI SDK's class, while any_llm exposes a
         # same-named but distinct class alias.
-        tool_calls = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-            }
-            for tc in sdk_calls
-            if hasattr(tc, "function")
-        ]
+        tool_calls = [_tool_call_dict(tc) for tc in sdk_calls if hasattr(tc, "function")]
         return _execute_split(tool_calls, pool)
 
     def exit_after_split(self, result: ChatCompletion) -> bool:
@@ -761,6 +783,7 @@ async def mcp_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
     emit_activity: bool = False,
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
@@ -772,8 +795,8 @@ async def mcp_tool_loop_stream(
     is the final answer", and most SDKs stop reading at that point; subsequent
     iterations' content would be silently truncated.
 
-    A call to one of ``native_tools`` is reported in an ``otari_tool_calls`` chunk
-    when it starts and another when it ends.
+    A call to one of ``native_tools`` or to an MCP server's tool is reported in an
+    ``otari_tool_calls`` chunk when it starts and another when it ends.
 
     The terminal chunk is forwarded in three cases:
       * the iteration ended with a non-``tool_calls`` finish_reason (e.g. ``stop``),
@@ -793,6 +816,7 @@ async def mcp_tool_loop_stream(
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            on_first_response=on_first_response,
         )
     ) as inner:
         async for chunk in inner:
@@ -811,11 +835,10 @@ async def mcp_tool_loop(
     """Non-streaming variant. Accumulates usage across iterations into the returned completion.
 
     The completion carries the ended ``otari_tool_calls`` entry of each call to one of
-    ``native_tools``, across every round.
+    ``native_tools`` or to an MCP server's tool, across every round.
 
     ``on_first_response`` follows the provider lock-in contract documented on
-    :func:`gateway.services._tool_loop.run_tool_loop`; the hybrid-mode attempt
-    loop in :mod:`gateway.api.routes.chat` is the consumer.
+    :func:`gateway.services._tool_loop.run_tool_loop`.
 
     A first response with no choices is a provider failure, as on a call without
     tools. A later one is returned as the answer, so the rounds before it are billed.

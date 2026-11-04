@@ -20,6 +20,15 @@ interface SelectedWorkspace {
   selected: CallerWorkspaceMembership | null
   select: (workspaceId: string) => void
   isLoading: boolean
+  /**
+   * The context has answered, or its first read failed, so `selected` is final
+   * until the caller picks another workspace. Read from this provider rather than
+   * from the context query directly: a component subscribed to that query can
+   * render a beat before this provider does, and see the workspace still missing.
+   * Settled on a failure as `deploymentOperatorAnswer` is, so an outage does not
+   * hold a page through the query's retries.
+   */
+  isSettled: boolean
 }
 
 const Context = createContext<SelectedWorkspace | null>(null)
@@ -81,14 +90,16 @@ export function SelectedWorkspaceProvider({
     setChosen(workspaceId)
   }, [])
 
+  const isSettled = context.data !== undefined || context.isFetched
   const value = useMemo(
     () => ({
       memberships,
       selected,
       select,
       isLoading: context.isLoading,
+      isSettled,
     }),
-    [memberships, selected, select, context.isLoading],
+    [memberships, selected, select, context.isLoading, isSettled],
   )
 
   return <Context.Provider value={value}>{children}</Context.Provider>
@@ -104,6 +115,7 @@ const NO_WORKSPACE: SelectedWorkspace = {
   selected: null,
   select: () => {},
   isLoading: false,
+  isSettled: true,
 }
 
 export function useSelectedWorkspace(): SelectedWorkspace {

@@ -9,9 +9,9 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 # Ceiling on ``mcp_server_ids`` in one request. A workspace can hold at most 50
-# configured servers, in standalone (``MAX_MCP_SERVERS_PER_WORKSPACE`` in
-# ``services/tenancy/workspace_mcp_server_service.py``) and on the platform,
-# which uses the same value, so no reachable request loses anything. It is
+# configured servers (``MAX_MCP_SERVERS_PER_WORKSPACE`` in
+# ``services/tenancy/workspace_mcp_server_service.py``), so no reachable request
+# loses anything. It is
 # declared separately from that constant rather than imported: a wire bound has
 # to be enforceable at parse time, with no database and no mode to consult, and
 # a models module reaching into a service to learn its own limits would be the
@@ -56,14 +56,11 @@ class ResolvedMcpServer(BaseModel):
     check compares, and ``enabled`` is what separates the disabled-server 404
     from a server the caller cannot see at all.
 
-    Lives here rather than beside either resolver, because both produce it and
-    a port may name only a model.
+    Lives here rather than beside the resolver, because a port may name only a model.
     """
 
-    # Extra keys are ignored so a platform that grows a field does not break a
-    # gateway that has not learned about it. ``enabled`` defaults true for legacy
-    # peers that return only enabled server configs, but an explicit value is
-    # strict: lax coercion would read a resolver that answered ``"no"`` as enabled.
+    # ``enabled`` defaults true, but an explicit value is strict: lax coercion
+    # would read a resolver that answered ``"no"`` as enabled.
     model_config = ConfigDict(extra="ignore")
 
     id: uuid.UUID

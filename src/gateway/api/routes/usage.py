@@ -61,9 +61,9 @@ from gateway.services.usage_admin_service import (
     set_usage_price,
 )
 
-# Two routers under one prefix, because the two planes that meet here
-# authenticate differently. Reading or amending usage rows across an
-# organization is an operator's job, so that gate is declared on the router and a route added later
+# Two routers under one prefix, because their callers authenticate
+# differently. Reading or amending usage rows across an organization is an
+# operator's job, so that gate is declared on the router and a route added later
 # inherits it; ``POST /external-events`` files rows on behalf of the API key that
 # holds them, and ``GET /requests/{request_id}`` reads a key's own request back,
 # so both sit on a router of their own rather than a route-level override, and
@@ -608,7 +608,7 @@ async def ingest_external_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ExternalIngestResult:
-    """Ingest a batch of externally-observed usage events (standalone).
+    """Ingest a batch of externally-observed usage events.
 
     Authenticated with either an API key or the master key. Usage binds to the
     authenticated principal: an API key attributes to its own user (and stamps its
@@ -656,7 +656,7 @@ async def get_request_settlement(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RequestSettlement:
-    """Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+    """Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.
 
     This is how a caller recovers the cost of a request whose response never
     carried one: a stream that failed or was disconnected mid-response, or a
@@ -695,10 +695,10 @@ async def get_request_settlement(
     return RequestSettlement(
         request_id=request_id,
         status="error" if errors else "success",
-        cost_usd=f"{quantize_cost(cost):.6f}" if priced_rows else None,
-        prompt_tokens=int(prompt_tokens),
-        completion_tokens=int(completion_tokens),
-        total_tokens=int(total_tokens),
+        cost_usd=f"{quantize_cost(cost):.6f}" if priced_rows and cost is not None else None,
+        prompt_tokens=int(prompt_tokens or 0),
+        completion_tokens=int(completion_tokens or 0),
+        total_tokens=int(total_tokens or 0),
         row_count=int(row_count),
     )
 
@@ -768,7 +768,7 @@ async def count_usage(
         # promise rows _selection_conditions then refuses to touch.
         conditions.append(UsageLog.source != SERVED_HERE_SLUG)
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
-    total = (await db.execute(stmt)).scalar_one()
+    total: int = (await db.execute(stmt)).scalar_one()
     return UsageCount(total=total)
 
 
@@ -818,7 +818,7 @@ async def delete_usage_rows(
     db: Annotated[AsyncSession, Depends(get_db)],
     workspace_ids: CallerWorkspaceQuery,
 ) -> UsageDeleteResult:
-    """Delete imported usage rows by explicit ids or by filter (standalone).
+    """Delete imported usage rows by explicit ids or by filter.
 
     Target either the current selection (``ids``) or everything matching a filter
     (``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /
@@ -836,7 +836,7 @@ async def set_usage_price_rows(
     db: Annotated[AsyncSession, Depends(get_db)],
     workspace_ids: CallerWorkspaceQuery,
 ) -> UsageSetPriceResult:
-    """Set the cost of imported usage rows from manual per-1M rates (standalone).
+    """Set the cost of imported usage rows from manual per-1M rates.
 
     Target either the current selection (``ids``) or everything matching a filter
     (``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed

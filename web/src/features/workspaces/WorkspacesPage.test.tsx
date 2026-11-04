@@ -15,7 +15,9 @@ import type {
 } from "@/client"
 import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   budget,
   organizationContext,
   organizationMember,
@@ -119,7 +121,11 @@ function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+    </QueryClientProvider>,
+  )
 }
 
 const realMatchMedia = window.matchMedia
@@ -730,8 +736,8 @@ describe("WorkspacesPage", () => {
   })
 
   it("shows no provider-key column where the organization holds no keys", async () => {
-    // Every standalone deployment: organization-owned keys are a hosted
-    // surface, so the column would be a header over blank cells.
+    // The usual state when the organization holds no provider keys of its own,
+    // so the column would be a header over blank cells.
     mockApi()
     renderPage(<WorkspacesPage />)
 

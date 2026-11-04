@@ -1,8 +1,7 @@
 """The ``rate_limits`` rules, managed from the dashboard (``/api/v1/rate-limits``).
 
 Lists every rule in effect, and adds, changes and removes the stored ones. A
-rule from config.yml is listed and read-only here. Operator-gated and standalone
-only, since a hybrid gateway refuses ``rate_limits``.
+rule from config.yml is listed and read-only here. Operator-gated.
 """
 
 from fastapi import APIRouter, Depends, Response, status

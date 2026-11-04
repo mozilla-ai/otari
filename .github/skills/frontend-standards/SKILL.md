@@ -5,8 +5,8 @@ description: Guidelines for the otari admin dashboard (`web/`), React 19 + TypeS
 
 # Frontend Standards: otari dashboard (`web/`)
 
-`web/` is the dashboard shared by standalone, hosted, and hybrid deployments. It renders the
-management UI or hybrid landing page from `/v1/bootstrap` and uses an HttpOnly session for
+`web/` is the dashboard every deployment serves. It renders the
+management UI from `/v1/bootstrap` and uses an HttpOnly session for
 management calls. It is an operator tool, not a marketing surface. The base tracker under
 `src/shared/telemetry/` is a no-op seam an overlay may replace; do not give it an analytics
 implementation in this repository.
@@ -107,8 +107,9 @@ can link Vite's esbuild binary at all.
   `EntitlementGate` is the component form for wrapping a page. See
   [web/AGENTS.md](../../../web/AGENTS.md) for how the gates compose and where a capability
   the base build ships has to be declared. A route the *chrome* reaches is the exception and
-  is a hand-written `Link` on purpose: `/docs` from the top bar and the account menu, and
-  `/account` from that menu's first row. The registry is what the rails render, so an entry
+  is a hand-written `Link` on purpose: `/playground` from the top bar and the account menu,
+  and `/account` from that menu's first row. Documentation is not a route at all: it opens
+  `docs_url`, or `https://docs.otari.ai/`, in a new tab. The registry is what the rails render, so an entry
   there would duplicate into the sidebar a row the design draws once. Adding to the sidebar
   has no exception.
 - Add a Vitest test for any component, hook, or helper whose behavior you change (`Foo.tsx` →
@@ -150,8 +151,8 @@ can link Vite's esbuild binary at all.
 - Barrel files, default exports, or namespace imports. See
   [imports-and-modules.md](./imports-and-modules.md).
 - `getByTestId` when a semantic query (`getByRole`, `getByLabelText`, `getByText`) works.
-- A page component that branches on the gateway's mode (reading `/v1/settings`'s `mode`, or
-  probing whether a management endpoint 404s). The deployment bootstrap answers that once,
+- A page component that decides for itself what the deployment serves (probing whether a
+  management endpoint 404s). The deployment bootstrap answers that once,
   for the whole shell; see the rule above.
 
 ## A note on status colors

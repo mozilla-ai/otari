@@ -55,13 +55,10 @@ interface ToolStatusProps {
   docsHref: string
   /** Shown in place of the tool's own description, which is written for the model. */
   help?: ReactNode
-  /**
-   * Off where this process's own config does not decide whether the tool runs,
-   * as on a hosted control plane whose sandbox belongs to the platform.
-   */
-  showsAvailability?: boolean
   /** The setting the "no backend" case sends the operator to, when there is one. */
   urlFieldKey?: string
+  /** A link to where the tool is set up, when that is not a field on this page. */
+  setUp?: ReactNode
   /** The trailing status, for a tool that does not wait on a backend URL. */
   unavailableSummary?: string
   /** What turns that tool on, in place of setting a URL. */
@@ -73,8 +70,8 @@ export function ToolStatusRow({
   tool,
   docsHref,
   help,
-  showsAvailability = true,
   urlFieldKey,
+  setUp,
   unavailableSummary = "Unavailable · no backend",
   unavailableHelp = "No backend URL is set, so every call is rejected with 400.",
 }: ToolStatusProps) {
@@ -90,18 +87,16 @@ export function ToolStatusRow({
       isOpen={isOpen}
       onToggle={() => setIsOpen((open) => !open)}
       trailing={
-        showsAvailability ? (
-          <span className="flex items-center gap-2.5 text-mono-overline text-subtle">
-            <Dot className={tool.available ? "bg-success" : "bg-text-subtle"} />
-            {tool.available ? "Available" : unavailableSummary}
-          </span>
-        ) : null
+        <span className="flex items-center gap-2.5 text-mono-overline text-subtle">
+          <Dot className={tool.available ? "bg-success" : "bg-text-subtle"} />
+          {tool.available ? "Available" : unavailableSummary}
+        </span>
       }
     >
       <div className="flex flex-col divide-y divide-border-subtle">
         {/* Absent rather than empty when the tool is available: there is no
               reason to give. */}
-        {tool.available || !showsAvailability ? null : (
+        {tool.available ? null : (
           <SettingRow
             isNested
             label="Why unavailable"
@@ -130,7 +125,9 @@ export function ToolStatusRow({
                 >
                   Set backend URL ↓
                 </button>
-              ) : null
+              ) : (
+                (setUp ?? null)
+              )
             }
           />
         )}

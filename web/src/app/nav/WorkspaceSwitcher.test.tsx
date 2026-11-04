@@ -807,9 +807,8 @@ describe("the invitations row in the scope switcher", () => {
   })
 
   it("stays silent when the read fails, rather than breaking the chrome", async () => {
-    // A gateway older than this bundle does not serve the route, and a hybrid
-    // one answers 404 for every /api/v1/organizations path. The switcher still
-    // has to switch.
+    // A gateway older than this bundle does not serve the route. The switcher
+    // still has to switch.
     mockApi({
       memberships: twoOrganizations(),
       pendingInvitationsFail: true,

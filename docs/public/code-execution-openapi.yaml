@@ -49,8 +49,7 @@ servers:
   - url: "{sandbox_url}"
     description: |
       A code-execution backend. Otari takes this from its `sandbox_url` setting
-      (`OTARI_SANDBOX_URL`); in hybrid mode it points at the platform's
-      authenticated proxy rather than at the backend directly.
+      (`OTARI_SANDBOX_URL`).
     variables:
       sandbox_url:
         default: http://localhost:8080
@@ -342,10 +341,8 @@ components:
       type: http
       scheme: bearer
       description: |
-        Sent as `Authorization: Bearer <token>` where the deployment uses one.
-        In Otari's hybrid mode this is how the platform's authenticated proxy
-        admits the request and derives tenancy from the caller's workspace, so
-        the backend behind it never has to.
+        Sent as `Authorization: Bearer <token>` where the deployment uses one,
+        for an authenticated proxy in front of the backend.
 
   responses:
     # Declared on every operation, not just session creation: the credential is a

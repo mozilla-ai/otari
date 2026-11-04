@@ -7,3 +7,6 @@ port: 8000
 master_key: "e2e-master-key"
 # Keep the smoke focused on the flows under test rather than the pricing gate.
 require_pricing: false
+# Lets a member give their own key a federation rule, which the workload
+# identity spec does through the dashboard.
+federation_member_rules: true

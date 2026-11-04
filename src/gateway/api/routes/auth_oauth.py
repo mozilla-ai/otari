@@ -1,4 +1,4 @@
-"""Google and GitHub sign-in for the dashboard (standalone mode only).
+"""Google and GitHub sign-in for the dashboard.
 
 Two calls per provider, and the split from ``auth_session.py`` is the one that
 file's docstring already anticipated: an OAuth sign-in is a redirect through a
@@ -65,6 +65,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthIdentityLinkConflictError,
     OAuthNotConfiguredError,
     OAuthProviderUnavailableError,
+    SignInBlockedError,
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
@@ -316,8 +317,9 @@ async def callback(
             config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
         )
         signed_in = await identities.sign_in_with_oauth(external, terms_accepted=body.terms_accepted)
-    except (OAuthIdentityLinkConflictError, TermsNotAcceptedError):
-        # A concurrent sign-in finished first, or the terms are still to accept, so nobody failed to authenticate.
+    except (OAuthIdentityLinkConflictError, SignInBlockedError, TermsNotAcceptedError):
+        # A concurrent sign-in finished first, the address is blocked, or the terms are still to accept, so nobody
+        # failed to authenticate.
         raise
     except OAuthProviderUnavailableError as exc:
         # Rendered here so the 502 keeps its message, which the tenancy handler would blank.

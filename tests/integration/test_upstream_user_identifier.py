@@ -1,31 +1,40 @@
 """The end-user identifier a completion sends its provider."""
 
-from collections.abc import Callable, Generator
+import time
+from collections.abc import AsyncIterator, Callable, Generator
 from typing import Any
 
-import httpx
 import pytest
-from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatCompletionMessage,
+    Choice,
+    ChoiceDelta,
+    ChunkChoice,
+    CompletionUsage,
+)
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
-from conftest import InstallControlPlane
-from gateway.api.deps import reset_config
-from gateway.api.routes._pipeline import NO_UPSTREAM_USER_DETAIL
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
-from gateway.core.database import reset_db
+from gateway.models.usage import UsageLog
 from gateway.services.inference import UPSTREAM_USER_FIELD, upstream_user_identifier
 
-from .conftest import app_for, build_test_client
+from .conftest import build_test_client
 
 _MASTER_KEY = "test-master-key"
 _MASTER = {API_KEY_HEADER: f"Bearer {_MASTER_KEY}"}
 _KEY = "k" * 32
 _PROVIDERS = {
     "openai": {"api_key": "sk-openai"},
+    "azureopenai": {"api_key": "sk-azure", "api_base": "https://example.openai.azure.com"},
     "anthropic": {"api_key": "sk-anthropic"},
     "gemini": {"api_key": "gemini-key"},
     "meta": {"api_key": "meta-key"},
     "mistral": {"api_key": "mistral-key"},
+    "ollama": {"api_base": "http://ollama:11434"},
     "bedrock": {"api_key": "bedrock-key", "region_name": "us-east-1"},
 }
 
@@ -81,9 +90,10 @@ def captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
-def _keyed_user(client: TestClient, user_id: str = "alice") -> tuple[dict[str, str], str]:
+def _keyed_user(client: TestClient, user_id: str = "alice", *, create_user: bool = True) -> tuple[dict[str, str], str]:
     """A key for ``user_id``, and the workspace it bills to."""
-    assert client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=_MASTER).status_code == 200
+    if create_user:
+        assert client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=_MASTER).status_code == 200
     created = client.post(f"{API_ROOT}/keys", json={"key_name": "k", "user_id": user_id}, headers=_MASTER)
     assert created.status_code == 200
     key = created.json()
@@ -94,7 +104,7 @@ def _keyed_user(client: TestClient, user_id: str = "alice") -> tuple[dict[str, s
 def _chat(client: TestClient, headers: dict[str, str], model: str = "openai:gpt-4o-mini", **body: Any) -> None:
     client.post(
         f"{API_ROOT}/chat/completions",
-        json={"model": model, "messages": [{"role": "user", "content": "hi"}], **body},
+        json={"model": model, "messages": [{"role": "user", "content": "hi"}]} | body,
         headers=headers,
     )
 
@@ -107,17 +117,75 @@ def test_openai_gets_a_digest_of_the_workspace_and_resolved_user(
 
     _chat(client, headers)
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "alice", None)
-    assert UPSTREAM_USER_FIELD not in captured[0]
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
+    assert not {"user", UPSTREAM_USER_FIELD} & set(captured[0])
 
 
-def test_a_user_tag_replaces_the_resolved_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+def test_azure_openai_gets_a_safety_identifier(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, model="azureopenai:gpt-4o-mini")
+
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
+    assert "user" not in captured[0]
+
+
+def test_a_user_tag_subdivides_the_resolved_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
     client = make_client(reject_user_mismatch=False)
     headers, workspace = _keyed_user(client)
 
     _chat(client, headers, user="end-user-7")
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "end-user-7", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+
+
+def test_a_safety_identifier_is_the_tag(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, safety_identifier="a")
+    _chat(client, headers, safety_identifier="b")
+
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="a")
+    assert captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="b")
+
+
+def test_a_safety_identifier_wins_over_user(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, user="alice", safety_identifier="end-user-7")
+
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+
+
+def test_a_tag_naming_another_user_never_gives_their_identifier(
+    make_client: ClientFactory, captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    alice, workspace = _keyed_user(client)
+    bob, bobs_workspace = _keyed_user(client, "bob")
+
+    _chat(client, bob)
+    _chat(client, alice, safety_identifier="bob")
+
+    assert workspace == bobs_workspace
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "bob", None)
+    assert captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="bob")
+    assert captured[1]["safety_identifier"] != captured[0]["safety_identifier"]
+
+
+def test_the_callers_safety_identifier_never_reaches_the_provider(
+    make_client: ClientFactory, captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers, model="anthropic:claude-sonnet-4-5", safety_identifier="end-user-7")
+
+    assert captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "alice", None, tag="end-user-7")}
+    assert "safety_identifier" not in captured[0]
 
 
 def test_echoing_your_own_user_gives_the_same_identifier(
@@ -129,7 +197,7 @@ def test_echoing_your_own_user_gives_the_same_identifier(
     _chat(client, headers)
     _chat(client, headers, user="alice")
 
-    assert captured[0]["user"] == captured[1]["user"]
+    assert captured[0]["safety_identifier"] == captured[1]["safety_identifier"]
 
 
 def test_the_master_key_user_is_digested_too(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -139,8 +207,8 @@ def test_the_master_key_user_is_digested_too(make_client: ClientFactory, capture
     _chat(client, headers)
     _chat(client, _MASTER, user="alice")
 
-    assert captured[1]["user"] == captured[0]["user"]
-    assert captured[1]["user"] != "alice"
+    assert captured[1]["safety_identifier"] == captured[0]["safety_identifier"]
+    assert captured[1]["safety_identifier"] != "alice"
 
 
 def test_a_key_makes_the_digest_keyed(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
@@ -149,7 +217,7 @@ def test_a_key_makes_the_digest_keyed(make_client: ClientFactory, captured: list
 
     _chat(client, headers)
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "alice", _KEY)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", _KEY)
 
 
 def test_anthropic_gets_metadata_user_id_and_no_user(
@@ -212,144 +280,160 @@ def test_a_streamed_request_carries_it(make_client: ClientFactory, captured: lis
 
     _chat(client, headers, stream=True)
 
-    assert captured[0]["user"] == upstream_user_identifier(workspace, "alice", None)
+    assert captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
 
 
-def test_turned_off_nothing_is_sent(make_client: ClientFactory, captured: list[dict[str, Any]]) -> None:
-    client = make_client(provider_user_identifier_enabled=False)
-    headers, _ = _keyed_user(client)
-
-    _chat(client, headers, user="alice")
-
-    assert not {"user", UPSTREAM_USER_FIELD} & set(captured[0])
-
-
-# ---------------------------------------------------------------------------
-# Hybrid mode: the identity comes from the platform's resolve response.
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def hybrid_client(monkeypatch: pytest.MonkeyPatch) -> Generator[Callable[..., TestClient]]:
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    entered: list[TestClient] = []
-
-    def make(**overrides: Any) -> TestClient:
-        app = app_for(GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}, **overrides))
-        client = TestClient(app)
-        client.__enter__()
-        entered.append(client)
-        return client
-
-    yield make
-    for client in entered:
-        client.__exit__(None, None, None)
-    reset_config()
-    reset_db()
-
-
-def _platform(control_plane_transport: InstallControlPlane, **identity: str) -> None:
-    async def fake_post_platform(
-        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
-    ) -> httpx.Response:
-        if url.endswith("/gateway/provider-keys/resolve"):
-            return httpx.Response(
-                200,
-                json={
-                    "request_id": "req-1",
-                    "fallback_enabled": False,
-                    "attempts": [
-                        {
-                            "attempt_id": "att-1",
-                            "position": 0,
-                            "provider": "openai",
-                            "model": "gpt-4o-mini",
-                            "api_key": "sk-platform",
-                            "managed": False,
-                        }
-                    ],
-                    **identity,
-                },
-            )
-        return httpx.Response(204)
-
-    control_plane_transport(fake_post_platform)
-
-
-@pytest.fixture
-def hybrid_captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
-        calls.append(kwargs)
-        return _completion()
-
-    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
-    return calls
-
-
-_TOKEN = {"Authorization": "Bearer user_test_token"}
-
-
-def test_hybrid_digests_the_platform_workspace_and_user(
-    hybrid_client: Callable[..., TestClient],
-    control_plane_transport: InstallControlPlane,
-    hybrid_captured: list[dict[str, Any]],
-) -> None:
-    _platform(control_plane_transport, workspace_id="ws-1", user_id="platform-user")
-
-    _chat(hybrid_client(), _TOKEN, model="gpt-4o-mini")
-
-    assert hybrid_captured[0]["user"] == upstream_user_identifier("ws-1", "platform-user", None)
-
-
-def test_hybrid_prefers_the_callers_tag(
-    hybrid_client: Callable[..., TestClient],
-    control_plane_transport: InstallControlPlane,
-    hybrid_captured: list[dict[str, Any]],
-) -> None:
-    _platform(control_plane_transport, workspace_id="ws-1")
-
-    _chat(hybrid_client(), _TOKEN, model="gpt-4o-mini", user="end-user-7")
-
-    assert hybrid_captured[0]["user"] == upstream_user_identifier("ws-1", "end-user-7", None)
+_IMAGE = "data:image/png;base64,iVBORw0KGgo="
 
 
 @pytest.mark.parametrize(
-    ("identity", "body"),
-    [({"user_id": "platform-user"}, {"user": "end-user-7"}), ({"workspace_id": "ws-1"}, {}), ({}, {})],
-    ids=["no-workspace", "no-user-no-tag", "neither"],
+    ("vision_model", "fields"),
+    [
+        ("openai:gpt-4o-mini", lambda identifier: {"safety_identifier": identifier}),
+        ("anthropic:claude-sonnet-4-5", lambda identifier: {"metadata": {"user_id": identifier}}),
+    ],
+    ids=["openai", "anthropic"],
 )
-def test_hybrid_refuses_a_request_it_cannot_identify(
-    hybrid_client: Callable[..., TestClient],
-    control_plane_transport: InstallControlPlane,
-    hybrid_captured: list[dict[str, Any]],
-    identity: dict[str, str],
-    body: dict[str, Any],
+def test_the_image_describe_call_carries_the_requests_identifier(
+    make_client: ClientFactory,
+    captured: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    vision_model: str,
+    fields: Callable[[str], dict[str, Any]],
 ) -> None:
-    _platform(control_plane_transport, **identity)
+    """A text-only model's image is captioned by the vision model, which gets the main call's identifier."""
+    described: list[dict[str, Any]] = []
 
-    response = hybrid_client().post(
-        f"{API_ROOT}/chat/completions",
-        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}], **body},
-        headers=_TOKEN,
+    async def fake_describe(**kwargs: Any) -> ChatCompletion:
+        described.append(kwargs)
+        return _completion()
+
+    monkeypatch.setattr("gateway.services.vision.acompletion", fake_describe)
+    client = make_client(vision_strategy="describe", vision_describe_model=vision_model)
+    headers, workspace = _keyed_user(client)
+
+    _chat(
+        client,
+        headers,
+        model="ollama:llama3",
+        safety_identifier="end-user-7",
+        messages=[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _IMAGE}}]}],
     )
 
-    assert response.status_code == 502
-    assert response.json() == {"detail": NO_UPSTREAM_USER_DETAIL}
-    assert hybrid_captured == []
+    assert len(captured) == 1
+    identifier = upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+    end_user_fields = {"user", "safety_identifier", "metadata", UPSTREAM_USER_FIELD}
+    assert {key: value for key, value in described[0].items() if key in end_user_fields} == fields(identifier)
 
 
-def test_hybrid_turned_off_serves_an_unidentified_request(
-    hybrid_client: Callable[..., TestClient],
-    control_plane_transport: InstallControlPlane,
-    hybrid_captured: list[dict[str, Any]],
+# ---------------------------------------------------------------------------
+# Usage rows
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def served(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every chat completion succeeds, streamed or not."""
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        if not kwargs.get("stream"):
+            return _completion()
+
+        async def chunks() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk(
+                id="chunk-1",
+                object="chat.completion.chunk",
+                created=0,
+                model="gpt-4o-mini",
+                choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="hi"), finish_reason="stop")],
+                usage=CompletionUsage(prompt_tokens=4, completion_tokens=2, total_tokens=6),
+            )
+
+        return chunks()
+
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+
+def _logged_identifiers(postgres_url: str, count: int, *, timeout: float = 3.0) -> list[str | None]:
+    """The ``safety_identifier`` of each usage row, once ``count`` rows are written."""
+    engine = create_engine(postgres_url)
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            with Session(engine) as db:
+                identifiers = list(db.scalars(select(UsageLog.safety_identifier)).all())
+            if len(identifiers) >= count:
+                return identifiers
+            assert time.monotonic() < deadline, f"expected {count} usage rows, found {len(identifiers)}"
+            time.sleep(0.1)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+@pytest.mark.usefixtures("served")
+def test_the_usage_row_stores_the_identifier_the_provider_got(
+    make_client: ClientFactory, postgres_url: str, stream: bool
 ) -> None:
-    _platform(control_plane_transport)
+    client = make_client()
+    headers, workspace = _keyed_user(client)
 
-    _chat(hybrid_client(provider_user_identifier_enabled=False), _TOKEN, model="gpt-4o-mini")
+    _chat(client, headers, safety_identifier="end-user-7", stream=stream)
 
-    assert not {"user", UPSTREAM_USER_FIELD} & set(hybrid_captured[0])
+    assert _logged_identifiers(postgres_url, 1) == [
+        upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+    ]
+
+
+@pytest.mark.usefixtures("captured")
+def test_a_failed_calls_usage_row_stores_the_identifier(make_client: ClientFactory, postgres_url: str) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _chat(client, headers)
+
+    assert _logged_identifiers(postgres_url, 1) == [upstream_user_identifier(workspace, "alice", None)]
+
+
+@pytest.mark.usefixtures("captured")
+def test_a_refusal_after_the_user_is_resolved_stores_the_identifier(
+    make_client: ClientFactory, postgres_url: str
+) -> None:
+    client = make_client()
+    created = client.post(
+        f"{API_ROOT}/users", json={"user_id": "alice", "allowed_models": ["openai:gpt-4o"]}, headers=_MASTER
+    )
+    assert created.status_code == 200
+    headers, workspace = _keyed_user(client, create_user=False)
+
+    _chat(client, headers, safety_identifier="end-user-7")
+
+    assert _logged_identifiers(postgres_url, 1) == [
+        upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+    ]
+
+
+@pytest.mark.usefixtures("served")
+def test_the_image_describe_row_stores_the_requests_identifier(
+    make_client: ClientFactory, postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_describe(**_kwargs: Any) -> ChatCompletion:
+        return _completion()
+
+    monkeypatch.setattr("gateway.services.vision.acompletion", fake_describe)
+    client = make_client(vision_strategy="describe", vision_describe_model="openai:gpt-4o-mini")
+    headers, workspace = _keyed_user(client)
+
+    _chat(
+        client,
+        headers,
+        model="ollama:llama3",
+        safety_identifier="end-user-7",
+        messages=[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _IMAGE}}]}],
+    )
+
+    identifier = upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+    assert _logged_identifiers(postgres_url, 2) == [identifier, identifier]
 
 
 # ---------------------------------------------------------------------------
@@ -381,10 +465,23 @@ def test_responses_sends_openai_a_safety_identifier_and_no_user(
     client = make_client()
     headers, workspace = _keyed_user(client)
 
-    _respond(client, headers, user="alice", safety_identifier="caller-chosen")
+    _respond(client, headers, user="alice")
 
     assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
     assert not {"user", UPSTREAM_USER_FIELD} & set(responses_captured[0])
+
+
+def test_responses_digests_the_callers_safety_identifier(
+    make_client: ClientFactory, responses_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _respond(client, headers, user="alice", safety_identifier="a")
+    _respond(client, headers, user="alice", safety_identifier="b")
+
+    assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="a")
+    assert responses_captured[1]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None, tag="b")
 
 
 def test_responses_to_anthropic_sends_metadata_user_id_and_never_user(
@@ -398,17 +495,6 @@ def test_responses_to_anthropic_sends_metadata_user_id_and_never_user(
 
     assert responses_captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "alice", None)}
     assert not {"user", "safety_identifier"} & set(responses_captured[0])
-
-
-def test_responses_turned_off_sends_no_identifier_at_all(
-    make_client: ClientFactory, responses_captured: list[dict[str, Any]]
-) -> None:
-    client = make_client(provider_user_identifier_enabled=False)
-    headers, _ = _keyed_user(client)
-
-    _respond(client, headers, user="alice", safety_identifier="caller-chosen")
-
-    assert not {"user", "safety_identifier", UPSTREAM_USER_FIELD} & set(responses_captured[0])
 
 
 # ---------------------------------------------------------------------------
@@ -449,7 +535,9 @@ def test_messages_replaces_the_callers_user_id_with_the_identifier(
 
     _message(client, headers, metadata={"user_id": "end-user-7"})
 
-    assert messages_captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "end-user-7", None)}
+    assert messages_captured[0]["metadata"] == {
+        "user_id": upstream_user_identifier(workspace, "alice", None, tag="end-user-7")
+    }
     assert UPSTREAM_USER_FIELD not in messages_captured[0]
 
 
@@ -464,17 +552,6 @@ def test_messages_without_a_tag_digests_the_resolved_user(
     assert messages_captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "alice", None)}
 
 
-def test_messages_turned_off_drops_the_callers_user_id(
-    make_client: ClientFactory, messages_captured: list[dict[str, Any]]
-) -> None:
-    client = make_client(provider_user_identifier_enabled=False)
-    headers, _ = _keyed_user(client)
-
-    _message(client, headers, metadata={"user_id": "alice"})
-
-    assert not {"metadata", UPSTREAM_USER_FIELD} & set(messages_captured[0])
-
-
 def test_messages_served_as_a_chat_completion_gets_the_providers_chat_field(
     make_client: ClientFactory, messages_captured: list[dict[str, Any]]
 ) -> None:
@@ -483,5 +560,5 @@ def test_messages_served_as_a_chat_completion_gets_the_providers_chat_field(
 
     _message(client, headers, model="openai:gpt-4o-mini")
 
-    assert messages_captured[0]["user"] == upstream_user_identifier(workspace, "alice", None)
+    assert messages_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
     assert not {"metadata", UPSTREAM_USER_FIELD} & set(messages_captured[0])

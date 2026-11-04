@@ -22,6 +22,7 @@ from gateway.services.tools import (
     build_web_search_backends,
     native_rendering,
     owning_backend,
+    resolve_fetch,
     resolve_in_loop_search,
 )
 from gateway.services.web_retrieval_policy import DomainPolicy
@@ -239,7 +240,7 @@ async def _ran_on_the_libraries(
         config,
         search,
         search_tool_entry={},
-        fetch_declared=True,
+        fetch=resolve_fetch(config, None, requested=None, for_search=None),
         fetch_policy=DomainPolicy(),
         cap=WebToolCallCap(cap),
         purpose_hint=None,

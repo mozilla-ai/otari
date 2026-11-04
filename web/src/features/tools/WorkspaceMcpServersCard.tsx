@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FiEdit2, FiTrash2 } from "react-icons/fi"
+import { FiEdit2, FiRefreshCw, FiTrash2 } from "react-icons/fi"
 
 import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -12,18 +12,27 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Popover } from "@/design-system/overlays/Popover"
 import { canManageWorkspace } from "@/features/organization/roles"
 import {
   McpServerDialog,
   type McpServerDraft,
 } from "@/features/tools/McpServerDialog"
+import {
+  healthDetail,
+  healthLabel,
+  healthNeedsAttention,
+  toolCountLabel,
+} from "@/features/tools/mcpServerHealth"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
+  useCheckWorkspaceMcpServer,
   useCreateWorkspaceMcpServer,
   useDeleteWorkspaceMcpServer,
   useUpdateWorkspaceMcpServer,
   useWorkspaceMcpServers,
 } from "@/shared/api/tools"
+import { formatDateTime } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The MCP servers this workspace has registered, which a request reaches by
@@ -58,9 +67,55 @@ function tokenChip(server: WorkspaceMcpServer) {
   )
 }
 
+// The last connection check, as of when it ran. The label is the cell; the
+// sentence saying what to fix and when it was checked open from it, as a
+// pressable rather than a title, so a keyboard or a finger reaches them too.
+function healthCell(server: WorkspaceMcpServer) {
+  const health = server.health
+  if (health === null) {
+    return <span className="text-subtle">Not checked</span>
+  }
+  const dot =
+    health.status === "failing"
+      ? "bg-danger"
+      : healthNeedsAttention(health)
+        ? "bg-warning"
+        : "bg-success"
+  return (
+    <Popover
+      label={`Last check of ${server.name}`}
+      trigger={
+        // Pulled left by the ghost button's 16px inset (1px edge, 15px
+        // padding), so the dot lines up with the column header and the cells
+        // beside it rather than sitting a padding's width in.
+        <Button className="-ms-4 gap-2">
+          <Dot className={dot} />
+          {/* The cell's own type, so the label reads like the Token and
+              Status cells beside it rather than like a button. */}
+          <span className="text-mono-caption text-muted">
+            {healthLabel(health)}
+          </span>
+        </Button>
+      }
+    >
+      <div className="flex max-w-xs flex-col gap-1">
+        <p className="text-sm">{healthDetail(health)}</p>
+        {(health.tools ?? []).length > 0 ? (
+          <p className="max-h-32 overflow-y-auto font-mono text-xs break-words">
+            {(health.tools ?? []).join(", ")}
+          </p>
+        ) : null}
+        <p className="text-caption">
+          Checked {formatDateTime(health.checked_at)}
+        </p>
+      </div>
+    </Popover>
+  )
+}
+
 /** The page's own opening line, which the `/tools` card does not carry. */
 const PAGE_DESCRIPTION =
-  "MCP endpoints a workspace's requests can reach by naming their ids, without carrying a URL or a bearer token of their own. Each is checked for SSRF safety when it is stored and again when a request uses it, and its token is encrypted at rest."
+  "MCP servers this workspace's requests can use by id. Each is checked for SSRF safety and tested when saved."
 
 export function WorkspaceMcpServersCard({
   variant = "card",
@@ -87,6 +142,7 @@ export function WorkspaceMcpServersCard({
   const create = useCreateWorkspaceMcpServer()
   const update = useUpdateWorkspaceMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
+  const check = useCheckWorkspaceMcpServer()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
   // Bumped on every open and used as the dialog's key, so the draft is cleared
@@ -94,6 +150,7 @@ export function WorkspaceMcpServersCard({
   // is still animating away.
   const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<WorkspaceMcpServer>()
+  const [saved, setSaved] = useState<WorkspaceMcpServer>()
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
 
   const isPage = variant === "page"
@@ -122,6 +179,7 @@ export function WorkspaceMcpServersCard({
   // 409 over a blank one. Same reset `PasskeysCard` does for the same reason.
   const openAdd = () => {
     setEditing(undefined)
+    setSaved(undefined)
     create.reset()
     setOpenCount((count) => count + 1)
     setDialogOpen(true)
@@ -129,6 +187,7 @@ export function WorkspaceMcpServersCard({
 
   const openEdit = (server: WorkspaceMcpServer) => {
     setEditing(server)
+    setSaved(undefined)
     update.reset()
     setOpenCount((count) => count + 1)
     setDialogOpen(true)
@@ -140,7 +199,28 @@ export function WorkspaceMcpServersCard({
   }
 
   const submit = (draft: McpServerDraft) => {
-    const onDone = { onSuccess: () => setDialogOpen(false) }
+    // A save checks the connection when it adds a server or changes its URL,
+    // token or allow-list, the same rule the service applies. When that check
+    // found a problem, or could not run, the dialog stays open on the stored
+    // row and says so, so the fix is an edit rather than a second add.
+    const checked =
+      editing === undefined ||
+      draft.url !== editing.url ||
+      draft.authorization_token !== undefined ||
+      JSON.stringify(draft.allowed_tools) !==
+        JSON.stringify(editing.allowed_tools)
+    const settle = (server: WorkspaceMcpServer) => {
+      if (
+        checked &&
+        (server.health === null || healthNeedsAttention(server.health))
+      ) {
+        setEditing(server)
+        setSaved(server)
+        return
+      }
+      setDialogOpen(false)
+    }
+    const onDone = { onSuccess: settle }
     if (editing) {
       update.mutate(
         {
@@ -186,19 +266,20 @@ export function WorkspaceMcpServersCard({
     {
       id: "allowed_tools",
       header: "Tools",
-      // An empty list reads as "All", not as "0 allowed", because that is what
-      // the gateway does with it: `mcp_client` takes a falsy `allowed_tools` as
-      // no allow-list at all, so `[]` exposes every tool exactly as null does.
-      // This form never sends `[]`, but a row created over the API can hold one,
-      // and a cell claiming no tools were exposed would be the opposite of true.
-      cell: (row) =>
-        row.allowed_tools === null || row.allowed_tools.length === 0 ? (
+      // A passing check gives the real count; without one, the allow-list is
+      // all there is to say. `[]` is a list that admits nothing, which is how
+      // the tool loop reads it: this form never sends one, but a row created
+      // over the API can hold it. The names would be an unbounded column (the
+      // list runs to hundreds), so they live in the Health popover and dialog.
+      cell: (row) => {
+        const counted = toolCountLabel(row.health, row.allowed_tools !== null)
+        if (counted) return <span className="whitespace-nowrap">{counted}</span>
+        return row.allowed_tools === null ? (
           <span className="text-muted">All</span>
         ) : (
-          // The names themselves would be an unbounded column (the list runs to
-          // hundreds), so the count is the cell and the list is in the dialog.
           <span>{row.allowed_tools.length} allowed</span>
-        ),
+        )
+      },
     },
     { id: "token", header: "Token", cell: tokenChip },
     {
@@ -215,6 +296,7 @@ export function WorkspaceMcpServersCard({
         </span>
       ),
     },
+    { id: "health", header: "Health", cell: healthCell },
   ]
   if (manages) {
     columns.push({
@@ -222,6 +304,17 @@ export function WorkspaceMcpServersCard({
       header: "",
       cell: (row) => (
         <RowActionRow>
+          <RowAction
+            icon={FiRefreshCw}
+            label="Recheck"
+            isDisabled={check.isPending && check.variables?.serverId === row.id}
+            onPress={() =>
+              check.mutate({
+                workspaceId: selected.workspace_id,
+                serverId: row.id,
+              })
+            }
+          />
           <RowAction
             icon={FiEdit2}
             label="Edit"
@@ -257,17 +350,16 @@ export function WorkspaceMcpServersCard({
       )}
 
       <p className="max-w-prose text-sm text-muted">
-        Endpoints that requests billed to {selected.name} can use by naming
-        their ids in <code className="font-mono">mcp_server_ids</code>. A
-        request may still pass its own servers inline; these are the ones it
-        does not have to carry a URL or a token for. Tokens are stored encrypted
-        and are never shown again.
+        Requests billed to {selected.name} use these by listing their ids in{" "}
+        <code className="font-mono">mcp_server_ids</code>, with no URL or token
+        of their own. Tokens are encrypted and never shown again.
         {manages
           ? null
-          : " Registering or changing one is for an owner or admin of the workspace, or of the organization."}
+          : " Only an owner or admin of the workspace or organization can change them."}
       </p>
 
       <ErrorBanner error={query.error} />
+      <ErrorBanner error={check.error} />
 
       <TableScrollFrame className="otari-mcp-table">
         <DataTable
@@ -291,6 +383,8 @@ export function WorkspaceMcpServersCard({
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
+        saved={saved}
+        workspaceId={selected.workspace_id}
         isPending={create.isPending || update.isPending}
         error={editing ? update.error : create.error}
         onSubmit={submit}

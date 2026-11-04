@@ -3,7 +3,7 @@
 The service-endpoint and web-search fields that ``/api/v1/settings`` keeps
 display-only (the ``*_url`` fields and the web-search knobs are excluded there on
 SSRF grounds) are made editable here, on their own page, with structural URL
-validation and per-service reachability tests. Standalone-only and master-key
+validation and per-service reachability tests. Master-key
 gated, mirroring the other management routers.
 
 * ``GET /api/v1/tool-settings`` returns each field's effective value (the value a
@@ -19,16 +19,19 @@ gated, mirroring the other management routers.
   and applies them to the running worker.
 * ``POST /api/v1/tool-settings/{service}/test`` structurally validates a (typically
   unsaved) URL and probes it for reachability, returning ``{ok, reason}``.
+* ``PUT`` and ``DELETE /api/v1/tool-settings/sandbox/credential`` store and clear
+  the key a hosted sandbox provider (``sandbox_provider: e2b``) leases with. A
+  stored key wins over the provider's environment variable and reaches every
+  worker without a restart, so rotating it needs no redeploy. The key is never
+  returned: the GET reports only where it comes from and its last four characters.
 * ``GET /api/v1/tool-settings/guardrails/profiles`` reads the guardrail catalog off
   the service ``guardrails_url`` names. It sits here because that field is the
-  only input it takes, and on the reader router for the reason the GET above is:
-  a profile name is what a caller puts in a request body, so the set of them is
-  not the operator's to withhold, and the endpoint they were read from does not
-  appear in the answer.
+  only input it takes, and on the catalog router because a profile name is what
+  a caller puts in a request body, so any API key may list them. The answer is
+  cached per worker, and the endpoint it was read from does not appear in it.
 * ``GET /api/v1/tool-settings/guardrails/catalog`` lists the guardrails this
-  gateway can run itself, from the installed ``any_guardrail``. On the operator
-  router, unlike the profiles read beside it: it is the picker behind a form that
-  stores a vendor credential deployment-wide, which is not a tenant's to read.
+  gateway can run itself, from the installed ``any_guardrail``. Also on the
+  catalog router: it is the picker an organization's guardrail form fills from.
 """
 
 from typing import Annotated, Literal, cast
@@ -39,6 +42,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    SearchToolServiceDep,
+    UnitOfWorkDep,
     get_config,
     get_db,
     get_session_identity,
@@ -53,14 +58,14 @@ from gateway.core.settings.tools import validate_default_tool
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tools import SandboxProvider
+from gateway.schemas.tools import SandboxCredentialPublic, SandboxCredentialRequest
 from gateway.services.guardrail_catalog import (
     BuiltInGuardrailCatalog,
     GuardrailCatalog,
     build_builtin_guardrail_catalog,
-    fetch_guardrail_catalog,
+    cached_guardrail_catalog,
 )
 from gateway.services.runtime_settings_service import SettingValue
-from gateway.services.search_tool_store_service import refresh_search_tool_cache
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tool_settings_service import (
     GUARDRAILS_URL,
@@ -76,6 +81,13 @@ from gateway.services.tool_settings_service import (
     get_field_options,
     stage_override,
     validate_url,
+)
+from gateway.services.tools import (
+    SANDBOX_KEY_ENV,
+    SandboxCredentialStatus,
+    clear_sandbox_api_key,
+    sandbox_credential_status,
+    store_sandbox_api_key,
 )
 from gateway.services.url_safety import redact_url_secrets
 
@@ -94,11 +106,12 @@ reader_router = APIRouter(
     tags=["tool-settings"],
     dependencies=[Depends(verify_master_key)],
 )
-# The built-in catalog, which describes the installed ``any_guardrail`` rather
-# than anything this deployment configured. A tenant reaches it: the organization
-# guardrail form is the picker's other caller, and it is owners and admins who
-# fill it, never an operator. Gated like the other catalog reads so admitting a
-# session is spelled at the router (see ``deps.verify_catalog_reader``).
+# The two guardrail catalogs: the installed ``any_guardrail`` and the profiles the
+# deployment's guardrails service built. A tenant reaches both: the organization
+# guardrail form is the pickers' other caller, filled by owners and admins rather
+# than an operator, and a profile name is what any caller sends. Gated like the
+# other catalog reads so admitting a session is spelled at the router (see
+# ``deps.verify_catalog_reader``).
 catalog_router = APIRouter(
     prefix="/tool-settings",
     tags=["tool-settings"],
@@ -141,6 +154,13 @@ class ToolSettingsResponse(BaseModel):
             "not editable here. Null for a reader who does not operate the deployment."
         ),
     )
+    sandbox_credential: SandboxCredentialPublic | None = Field(
+        default=None,
+        description=(
+            "The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes "
+            "none, and for a reader who does not operate the deployment."
+        ),
+    )
 
 
 class UpdateToolSettingsRequest(BaseModel):
@@ -161,7 +181,10 @@ class UpdateToolSettingsRequest(BaseModel):
     web_search_intercept: bool | None = None
     web_search_default_tool: str | None = Field(
         default=None,
-        description="A search instance whose provider any-search serves, or 'none' to turn in-loop search off.",
+        description=(
+            "A search instance whose provider any-search serves, or 'none' to turn off the deployment's own "
+            "in-loop search, which an organization key still serves."
+        ),
     )
     web_fetch_default_tool: str | None = Field(default=None, description="A fetch instance, or 'builtin_fetch'.")
     web_search_max_calls: int | None = Field(default=None, ge=1)
@@ -212,7 +235,16 @@ def _current_fields(config: GatewayConfig, *, include_urls: bool = True) -> Tool
         for key in keys
     ]
     provider = config.effective_sandbox_provider() if include_urls else None
-    return ToolSettingsResponse(fields=fields, sandbox_provider=provider)
+    credential = _sandbox_credential(provider, sandbox_credential_status(provider)) if provider else None
+    return ToolSettingsResponse(fields=fields, sandbox_provider=provider, sandbox_credential=credential)
+
+
+def _sandbox_credential(provider: SandboxProvider, status: SandboxCredentialStatus) -> SandboxCredentialPublic | None:
+    """What the dashboard shows of the key ``provider`` leases with, or ``None`` where it takes none."""
+    env_var = SANDBOX_KEY_ENV.get(provider)
+    if env_var is None:
+        return None
+    return SandboxCredentialPublic(source=status.source, last4=status.last4, env_var=env_var)
 
 
 @reader_router.get("")
@@ -235,7 +267,7 @@ async def get_tool_settings(
     return _current_fields(config, include_urls=include_urls)
 
 
-@reader_router.get("/guardrails/profiles")
+@catalog_router.get("/guardrails/profiles")
 async def list_guardrail_profiles(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> GuardrailCatalog:
@@ -258,12 +290,12 @@ async def list_guardrail_profiles(
     caller-supplied and fetching it here would make this a way to have the
     gateway request an address of the caller's choosing.
 
-    Not on ``verify_catalog_reader``, despite being a catalog read: that plane is
-    the three deployment-describing reads a data-plane key may also make, and
-    admitting a key here would let any workspace credential dial the deployment's
-    guardrails service. This is a management read, so it takes the router's own gate.
+    On ``verify_catalog_reader``, so any API key reads it: a caller who may send
+    a profile name may learn which ones exist (otari#2690). The answer is cached
+    for 30 seconds per worker, so however many reads arrive, a worker sends the
+    deployment's guardrails service at most one request in that time.
     """
-    return await fetch_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
+    return await cached_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
 
 
 @catalog_router.get("/guardrails/catalog")
@@ -293,10 +325,8 @@ async def list_builtin_guardrails() -> BuiltInGuardrailCatalog:
     every deployment of the same build, and a parameter's environment variable is
     a name, never whether that name is set.
 
-    The profiles read next door keeps the stricter gate, and the difference is
-    reach rather than audience. That one dials ``guardrails_url``, so admitting a
-    key there would let a workspace credential probe the deployment's own
-    service. This one dials nothing.
+    The profiles read next door takes the same gate. It differs in reach: that
+    one dials ``guardrails_url``, from a short cache, and this one dials nothing.
     """
     return build_builtin_guardrail_catalog()
 
@@ -306,11 +336,12 @@ async def update_tool_settings(
     request: UpdateToolSettingsRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    search_tools: SearchToolServiceDep,
 ) -> ToolSettingsResponse:
     """Persist and apply tool/guardrail setting changes.
 
     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-    omitted field is left unchanged. Operator-gated and standalone-only.
+    omitted field is left unchanged. Operator-gated.
     """
     updates: dict[str, SettingValue] = {
         key: getattr(request, key) for key in request.model_fields_set if key in TOOL_SETTABLE_KEYS
@@ -322,7 +353,7 @@ async def update_tool_settings(
                 # A search tool stored through another replica since this worker's
                 # overlay last refreshed can be the one a search default names, or
                 # take a fetch default's name and so leave that fetch instance out.
-                await refresh_search_tool_cache(db, config)
+                await search_tools.refresh_rows()
             normalized = {key: await stage_override(db, key, value) for key, value in updates.items()}
             # Here rather than in the service's own check, which also runs at
             # startup, before the stored search tools a default may name.
@@ -345,6 +376,38 @@ async def update_tool_settings(
             logger.info("Tool setting changed via dashboard: %s", key)
 
     return _current_fields(config)
+
+
+@operator_router.put("/sandbox/credential")
+async def set_sandbox_credential(
+    request: SandboxCredentialRequest,
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SandboxCredentialPublic:
+    """Store the key this deployment's hosted sandbox provider leases sandboxes with.
+
+    Wins over the provider's environment variable (``E2B_API_KEY``), on this
+    worker at once and on every other within 30 seconds, so a rotated key needs
+    no redeploy. Refused for the ``protocol`` provider, which takes no key of
+    its own. Operator-gated.
+    """
+    provider = config.effective_sandbox_provider()
+    status_ = await store_sandbox_api_key(uow, provider, request.api_key)
+    return cast(SandboxCredentialPublic, _sandbox_credential(provider, status_))
+
+
+@operator_router.delete("/sandbox/credential")
+async def clear_sandbox_credential(
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SandboxCredentialPublic:
+    """Delete the stored sandbox key, so sandboxes are leased with the environment's key again.
+
+    Clearing a key that was never stored is not an error. Operator-gated.
+    """
+    provider = config.effective_sandbox_provider()
+    status_ = await clear_sandbox_api_key(uow, provider)
+    return cast(SandboxCredentialPublic, _sandbox_credential(provider, status_))
 
 
 @operator_router.post("/{service}/test")

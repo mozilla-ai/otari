@@ -218,15 +218,10 @@ def _result_limit(query: SearchQuery) -> int:
 
 
 async def _search_searxng(tool: SearchTool, query: SearchQuery, client: httpx.AsyncClient) -> SearchOutcome:
-    # A self-hosted SearXNG needs no credential and ignores the header. A tool
-    # that does carry an api_key is fronting something that authenticates the
-    # gateway, and gets the header the in-loop backend already sends.
-    headers = {"X-Gateway-Token": tool.api_key} if tool.api_key else None
     try:
         response = await client.get(
             f"{tool.api_base}/search",
             params=build_searxng_params(tool, query),
-            headers=headers,
             timeout=tool.timeout_s,
         )
     # InvalidURL is not an HTTPError: a base URL whose port does not parse, say.

@@ -1,4 +1,4 @@
-"""Passkey ceremonies and the credentials a person manages (standalone only).
+"""Passkey ceremonies and the credentials a person manages.
 
 Two ceremonies, each two calls, plus a small CRUD surface over what they
 produce. The split from ``auth_session.py`` is the one that file's docstring

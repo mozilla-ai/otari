@@ -173,7 +173,6 @@ class CodeExecutionPort(Protocol):
         image: str | None = None,
         timeout_s: float,
         session_ttl_s: float,
-        auth_token: str | None = None,
         resume: str | None = None,
         keep_alive_s: float | None = None,
     ) -> AbstractAsyncContextManager[CodeExecutionSession]:
@@ -203,8 +202,6 @@ class CodeExecutionPort(Protocol):
         ``image`` is the workspace's pinned image or the deployment's, in the
         vocabulary of the published protocol (a container image reference). An
         adapter whose provider has no such notion, or names its workspaces in a
-        vocabulary of its own, ignores it. ``auth_token`` is the caller's bearer
-        credential, set only where the backend authenticates the request rather
-        than the deployment.
+        vocabulary of its own, ignores it.
         """
         ...

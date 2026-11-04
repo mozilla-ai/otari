@@ -5,8 +5,8 @@ handed as keyword arguments: ``org_provider_keys.client_args``,
 ``provider_credentials.client_args`` and ``search_tool_credentials.options``,
 which reach a provider SDK, and ``organization_guardrails.validate_kwargs``,
 which reaches the guardrails service. All four are places a real credential
-legitimately lives (standalone Bedrock needs ``aws_secret_access_key`` in
-``client_args``, ``services/bedrock_gateway_auth.py`` explains why; a guardrail
+legitimately lives (Bedrock needs ``aws_secret_access_key`` in ``client_args``,
+because any-llm never forwards ``api_key`` into its boto3 client; a guardrail
 class can take its vendor key as a parameter), and none of them may echo one
 back over the API. A leaf module rather than a helper on one of the models, so
 the later serializers share the first's rules instead of carrying a copy that
@@ -138,6 +138,17 @@ def _restore_list(incoming: list[Any], stored: list[Any], depth: int) -> list[An
 def carries_redaction(values: dict[str, Any] | None) -> bool:
     """Whether a submitted object still holds the mask somewhere a read could have put it."""
     return values is not None and _carries_mask(values, 0)
+
+
+def stored_secrets_survive(stored: dict[str, Any] | None, submitted: dict[str, Any] | None, *, sent: bool) -> bool:
+    """Whether an update keeps a stored credential-shaped entry the editor never saw.
+
+    A ``sent`` object keeps one only where it still carries the mask; an object
+    left out of the update keeps every entry a read masks.
+    """
+    if sent:
+        return carries_redaction(submitted)
+    return stored is not None and redact_secret_like_values(stored) != stored
 
 
 def restore_redacted_values(

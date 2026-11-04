@@ -1,0 +1,11 @@
+{
+  "status": 401,
+  "body": {
+    "error": {
+      "message": "Authentication Fails, Your api key: ****0000 is invalid (request_id: f7b9ad34-f467-40e8-a518-6d7eeb9677d2)",
+      "type": "authentication_error",
+      "param": null,
+      "code": "invalid_request_error"
+    }
+  }
+}

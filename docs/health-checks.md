@@ -6,9 +6,8 @@ deployment's hosted providers serve, and the Health page shows what each one
 answered. An alert list is emailed when a model stops answering and again when
 it answers.
 
-Health checks are for operators only, on a standalone or a hosted deployment. A
-hybrid gateway has no Health page: it keeps no database and hosts no dashboard
-pages of its own. `health_checks_enabled: false` in `config.yml` (or
+Health checks are for operators only, and every deployment offers them.
+`health_checks_enabled: false` in `config.yml` (or
 `OTARI_HEALTH_CHECKS_ENABLED=false`) removes the page, its routes and its worker;
 it is read at startup, so changing it needs a restart.
 
@@ -39,8 +38,11 @@ Open **Deployment → Health** in the dashboard. It shows:
 
 Every chat model is sent the prompt, `Reply with the single word: pong` by
 default, capped at 16 output tokens. Any answer passes, whatever it says. An
-error, or no answer within 60 seconds, fails. Embedding, image, speech and
-rerank models are skipped.
+error, or no answer within 60 seconds, fails. A model is skipped when its kind
+is embedding, rerank, transcription, image, speech, video, realtime or `other`.
+The provider's listing gives the kind when it says one, and models.dev gives it
+only when the listing does not (see `type` in [Models](models.md)). A model of
+no known kind is checked as a chat model.
 
 A check goes straight to the provider with that hosted provider's own key and
 endpoint. It
@@ -81,6 +83,12 @@ results with what the list was last told:
 So an outage sends two emails however many runs it lasts. One run's changes
 share one email, grouped by provider, and its subject names the deployment's
 host, so mail from several deployments says which one it is about.
+
+The same list is emailed when a hosted model is switched off because its
+provider refused to serve it (see
+[Hosted providers](hosted-providers.md)), once per model. A run that meets
+that refusal switches the model off itself, and the model is then left out of
+the run's alert.
 
 Alerts need outgoing mail; see [Configuration](configuration.md) for the
 `smtp_*` settings, `mail_from_email` and `public_base_url`. When no address

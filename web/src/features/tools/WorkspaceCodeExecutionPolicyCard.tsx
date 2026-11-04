@@ -9,6 +9,7 @@ import { Toggle } from "@/design-system/forms/Toggle"
 import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { canManageWorkspace } from "@/features/organization/roles"
+import { ExecutorRow } from "@/features/tools/ExecutorRow"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import { WorkspaceToolStatus } from "@/features/tools/WorkspaceToolStatus"
 import { useOrganizationContext } from "@/shared/api/organizations"
@@ -21,8 +22,9 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
 // The stored policy has three states (allowed, blocked, none) and can also
-// narrow limits, the image and the tool kinds. The card shows only the switch;
-// the narrowing fields are set through the API.
+// narrow limits, the image and the tool kinds, and pin who runs a provider's own
+// code tool. The card shows the switch and the pin; the narrowing fields are set
+// through the API.
 //
 // What "none" means is the deployment's `default_enabled`. Switching to that
 // value deletes a policy that narrows nothing else, and any other change writes.
@@ -44,14 +46,10 @@ function narrowsAnything(policy: WorkspaceCodeExecutionPolicy): boolean {
  * longer offers. Admission refuses such a policy, so the switch alone would read
  * "on" over a workspace whose requests all fail.
  */
-function staleParts(policy: WorkspaceCodeExecutionPolicy, isHosted: boolean) {
+function staleParts(policy: WorkspaceCodeExecutionPolicy) {
   return {
-    // Hosted, `allowed_images` is the control plane's own list, not the
-    // platform sandbox's, so it cannot say a pin was withdrawn.
     image:
-      !isHosted &&
-      policy.image != null &&
-      !policy.allowed_images.includes(policy.image),
+      policy.image != null && !policy.allowed_images.includes(policy.image),
     tools: (policy.tools ?? []).some(
       (name) => !policy.available_tools.includes(name),
     ),
@@ -66,15 +64,9 @@ function staleParts(policy: WorkspaceCodeExecutionPolicy, isHosted: boolean) {
  */
 export function WorkspaceCodeExecutionPolicyCard({
   leading,
-  isHosted = false,
 }: {
   /** Rows above the switch, so the tool and its switch read as one card. */
   leading?: ReactNode
-  /**
-   * A hosted control plane, where the sandbox is the platform's rather than
-   * this process's, so `sandbox_configured` says nothing.
-   */
-  isHosted?: boolean
 }) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
@@ -140,11 +132,9 @@ export function WorkspaceCodeExecutionPolicyCard({
   const isOn = policy?.configured
     ? policy.enabled
     : (policy?.default_enabled ?? true)
-  const hasSandbox = isHosted || (policy?.sandbox_configured ?? true)
+  const hasSandbox = policy?.sandbox_configured ?? true
   const organizationName = context.data?.organization.name
-  const stale = policy
-    ? staleParts(policy, isHosted)
-    : { image: false, tools: false }
+  const stale = policy ? staleParts(policy) : { image: false, tools: false }
   const needsReset = isOn && (stale.image || stale.tools)
   // Disabled until the read has succeeded. Without that the switch sits on over
   // a workspace that may well have a stored policy, and one change issues the
@@ -218,6 +208,15 @@ export function WorkspaceCodeExecutionPolicyCard({
             isDisabled={isUnreadable || !hasSandbox || save.isSaving}
           />
         }
+      />
+      <ExecutorRow
+        label="Who runs provider code tools"
+        help="For a provider's own code tool (Anthropic code_execution, OpenAI code_interpreter)."
+        value={policy?.executor}
+        onChange={(executor) =>
+          void save.run(() => write({ enabled: true, executor }))
+        }
+        disabled={isUnreadable || !hasSandbox || !isOn || save.isSaving}
       />
     </SettingsGroup>
   )

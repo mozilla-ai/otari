@@ -163,8 +163,8 @@ export function useModelCatalog(
  * Nothing discovered is the ordinary state of a gateway with no provider
  * credential, not an edge case, so the empty popover says which of the two it
  * is and what fills it. The wording names the credential rather than the page
- * that holds one: a hosted deployment keeps those under the organization
- * instead of the process-wide providers page.
+ * that holds one, since it may be the organization's or the process-wide
+ * providers page.
  */
 export function ModelComboBox({
   label,

@@ -1,12 +1,14 @@
 import { buttonVariants, Drawer } from "@heroui/react"
 import { useState } from "react"
-import { FaGithub } from "react-icons/fa"
+import { FaDiscord, FaGithub } from "react-icons/fa"
 import { FiMenu, FiX } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
+import { ProductLockup } from "@/design-system/ProductMark"
 import {
   publicCatalogHref,
   siteHomeHref,
 } from "@/features/models/publicCatalog"
+import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -21,8 +23,8 @@ const DRAWER_LINK =
 
 /**
  * The public catalog's bar: the same destinations as the site in front of it
- * (Models, Documentation, Log in, Sign up, GitHub), so a visitor who came from
- * that site's navbar finds the same one here. The logo goes back to the site
+ * (Models, Documentation, Log in, Sign up, GitHub, Discord), so a visitor who
+ * came from that site's navbar finds the same one here. The logo goes back to the site
  * where the deployment names one (`site_url`), else to the catalog.
  *
  */
@@ -39,11 +41,7 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
         aria-label="Otari home"
         className="inline-flex min-h-11 items-center"
       >
-        <img
-          src={`${import.meta.env.BASE_URL}favicon.svg`}
-          alt=""
-          className="h-6 w-[1.625rem]"
-        />
+        <ProductLockup className="h-8 w-auto text-accent" />
       </a>
       <nav aria-label="Site" className="flex items-center gap-1 md:gap-2">
         <a
@@ -80,6 +78,15 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
           className={LINK}
         >
           <FaGithub aria-hidden className="size-[1.125rem]" />
+        </a>
+        <a
+          href={OTARI_COMMUNITY_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Discord"
+          className={LINK}
+        >
+          <FaDiscord aria-hidden className="size-[1.125rem]" />
         </a>
         <Drawer isOpen={menuOpen} onOpenChange={setMenuOpen}>
           <Drawer.Trigger
@@ -131,6 +138,15 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
                   >
                     <FaGithub aria-hidden className="size-4" />
                     GitHub
+                  </a>
+                  <a
+                    href={OTARI_COMMUNITY_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={DRAWER_LINK}
+                  >
+                    <FaDiscord aria-hidden className="size-4" />
+                    Discord
                   </a>
                   <hr className="my-2 border-border" />
                   <a href="#/" className={DRAWER_LINK}>

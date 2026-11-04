@@ -905,80 +905,6 @@ def test_renaming_the_unit_of_work_on_a_relative_import_is_flagged(tmp_path: Pat
     ]
 
 
-_MODE_READ_REMEDY = "a service gets the behavior for each mode from a binding, not from a branch on the mode"
-
-
-@pytest.mark.parametrize(
-    ("source", "name"),
-    [
-        ("def pick(config):\n    return config.is_hybrid_mode\n", "is_hybrid_mode"),
-        ("def pick(self):\n    return self._config.is_hosted_mode\n", "is_hosted_mode"),
-        ("def pick(config):\n    return config.effective_mode\n", "effective_mode"),
-        ("def pick(config):\n    return config.configured_mode\n", "configured_mode"),
-        ('def pick(config):\n    return getattr(config, "is_hybrid_mode")\n', "is_hybrid_mode"),
-        ("def pick(config):\n    return deployment_for(config).supports(Plane.DATA)\n", "deployment_for"),
-        ("def pick(config):\n    return deployment.deployment_for(config)\n", "deployment_for"),
-    ],
-)
-@pytest.mark.parametrize("relative_path", ["gateway/services/thing_service.py", "gateway/services/things/_store.py"])
-def test_a_service_that_reads_the_mode_is_flagged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str, name: str
-) -> None:
-    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ())
-    _write(tmp_path, relative_path, source)
-    assert check.check_service_mode_reads(tmp_path) == [f"{relative_path}:2 reads {name}; {_MODE_READ_REMEDY}"]
-
-
-@pytest.mark.parametrize(
-    ("relative_path", "source"),
-    [
-        ("gateway/api/main.py", "def mount(config):\n    return config.is_hybrid_mode\n"),
-        ("gateway/container.py", "def bind(config):\n    return config.is_hosted_mode\n"),
-        ("gateway/services/thing_service.py", "def pick(is_hybrid_mode: bool) -> bool:\n    return is_hybrid_mode\n"),
-        ("gateway/services/thing_service.py", "def pick(state):\n    state.is_hybrid_mode = True\n"),
-        (
-            "gateway/services/thing_service.py",
-            'def pick(helpers, config):\n    return helpers.getattr(config, "is_hybrid_mode")\n',
-        ),
-    ],
-)
-def test_a_mode_read_outside_services_or_a_mode_passed_in_is_clean(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str
-) -> None:
-    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ())
-    _write(tmp_path, relative_path, source)
-    assert check.check_service_mode_reads(tmp_path) == []
-
-
-def test_a_service_on_the_mode_read_baseline_may_read_the_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ("gateway/services/thing_service.py",))
-    _write(tmp_path, "gateway/services/thing_service.py", "def pick(config):\n    return config.is_hybrid_mode\n")
-    assert check.check_service_mode_reads(tmp_path) == []
-
-
-@pytest.mark.parametrize("source", ["def pick(config):\n    return config.port\n", None])
-def test_a_mode_read_baseline_entry_that_reads_no_mode_must_leave_the_baseline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
-) -> None:
-    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ("gateway/services/thing_service.py",))
-    _write(tmp_path, "gateway/services/other.py", "")
-    if source is not None:
-        _write(tmp_path, "gateway/services/thing_service.py", source)
-    assert check.check_service_mode_reads(tmp_path) == [
-        "gateway/services/thing_service.py is on the mode read baseline but reads no mode; remove it from the baseline"
-    ]
-
-
-def test_main_fails_on_a_service_that_reads_the_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write(tmp_path, "src/gateway/services/__init__.py", "")
-    _write(tmp_path, "src/gateway/services/things/__init__.py", "")
-    _write(tmp_path, "tests/__init__.py", "")
-    _point_main_at(tmp_path, monkeypatch)
-    assert check.main() == 0
-    _write(tmp_path, "src/gateway/services/things/_store.py", "def pick(config):\n    return config.is_hybrid_mode\n")
-    assert check.main() == 1
-
-
 _LISTENER_DEFAULT_REMEDY = "a caller that leaves a listener out skips it with no error, so every caller passes one"
 _LISTENER_MODULE = "gateway/services/things/thing_service.py"
 
@@ -990,56 +916,56 @@ def _listener_default(line: int, name: str, path: str) -> str:
 @pytest.mark.parametrize(
     ("source", "line", "path"),
     [
-        ("def wire(workspace_listener: WorkspaceListener | None = None) -> None: ...\n", 1, "wire"),
-        ("async def wire(workspace_listener: WorkspaceListener | None = None) -> None: ...\n", 1, "wire"),
-        ("def wire(*, workspace_listener: WorkspaceListener | None = None) -> None: ...\n", 1, "wire"),
-        ("def wire(workspace_listener: WorkspaceListener | None = None, /) -> None: ...\n", 1, "wire"),
-        ("def wire(workspace_listener: WorkspaceListener = NoOpListener()) -> None: ...\n", 1, "wire"),
-        ("def wire(workspace_listener: WorkspaceListenerBuilder | None = None) -> None: ...\n", 1, "wire"),
-        ("def wire(workspace_listener: WorkspaceListenerDep | None = None) -> None: ...\n", 1, "wire"),
-        ("def wire(workspace_listener: tenancy.WorkspaceListener | None = None) -> None: ...\n", 1, "wire"),
+        ("def wire(budget_listener: BudgetListener | None = None) -> None: ...\n", 1, "wire"),
+        ("async def wire(budget_listener: BudgetListener | None = None) -> None: ...\n", 1, "wire"),
+        ("def wire(*, budget_listener: BudgetListener | None = None) -> None: ...\n", 1, "wire"),
+        ("def wire(budget_listener: BudgetListener | None = None, /) -> None: ...\n", 1, "wire"),
+        ("def wire(budget_listener: BudgetListener = NoOpListener()) -> None: ...\n", 1, "wire"),
+        ("def wire(budget_listener: BudgetListenerBuilder | None = None) -> None: ...\n", 1, "wire"),
+        ("def wire(budget_listener: BudgetListenerDep | None = None) -> None: ...\n", 1, "wire"),
+        ("def wire(budget_listener: tenancy.BudgetListener | None = None) -> None: ...\n", 1, "wire"),
         (
-            "def wire(workspace_listener: Callable[[UnitOfWork], WorkspaceListener] | None = None) -> None: ...\n",
+            "def wire(budget_listener: Callable[[UnitOfWork], BudgetListener] | None = None) -> None: ...\n",
             1,
             "wire",
         ),
         (
-            "def wire(workspace_listener: Annotated[WorkspaceListener, Depends(get)] | None = None) -> None: ...\n",
+            "def wire(budget_listener: Annotated[BudgetListener, Depends(get)] | None = None) -> None: ...\n",
             1,
             "wire",
         ),
-        ('def wire(workspace_listener: "WorkspaceListener | None" = None) -> None: ...\n', 1, "wire"),
-        ('def wire(workspace_listener: Callable[[], "WorkspaceListener"] | None = None) -> None: ...\n', 1, "wire"),
+        ('def wire(budget_listener: "BudgetListener | None" = None) -> None: ...\n', 1, "wire"),
+        ('def wire(budget_listener: Callable[[], "BudgetListener"] | None = None) -> None: ...\n', 1, "wire"),
         (
-            "class Thing:\n    def __init__(self, workspace_listener: WorkspaceListener | None = None) -> None: ...\n",
+            "class Thing:\n    def __init__(self, budget_listener: BudgetListener | None = None) -> None: ...\n",
             2,
             "Thing.__init__",
         ),
         (
-            "def outer() -> None:\n    def inner(workspace_listener: WorkspaceListener | None = None) -> None: ...\n",
+            "def outer() -> None:\n    def inner(budget_listener: BudgetListener | None = None) -> None: ...\n",
             2,
             "outer.inner",
         ),
-        ("@dataclass\nclass Thing:\n    workspace_listener: WorkspaceListener | None = None\n", 3, "Thing"),
+        ("@dataclass\nclass Thing:\n    budget_listener: BudgetListener | None = None\n", 3, "Thing"),
         (
-            "@dataclass\nclass Thing:\n    workspace_listener: WorkspaceListener | None = field(default=None)\n",
+            "@dataclass\nclass Thing:\n    budget_listener: BudgetListener | None = field(default=None)\n",
             3,
             "Thing",
         ),
-        ("class Thing(BaseModel):\n    workspace_listener: WorkspaceListener | None = Field(None)\n", 2, "Thing"),
+        ("class Thing(BaseModel):\n    budget_listener: BudgetListener | None = Field(None)\n", 2, "Thing"),
         (
-            "class Thing(BaseModel):\n    workspace_listener: WorkspaceListener | None = Field(None, init=False)\n",
+            "class Thing(BaseModel):\n    budget_listener: BudgetListener | None = Field(None, init=False)\n",
             2,
             "Thing",
         ),
         (
-            "class Thing(BaseModel):\n    workspace_listener: WorkspaceListener = Field(default_factory=make)\n",
+            "class Thing(BaseModel):\n    budget_listener: BudgetListener = Field(default_factory=make)\n",
             2,
             "Thing",
         ),
-        ("class Thing(BaseModel):\n    workspace_listener: WorkspaceListener = Field(**options)\n", 2, "Thing"),
-        ("@dataclass\nclass Thing:\n    workspace_listener: WorkspaceListener = field(default=...)\n", 3, "Thing"),
-        ("@dataclass\nclass Thing:\n    workspace_listener: WorkspaceListener = field(**options)\n", 3, "Thing"),
+        ("class Thing(BaseModel):\n    budget_listener: BudgetListener = Field(**options)\n", 2, "Thing"),
+        ("@dataclass\nclass Thing:\n    budget_listener: BudgetListener = field(default=...)\n", 3, "Thing"),
+        ("@dataclass\nclass Thing:\n    budget_listener: BudgetListener = field(**options)\n", 3, "Thing"),
     ],
 )
 def test_a_listener_with_a_default_is_flagged(
@@ -1047,7 +973,7 @@ def test_a_listener_with_a_default_is_flagged(
 ) -> None:
     monkeypatch.setattr(check, "LISTENER_DEFAULT_BASELINE", ())
     _write(tmp_path, _LISTENER_MODULE, source)
-    assert check.check_listener_defaults(tmp_path) == [_listener_default(line, "workspace_listener", path)]
+    assert check.check_listener_defaults(tmp_path) == [_listener_default(line, "budget_listener", path)]
 
 
 def test_each_listener_with_a_default_in_one_signature_is_flagged(
@@ -1058,41 +984,41 @@ def test_each_listener_with_a_default_in_one_signature_is_flagged(
         tmp_path,
         _LISTENER_MODULE,
         "def wire(\n"
-        "    membership_listener: MembershipListener | None = None,\n"
-        "    workspace_listener: WorkspaceListener | None = None,\n"
+        "    budget_listener: BudgetListener | None = None,\n"
+        "    budget_listener: BudgetListener | None = None,\n"
         ") -> None: ...\n",
     )
     assert check.check_listener_defaults(tmp_path) == [
-        _listener_default(2, "membership_listener", "wire"),
-        _listener_default(3, "workspace_listener", "wire"),
+        _listener_default(2, "budget_listener", "wire"),
+        _listener_default(3, "budget_listener", "wire"),
     ]
 
 
 @pytest.mark.parametrize(
     "source",
     [
-        "def wire(workspace_listener: WorkspaceListener | None) -> None: ...\n",
-        "def wire(workspace_listener: WorkspaceListener, /, limit: int = 3) -> None: ...\n",
-        "def wire(*, workspace_listener: WorkspaceListener) -> None: ...\n",
-        "def wire(workspace_listener: WorkspaceListener, limit: int = 3) -> None: ...\n",
-        "def wire(*, workspace_listener: WorkspaceListener, limit: int = 3) -> None: ...\n",
+        "def wire(budget_listener: BudgetListener | None) -> None: ...\n",
+        "def wire(budget_listener: BudgetListener, /, limit: int = 3) -> None: ...\n",
+        "def wire(*, budget_listener: BudgetListener) -> None: ...\n",
+        "def wire(budget_listener: BudgetListener, limit: int = 3) -> None: ...\n",
+        "def wire(*, budget_listener: BudgetListener, limit: int = 3) -> None: ...\n",
         "def wire(settings: Settings | None = None) -> None: ...\n",
-        'def wire(kind: Literal["WorkspaceListener"] = "WorkspaceListener") -> None: ...\n',
-        'def wire(label: Annotated[str, "WorkspaceListener"] = "") -> None: ...\n',
+        'def wire(kind: Literal["BudgetListener"] = "BudgetListener") -> None: ...\n',
+        'def wire(label: Annotated[str, "BudgetListener"] = "") -> None: ...\n',
         'def wire(label: "\\x00" = "") -> None: ...\n',
-        "class Thing:\n    workspace_listener: WorkspaceListener\n",
-        "@dataclass\nclass Thing:\n    workspace_listener: WorkspaceListener = field(kw_only=True)\n",
-        'class Thing(BaseModel):\n    workspace_listener: WorkspaceListener = Field(description="x")\n',
-        "class Thing(BaseModel):\n    workspace_listener: WorkspaceListener = Field(...)\n",
-        "class Thing(BaseModel):\n    workspace_listener: WorkspaceListener = Field(default=...)\n",
-        "class Thing(BaseModel):\n    workspace_listener: WorkspaceListener = Field(default_factory=None)\n",
-        "@dataclass\nclass Thing:\n    workspace_listener: WorkspaceListener = field(init=False, default=None)\n",
-        "class Thing(BaseModel):\n    _workspace_listener: WorkspaceListener | None = PrivateAttr(default=None)\n",
-        "@dataclass\nclass Thing:\n    workspace_listener: ClassVar[WorkspaceListener] = NoOpListener()\n",
+        "class Thing:\n    budget_listener: BudgetListener\n",
+        "@dataclass\nclass Thing:\n    budget_listener: BudgetListener = field(kw_only=True)\n",
+        'class Thing(BaseModel):\n    budget_listener: BudgetListener = Field(description="x")\n',
+        "class Thing(BaseModel):\n    budget_listener: BudgetListener = Field(...)\n",
+        "class Thing(BaseModel):\n    budget_listener: BudgetListener = Field(default=...)\n",
+        "class Thing(BaseModel):\n    budget_listener: BudgetListener = Field(default_factory=None)\n",
+        "@dataclass\nclass Thing:\n    budget_listener: BudgetListener = field(init=False, default=None)\n",
+        "class Thing(BaseModel):\n    _budget_listener: BudgetListener | None = PrivateAttr(default=None)\n",
+        "@dataclass\nclass Thing:\n    budget_listener: ClassVar[BudgetListener] = NoOpListener()\n",
         "def wire(label: Annotated[()] = 0) -> None: ...\n",
-        "def wire(make: Callable[[WorkspaceListener], Service] = build) -> None: ...\n",
+        "def wire(make: Callable[[BudgetListener], Service] = build) -> None: ...\n",
         "def wire(make: Callable[()] = build) -> None: ...\n",
-        "def wire(kind: WorkspaceListener.Kind = WorkspaceListener.Kind.A) -> None: ...\n",
+        "def wire(kind: BudgetListener.Kind = BudgetListener.Kind.A) -> None: ...\n",
     ],
 )
 def test_a_listener_without_a_default_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
@@ -1103,50 +1029,48 @@ def test_a_listener_without_a_default_is_clean(tmp_path: Path, monkeypatch: pyte
 
 def test_a_listener_with_a_default_outside_services_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "LISTENER_DEFAULT_BASELINE", ())
-    _write(
-        tmp_path, "gateway/container.py", "def wire(workspace_listener: WorkspaceListener | None = None) -> None: ...\n"
-    )
+    _write(tmp_path, "gateway/container.py", "def wire(budget_listener: BudgetListener | None = None) -> None: ...\n")
     assert check.check_listener_defaults(tmp_path) == [
-        f"gateway/container.py:1 gives the listener workspace_listener of wire a default; {_LISTENER_DEFAULT_REMEDY}"
+        f"gateway/container.py:1 gives the listener budget_listener of wire a default; {_LISTENER_DEFAULT_REMEDY}"
     ]
 
 
 def test_a_listener_on_the_baseline_may_have_a_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "LISTENER_DEFAULT_BASELINE", ((_LISTENER_MODULE, "wire", "workspace_listener"),))
-    _write(tmp_path, _LISTENER_MODULE, "def wire(workspace_listener: WorkspaceListener | None = None) -> None: ...\n")
+    monkeypatch.setattr(check, "LISTENER_DEFAULT_BASELINE", ((_LISTENER_MODULE, "wire", "budget_listener"),))
+    _write(tmp_path, _LISTENER_MODULE, "def wire(budget_listener: BudgetListener | None = None) -> None: ...\n")
     assert check.check_listener_defaults(tmp_path) == []
 
 
 def test_a_second_listener_default_in_a_module_on_the_baseline_is_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(check, "LISTENER_DEFAULT_BASELINE", ((_LISTENER_MODULE, "wire", "workspace_listener"),))
+    monkeypatch.setattr(check, "LISTENER_DEFAULT_BASELINE", ((_LISTENER_MODULE, "wire", "budget_listener"),))
     _write(
         tmp_path,
         _LISTENER_MODULE,
-        "def wire(workspace_listener: WorkspaceListener | None = None) -> None: ...\n"
-        "def rewire(workspace_listener: WorkspaceListener | None = None) -> None: ...\n",
+        "def wire(budget_listener: BudgetListener | None = None) -> None: ...\n"
+        "def rewire(budget_listener: BudgetListener | None = None) -> None: ...\n",
     )
-    assert check.check_listener_defaults(tmp_path) == [_listener_default(2, "workspace_listener", "rewire")]
+    assert check.check_listener_defaults(tmp_path) == [_listener_default(2, "budget_listener", "rewire")]
 
 
 @pytest.mark.parametrize(
     "source",
     [
-        "def wire(workspace_listener: WorkspaceListener | None) -> None: ...\n",
-        "def renamed(workspace_listener: WorkspaceListener) -> None: ...\n",
+        "def wire(budget_listener: BudgetListener | None) -> None: ...\n",
+        "def renamed(budget_listener: BudgetListener) -> None: ...\n",
         None,
     ],
 )
 def test_a_listener_default_baseline_entry_with_no_default_must_leave_the_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
 ) -> None:
-    monkeypatch.setattr(check, "LISTENER_DEFAULT_BASELINE", ((_LISTENER_MODULE, "wire", "workspace_listener"),))
+    monkeypatch.setattr(check, "LISTENER_DEFAULT_BASELINE", ((_LISTENER_MODULE, "wire", "budget_listener"),))
     _write(tmp_path, "gateway/services/things/other.py", "")
     if source is not None:
         _write(tmp_path, _LISTENER_MODULE, source)
     assert check.check_listener_defaults(tmp_path) == [
-        f"{_LISTENER_MODULE} is on the listener default baseline for workspace_listener of wire, "
+        f"{_LISTENER_MODULE} is on the listener default baseline for budget_listener of wire, "
         "but no such listener has a default; remove it from the baseline"
     ]
 
@@ -1160,7 +1084,7 @@ def test_main_fails_on_a_listener_with_a_default(tmp_path: Path, monkeypatch: py
     _write(
         tmp_path,
         "src/gateway/services/things/thing_service.py",
-        "def wire(workspace_listener: WorkspaceListener | None = None) -> None: ...\n",
+        "def wire(budget_listener: BudgetListener | None = None) -> None: ...\n",
     )
     assert check.main() == 1
 

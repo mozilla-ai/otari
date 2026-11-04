@@ -14,7 +14,7 @@ falls back to the configured env/YAML value (not to "nothing"). So a deployment
 that set ``OTARI_WEB_SEARCH_URL`` reverts to that env URL when the override is
 cleared; it does not disable web search.
 
-Security posture: these settings are master-key-gated and standalone-only. The
+Security posture: these settings are master-key-gated. The
 operator is already fully trusted (they can point the running gateway at any URL
 via config/env), so URL validation is deliberately **structural** (scheme must be
 http/https, a host must be present) rather than an SSRF deny-list. A deny-private

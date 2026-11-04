@@ -1,4 +1,4 @@
-"""Organization-scoped provider keys (standalone mode only).
+"""Organization-scoped provider keys.
 
 Thin composition over `gateway.services.tenancy.org_provider_key_service`.
 Two routers, because the surface has two scopes: an organization's own keys
@@ -16,12 +16,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
+    OrgProviderKeyServiceDep,
     OrgProviderModelServiceDep,
-    get_db,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
@@ -43,7 +42,6 @@ from gateway.schemas.providers import (
     WorkspaceProviderModelRestrictionRequest,
     WorkspaceProviderModelRestrictionsPublic,
 )
-from gateway.services.tenancy import OrgProviderKeyService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # see organizations.py/workspaces.py for the same note.
@@ -53,10 +51,8 @@ org_router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-# Published by both topologies, because the page behind it is where an
-# organization's models are offered, priced and switched, and that is a tenant's
-# question whether or not the deployment has more than one tenant. ``providers``
-# stays standalone-only beside it, and the two are disjoint mechanisms (see
+# Where an organization's models are offered, priced and switched. ``providers``
+# is published beside it, and the two are disjoint mechanisms (see
 # ``models/provider_keys.py``), so neither stands in for the other. Not named
 # after its prefix, since ``organizations`` is already a surface.
 SURFACE = Surface("organization_providers")
@@ -66,14 +62,6 @@ workspace_router = APIRouter(
     tags=["provider-keys"],
     dependencies=[Depends(verify_master_key)],
 )
-
-
-def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrgProviderKeyService:
-    """Build the org provider key service on the request's session."""
-    return OrgProviderKeyService(db)
-
-
-OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]
 
 
 # ==============================================================================
@@ -121,7 +109,12 @@ async def update_org_provider_key(
     key_id: uuid.UUID,
     body: OrgProviderKeyUpdateRequest,
 ) -> OrgProviderKeyPublic:
-    """Change a key's name, credential, base URL, or client args. Organization owners and admins only."""
+    """Change a key's name, credential, base URL, or client args. Organization owners and admins only.
+
+    A new base URL on a key that holds a credential needs that credential in the
+    same request, `api_key` and any masked `client_args` entry, since the next call
+    sends it to the new host. Clearing the base URL needs neither.
+    """
     return await service.update_key_for_user(user=current_identity, key_id=key_id, request=body)
 
 

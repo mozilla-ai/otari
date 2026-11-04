@@ -1,11 +1,8 @@
 # Importing external usage
 
 Otari can record usage that it did not proxy, such as subscription-backed coding
-agents or another instrumented application. Imported events appear in Activity
-and Usage with their source and an API-equivalent cost estimate.
-
-This feature is available in standalone and hosted control planes. A hybrid
-gateway has no local usage database or import API.
+agents or another instrumented application. Imported events appear in the
+dashboard's Overview with their source and an API-equivalent cost estimate.
 
 ## Enforcement boundary
 
@@ -113,18 +110,10 @@ path itself.
 
 Otari reads the OpenTelemetry GenAI provider, model, response ID, input-token,
 output-token, and cache-token attributes, and records usage from the spans that
-carry tokens. While `trace_capture_enabled` is on, the spans, including an
-agent's own (`invoke_agent`, `execute_tool`), are also kept on the exporting
-key's agent trace, grouped into a session by `anthropic.session.id`, else
-`gen_ai.conversation.id`, else `otari.session_label`, else the OTel trace. Span names and attribute values are
-kept only when they are identifier-shaped; prompt, response, and tool content is
-never stored.
-
-Keeping them is best-effort, and its limits are counted rather than refused: one
-export keeps at most 1,000 spans and 100 sessions, and spans past either limit,
-or that arrive while the trace writer's queue is full, are dropped and counted
-on `gateway_trace_spans_dropped`. The export itself, and the usage it carries,
-is never refused for its traces.
+carry tokens. Prompt, response, and tool content is never stored. The spans are
+also kept on the exporting key's agent trace: how they are grouped into sessions,
+and the per-export limits, are in
+[Agent traces](traces.md#instrumented-agents).
 
 ### Claude Platform and the Claude SDKs
 
@@ -201,8 +190,8 @@ source exports.
 ## Reading imported usage
 
 Use the normal usage APIs and filter on `source`, `api_key_id`, user, model,
-or session label. Activity identifies imported rows and Usage separates priced
-and unpriced totals.
+or session label. On the Overview, Requests identifies imported rows and Usage
+separates priced and unpriced totals.
 
 Imported rows do not appear in budget-consumption gauges because those gauges
 read the enforcement ledger.

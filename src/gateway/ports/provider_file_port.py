@@ -4,6 +4,8 @@ The seam between the files domain and a provider's own files API.
 A provider-native feature names a file only by an ID that provider issued, so a
 file Otari holds is copied there for it, and a file the provider's code produced
 is read back from there.
+An attachment too large to send inline is put in the provider's storage too, for
+a provider that reads such files by URI.
 
 A session is opened for one provider account, with the credential that reaches
 it, and owns the connection its calls run on until it is closed.
@@ -82,5 +84,20 @@ class ProviderFilePort(Protocol):
 
         Raises:
             LookupError: Otari cannot reach this provider's files.
+        """
+        ...
+
+    async def upload_attachment(
+        self, *, provider: LLMProvider, credential: ResolvedCredential, data: bytes, filename: str, mime_type: str
+    ) -> str:
+        """Put an attachment where a request to ``provider`` can reference it, and return the URI it is referenced by.
+
+        For a provider that caps the bytes one request carries inline and reads a
+        larger file from its own storage (Gemini). Returns once the provider can
+        read the file. The provider expires it on its own schedule.
+
+        Raises:
+            ProviderUploadFailedError: the provider has no such storage here,
+                refused the file, or never made it readable.
         """
         ...

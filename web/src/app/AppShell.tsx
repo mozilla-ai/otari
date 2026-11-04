@@ -1,6 +1,5 @@
-import { Button, Disclosure, Popover } from "@heroui/react"
+import { Button, cn, Disclosure, Popover } from "@heroui/react"
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
-import { clsx } from "clsx"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { IconType } from "react-icons"
@@ -13,6 +12,7 @@ import {
   FiSidebar,
   FiX,
 } from "react-icons/fi"
+import { AutoUpdate } from "@/app/AutoUpdate"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { AccountMenu } from "@/app/nav/AccountMenu"
 import { Breadcrumbs } from "@/app/nav/Breadcrumbs"
@@ -51,13 +51,13 @@ import { EntitlementResolver } from "@/app/overlayEntitlementResolver"
 import { PostSignInGate } from "@/app/overlayPostSignInGate"
 import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
-import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { Chip } from "@/design-system/indicators/Chip"
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
+import { useSessionCaller } from "@/shared/api/auth"
 import {
   isNoOrganizationError,
   useOrganizationContext,
@@ -389,7 +389,7 @@ function NavGroup({
     <Disclosure
       isExpanded={open}
       onExpandedChange={setOpen}
-      className={clsx("flex flex-col", open && "gap-0.5")}
+      className={cn("flex flex-col", open && "gap-0.5")}
     >
       {/* A plain wrapper rather than `Disclosure.Heading`: HeroUI renders that
           as an <h3>, which put every group's label ("Routing", "Tools") into the
@@ -466,12 +466,12 @@ function NavGroup({
  * because everything that reads the axis is inside the shell and because the
  * resolver a superset build swaps in issues a query: it belongs behind the auth
  * gate `App.tsx` puts the router behind, not in front of it. So the surfaces
- * that render instead of the shell (the sign-in screen, the public auth pages,
- * the hybrid landing) are deliberately outside it: none of them gates on a
+ * that render instead of the shell (the sign-in screen, the public auth pages)
+ * are deliberately outside it: none of them gates on a
  * capability, and a visitor without a session has nothing to resolve one from.
  *
  * `PostSignInGate` is the seam for anything that has to be shown once, in front
- * of the whole app, after a session exists (otari#789): a hosted signup's
+ * of the whole app, after a session exists (otari#789): otari.ai's signup
  * profile questions, in the build that has a signup. It is mounted here rather
  * than anywhere else because its position *is* its contract, all three
  * boundaries of it, and the module docstring is where that lives. The base
@@ -547,12 +547,13 @@ function AppShellChrome() {
   const inOrganization = navContext === "organization"
   const inDeployment = navContext === "deployment"
   const organization = useOrganizationContext()
+  // The identity the gateway reads the shared email from, so the address the
+  // dialog offers is the one that is sent.
+  const caller = useSessionCaller()
   const { selected: selectedWorkspace } = useSelectedWorkspace()
-  // Always true in a standalone deployment, where the one session is the local
-  // operator and it owns the organization the gateway provisioned for itself.
-  // Written anyway because it becomes load-bearing the moment per-user sign-in
-  // lands (otari-ai#1716), and because an overlay build can already be reached
-  // by someone who is not an admin.
+  // True for the local operator, who owns the organization the gateway
+  // provisioned for itself, and load-bearing for every account that signs in
+  // without managing it (otari-ai#1716).
   // Fails open when the context errors rather than resolving false: Users,
   // budgets and settings are reachable only through this entry, the routes still
   // work by URL, and the server authorizes every request behind it regardless.
@@ -794,7 +795,10 @@ function AppShellChrome() {
   const backgroundInert = isMobile && mobileNavOpen ? true : undefined
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden">
+    // NOTE: This clips rather than hides. `overflow: hidden` makes a box a
+    // scroll container, and a control's real input is positioned against this
+    // box, so one past the fold gives it a scroll range that focus scrolls.
+    <div className="relative flex h-full flex-col overflow-clip">
       {/* The first tab stop: a keyboard user can jump straight to the page body
           instead of tabbing through the whole nav on every route. Visually hidden
           until focused, then pinned top-left over the header (z above it). Goes
@@ -813,7 +817,7 @@ function AppShellChrome() {
           the actor a session belongs to, and this shell is what a session gets
           you; the pages in front of one have no actor to name. */}
       <TelemetryIdentity />
-      <UpdatePrompt />
+      <AutoUpdate />
       <ConnectionStatus />
       <PricingWarning />
       <UnpricedUsageWarning />
@@ -822,8 +826,8 @@ function AppShellChrome() {
           and the pricing alarm above it is a band in flow, so a
           viewport-relative offset would leave the drawer covering the header by
           however tall that band is, taking the only control that closes it with
-          it. The update prompt and the connection status are out of flow and
-          carry their own fill, so they do not enter into this. */}
+          it. The connection status is out of flow and carries its own fill, so
+          it does not enter into this. */}
       <div
         className="relative flex min-h-0 flex-1"
         // What the rail costs the content beside it, for a `position: fixed`
@@ -861,13 +865,13 @@ function AppShellChrome() {
           // the natural tab order.
           tabIndex={-1}
           inert={isMobile && !mobileNavOpen ? true : undefined}
-          className={clsx(
+          className={cn(
             // `otari-rail`: the rail is a named place, the way the toolbar and
             // the tables already are, and a ghost control inside it drops its
             // edge rather than each of them remembering to.
             "otari-rail flex flex-col border-r border-border bg-background focus:outline-none",
             isMobile
-              ? clsx(
+              ? cn(
                   // Full width, starting below the top bar: `top-14` pairs with
                   // the header's `min-h-14`, which is exact because everything in
                   // that bar truncates rather than wrapping. Absolute within the
@@ -883,7 +887,7 @@ function AppShellChrome() {
                   "absolute inset-x-0 top-14 bottom-0 z-40 w-full transition-transform duration-250 ease-out-fluid motion-reduce:transition-none",
                   mobileNavOpen ? "translate-x-0" : "-translate-x-full",
                 )
-              : clsx(
+              : cn(
                   // 150ms, which is what `otari-ai/frontend`'s shell collapses
                   // its own rail in.
                   "relative shrink-0 transition-[width] duration-150 motion-reduce:transition-none",
@@ -972,7 +976,7 @@ function AppShellChrome() {
               // Expanded, one 2px rhythm runs through rows *and* between groups:
               // the 32px heading block is what separates one group from the next.
               // Collapsed there are no headings, so the gap has to do that work.
-              className={clsx(
+              className={cn(
                 "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden",
                 effectiveCollapsed ? "gap-3" : "gap-0.5",
               )}
@@ -1220,7 +1224,7 @@ function AppShellChrome() {
             // which computes to `hidden` beside `overflow-y: auto` anyway.
             className="flex-1 overflow-x-hidden overflow-y-auto focus:outline-none"
           >
-            <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
+            <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 pt-5 pb-[calc(1.25rem+var(--shell-corner-clearance))] md:px-6 md:pt-6 md:pb-[calc(1.5rem+var(--shell-corner-clearance))]">
               {answerIsStillComing ? (
                 <PendingPage />
               ) : routeIsGatedOff ? (
@@ -1249,6 +1253,7 @@ function AppShellChrome() {
           // Below `md` the drawer has closed by then, and the menu row inside it
           // with it, so the control that reopens the drawer takes focus.
           returnFocusRef={isMobile ? toggleRef : feedbackTriggerRef}
+          email={caller?.email?.trim() || null}
         />
       ) : null}
     </div>

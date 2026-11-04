@@ -30,6 +30,7 @@ const SEAM_MODULES = [
   "app/overlayEntitlementResolver.tsx",
   "app/overlayPostSignInGate.tsx",
   "features/auth/overlayAuthShellSlot.tsx",
+  "features/auth/overlayLoginRefusalHint.tsx",
   "features/auth/overlayPublicAuthFields.tsx",
   "shared/api/overlayRequestPolicy.ts",
   "shared/telemetry/overlayTelemetry.ts",

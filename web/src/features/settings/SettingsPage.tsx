@@ -13,6 +13,7 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { Toolbar } from "@/design-system/layout/Toolbar"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { CountryDatabaseCard } from "@/features/settings/CountryDatabaseCard"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
@@ -22,7 +23,6 @@ import {
   useReencryptHostedProviders,
 } from "@/shared/api/hostedProviders"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -528,8 +528,7 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
 }
 
 function SecretKeyRow() {
-  const hostsHosted = useSurfaces()("hosted_providers")
-  const hostedProviders = useHostedProviders(hostsHosted)
+  const hostedProviders = useHostedProviders()
   const reencrypt = useReencryptHostedProviders()
   // A configured hosted provider holds no ciphertext, so only stored ones count.
   const storedHosted = (hostedProviders.data?.data ?? []).filter(
@@ -626,7 +625,6 @@ function groupFields(
 export function SettingsPage() {
   const settings = useSettings()
   const updateSettings = useUpdateSettings()
-  const { deployment_type } = useDeployment()
 
   const data = settings.data
   const isPending = updateSettings.isPending
@@ -665,11 +663,7 @@ export function SettingsPage() {
   // Shown under "Settable only" too: the rules are editable even though the
   // rows in the group beside them are startup-only. Not before the settings
   // answer, or the card would render first and then move under its group.
-  // Not on a hosted control plane, which serves no request a rule could limit.
-  const showRules =
-    data !== undefined &&
-    deployment_type !== "hosted" &&
-    rateLimitRulesMatch(search)
+  const showRules = data !== undefined && rateLimitRulesMatch(search)
   const rulesAfter = rulesCardAfter(groups, groupFields(allFields))
 
   return (
@@ -738,9 +732,11 @@ export function SettingsPage() {
 
       <MaintenanceModeCard />
 
+      <CountryDatabaseCard />
+
       {data ? (
         <p className="pt-6 text-xs text-subtle">
-          Mode: {data.mode} · Version {data.version}
+          Version {data.version}
           {data.require_pricing ? " · require_pricing on" : ""}
         </p>
       ) : null}

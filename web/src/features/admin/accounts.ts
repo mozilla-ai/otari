@@ -22,8 +22,8 @@ import type { DeploymentUser } from "@/client"
 export function accountLockoutReason(
   account: DeploymentUser,
 ): string | undefined {
-  // Bootstrap first, and the order matters on the row that is both: on a
-  // standalone deployment the operator reading this page usually *is* the
+  // Bootstrap first, and the order matters on the row that is both: the
+  // operator reading this page usually *is* the
   // bootstrap identity, and the self reason ends in a remedy ("another operator
   // has to make this change") that no operator can carry out, because the server
   // refuses this change from every one of them. The bootstrap reason is the one

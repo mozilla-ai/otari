@@ -16,7 +16,6 @@ import { PricingWarning } from "./PricingWarning"
 function settings(overrides: Record<string, unknown> = {}) {
   return {
     version: "0.9.1",
-    mode: "standalone",
     require_pricing: true,
     model_discovery: true,
     // False, because the banner needs BOTH: `require_pricing` on and default

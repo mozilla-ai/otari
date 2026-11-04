@@ -7,6 +7,10 @@ async with AnyFetch.create("builtin") as fetcher:  # once the host has registere
     page = await fetcher.fetch("https://www.python.org/downloads/", max_chars=20_000)
 """
 
+# The library's own version, bumped in the PR that changes the library. Set
+# before the imports: ``_http`` reads it while this package is still importing.
+__version__ = "0.1.0"
+
 from any_fetch._api import DEFAULT_TIMEOUT, SHARED_PARAMETERS, AnyFetch, afetch, shared_parameter_problems
 from any_fetch._errors import (
     AnyFetchError,
@@ -45,4 +49,5 @@ __all__ = [
     "afetch",
     "install_log_filter",
     "shared_parameter_problems",
+    "__version__",
 ]

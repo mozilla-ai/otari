@@ -13,6 +13,17 @@ export type GuardrailVerdict =
   | "refused"
   | "unchecked"
 
+// A gate a coding agent's hook checked says its own verdict, and whether it
+// stopped the agent; null for any other guardrail span.
+export function gateVerdict(span: TraceSpan): GuardrailVerdict | null {
+  const outcome = span.attributes["otari.gate.outcome"]
+  if (typeof outcome !== "string") return null
+  const stopped = span.attributes["otari.gate.blocked"] === true
+  if (outcome === "pass") return "passed"
+  if (outcome === "fail") return stopped ? "blocked" : "flagged"
+  return stopped ? "refused" : "unchecked"
+}
+
 // A flag stops the request only in block mode, and a check that could not run
 // stops it only when the guardrail fails closed. Neither setting is recorded on
 // the span, so the step it ran under says which happened.
@@ -20,6 +31,8 @@ export function guardrailVerdict(
   span: TraceSpan,
   step: TraceSpan | undefined,
 ): GuardrailVerdict {
+  const gate = gateVerdict(span)
+  if (gate) return gate
   if (span.outcome !== "error") return "passed"
   const stopped = step?.outcome === "error"
   if (span.error_class === "guardrail_unavailable") {

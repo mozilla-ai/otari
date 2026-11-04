@@ -16,12 +16,20 @@ if TYPE_CHECKING:
 def _providers() -> dict[str, type["AnyFetch"]]:
     # Imported on first use: each provider subclasses AnyFetch, whose module imports this one.
     from any_fetch.providers.builtin import BuiltinProvider
+    from any_fetch.providers.deepseek import DeepSeekProvider
     from any_fetch.providers.exa import ExaProvider
     from any_fetch.providers.fake import FakeProvider
     from any_fetch.providers.tabstack import TabstackProvider
 
     return {
-        provider.METADATA.name: provider for provider in (BuiltinProvider, ExaProvider, FakeProvider, TabstackProvider)
+        provider.METADATA.name: provider
+        for provider in (
+            BuiltinProvider,
+            DeepSeekProvider,
+            ExaProvider,
+            FakeProvider,
+            TabstackProvider,
+        )
     }
 
 

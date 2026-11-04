@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Boot Otari as the OSS edition and smoke it end to end.
 
-ARCHITECTURE.md promises that every milestone ships a standalone OSS edition:
-Otari must boot with only its own adapters bound, no overlay bootstrap and no
-platform token, and still serve a real request. Without one automated check that
+ARCHITECTURE.md promises that Otari stands alone:
+it must boot with only its own adapters bound and no overlay bootstrap,
+and still serve a real request. Without one automated check that
 proves it, the promise is an assertion, and the first change that quietly makes
 an OSS path depend on an enterprise adapter merges green and breaks self-hosting.
 
@@ -12,26 +12,22 @@ TestClient) so a failure to *start* counts as a failure, then walks the path a
 self-hoster walks on day one:
 
 1. ``/api/v1/health``, ``/api/v1/health/liveness``, ``/api/v1/health/readiness`` answer.
-2. Readiness reports no ``mode``, which is what standalone looks like: hybrid
-   mode stamps ``mode: hybrid`` on both health payloads, so the absence is the
-   assertion that no platform token selected the other edition behind our back.
-3. ``/api/v1/bootstrap`` answers with no credential and reports ``standalone``. It is
-   the first request a browser makes, and a second statement of which edition
-   booted.
-4. Create a budget that resets on the UTC calendar day, a user on it, then an
+2. ``/api/v1/bootstrap`` answers with no credential. It is the first request a
+   browser makes.
+3. Create a budget that resets on the UTC calendar day, a user on it, then an
    API key for it (master-key admin surface). The period puts a stored reset
    time in front of the budget gate on every request, which SQLite reads back
    without an offset; a gate that compared it to an aware clock refused every
    request with a 500.
-5. Add a hosted provider at runtime, whose key is stored encrypted.
-6. Create a routing policy whose default candidate fails and whose ``on_failure``
+4. Add a hosted provider at runtime, whose key is stored encrypted.
+5. Create a routing policy whose default candidate fails and whose ``on_failure``
    candidate is that hosted provider.
-7. Send one chat completion at the policy. It can only succeed by failing over to
+6. Send one chat completion at the policy. It can only succeed by failing over to
    the hosted candidate and presenting the stored key to the provider, so a 200 with
    the expected body proves credential storage, routing, fallback, and dispatch
    all work in the OSS edition.
-8. The usage row for that request is readable back through ``/api/v1/usage``.
-9. Mail, which this deployment never configured, reports itself unavailable and
+7. The usage row for that request is readable back through ``/api/v1/usage``.
+8. Mail, which this deployment never configured, reports itself unavailable and
    names what would turn it on, and a send is refused rather than accepted and
    dropped. That is the state every self-hoster who wants no email is in, so it
    is the state the gate has to prove still boots and still says so honestly.
@@ -45,8 +41,7 @@ or dev-only import that reached an OSS code path fails here rather than passing
 on a developer machine that happens to have it installed.
 
 ``--image`` runs the same walk against a built container instead of the source
-checkout, as ``scripts/hybrid_edition_smoke.py --image`` does: the image's own
-filesystem, entrypoint and baked environment. The container migrates on start,
+checkout: the image's own filesystem, entrypoint and baked environment. The container migrates on start,
 as a deployment's does, and keeps its database in a SQLite file of its own
 unless ``--database-url`` names one it can reach. The mock provider then binds
 every interface and the container reaches it through ``host.docker.internal``.
@@ -100,10 +95,8 @@ WORKING_PREFIX = "/working"
 
 # Everything the gateway reads from the environment is cleared before it starts,
 # so the config file this script writes is the only thing that decides what boots.
-# A developer's exported OTARI_MODE or OTARI_AI_TOKEN would otherwise select
-# hybrid mode (GatewayConfig.effective_mode) and quietly turn the gate into a
-# check of the other edition; OTARI_DATABASE_URL or the CLI's DATABASE_URL would
-# point the run at a database nobody meant to smoke. OTARI_BOOTSTRAP, the overlay
+# OTARI_DATABASE_URL or the CLI's DATABASE_URL would otherwise point the run at
+# a database nobody meant to smoke. OTARI_BOOTSTRAP, the overlay
 # selector, is covered by the same sweep, which is what keeps this a gate on the
 # plain build rather than on whatever overlay a developer had exported.
 SCRUBBED_ENV_PREFIXES = ("OTARI_",)
@@ -320,10 +313,10 @@ def oss_edition_env(base_env: dict[str, str], secret_key: str, pepper: str) -> d
 def oss_edition_config(*, database_url: str, port: int | None, mock_base_url: str, names: Names) -> dict[str, Any]:
     """Return the config file contents for the OSS edition under smoke.
 
-    No ``mode``, no ``platform`` block, and no provider anyone has to hold a key
-    for: this is the config a self-hoster could write on day one. A ``port`` of
-    ``None`` leaves out ``host`` and ``port``, for a container whose environment
-    sets its listen address, as the published image does.
+    No provider anyone has to hold a key for: this is the config
+    a self-hoster could write on day one. A ``port`` of ``None`` leaves out
+    ``host`` and ``port``, for a container whose environment sets its listen
+    address, as the published image does.
     """
     config: dict[str, Any] = {
         "database_url": database_url,
@@ -575,16 +568,11 @@ def _expect(status: int, expected: int, what: str, body: Any) -> None:
 
 
 def check_health(base_url: str) -> None:
-    """Assert the three probes answer, and that this is the standalone edition."""
+    """Assert the three probes answer, and readiness reports a connected database."""
     status, body = _request("GET", f"{base_url}{API_ROOT}/health")
     _expect(status, 200, f"GET {API_ROOT}/health", body)
     if not isinstance(body, dict) or body.get("status") != "healthy":
         raise SmokeFailure(f"GET {API_ROOT}/health did not report healthy: {body!r}")
-    if "mode" in body:
-        raise SmokeFailure(
-            f"GET {API_ROOT}/health reports mode {body['mode']!r}. Only hybrid mode stamps a mode, so this "
-            "process is not the OSS edition."
-        )
 
     status, body = _request("GET", f"{base_url}{API_ROOT}/health/liveness")
     _expect(status, 200, f"GET {API_ROOT}/health/liveness", body)
@@ -593,30 +581,22 @@ def check_health(base_url: str) -> None:
     _expect(status, 200, f"GET {API_ROOT}/health/readiness", body)
     if not isinstance(body, dict) or body.get("database") != "connected":
         raise SmokeFailure(f"GET {API_ROOT}/health/readiness did not report a connected database: {body!r}")
-    if "mode" in body:
-        raise SmokeFailure(
-            f"GET {API_ROOT}/health/readiness reports mode {body['mode']!r}, so this process is not the OSS edition."
-        )
-    log("Health probes answer, and the edition is standalone")
+    log("Health probes answer")
 
 
 def check_bootstrap(base_url: str) -> None:
-    """Assert the deployment bootstrap answers, uncredentialed, as standalone.
+    """Assert the deployment bootstrap answers, uncredentialed, with its surfaces.
 
     This is the first request any browser makes, before it holds a credential, so
-    it is checked without one. It is also a second, independent statement of
-    which edition booted: an enterprise or platform-connected build answers
-    something other than ``standalone`` here.
+    it is checked without one.
     """
     status, body = _request("GET", f"{base_url}{API_ROOT}/bootstrap")
     _expect(status, 200, f"GET {API_ROOT}/bootstrap", body)
     if not isinstance(body, dict):
         raise SmokeFailure(f"GET {API_ROOT}/bootstrap did not return an object: {body!r}")
-    if body.get("deployment_type") != "standalone" or body.get("session_type") != "local_operator":
-        raise SmokeFailure(f"GET {API_ROOT}/bootstrap does not describe the OSS edition: {body!r}")
     if not body.get("surfaces"):
         raise SmokeFailure(f"GET {API_ROOT}/bootstrap reports no management surfaces: {body!r}")
-    log("The deployment bootstrap answers without a credential, as standalone")
+    log("The deployment bootstrap answers without a credential")
 
 
 def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> None:
@@ -765,7 +745,7 @@ def run_completion(base_url: str, key: str, provider: _MockProviderServer, names
 
 
 def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> None:
-    """Assert the completion was recorded, which is the OSS control plane's own job."""
+    """Assert the completion left a usage row."""
     status, rows = _request("GET", f"{base_url}{API_ROOT}/usage?limit=10", headers=admin)
     _expect(status, 200, f"GET {API_ROOT}/usage", rows)
     if not isinstance(rows, list) or not rows:

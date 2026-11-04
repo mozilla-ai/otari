@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -24,13 +24,13 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.models.pricing import MODEL_KIND, ModelPricing, PriceSource
 from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
-from gateway.services.catalog import apply_model_limits, load_catalog_metadata
+from gateway.services.catalog import ModelArchitecture, ModelType, apply_model_metadata, load_catalog_metadata
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
 from gateway.services.policy_store import effective_policies
@@ -40,6 +40,7 @@ from gateway.services.pricing_service import (
     default_model_pricing,
     default_pricing_enabled,
     default_pricing_reference,
+    legacy_tool_price_keys,
     load_organization_override_index,
     normalize_effective_at,
     pricing_key_forms,
@@ -67,6 +68,8 @@ from gateway.services.workspace_scope import (
     organization_for_key_id,
     organization_for_workspace_id,
 )
+from gateway.types.models_dev import ModelsDevCatalog
+from gateway.types.price_unit import PriceUnit
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -101,11 +104,11 @@ class ModelPricingInfo(BaseModel):
     # pricing_service._pricing_tiers emits (a `min_input_tokens` of 0 fails
     # `gt=0`, and a tier with no rate override fails validate_has_rate_override).
     pricing_tiers: Sequence[PricingTier | dict[str, float | int]] = Field(default_factory=list)
-    # What the rates are per (``PRICING_UNITS``). A gateway-run tool's row is per
-    # million requests, and a reader that assumed tokens would be wrong by the
-    # whole unit; the catalog never lists one, but the field travels with the
-    # price so a caller reading one model is told too.
-    unit: str = "tokens"
+    # What the rates are per. A gateway-run tool's row is per million requests,
+    # and a reader that assumed tokens would be wrong by the whole unit; the
+    # catalog never lists one, but the field travels with the price so a caller
+    # reading one model is told too.
+    unit: PriceUnit = "tokens"
 
 
 def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
@@ -139,6 +142,15 @@ class ModelObject(BaseModel):
     # Metadata only, independent of the default_pricing toggle; ``None`` where neither knows one.
     context_window: int | None = None
     max_output_tokens: int | None = None
+    # Capabilities from the live models.dev catalog (see ``model_capabilities``), in the
+    # fields OpenRouter's listing uses, so an OpenAI-compatible client can tell which models
+    # take tools or images. ``None`` where models.dev has no entry: unknown, not unsupported.
+    name: str | None = None
+    supported_parameters: list[str] | None = None
+    architecture: ModelArchitecture | None = None
+    # What kind of model this is (``chat``, ``embedding``, ...; see ``services/catalog/_model_type``), so a
+    # client can offer chat models alone. ``None`` where neither the provider's listing nor models.dev says.
+    type: ModelType | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
@@ -194,7 +206,7 @@ def alias_model(
     target: str,
     pricing_lookup: dict[str, ModelPricing],
     *,
-    models_dev: dict[str, Any] | None,
+    models_dev: ModelsDevCatalog | None,
 ) -> ModelObject:
     """Build a ModelObject for an alias, from config.yml or from storage.
 
@@ -218,8 +230,9 @@ def alias_model(
     # this an alias to an unpriced model would report no price while the gateway
     # billed it at the default rate.
     apply_default_pricing(obj, pricing_selector=canonical_target)
-    # Limits from the target too, for the same reason. Exposing them does not reveal the target.
-    apply_model_limits(config, models_dev, obj, limits_selector=canonical_target)
+    # Limits and capabilities from the target too, for the same reason. Exposing them does not
+    # reveal the target; its display name would, so the alias gets none.
+    apply_model_metadata(config, models_dev, obj, metadata_selector=canonical_target, with_name=False)
     return obj
 
 
@@ -344,24 +357,34 @@ async def get_pricing_map(
     provider_filter: str | None = None,
     model_keys: Sequence[str] | None = None,
 ) -> dict[str, ModelPricing]:
-    """Load latest pricing per model_key, optionally filtered by provider prefix or key set."""
+    """Load latest model pricing per model_key, optionally filtered by provider prefix or key set.
+
+    Model-kind rows only: a search or fetch tool's own price is not a model.
+    """
     latest_effective = (
         select(
             ModelPricing.model_key.label("model_key"),
             func.max(ModelPricing.effective_at).label("effective_at"),
         )
+        .where(ModelPricing.kind == MODEL_KIND)
         .group_by(ModelPricing.model_key)
         .subquery()
     )
 
     stmt = select(ModelPricing).join(
         latest_effective,
-        (ModelPricing.model_key == latest_effective.c.model_key)
+        (ModelPricing.kind == MODEL_KIND)
+        & (ModelPricing.model_key == latest_effective.c.model_key)
         & (ModelPricing.effective_at == latest_effective.c.effective_at),
     )
 
     if provider_filter:
-        stmt = stmt.where(ModelPricing.model_key.startswith(f"{provider_filter}:"))
+        # Both spellings a stored key may use: the canonical ``provider:model``
+        # and the legacy ``provider/model``.
+        stmt = stmt.where(
+            ModelPricing.model_key.startswith(f"{provider_filter}:")
+            | ModelPricing.model_key.startswith(f"{provider_filter}/")
+        )
 
     if model_keys is not None:
         stmt = stmt.where(ModelPricing.model_key.in_(model_keys))
@@ -398,6 +421,14 @@ class CatalogScope:
     instances, and the pricing-only pass (phase 2) lists keys the *deployment*
     price list names, so a model an organization adopted on its own credential is
     permitted by the allow-list and published by neither. See phase 2b.
+    """
+
+    hosted_keys: frozenset[str] = frozenset()
+    """Selectors a hosted provider switched on and the caller reaches on the deployment's key.
+
+    Listed by nothing else either: discovery does not dial a hosted provider,
+    so without these an unpriced model switched on would be served and listed
+    nowhere. See phase 2b.
     """
 
     hosted_models: HostedModels = field(default_factory=dict)
@@ -462,6 +493,16 @@ def served_on_deployment_key(hosted_models: HostedModels, model_key: str) -> boo
         return False
     roster = hosted_models[provider]
     return roster is None or model in roster
+
+
+def _listed_hosted_keys(hosted_models: HostedModels) -> frozenset[str]:
+    """The selectors ``hosted_models`` switches on, for phase 2b to list.
+
+    A provider that advertises no particular models names none: it permits
+    whatever is priced on it, which the price list lists already.
+    """
+    entries = hosted_allowlist_entries(hosted_models, frozenset(hosted_models))
+    return frozenset(entry for entry in entries if not entry.endswith(":*"))
 
 
 def _without(hosted_models: HostedModels, providers: frozenset[str]) -> HostedModels:
@@ -583,14 +624,15 @@ async def catalog_scope(
             reads_workspace_layer=False,
             deployment_supplied_providers=hosted,
             offered_keys=frozenset(),
+            hosted_keys=_listed_hosted_keys(hosted_models),
             deployment_key_models=hosted_models,
         )
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
             # Unrestricted, and still carrying its *own* organization's offered
             # models. Not every organization's, which would cross the tenant line
-            # the rest of this function draws, and not none: on a standalone
-            # deployment the operator is also the single organization's owner, so
+            # the rest of this function draws, and not none: on a deployment with
+            # one organization the operator is also its owner, so
             # an empty set would hide the model they just adopted on Providers
             # from the catalog they were told it joined.
             organization_id: uuid.UUID | None = session_identity.active_organization_id
@@ -605,6 +647,7 @@ async def catalog_scope(
                     organization_key_providers = await OrgProviderKeyService(db).get_byo_providers(
                         organization_id=organization_id
                     )
+            deployment_key_models = _without(hosted_models, organization_key_providers)
             return CatalogScope(
                 allowlist=None,
                 reads_workspace_layer=True,
@@ -616,7 +659,8 @@ async def catalog_scope(
                 # key one workspace calls on leaves the deployment paying for
                 # the others, so only a key every workspace calls on takes a
                 # provider out.
-                deployment_key_models=_without(hosted_models, organization_key_providers),
+                deployment_key_models=deployment_key_models,
+                hosted_keys=_listed_hosted_keys(deployment_key_models),
             )
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
@@ -624,6 +668,7 @@ async def catalog_scope(
             reads_workspace_layer=scope.reads_default_workspace,
             deployment_supplied_providers=scope.deployment_supplied_providers,
             offered_keys=scope.offered_keys if include_offered else frozenset(),
+            hosted_keys=scope.hosted_keys,
         )
     api_key, is_master_key = auth
     # An API key's hosted models stay unflagged, because its organization is
@@ -648,6 +693,7 @@ async def catalog_scope(
     if (hosted_models or withhold_unserved) and include_offered:
         dispatch_workspace_id = await lookup_default_workspace_id(db) if is_master_key else workspace_id
         byo_providers = await resolve_workspace_byo_providers(db, dispatch_workspace_id)
+    deployment_key_models = _without(hosted_models, byo_providers)
     return CatalogScope(
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
         reads_workspace_layer=True,
@@ -667,7 +713,8 @@ async def catalog_scope(
         byo_providers=byo_providers,
         withheld_providers=withheld_providers,
         withhold_unserved=withhold_unserved,
-        deployment_key_models=_without(hosted_models, byo_providers),
+        deployment_key_models=deployment_key_models,
+        hosted_keys=_listed_hosted_keys(deployment_key_models),
     )
 
 
@@ -687,8 +734,10 @@ class MergedCatalog:
     """The selectors phase 1 heard from a provider, as opposed to only priced."""
     deployment_key_models: HostedModels = field(default_factory=dict)
     """What the caller reaches on a deployment-owned key; see :attr:`CatalogScope.deployment_key_models`."""
-    models_dev: dict[str, Any] | None = None
+    models_dev: ModelsDevCatalog | None = None
     """The models.dev catalog the limits were read from, for a reader that joins more of it."""
+    alias_targets: set[str] = field(default_factory=set)
+    """Canonical keys of the caller's alias targets, whether or not the listing withheld them."""
 
 
 async def build_merged_catalog(
@@ -782,7 +831,8 @@ async def build_merged_catalog(
     # the models.dev default then vanished from the dashboard along with its
     # rate, and the single-model read served the same model with its price all
     # along, so nothing was actually kept off the wire.
-    alias_targets = alias_target_keys(config, configured_aliases) if withhold_alias_targets else set()
+    targets = alias_target_keys(config, configured_aliases)
+    alias_targets = targets if withhold_alias_targets else set()
     models_dev = await load_catalog_metadata(config, cached_only=cached_only)
 
     merged: dict[str, ModelObject] = {}
@@ -825,6 +875,7 @@ async def build_merged_catalog(
     # forces a pricing entry for it, and publishing that entry here would expose
     # the very name the alias exists to hide. Whether real models are listed is
     # governed by ``model_discovery`` (phase 1), never by pricing config.
+    legacy_tool_keys = legacy_tool_price_keys(config)
     for model_key, pricing in pricing_map.items():
         if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
             continue
@@ -836,16 +887,20 @@ async def build_merged_catalog(
         # reads as a per-million-token price, and calling it would fail.
         if model_key.startswith(f"{GATEWAY_TOOL_PRICING_PROVIDER}:"):
             continue
+        # Nor is a tool's rate still under its old ``<provider>:<instance>`` key.
+        if model_key in legacy_tool_keys:
+            continue
         merged[model_key] = model_from_pricing(pricing)
 
-    # Phase 2b: models the caller's organization offers on its own provider keys.
+    # Phase 2b: models the caller's organization offers on its own provider keys,
+    # and the ones a hosted provider switched on for it.
     #
-    # Neither phase above can list these. A BYO key is not a discovery source
+    # Neither phase above can list these. Neither is a discovery source
     # (phase 1 dials ``config.providers`` instances only), and an organization's
     # own rate lives in ``organization_model_pricing`` rather than in the
-    # deployment price list phase 2 reads. Without this phase an organization can
-    # adopt a model, price it and serve it while the catalog says it does not
-    # exist.
+    # deployment price list phase 2 reads, which a hosted model switched on
+    # unpriced is not in either. Without this phase a model can be served while
+    # the catalog says it does not exist.
     #
     # Priced by phase 3 and then by the per-viewer pass, which reads the
     # organization's own rate, so nothing here carries a price of its own: doing
@@ -854,12 +909,20 @@ async def build_merged_catalog(
     # ``?provider=`` filters these like any real model, and the allow-list filter
     # at the end still applies: an offered model the caller's key may not use is
     # withheld exactly as a discovered one would be.
-    for model_key in sorted(scope.offered_keys):
-        if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
+    # Compared canonically: phase 2 lists a price stored under the legacy
+    # ``provider/model`` spelling, and listing the selector again would show the
+    # model twice, once without its rate.
+    listed = {normalize_pricing_key(config, model_key) for model_key in merged}
+    hosted_only: set[str] = set()
+    for model_key in sorted(scope.offered_keys | scope.hosted_keys):
+        canonical = normalize_pricing_key(config, model_key)
+        if canonical in listed or canonical in alias_targets:
             continue
         owner = owner_from_key(model_key)
         if provider is not None and owner != provider:
             continue
+        if model_key not in scope.offered_keys:
+            hosted_only.add(model_key)
         merged[model_key] = ModelObject(
             id=model_key,
             created=0,
@@ -876,7 +939,15 @@ async def build_merged_catalog(
     # asked to price. Aliases fill both from the resolved target in phase 4.
     for obj in merged.values():
         apply_default_pricing(obj)
-        apply_model_limits(config, models_dev, obj)
+        apply_model_metadata(config, models_dev, obj)
+
+    # A hosted model phase 2b listed has no stored rate, and an organization's
+    # override does not admit it past ``require_pricing`` either, so with the
+    # gate on, the default just filled is all that makes it callable.
+    if config.require_pricing:
+        for model_key in hosted_only:
+            if merged[model_key].pricing is None:
+                del merged[model_key]
 
     # Phase 4: aliases, from config.yml and from storage alike. An alias is a
     # display name, not a provider, so it is only listed for the unfiltered
@@ -925,6 +996,7 @@ async def build_merged_catalog(
         discovered_keys=discovered_keys,
         deployment_key_models=scope.deployment_key_models,
         models_dev=models_dev,
+        alias_targets=targets,
     )
 
 

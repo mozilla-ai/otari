@@ -1,6 +1,12 @@
-"""Web search on the libraries: the resolver, the in-loop backend, and the direct endpoint's rules and mapping."""
+"""Web search on the libraries: the in-loop default, the resolver, the in-loop backend, and the direct endpoint."""
 
 from gateway.services.tools._web_search._backend import WebSearchBackend
+from gateway.services.tools._web_search._default import (
+    in_loop_default,
+    search_default_to_pin,
+    warn_about_tool_instances,
+    web_search_configured,
+)
 from gateway.services.tools._web_search._direct import (
     DirectSearch,
     DirectSearchResult,
@@ -22,9 +28,12 @@ from gateway.services.tools._web_search._resolve import (
     ResolvedFetch,
     ResolvedSearch,
     builtin_fetch_resolved,
+    fetch_resolves,
+    in_loop_search_for,
     resolve_fetch,
     resolve_in_loop_search,
     resolve_search,
+    search_resolves,
 )
 
 __all__ = [
@@ -39,7 +48,10 @@ __all__ = [
     "SearchQuery",
     "WebSearchBackend",
     "builtin_fetch_resolved",
+    "fetch_resolves",
     "filter_hits_by_domain",
+    "in_loop_default",
+    "in_loop_search_for",
     "page_budget_chars",
     "pick_direct_search_instance",
     "refuse_unpriced_direct_search",
@@ -48,4 +60,8 @@ __all__ = [
     "resolve_in_loop_search",
     "resolve_search",
     "run_direct_search",
+    "search_default_to_pin",
+    "search_resolves",
+    "warn_about_tool_instances",
+    "web_search_configured",
 ]

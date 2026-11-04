@@ -6,11 +6,7 @@ import { AccountMenu } from "@/app/nav/AccountMenu"
 import type { CallerIdentity, DeploymentBootstrap } from "@/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import {
-  bootstrap,
-  HOSTED_SURFACES,
-  organizationContext,
-} from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
 
@@ -33,7 +29,7 @@ vi.mock("@/app/nav/overlayAccountBadge", async (importOriginal) => {
 // case installs one, including the ones about the menu's rows: the component
 // makes that request either way, and an unstubbed `fetch` would leave it
 // failing in the background of a test that is not about it.
-// The identity a standalone first boot leaves behind, which the fixture already
+// The identity first boot leaves behind, which the fixture already
 // describes: a name and no address.
 const OPERATOR = organizationContext().caller as CallerIdentity
 
@@ -193,7 +189,7 @@ describe("AccountMenu", () => {
     expect(privacy).toBeDisabled()
   })
 
-  it("links both legal rows at the pages a hosted deployment published", async () => {
+  it("links both legal rows at the pages the deployment published", async () => {
     mockCaller(OPERATOR)
     await openMenu({
       terms_url: "https://otari.ai/terms",
@@ -244,27 +240,25 @@ describe("AccountMenu", () => {
     expect(link).toHaveClass("md:hidden")
   })
 
-  // The bug in #832: the trigger named a standing rather than a person, and the
-  // standing it named came from the bootstrap, which says what kind of session
-  // the deployment issues and not who holds this one. So every signed-in member
-  // of a hosted deployment was told they were the operator.
-  it("names the person signed in to a hosted deployment, not a role", async () => {
+  // #832: the trigger names a person rather than a standing, read off the
+  // caller rather than off the bootstrap, which describes the deployment and
+  // not who is signed in to it.
+  it("names the person signed in, not a role", async () => {
     mockCaller({
       user_id: "44444444-4444-4444-4444-444444444444",
       email: "ada@example.com",
       full_name: "Ada Lovelace",
     })
-    await renderMenu({ deployment_type: "hosted", surfaces: HOSTED_SURFACES })
+    await renderMenu()
 
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument()
     expect(screen.getByText("AL")).toBeInTheDocument()
     expect(screen.queryByText("Operator")).not.toBeInTheDocument()
   })
 
-  // Unchanged for the deployment that has one identity, and for a reason worth
-  // pinning: "Operator" is what first boot *names* that identity, so the word
-  // survives as a name where it used to stand in for one.
-  it("still names the operator of a standalone gateway, whose name that is", async () => {
+  // "Operator" is what first boot *names* the operator identity, so the word
+  // is a name here rather than a role.
+  it("names the operator, whose name that is", async () => {
     mockCaller(OPERATOR)
     await renderMenu()
 

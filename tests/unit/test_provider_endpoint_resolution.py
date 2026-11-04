@@ -147,6 +147,18 @@ def test_a_non_public_base_url_is_refused_when_saved(api_base: str) -> None:
         asyncio.run(check_owned_endpoint_api_base(api_base))
 
 
+@pytest.mark.parametrize(
+    ("api_base", "points_at_hosted"),
+    [("http://127.0.0.1:8000/v1", True), ("http://10.0.0.1/v1", True), ("ftp://1.1.1.1/", False)],
+)
+def test_only_an_address_refusal_points_at_hosted_providers(api_base: str, points_at_hosted: bool) -> None:
+    with pytest.raises(OwnedEndpointAddressError) as refused:
+        asyncio.run(check_owned_endpoint_api_base(api_base))
+    message = str(refused.value)
+    assert message.startswith("endpoint api_base refused: ")
+    assert ("added as a hosted provider instead" in message) is points_at_hosted
+
+
 def test_a_public_ip_literal_is_accepted_without_dns() -> None:
     asyncio.run(check_owned_endpoint_api_base("https://1.1.1.1/v1"))
 

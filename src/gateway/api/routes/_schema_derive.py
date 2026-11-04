@@ -31,15 +31,12 @@ from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 PARAM_FIELD_RENAMES: dict[str, str] = {"model_id": "model"}
 
 # Shared definition for the optional ``session_label`` body field on the chat,
-# messages, and responses request schemas. Capped at 255 to match the platform's
-# indexed session-label keyword so the value is never truncated downstream.
+# messages, and responses request schemas. Capped at 255.
 SESSION_LABEL_MAX_LENGTH = 255
 SESSION_LABEL_DESC = (
-    "Optional caller-supplied label for cost attribution (per run, experiment, "
-    "or conversation). In hybrid mode it is forwarded onto the platform usage "
-    "report so spend can be sliced by session without standing up OpenTelemetry. "
-    "Stripped before the request is forwarded upstream to the provider. Has no "
-    "effect in standalone mode, where there is no platform to report it to."
+    "Optional caller-supplied label for a run, experiment or conversation, which "
+    "names the session the request's trace is grouped under. Stripped before the "
+    "request is forwarded upstream to the provider."
 )
 
 

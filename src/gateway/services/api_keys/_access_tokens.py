@@ -136,25 +136,14 @@ def _same_uuid(value: str, expected: uuid.UUID) -> bool:
         return False
 
 
-def grant_names_key(
-    *,
-    organization_id: str | None,
-    workspace_id: str | None,
-    service_account_id: str | None,
-    key_organization_id: uuid.UUID,
-    key_workspace_id: uuid.UUID,
-    api_key_id: str,
-) -> bool:
-    """Whether each scope a token request names, where it names one, is the rule's key's own.
+def grant_names_organization(*, organization_id: str | None, key_organization_id: uuid.UUID) -> bool:
+    """Whether the organization a token request names, where it names one, is the UUID of the rule's key's.
 
-    ``organization_id`` and ``workspace_id`` are the UUIDs of the key's organization and workspace;
-    ``service_account_id`` is the key's id.
+    The one scope checked. The rule id alone decides the key, so this grants nothing; it refuses a rule id taken from
+    another organization, a mistake worth stopping at the exchange, and it costs nothing, since a client switching
+    from Anthropic to Otari changes ``ANTHROPIC_ORGANIZATION_ID`` along with the rule id anyway.
     """
-    return (
-        (organization_id is None or _same_uuid(organization_id, key_organization_id))
-        and (workspace_id is None or _same_uuid(workspace_id, key_workspace_id))
-        and (service_account_id is None or service_account_id == api_key_id)
-    )
+    return organization_id is None or _same_uuid(organization_id, key_organization_id)
 
 
 def access_token_expiry(*, now: float, ttl_seconds: int, identity_expires_at: int) -> int:

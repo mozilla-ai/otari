@@ -628,3 +628,35 @@ async def test_an_output_cancelled_inside_its_reservation_writes_no_bytes() -> N
         await bridge.store_output("chart.png", _chunks(b"\x89PNG"))
 
     assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_provider_output_sent_inline_is_stored_as_a_new_file() -> None:
+    store = _MemoryStore()
+    db = _FakeDb()
+
+    file_id = await _bridge(store, _CommittingUnitOfWork(db)).store_provider_output(b"\x89PNG", "image/png")
+
+    (record,) = db.added
+    assert file_id == record.id
+    assert store.blobs == {record.storage_ref: b"\x89PNG"}
+    assert record.filename.endswith(".png")
+    assert record.purpose == CODE_EXECUTION_OUTPUT_PURPOSE
+
+
+@pytest.mark.asyncio
+async def test_inline_provider_outputs_draw_on_the_same_caps_as_copies() -> None:
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=2, files_output_max_bytes=5)
+
+    assert await bridge.store_provider_output(b"123456", "text/plain") is None
+    assert await bridge.store_provider_output(b"1234", "text/plain") is not None
+    assert await bridge.store_provider_output(b"12", "text/plain") is None
+    assert len(db.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_inline_provider_output_that_cannot_be_stored_never_raises() -> None:
+    bridge = _bridge(_MemoryStore(), record_error=TimeoutError())
+
+    assert await bridge.store_provider_output(b"data", "text/plain") is None

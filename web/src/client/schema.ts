@@ -30,6 +30,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/blocked-emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Blocked Emails
+         * @description List the addresses and domains blocked from holding an account on this deployment, newest first.
+         */
+        get: operations["admin-list_blocked_emails"];
+        put?: never;
+        /**
+         * Block Email
+         * @description Block an address, or a domain and its subdomains, from holding an account on this deployment.
+         *
+         *     A blocked address cannot sign up, be added to or invited into an organization, or sign in by password,
+         *     passkey or provider, and nothing is mailed to it for signup, verification or a password reset. Every
+         *     existing account the entry matches has its dashboard sessions ended now; the account itself is kept, so
+         *     removing the entry lets it sign in again. API keys are not affected.
+         *
+         *     Refused with 400 for a value that is neither an address nor a domain, or one that would block your own
+         *     address or the deployment's bootstrap operator's, and with 409 for one already blocked.
+         */
+        post: operations["admin-block_email"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/blocked-emails/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unblock Email
+         * @description Remove a blocklist entry, so the accounts it matched may sign in again.
+         */
+        delete: operations["admin-unblock_email"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users": {
         parameters: {
             query?: never;
@@ -77,7 +129,8 @@ export interface paths {
          *     Both fields are optional and omitting one leaves it alone; a body naming
          *     neither is refused rather than treated as a no-op. Deactivating also ends
          *     that account's dashboard sessions immediately, so a lost laptop stops
-         *     working now rather than when its cookie is next presented.
+         *     working now rather than when its cookie is next presented, and ends every
+         *     share of session content it made, which reactivating does not bring back.
          *
          *     Two changes are refused to keep a deployment reachable: an operator may not
          *     deactivate their own account or drop their own operator access, and neither
@@ -129,7 +182,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Agent Telemetry Rows
-         * @description Delete agent_telemetry rows by explicit ids or by filter (standalone).
+         * @description Delete agent_telemetry rows by explicit ids or by filter.
          *
          *     Target either an explicit selection (`ids`) or everything matching a filter
          *     (`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date
@@ -151,7 +204,7 @@ export interface paths {
         };
         /**
          * Count Agent Telemetry
-         * @description Total agent_telemetry rows matching the given filters (standalone).
+         * @description Total agent_telemetry rows matching the given filters.
          *
          *     The filter set mirrors the purge endpoint's, so this sizes exactly what a
          *     "delete all N matching" would remove. Behavioral and metric rows are counted
@@ -175,7 +228,7 @@ export interface paths {
         };
         /**
          * Agent Telemetry Series
-         * @description Row volume over time, split by user or API key (standalone).
+         * @description Row volume over time, split by user or API key.
          *
          *     Mirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top
          *     groups as their own series with the remainder folded into a reconciling
@@ -200,7 +253,7 @@ export interface paths {
         };
         /**
          * Agent Telemetry Summary
-         * @description What the coding agent produced in a window, and what it cost (standalone).
+         * @description What the coding agent produced in a window, and what it cost.
          *
          *     Range-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),
          *     so the aggregates stay served by the timestamp index. Returns the outcome
@@ -973,8 +1026,7 @@ export interface paths {
          *
          *     The database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``
          *     marker, and the identity it names, to answer whether *that* identity holds a
-         *     password (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,
-         *     and ``get_db_if_needed`` hands it no session to read one from.
+         *     password (#702).
          */
         get: operations["bootstrap-get_bootstrap"];
         put?: never;
@@ -1185,6 +1237,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/code/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Code
+         * @description Run code in the gateway's sandbox and return its output.
+         *
+         *     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
+         *     code execution policy is off is refused, and its execution ceiling and pinned
+         *     image apply. It is priced under ``otari:code_execution`` and reserved against
+         *     the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+         *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
+         *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
+         *     sending that id back runs in the same sandbox, with its files and
+         *     interpreter state.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user.
+         */
+        post: operations["code-execution-execute_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/decisions": {
         parameters: {
             query?: never;
@@ -1251,10 +1343,10 @@ export interface paths {
         };
         /**
          * List End User Budgets
-         * @description List the budgets the calling service key may put its end users on, with how many end users each holds.
+         * @description List the budgets the calling service key may put its end users on, with their limits and end user counts.
          *
-         *     Requires a service key. The counts cover the end users of the key's user, blocked ones included and deleted
-         *     ones not.
+         *     Requires a service key. Each budget's name, limits and period are the ones every end user on it is held to. The
+         *     counts cover the end users of the key's user, blocked ones included and deleted ones not.
          */
         get: operations["end-users-list_end_user_budgets"];
         put?: never;
@@ -1658,6 +1750,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hooks/guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Guardrail Definition
+         * @description Keep one version of an agent guardrail, so the gate spans that name it can say what each gate is for.
+         *
+         *     `otari hook` sends this once per version, the first time it reports a check
+         *     against it. The fingerprint is recomputed from the gates, and one that does
+         *     not match the one sent is refused, so a version cannot be stored under
+         *     another's name. Sending a version again changes nothing. A workspace keeps at
+         *     most 1,000 versions, and a new one past that is refused with a 409. It is stored in the
+         *     API key's workspace, beside that key's traces, and takes the same key a trace
+         *     export does: a budget-exempt API key, never the master key.
+         */
+        post: operations["hooks-record_guardrail_definition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/hosted-providers": {
         parameters: {
             query?: never;
@@ -1684,6 +1804,58 @@ export interface paths {
          *     then serves instead.
          */
         post: operations["hosted-providers-create_hosted_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/catalog-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Catalog
+         * @description Apply the reviewed prices, then refresh every provider's models, then the cleanup if asked.
+         *
+         *     The price step comes first, so the model step prices new models at the
+         *     prices it applied, and a model held for want of a price is served once it
+         *     has one. Without a ``digest`` no price changes. A ``digest`` that no longer
+         *     names the pending prices answers 409 and changes nothing. ``cleanup``
+         *     removes the prices of models no provider serves, with their history.
+         */
+        post: operations["hosted-providers-update_catalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/catalog-update/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Catalog Update
+         * @description What updating the catalog would do: the models.dev price changes, then what each provider newly lists.
+         *
+         *     A POST, because it holds the fetched prices as pending for the apply to
+         *     name by their ``digest``; nothing else is written. It dials every enabled
+         *     provider. A price fetch that fails is reported in ``price_error`` and the
+         *     model lists are still previewed. With ``cleanup``, it also previews which
+         *     prices of models no provider serves would be removed.
+         */
+        post: operations["hosted-providers-preview_catalog_update"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1760,60 +1932,6 @@ export interface paths {
          *     A provider no configured key reads is left as it is, to be re-entered.
          */
         post: operations["hosted-providers-reencrypt_hosted_providers"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/hosted-providers/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh Catalog
-         * @description Re-ask every enabled provider what it lists, then take the rest off the catalog.
-         *
-         *     The whole deployment rather than one provider: a stored price is what puts a
-         *     model on a tenant's Models page, and a price under a provider nothing here
-         *     serves cannot be reached by a per-provider refresh. A model list whose
-         *     provider nothing defines any more, such as a removed ``config.yml`` entry,
-         *     goes too, and is named in ``orphaned_rosters``. Where no provider offers a
-         *     model, only those lists go and every price stays; with none of them either,
-         *     the sweep answers 409. Declared before the
-         *     ``/{provider}`` paths to read in the order the surface is used; no method
-         *     collides in any case.
-         */
-        post: operations["hosted-providers-refresh_catalog"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/hosted-providers/refresh/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Preview Catalog Refresh
-         * @description What a catalog sweep would remove, without removing it.
-         *
-         *     A GET, and a truthful one: it writes nothing. It does dial every enabled
-         *     provider, as ``available-models`` does, because a model the provider still
-         *     lists would survive the sweep and previewing it as doomed would be a lie.
-         */
-        get: operations["hosted-providers-preview_catalog_refresh"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2352,10 +2470,7 @@ export interface paths {
          * @description Anthropic Messages API-compatible endpoint.
          *
          *     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-         *     web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-         *     resolve credentials via the platform service and get multi-attempt
-         *     fallback across the resolved route, tool-loop requests included (fallback
-         *     applies up to the pre-lock-in point, same as chat).
+         *     web_search.
          */
         post: operations["messages-create_message"];
         delete?: never;
@@ -2379,9 +2494,8 @@ export interface paths {
          *
          *     Returns ``{"input_tokens": N}`` without contacting an upstream provider:
          *     counting is local, so there is no budget reservation, pricing, or usage
-         *     logging. Authentication mirrors :func:`create_message` — hybrid mode
-         *     resolves the caller's token against the platform, standalone mode validates
-         *     the API key — so the endpoint is not an open token-counting oracle.
+         *     logging. Authentication mirrors :func:`create_message`, validating the API
+         *     key, so the endpoint is not an open token-counting oracle.
          */
         post: operations["messages-count_message_tokens"];
         delete?: never;
@@ -2399,14 +2513,17 @@ export interface paths {
         };
         /**
          * List Models
-         * @description List all available models.
+         * @description List all available models, one entry per model however many providers serve it.
          *
-         *     Returns models auto-discovered from configured providers, enriched with
-         *     pricing data from the model_pricing table when available, and with each
-         *     model's token limits: the context window from the live models.dev catalog,
-         *     or from the pricing snapshot where it has none, and the output limit from the
-         *     live catalog alone. A limit neither knows is null. Models that only exist in the pricing
-         *     table are also included for backward compatibility.
+         *     Each `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a
+         *     request sends as `model` to let the gateway choose the provider: it tries the
+         *     model's offerings best first and falls back down the list. An entry's price,
+         *     token limits and capabilities are those of the offering tried first, at the
+         *     caller's own rate. A value nobody knows is omitted rather than sent as null.
+         *
+         *     Aliases and routing policies are listed beside the models. An
+         *     `instance:model` selector still pins a request to one provider, and
+         *     GET /api/v1/catalog/models/{model_id} lists the offerings of a model.
          */
         get: operations["models-list_models"];
         put?: never;
@@ -2464,9 +2581,10 @@ export interface paths {
          * @description Per-model metadata for the dashboard's detail view, from models.dev.
          *
          *     Covers every model models.dev lists under a configured provider, keyed by the
-         *     ``instance:model`` selector the dashboard uses. ``available`` is false when
-         *     enrichment is disabled (``models_dev_metadata``) or models.dev could not be
-         *     reached; the response is then empty and the UI falls back to bundled data.
+         *     ``instance:model`` selector the dashboard uses. Until models.dev has been
+         *     fetched, and always when ``models_dev_metadata`` is off, it comes from the
+         *     catalog bundled with the gateway. ``available`` is false only when no catalog
+         *     could be read; the response is then empty.
          *     Operator-gated: it describes the gateway's configured providers.
          *
          *     Answers from the cached catalog, kept warm by a background refresher, so the
@@ -2490,7 +2608,9 @@ export interface paths {
         };
         /**
          * Get Model
-         * @description Get details for a specific model.
+         * @description Get details for a specific model, by catalog id, alias or `instance:model` selector.
+         *
+         *     A value the gateway does not know is omitted rather than sent as null.
          */
         get: operations["models-get_model"];
         put?: never;
@@ -2539,10 +2659,12 @@ export interface paths {
          * Exchange Token
          * @description Exchange an identity token for an access token (the RFC 7523 ``jwt-bearer`` grant).
          *
-         *     The identity token must verify against an issuer on ``federation_issuers`` and match the federation rule
-         *     ``federation_rule_id`` names. ``organization_id``, ``workspace_id`` and ``service_account_id``, where set, must
-         *     be the UUIDs of the rule's key's organization and workspace and the key's id. The access token authenticates as
-         *     that key until ``expires_in`` runs out, the rule is deleted or the key stops passing its checks.
+         *     The identity token must match the federation rule ``federation_rule_id`` names and verify against its issuer:
+         *     one on ``federation_issuers`` for an operator's rule, the one the rule names for a member's. ``organization_id``,
+         *     where set, must be the UUID of the rule's key's organization. ``workspace_id`` and ``service_account_id`` are
+         *     accepted and ignored, so a client configured for Anthropic needs only its rule and organization changed. The
+         *     access token authenticates as that key until ``expires_in`` runs out, the rule is deleted or the key stops passing
+         *     its checks.
          *
          *     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
          */
@@ -2688,9 +2810,10 @@ export interface paths {
          *
          *     A request that sends a model's catalog ID moves to the model's next offering
          *     when one fails, with no policy. Each model lists its offerings in the order
-         *     such a request tries them, priced for this organization, with who runs the
-         *     built-in tools on each, beside its traffic: how many requests a backup served,
-         *     and how many named one offering and so had no fallback. The traffic is the
+         *     such a request tries them before automatic selection reorders it, each with
+         *     its input price for this organization and who runs the built-in tools on it,
+         *     beside its traffic: how many requests a backup served, and how many named one
+         *     offering or a policy instead, by API key and provider. The traffic is the
          *     workspaces the caller may see in their active organization, by the rule the
          *     organization's usage reads use.
          */
@@ -3068,7 +3191,8 @@ export interface paths {
          *     Only keys billed to the caller's own user: an operator-minted key assigned
          *     to them is theirs to see here, and nobody else's key ever is. Naming a
          *     workspace outside their organization lists nothing rather than refusing, so
-         *     the filter reports no more than the unfiltered read does.
+         *     the filter reports no more than the unfiltered read does. An owner or admin
+         *     also sees the organization's service keys, which they manage.
          */
         get: operations["organization-keys-list_own_keys"];
         put?: never;
@@ -3079,7 +3203,12 @@ export interface paths {
          *     The member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the
          *     caller's own attribution user, the key is always budget-enforced, and the
          *     workspace must be visible to the caller (a member of it, or an organization
-         *     owner/admin, who see every workspace). The secret is returned once.
+         *     owner/admin, who see every workspace). A viewer of the workspace is refused
+         *     with 403. The secret is returned once.
+         *
+         *     A service key is the organization's rather than the caller's: only an
+         *     organization owner or admin may create one, its end-user budgets must be
+         *     this organization's, and it is owned by a user minted for it alone.
          */
         post: operations["organization-keys-create_own_key"];
         delete?: never;
@@ -3107,9 +3236,65 @@ export interface paths {
         head?: never;
         /**
          * Update Own Key
-         * @description Update one of the caller's own API keys.
+         * @description Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.
          */
         patch: operations["organization-keys-update_own_key"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Federation Rules
+         * @description List the identities that may authenticate as a key, oldest first.
+         *
+         *     The caller's own key, or for the deployment operator any key in their active organization. Includes any rule
+         *     the operator gave the key on ``/api/v1/keys``, which ``member_managed`` tells apart.
+         */
+        get: operations["organization-keys-list_own_federation_rules"];
+        put?: never;
+        /**
+         * Create Own Federation Rule
+         * @description Let an OpenID Connect identity token stand in for a key, through the token exchange.
+         *
+         *     Needs ``federation_member_rules``, else 403, and an organization owner or admin acting on their own key, or the
+         *     deployment operator on any key in their active organization, else 403. The issuer may be any https URL; its
+         *     signing keys are fetched only from a public host. The rule matches only in ``POST /api/v1/oauth/token`` naming
+         *     its id, never as a bare identity token, so it lets a workload act as this key and no other: a rule naming another
+         *     tenant's workload gives that workload nothing it did not ask for. A rule this key already holds answers 409.
+         */
+        post: operations["organization-keys-create_own_federation_rule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Own Federation Rule
+         * @description Remove a federation rule from a key. Tokens it matched stop with the next request.
+         *
+         *     The caller's own key whatever their role, or for the deployment operator any key in their active organization.
+         *     Works whether or not ``federation_member_rules`` is on, so a rule can always be taken back.
+         */
+        delete: operations["organization-keys-delete_own_federation_rule"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/organizations/me/keys/{key_id}/rotate": {
@@ -3559,6 +3744,10 @@ export interface paths {
         /**
          * Update Org Provider Key
          * @description Change a key's name, credential, base URL, or client args. Organization owners and admins only.
+         *
+         *     A new base URL on a key that holds a credential needs that credential in the
+         *     same request, `api_key` and any masked `client_args` entry, since the next call
+         *     sends it to the new host. Clearing the base URL needs neither.
          */
         patch: operations["provider-keys-update_org_provider_key"];
         trace?: never;
@@ -3926,6 +4115,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/traces/audit/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Break Glass Reads
+         * @description The organization's owners' break-glass openings, newest first. Owners only.
+         */
+        get: operations["organization-traces-list_organization_break_glass_reads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/traces/count": {
         parameters: {
             query?: never;
@@ -3978,11 +4187,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["organization-traces-trace_series"];
         put?: never;
@@ -4008,6 +4220,99 @@ export interface paths {
          *     than one of the caller's workspaces is a 409 rather than a guess.
          */
         get: operations["organization-traces-get_trace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Organization Break Glass
+         * @description Open a session's content without its owner's share, as an owner of the organization.
+         *
+         *     For an investigation the session's owner cannot be asked to share for, a member
+         *     who left included. The opening is recorded with its reason before anything
+         *     opens, and listed for every owner at ``GET .../audit/break-glass``. The
+         *     session's owner is not told.
+         */
+        post: operations["organization-traces-organization_break_glass"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Trace Content Shares
+         * @description The shares one of your sessions has had, ended ones included, newest first, each with its newest reads.
+         */
+        get: operations["organization-traces-list_trace_content_shares"];
+        put?: never;
+        /**
+         * Share Trace Content
+         * @description Let the organization's admins, or the deployment's operator, read what one of your sessions was about.
+         *
+         *     A session's content is private to its own user. A share lets its audience read
+         *     it until you end it or lose the workspace, and each read through it is recorded for you.
+         *     Only the session's own user can share it.
+         */
+        post: operations["organization-traces-share_trace_content"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/shares/{share_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End Trace Content Share
+         * @description Stop a share letting its audience read what your session was about.
+         */
+        delete: operations["organization-traces-end_trace_content_share"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}/shares/{share_id}/reads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Trace Content Share Reads
+         * @description Every read through one share of your session, newest first, a page at a time.
+         */
+        get: operations["organization-traces-list_trace_content_share_reads"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4127,15 +4432,16 @@ export interface paths {
         };
         /**
          * List Org Web Search Keys
-         * @description List the caller's organization's web search keys. Organization owners and admins only.
+         * @description List the caller's organization's web search and fetch keys. Organization owners and admins only.
          */
         get: operations["web-search-keys-list_org_web_search_keys"];
         put?: never;
         /**
          * Create Org Web Search Key
-         * @description Add a web search key to the caller's organization. Organization owners and admins only.
+         * @description Add a search or fetch key to the caller's organization. Organization owners and admins only.
          *
-         *     A workspace with a usable key searches with it rather than with the deployment's search.
+         *     A new key serves no workspace until the organization makes it its default for the key's kind, or a
+         *     workspace pins it. Until then each workspace keeps the key it uses, or the deployment's instance.
          */
         post: operations["web-search-keys-create_org_web_search_key"];
         delete?: never;
@@ -4156,14 +4462,19 @@ export interface paths {
         post?: never;
         /**
          * Delete Org Web Search Key
-         * @description Delete an archived web search key. Organization owners and admins only.
+         * @description Delete an archived key. Organization owners and admins only.
          */
         delete: operations["web-search-keys-delete_org_web_search_key"];
         options?: never;
         head?: never;
         /**
          * Update Org Web Search Key
-         * @description Rename a web search key or replace its secret. Organization owners and admins only.
+         * @description Rename a key, replace its secret, or change its api_base or options. Organization owners and admins only.
+         *
+         *     Its kind and provider are fixed. A new api_base on a key that holds a secret
+         *     needs that secret in the same request, `api_key` and any masked `options`
+         *     entry, since the next call sends it to the new host. Clearing api_base needs
+         *     neither.
          */
         patch: operations["web-search-keys-update_org_web_search_key"];
         trace?: never;
@@ -4179,7 +4490,7 @@ export interface paths {
         put?: never;
         /**
          * Archive Org Web Search Key
-         * @description Take a web search key out of use. Organization owners and admins only.
+         * @description Take a key out of use. Organization owners and admins only.
          */
         post: operations["web-search-keys-archive_org_web_search_key"];
         delete?: never;
@@ -4199,10 +4510,19 @@ export interface paths {
         put?: never;
         /**
          * Set Org Default Web Search Key
-         * @description Make a web search key its provider's organization default. Organization owners and admins only.
+         * @description Make a key the organization's default of its kind, in place of the previous one.
+         *
+         *     Organization owners and admins only.
          */
         post: operations["web-search-keys-set_org_default_web_search_key"];
-        delete?: never;
+        /**
+         * Unset Org Default Web Search Key
+         * @description Stop a key being the organization's default of its kind. Organization owners and admins only.
+         *
+         *     Idempotent: a key that is not the default is returned unchanged. With no default, a workspace that
+         *     pinned no key uses the deployment's instance for that kind.
+         */
+        delete: operations["web-search-keys-unset_org_default_web_search_key"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4219,7 +4539,7 @@ export interface paths {
         put?: never;
         /**
          * Restore Org Web Search Key
-         * @description Put an archived web search key back in use. Organization owners and admins only.
+         * @description Put an archived key back in use. Organization owners and admins only.
          */
         post: operations["web-search-keys-restore_org_web_search_key"];
         delete?: never;
@@ -4280,13 +4600,9 @@ export interface paths {
          *     also have to be added to the pipeline's strip list, and a gateway-internal
          *     field that is not stripped is forwarded to the provider as a call kwarg.
          *
-         *     ``user`` in the body is the one field the pipeline will not read here: spend
-         *     binds to the session's own attribution user, derived and never accepted.
-         *
-         *     On a hosted control plane there is no local pipeline to call, so the same
-         *     principal is forwarded to the data-plane gateway instead
-         *     (:func:`_dispatch_to_data_plane`). The request and the response are the same
-         *     either way.
+         *     ``user`` and ``safety_identifier`` in the body are the fields the pipeline
+         *     will not read here: spend and the provider's end-user identifier both bind
+         *     to the session's own attribution user, derived and never accepted.
          */
         post: operations["playground-playground_chat_completions"];
         delete?: never;
@@ -4583,10 +4899,11 @@ export interface paths {
         };
         /**
          * List Pricing
-         * @description List all model pricing.
+         * @description List every stored price version, of every kind.
          *
-         *     A hosted provider restricted to another organization than the caller's is
-         *     left out, as it is from the catalog.
+         *     A row's ``kind`` says whether it prices a model or a search or fetch
+         *     instance. A hosted provider restricted to another organization than the
+         *     caller's is left out, as it is from the catalog.
          */
         get: operations["pricing-list_pricing"];
         put?: never;
@@ -4614,15 +4931,16 @@ export interface paths {
         };
         /**
          * List Current Pricing
-         * @description List the rate each priced model is metered at, one row per model key.
+         * @description List the rate each priced key is metered at, one row per kind and key.
          *
          *     Listing prices answers the stored history, one row per ``effective_at``, so a
-         *     page of that is a page of revisions rather than a page of models. This
+         *     page of that is a page of revisions rather than a page of keys. This
          *     answers one row per key: the newest rate that has taken effect, or the
-         *     earliest scheduled rate for a key that has none yet. ``count`` is the number
-         *     of priced models, so a caller can page without reading the collection to
-         *     learn how long it is. A hosted provider restricted to another organization
-         *     than the caller's is left out of both.
+         *     earliest scheduled rate for a key that has none yet. Every kind is returned,
+         *     a row's ``kind`` telling a model's price from a search or fetch instance's,
+         *     and ``count`` is the number of priced keys of any kind, so a caller can page
+         *     without reading the collection to learn how long it is. A hosted provider
+         *     restricted to another organization than the caller's is left out of both.
          */
         get: operations["pricing-list_current_pricing"];
         put?: never;
@@ -4654,46 +4972,6 @@ export interface paths {
         get: operations["pricing-list_pricing_drift"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pricing/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Pricing Refresh
-         * @description Fetch the latest defaults and hold them for operator review.
-         */
-        post: operations["pricing-preview_pricing_refresh"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pricing/refresh/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Confirm Pricing Refresh
-         * @description Activate the latest reviewed default-price snapshot.
-         */
-        post: operations["pricing-confirm_pricing_refresh"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4772,7 +5050,7 @@ export interface paths {
         };
         /**
          * Get Pricing
-         * @description Get pricing for a specific model as of a timestamp.
+         * @description Get pricing for a specific model, or a search or fetch instance, as of a timestamp.
          *
          *     A 404 for a model of a hosted provider restricted to another organization
          *     than the caller's.
@@ -4782,7 +5060,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Pricing
-         * @description Delete pricing entries for a model.
+         * @description Delete pricing entries for a model, or for a search or fetch instance.
          */
         delete: operations["pricing-delete_pricing"];
         options?: never;
@@ -4799,7 +5077,7 @@ export interface paths {
         };
         /**
          * Get Pricing History
-         * @description Return the full pricing history for a model.
+         * @description Return the full pricing history for a model, or for a search or fetch instance.
          *
          *     A 404 for a model of a hosted provider restricted to another organization
          *     than the caller's.
@@ -5079,10 +5357,7 @@ export interface paths {
          * @description OpenAI-compatible Responses endpoint.
          *
          *     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-         *     web_search in both standalone mode and hybrid mode. Hybrid-mode requests
-         *     resolve credentials via the platform service and get multi-attempt
-         *     fallback across the resolved route, tool-loop requests included (fallback
-         *     applies up to the pre-lock-in point, same as chat).
+         *     web_search.
          */
         post: operations["responses-create_response"];
         delete?: never;
@@ -5170,40 +5445,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/routing/preferences/rank": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rank Candidates
-         * @description Record scored examples: one routing-memory record each, plus an audit row.
-         *
-         *     The routing-memory record is written before its audit row for each example,
-         *     because it is the load-bearing one (the router votes over it) and embedding it
-         *     can fail; writing the audit row only afterwards means a failed embedding never
-         *     leaves an orphan audit row.
-         *
-         *     A failed embedding is a 502 that names the model, not a 500. Every example in
-         *     the batch is embedded, so this is the call an operator makes most often and the
-         *     one most likely to meet a misconfigured ``router_embedding_model``.
-         *
-         *     Score keys are stored canonically as ``instance:model`` (see
-         *     :func:`_validated_scores`), which is the form the router canonicalizes its
-         *     candidates to, so how a policy spells a candidate cannot decide whether it
-         *     matches.
-         */
-        post: operations["routing-rank_candidates"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/routing/recommend": {
         parameters: {
             query?: never;
@@ -5221,9 +5462,9 @@ export interface paths {
          *     session and the spawning tool call, the subagent type, the task, the
          *     parent's model and the model the caller asked for, if any. The recommender
          *     this build binds picks one of the candidate models and the answer names it.
-         *     A standalone deployment asks the decision model `agent_recommender_model`
-         *     names to choose among `agent_recommender_candidates` for Claude Code and
-         *     among the request's own `candidates` for pi; a hosted build may bind a
+         *     By default the deployment asks the subagent router an operator switched on
+         *     in the dashboard to choose among `agent_recommender_candidates` for Claude Code and
+         *     among the request's own `candidates` for pi; a bootstrap may bind a
          *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
          *     and its probability for each candidate.
@@ -5239,7 +5480,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/routing/status": {
+    "/api/v1/routing/recommenders": {
         parameters: {
             query?: never;
             header?: never;
@@ -5247,23 +5488,50 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Routing Memory Status
-         * @description Report how warm one user's routing memory is in one workspace, per pool.
-         *
-         *     ``user_id`` is required rather than optional because there is no aggregate
-         *     answer: warmth is per user, and a total across users would describe a pool
-         *     that no request ever votes over. The same holds across workspaces, which is
-         *     why ``workspace_id`` narrows rather than aggregating; it merely defaults
-         *     instead of being required, because a single-workspace deployment has one
-         *     answer.
+         * List Agent Recommenders
+         * @description List the subagent routers.
          */
-        get: operations["routing-routing_memory_status"];
+        get: operations["agent-recommenders-list_agent_recommenders"];
         put?: never;
-        post?: never;
+        /**
+         * Create Agent Recommender
+         * @description Add a subagent router: a decision model, its key, and the prices a recommendation is charged at.
+         *
+         *     The first router added is switched on; a later one waits to be switched
+         *     on in place of the one that is.
+         */
+        post: operations["agent-recommenders-create_agent_recommender"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/routing/recommenders/{recommender_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Agent Recommender
+         * @description Remove a subagent router and its key. With none left, no recommendation is served.
+         */
+        delete: operations["agent-recommenders-delete_agent_recommender"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Agent Recommender
+         * @description Change a subagent router, or switch it on in place of the one that is.
+         *
+         *     An omitted field keeps its stored value, the key included while the
+         *     provider and the API base stay the same.
+         */
+        patch: operations["agent-recommenders-update_agent_recommender"];
         trace?: never;
     };
     "/api/v1/scoped-budgets": {
@@ -5610,6 +5878,42 @@ export interface paths {
         patch: operations["settings-update_settings"];
         trace?: never;
     };
+    "/api/v1/settings/country-database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Country Database
+         * @description Describe the stored country file, and say whether ``client_country_database`` is read instead.
+         */
+        get: operations["settings-get_country_database"];
+        /**
+         * Upload Country Database
+         * @description Store a country file in place of the one stored before.
+         *
+         *     A file larger than 32 MiB answers 413, and one that is no MaxMind DB
+         *     country file answers 400. Either way the file stored before stays. While
+         *     ``client_country_database`` is set, the stored file is kept but not read.
+         */
+        put: operations["settings-upload_country_database"];
+        post?: never;
+        /**
+         * Delete Country Database
+         * @description Remove the stored country file.
+         *
+         *     Answers 404 when none is stored, and 409 when it is the only country source
+         *     for ``provider_supported_countries`` or for the supported countries of an
+         *     enabled hosted provider.
+         */
+        delete: operations["settings-delete_country_database"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/mail": {
         parameters: {
             query?: never;
@@ -5768,7 +6072,7 @@ export interface paths {
          * @description Persist and apply tool/guardrail setting changes.
          *
          *     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-         *     omitted field is left unchanged. Operator-gated and standalone-only.
+         *     omitted field is left unchanged. Operator-gated.
          */
         patch: operations["tool-settings-update_tool_settings"];
         trace?: never;
@@ -5807,10 +6111,8 @@ export interface paths {
          *     every deployment of the same build, and a parameter's environment variable is
          *     a name, never whether that name is set.
          *
-         *     The profiles read next door keeps the stricter gate, and the difference is
-         *     reach rather than audience. That one dials ``guardrails_url``, so admitting a
-         *     key there would let a workspace credential probe the deployment's own
-         *     service. This one dials nothing.
+         *     The profiles read next door takes the same gate. It differs in reach: that
+         *     one dials ``guardrails_url``, from a short cache, and this one dials nothing.
          */
         get: operations["tool-settings-list_builtin_guardrails"];
         put?: never;
@@ -5849,15 +6151,46 @@ export interface paths {
          *     caller-supplied and fetching it here would make this a way to have the
          *     gateway request an address of the caller's choosing.
          *
-         *     Not on ``verify_catalog_reader``, despite being a catalog read: that plane is
-         *     the three deployment-describing reads a data-plane key may also make, and
-         *     admitting a key here would let any workspace credential dial the deployment's
-         *     guardrails service. This is a management read, so it takes the router's own gate.
+         *     On ``verify_catalog_reader``, so any API key reads it: a caller who may send
+         *     a profile name may learn which ones exist (otari#2690). The answer is cached
+         *     for 30 seconds per worker, so however many reads arrive, a worker sends the
+         *     deployment's guardrails service at most one request in that time.
          */
         get: operations["tool-settings-list_guardrail_profiles"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tool-settings/sandbox/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Sandbox Credential
+         * @description Store the key this deployment's hosted sandbox provider leases sandboxes with.
+         *
+         *     Wins over the provider's environment variable (``E2B_API_KEY``), on this
+         *     worker at once and on every other within 30 seconds, so a rotated key needs
+         *     no redeploy. Refused for the ``protocol`` provider, which takes no key of
+         *     its own. Operator-gated.
+         */
+        put: operations["tool-settings-set_sandbox_credential"];
+        post?: never;
+        /**
+         * Clear Sandbox Credential
+         * @description Delete the stored sandbox key, so sandboxes are leased with the environment's key again.
+         *
+         *     Clearing a key that was never stored is not an error. Operator-gated.
+         */
+        delete: operations["tool-settings-clear_sandbox_credential"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5900,10 +6233,31 @@ export interface paths {
          * List Tools
          * @description List the tools Otari runs itself, with the declaration forms it accepts.
          *
-         *     Every other `tools[]` entry, including provider-native keywords not listed
-         *     here, is forwarded to the upstream provider untouched.
+         *     Called with an API key, a tool its workspace does not allow is listed as
+         *     unavailable. Every other `tools[]` entry, including provider-native keywords
+         *     not listed here, is forwarded to the upstream provider untouched.
          */
         get: operations["tools-list_tools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trace-content/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trace Content Policy
+         * @description What this deployment keeps of agent sessions, and who besides a session's owner can open it.
+         */
+        get: operations["traces-get_trace_content_policy"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5924,6 +6278,30 @@ export interface paths {
          * @description List agent sessions, most recently active first unless ``sort`` says otherwise.
          */
         get: operations["traces-list_traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/traces/audit/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Break Glass Reads
+         * @description The operator's recorded break-glass openings, in any organization, newest first.
+         *
+         *     An organization owner's openings are listed for that organization's owners
+         *     alone, at ``GET /organizations/me/traces/audit/break-glass``: their reasons
+         *     can name the people under investigation, which is no business of the operator's.
+         */
+        get: operations["traces-list_break_glass_reads"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5984,11 +6362,14 @@ export interface paths {
         };
         /**
          * Trace Series
-         * @description Count sessions per bucket of their start, split by whether they failed.
+         * @description Count the sessions active in each bucket, split by whether they failed.
          *
-         *     A session failed when it holds an unrecovered error other than a tool's. A tool's error
-         *     goes back to the model, an MCP tool's included, so a session whose only errors are tools'
-         *     counts as succeeded.
+         *     A session is active from its start to its last activity, so a long one counts in every bucket it ran
+         *     through. Here ``start`` and ``end`` bound the buckets: a session that began before
+         *     ``start`` or was still active at ``end`` counts in the buckets between them it overlaps. Buckets are
+         *     aligned to their size in UTC and only the populated ones are returned. A session failed when it holds an
+         *     unrecovered error other than a tool's. A tool's error goes back to the model, an MCP tool's included, so
+         *     a session whose only errors are tools' counts as succeeded.
          */
         get: operations["traces-trace_series"];
         put?: never;
@@ -6022,6 +6403,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/traces/{trace_id}/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Platform Break Glass
+         * @description Open a session's content in any organization without its owner's share, as the deployment's operator.
+         *
+         *     Only where ``trace_platform_break_glass_enabled`` is on; a 404 otherwise. The
+         *     opening is recorded with its reason and reference before anything opens, and
+         *     listed at ``GET /traces/audit/break-glass``.
+         */
+        post: operations["traces-platform_break_glass"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -6047,7 +6452,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Usage Rows
-         * @description Delete imported usage rows by explicit ids or by filter (standalone).
+         * @description Delete imported usage rows by explicit ids or by filter.
          *
          *     Target either the current selection (``ids``) or everything matching a filter
          *     (``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /
@@ -6104,7 +6509,7 @@ export interface paths {
         put?: never;
         /**
          * Ingest External Usage
-         * @description Ingest a batch of externally-observed usage events (standalone).
+         * @description Ingest a batch of externally-observed usage events.
          *
          *     Authenticated with either an API key or the master key. Usage binds to the
          *     authenticated principal: an API key attributes to its own user (and stamps its
@@ -6162,7 +6567,7 @@ export interface paths {
         };
         /**
          * Get Request Settlement
-         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent.
          *
          *     This is how a caller recovers the cost of a request whose response never
          *     carried one: a stream that failed or was disconnected mid-response, or a
@@ -6223,7 +6628,7 @@ export interface paths {
         put?: never;
         /**
          * Set Usage Price Rows
-         * @description Set the cost of imported usage rows from manual per-1M rates (standalone).
+         * @description Set the cost of imported usage rows from manual per-1M rates.
          *
          *     Target either the current selection (``ids``) or everything matching a filter
          *     (``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed
@@ -6359,32 +6764,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/web-search/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Web Search
-         * @description Run one search through this deployment's configured search provider.
-         *
-         *     The declared query params are the ``provider_options`` keys the providers
-         *     understand. Everything else the caller sends, ``format`` and ``engines``
-         *     included, is ignored rather than forwarded: the bag is opaque to the gateway
-         *     that filled it, so passing it upstream unread would let a workspace set
-         *     provider request fields this deployment never chose.
-         */
-        get: operations["web-search-web_search"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/workspaces": {
         parameters: {
             query?: never;
@@ -6432,7 +6811,10 @@ export interface paths {
         head?: never;
         /**
          * Update Workspace
-         * @description Rename a workspace or change its description.
+         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+         *
+         *     Turning content off keeps nothing new from the next export on; what is already
+         *     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
          */
         patch: operations["workspaces-update_workspace"];
         trace?: never;
@@ -6586,8 +6968,37 @@ export interface paths {
          *     is checked for SSRF safety here as well as on the request path, and must
          *     use https when a token is set. A name already used in this workspace is
          *     refused with a 409.
+         *
+         *     Once stored, the server is connected to and its tools listed, and the
+         *     outcome is returned as `health`. A server that fails this check is still
+         *     stored, and `health.error` says why.
          */
         post: operations["mcp-servers-create_workspace_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Workspace Mcp Server Connection
+         * @description Check connection details without storing them. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     What a form's Test button calls before it saves. Answers with what a stored
+         *     server's `health` would say, and records nothing. Pass `server_id` and omit
+         *     `authorization_token` to test with that server's stored token. The URL is
+         *     checked for SSRF safety first, with the same 400 a create gets.
+         */
+        post: operations["mcp-servers-check_workspace_mcp_server_connection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6617,9 +7028,35 @@ export interface paths {
          *
          *     Only the fields sent are applied. Omit `authorization_token` to leave the
          *     stored token alone, send an empty string to clear it, or send a value to
-         *     rotate it.
+         *     rotate it. A change to the URL, the token or the allow-list checks the
+         *     server again, as creating it does.
          */
         patch: operations["mcp-servers-update_workspace_mcp_server"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Workspace Mcp Server
+         * @description Check a server's connection now. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     Opens one session, lists the server's tools, and stores the outcome as
+         *     `health`. A server that fails is still a 200, with `health.status` set to
+         *     `failing`. A 429 means every check slot on this gateway was busy and
+         *     nothing was recorded.
+         */
+        post: operations["mcp-servers-check_workspace_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/workspaces/{workspace_id}/member-budget-policies": {
@@ -6713,6 +7150,9 @@ export interface paths {
         /**
          * Add Workspace Member
          * @description Add an existing organization member to a workspace.
+         *
+         *     The 404 for a workspace deleted during the add describes PostgreSQL. SQLite does not name the
+         *     foreign key it enforced, so it surfaces that race as a 500.
          */
         post: operations["workspaces-add_workspace_member"];
         /**
@@ -6817,6 +7257,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/trace-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Trace Content
+         * @description Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only.
+         */
+        delete: operations["workspaces-delete_workspace_trace_content"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/web-search": {
         parameters: {
             query?: never;
@@ -6869,9 +7329,10 @@ export interface paths {
         };
         /**
          * List Workspace Web Search Keys
-         * @description The organization's web search keys as this workspace sees them, and which one it searches with.
+         * @description The organization's keys as this workspace sees them, and which of each kind it uses.
          *
-         *     Any member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.
+         *     Any member of the workspace may read it. ``is_effective`` is decided across every key, not only this page,
+         *     and ``search_provider`` and ``fetch_provider`` say what the workspace's searches and fetches run on.
          */
         get: operations["web-search-keys-list_workspace_web_search_keys"];
         put?: never;
@@ -6901,7 +7362,7 @@ export interface paths {
         head?: never;
         /**
          * Set Workspace Web Search Key Override
-         * @description Pin a web search key as this workspace's own, or turn it off for this workspace.
+         * @description Pin a key as this workspace's own for its kind, or turn it off for this workspace.
          *
          *     Organization owners and admins, or this workspace's owners and admins. Answers with the list's first page.
          */
@@ -7055,7 +7516,7 @@ export interface components {
             accepted_at: string;
             /**
              * Accepted By
-             * @description `operator` for a dashboard confirm, `schedule` for the auto policy.
+             * @description `operator` for a catalog update an operator ran, `schedule` for the auto policy.
              */
             accepted_by: string;
             /** Id */
@@ -7263,7 +7724,7 @@ export interface components {
          *         "opus": 0.07,
          *         "sonnet": 0.72
          *       },
-         *       "reason": "jev-1.13.0 chose sonnet with 72%"
+         *       "reason": "sonnet with 72%"
          *     }
          */
         AgentModelRecommendation: {
@@ -7357,6 +7818,110 @@ export interface components {
              * @description User ID the decision is billed to when asking with the master key; not sent upstream.
              */
             user?: string | null;
+        };
+        /**
+         * AgentRecommenderCreate
+         * @description Add a subagent router. The first one added is switched on; a later one waits to be.
+         */
+        AgentRecommenderCreate: {
+            /**
+             * Api Base
+             * @description Root URL of the provider; blank for its own.
+             */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description Stored encrypted, never returned.
+             */
+            api_key?: string | null;
+            /**
+             * Input Price Per Million
+             * @default 0
+             */
+            input_price_per_million: number;
+            /**
+             * Model
+             * @description The decision model, as the provider names it.
+             */
+            model: string;
+            /**
+             * Output Price Per Million
+             * @default 0
+             */
+            output_price_per_million: number;
+            /**
+             * Provider
+             * @description The decision provider: typesafe, openrouter or llamacpp.
+             */
+            provider: string;
+        };
+        /**
+         * AgentRecommenderPublic
+         * @description One stored subagent router, known by its provider, model and the tail of its key.
+         */
+        AgentRecommenderPublic: {
+            /** Api Base */
+            api_base: string | null;
+            /** Api Key Last4 */
+            api_key_last4: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Has Api Key */
+            has_api_key: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Price Per Million */
+            input_price_per_million: number;
+            /** Model */
+            model: string;
+            /** Output Price Per Million */
+            output_price_per_million: number;
+            /** Provider */
+            provider: string;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /**
+         * AgentRecommenderUpdate
+         * @description Change a subagent router. An omitted field keeps its stored value.
+         *
+         *     Omitting ``api_key`` keeps the stored key while the provider and the API
+         *     base stay the same, so a price change never has to re-send a secret. A new
+         *     provider or address needs its own key, unless it is a self-hosted server
+         *     that takes none. A blank ``api_base`` goes back to the provider's own
+         *     address. Switching one on switches every other one off.
+         */
+        AgentRecommenderUpdate: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Model */
+            model?: string | null;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+            /** Provider */
+            provider?: string | null;
+        };
+        /**
+         * AgentRecommendersPublic
+         * @description Every stored subagent router, oldest first.
+         */
+        AgentRecommendersPublic: {
+            /** Data */
+            data: components["schemas"]["AgentRecommenderPublic"][];
         };
         /**
          * AgentTelemetryBehavior
@@ -7730,14 +8295,48 @@ export interface components {
             total_count: number;
             worst: components["schemas"]["WorstAllocationResponse"] | null;
         };
-        /** Annotations */
+        /**
+         * Annotations
+         * @description Optional annotations the client can use to inform how objects are used or displayed.
+         */
         Annotations: {
             /** Audience */
             audience?: ("user" | "assistant")[] | null;
+            /** Lastmodified */
+            lastModified?: string | null;
             /** Priority */
             priority?: number | null;
-        } & {
-            [key: string]: unknown;
+        };
+        /**
+         * AnthropicError
+         * @description What went wrong, in Anthropic's terms.
+         */
+        AnthropicError: {
+            /** Message */
+            message: string;
+            /**
+             * Type
+             * @description Anthropic's error type, such as `invalid_request_error` or `rate_limit_error`.
+             */
+            type: string;
+        };
+        /**
+         * AnthropicErrorResponse
+         * @description Anthropic's error envelope, which every error on a Messages route is answered in.
+         */
+        AnthropicErrorResponse: {
+            /**
+             * Code
+             * @description The refusal's `Otari-Error-Code`, where it has one.
+             */
+            code?: string | null;
+            error: components["schemas"]["AnthropicError"];
+            /**
+             * Type
+             * @default error
+             * @constant
+             */
+            type: "error";
         };
         /**
          * AnthropicFileDeleted
@@ -7798,7 +8397,7 @@ export interface components {
         };
         /**
          * AudioContent
-         * @description Audio content for a message.
+         * @description Audio provided to or from an LLM.
          */
         AudioContent: {
             /** Meta */
@@ -7812,11 +8411,10 @@ export interface components {
             mimeType: string;
             /**
              * Type
+             * @default audio
              * @constant
              */
             type: "audio";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * AudioSpeechRequest
@@ -7891,7 +8489,7 @@ export interface components {
             name: string;
             /**
              * Offerings
-             * @description What a request sent by catalog ID tries, first first. One entry means no backup.
+             * @description Offerings in baseline catalog order. Automatic selection can reorder them per request using cost, recent health, load, region, latency and cache continuity. One entry means no backup.
              */
             offerings: components["schemas"]["FallbackOfferingPublic"][];
             /**
@@ -7899,6 +8497,11 @@ export interface components {
              * @description Of `requests`, those that named an offering or a policy rather than the catalog ID, and so got no automatic fallback.
              */
             pinned: number;
+            /**
+             * Pinned Keys
+             * @description `pinned` by API key and the provider that served it, most first. Includes requests that named a policy, which may have fallen back within it.
+             */
+            pinned_keys: components["schemas"]["PinnedTrafficPublic"][];
             /**
              * Pinned Provider
              * @description The instance most pinned requests reached.
@@ -7981,13 +8584,102 @@ export interface components {
             blob: string;
             /** Mimetype */
             mimeType?: string | null;
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
+        };
+        /**
+         * BlockedEmailCreateRequest
+         * @description An address or a domain to block.
+         */
+        BlockedEmailCreateRequest: {
+            /**
+             * Reason
+             * @description A note for other operators on why the entry exists. Never shown to the blocked person.
+             */
+            reason?: string | null;
+            /**
+             * Value
+             * @description An address (person@example.com) or a domain (example.com, also accepted as @example.com or *.example.com). A domain also blocks its subdomains.
+             */
+            value: string;
+        };
+        /**
+         * BlockedEmailCreatedPublic
+         * @description A new entry, and how many existing accounts it now blocks.
+         */
+        BlockedEmailCreatedPublic: {
+            /**
+             * Blocked Account Count
+             * @description How many existing accounts the entry matches. Their dashboard sessions were ended.
+             */
+            blocked_account_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By User Id
+             * @description The operator who added it, or null once removed.
+             */
+            created_by_user_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description address or domain. A domain also blocks its subdomains.
+             */
+            kind: string;
+            /**
+             * Pattern
+             * @description The normalized address or domain the entry blocks.
+             */
+            pattern: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * BlockedEmailPublic
+         * @description One blocklist entry.
+         */
+        BlockedEmailPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By User Id
+             * @description The operator who added it, or null once removed.
+             */
+            created_by_user_id: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description address or domain. A domain also blocks its subdomains.
+             */
+            kind: string;
+            /**
+             * Pattern
+             * @description The normalized address or domain the entry blocks.
+             */
+            pattern: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /** BlockedEmailsPublic */
+        BlockedEmailsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["BlockedEmailPublic"][];
         };
         /** Body_audio-create_transcription */
         "Body_audio-create_transcription": {
@@ -8022,6 +8714,74 @@ export interface components {
         "Body_playground-upload_playground_file": {
             /** File */
             file: string;
+        };
+        /**
+         * BreakGlassCreate
+         * @description Why you are opening a session's content without its owner's share. Recorded with the opening.
+         */
+        BreakGlassCreate: {
+            /** Reason */
+            reason: string;
+        };
+        /** BreakGlassReadListPublic */
+        BreakGlassReadListPublic: {
+            /** Has More */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["BreakGlassReadPublic"][];
+        };
+        /**
+         * BreakGlassReadPublic
+         * @description One recorded opening of a session's content without its owner's share.
+         */
+        BreakGlassReadPublic: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description 'organization' for an owner of the organization, 'deployment' for the deployment's operator.
+             * @enum {string}
+             */
+            kind: "organization" | "deployment";
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+            /**
+             * Reader Email
+             * @description Their email address when they opened it.
+             */
+            reader_email: string;
+            /**
+             * Reader User Id
+             * @description Who opened it; null once that account is gone.
+             */
+            reader_user_id: string | null;
+            /** Reason */
+            reason: string;
+            /** Reference */
+            reference: string | null;
+            /**
+             * Session User Id
+             * @description Whose session it is.
+             */
+            session_user_id: string | null;
+            /** Trace Id */
+            trace_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /**
          * BudgetResetLogResponse
@@ -8229,6 +8989,11 @@ export interface components {
         /**
          * CallToolResult
          * @description The server's response to a tool call.
+         *
+         *     Errors that originate from the tool SHOULD be reported inside the result
+         *     with `is_error` set to true, not as an MCP protocol-level error, so the LLM
+         *     can see and self-correct. Errors in finding the tool, or any other
+         *     exceptional condition, should be reported as an MCP error response.
          */
         CallToolResult: {
             /** Meta */
@@ -8242,12 +9007,13 @@ export interface components {
              * @default false
              */
             isError: boolean;
+            /**
+             * Resulttype
+             * @default complete
+             */
+            resultType: ("complete" | "input_required") | string;
             /** Structuredcontent */
-            structuredContent?: {
-                [key: string]: unknown;
-            } | null;
-        } & {
-            [key: string]: unknown;
+            structuredContent?: unknown;
         };
         /**
          * CallerIdentityPublic
@@ -8431,6 +9197,11 @@ export interface components {
              * @description Authorized models before any of the request's filters.
              */
             total_count: number;
+            /**
+             * Types
+             * @description Every kind an authorized model has, sorted.
+             */
+            types: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
             /** Vendors */
             vendors: components["schemas"]["CatalogVendorFacet"][];
         };
@@ -8534,6 +9305,11 @@ export interface components {
              */
             selectors: string[];
             /**
+             * Type
+             * @description What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+            /**
              * Unpriced Count
              * @description How many offerings carry no price for this caller.
              */
@@ -8632,6 +9408,11 @@ export interface components {
              */
             selectors: string[];
             /**
+             * Type
+             * @description What kind of model it is: the kind most of its offerings give, from the provider's listing or models.dev. A tie goes to the vendor's own provider. Null where no offering gives one.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+            /**
              * Unpriced Count
              * @description How many offerings carry no price for this caller.
              */
@@ -8653,6 +9434,11 @@ export interface components {
              * @description Whether the provider itself reported this model.
              */
             discovered: boolean;
+            /**
+             * Endpoints
+             * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
+             */
+            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /**
@@ -8823,13 +9609,18 @@ export interface components {
             response_format?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Safety Identifier
+             * @description A stable identifier for the end user behind the request, used as the tag the provider's end-user identifier is derived from. Wins over `user` for that, and is never sent upstream. The dashboard's Playground ignores it.
+             */
+            safety_identifier?: string | null;
             /** Seed */
             seed?: number | null;
             /** Service Tier */
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Stop */
@@ -8865,6 +9656,16 @@ export interface components {
             /** User */
             user?: string | null;
         };
+        /**
+         * CheckFailure
+         * @description Why a stored server failed its connection check.
+         *
+         *     Stored on the server's row and shown to whoever manages it, so each value
+         *     names a cause an operator can act on, and none carries anything the remote
+         *     server said. The first two are decided before any connection is opened.
+         * @enum {string}
+         */
+        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed";
         /**
          * CheckVerdictRequest
          * @description One verifier gate's verdict, as the caller's own verifier run produced it.
@@ -8914,6 +9715,83 @@ export interface components {
             type: "choice";
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * CodeExecuteRequest
+         * @description A direct code execution request: the code to run, and the sandbox to run it in.
+         * @example {
+         *       "code": "print(1 + 1)",
+         *       "container": "auto"
+         *     }
+         */
+        CodeExecuteRequest: {
+            /**
+             * Code
+             * @description Python source to run in the sandbox
+             */
+            code: string;
+            /**
+             * Container
+             * @description 'auto' to hold the sandbox after the run, or a container id an earlier response named in Otari-Container-Id to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends.
+             */
+            container?: string | null;
+            /**
+             * File Ids
+             * @description Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.
+             */
+            file_ids?: string[] | null;
+            /**
+             * Timeout Seconds
+             * @description How long the code may run. Never more than the workspace's code execution ceiling, or 60 seconds when it sets none.
+             */
+            timeout_seconds?: number | null;
+            /**
+             * User
+             * @description User ID for usage attribution
+             */
+            user?: string | null;
+        };
+        /**
+         * CodeExecuteResponse
+         * @description A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``.
+         */
+        CodeExecuteResponse: {
+            /**
+             * Files
+             * @description The files the code wrote. Empty when it wrote none, or where the Files API is off.
+             */
+            files: components["schemas"]["CodeExecutionOutputFile"][];
+            /**
+             * Object
+             * @default code_execution.result
+             * @constant
+             */
+            object: "code_execution.result";
+            /**
+             * Return Code
+             * @description The program's exit status; null when the sandbox did not report one.
+             */
+            return_code: number | null;
+            /** Stderr */
+            stderr: string;
+            /** Stdout */
+            stdout: string;
+        };
+        /**
+         * CodeExecutionOutputFile
+         * @description A file the code wrote, stored in the Files API.
+         */
+        CodeExecutionOutputFile: {
+            /**
+             * File Id
+             * @description Download it from GET /api/v1/files/{file_id}/content
+             */
+            file_id: string;
+            /**
+             * Filename
+             * @description The name the code gave it in the working directory
+             */
+            filename: string;
         };
         /**
          * CodeExecutor
@@ -8985,6 +9863,109 @@ export interface components {
              */
             shadowed: boolean;
         };
+        /** ContentReadListPublic */
+        ContentReadListPublic: {
+            /**
+             * Has More
+             * @description More reads follow this page.
+             */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["ContentReadPublic"][];
+        };
+        /**
+         * ContentReadPublic
+         * @description One read of a session's content through a share.
+         */
+        ContentReadPublic: {
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+            /**
+             * Reader Email
+             * @description Their email address when they read it.
+             */
+            reader_email: string;
+            /**
+             * Reader User Id
+             * @description Who read it; null once that account is gone.
+             */
+            reader_user_id: string | null;
+        };
+        /**
+         * ContentShareCreate
+         * @description Let an audience read what one of your sessions was about.
+         */
+        ContentShareCreate: {
+            /**
+             * Audience
+             * @enum {string}
+             */
+            audience: "organization_admins" | "deployment_operator";
+            /** Note */
+            note?: string | null;
+        };
+        /** ContentShareListPublic */
+        ContentShareListPublic: {
+            /**
+             * Has More
+             * @description More shares follow this page.
+             * @default false
+             */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["ContentSharePublic"][];
+        };
+        /**
+         * ContentSharePublic
+         * @description A session's owner letting an audience read what it was about.
+         */
+        ContentSharePublic: {
+            /**
+             * Active
+             * @description Whether it still lets its audience read.
+             */
+            active: boolean;
+            /**
+             * Audience
+             * @description Who may read: the organization's owners and admins, or the deployment's operator.
+             * @enum {string}
+             */
+            audience: "organization_admins" | "deployment_operator";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Note
+             * @description Why it was shared, in its owner's words.
+             */
+            note: string | null;
+            /**
+             * Read Count
+             * @description How many reads it has had in all.
+             * @default 0
+             */
+            read_count: number;
+            /**
+             * Reads
+             * @description Its newest reads, newest first; GET .../shares/{share_id}/reads pages through all of them. A reader's reads are recorded at most once an hour. Only its owner sees them.
+             */
+            reads?: components["schemas"]["ContentReadPublic"][];
+            /**
+             * Revoked At
+             * @description When it ended: its owner ended it, or lost the workspace.
+             */
+            revoked_at: string | null;
+        };
         /**
          * CountTokensRequest
          * @description Anthropic ``/v1/messages/count_tokens`` request.
@@ -9041,6 +10022,19 @@ export interface components {
         CountTokensResponse: {
             /** Input Tokens */
             input_tokens: number;
+        };
+        /**
+         * CountryDatabaseStatus
+         * @description The country file a request's address is looked up in.
+         */
+        CountryDatabaseStatus: {
+            /**
+             * Client Country Database Set
+             * @description Whether `client_country_database` names a file. That file is read, and a stored one is not.
+             */
+            client_country_database_set: boolean;
+            /** @description The stored file, or null when none is stored. */
+            stored: components["schemas"]["StoredCountryDatabasePublic"] | null;
         };
         /** CreateBatchRequest */
         CreateBatchRequest: {
@@ -9117,6 +10111,11 @@ export interface components {
              */
             allowed_models?: string[] | null;
             /**
+             * Allowed Tools
+             * @description Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.
+             */
+            allowed_tools?: string[] | null;
+            /**
              * Capture Agent Telemetry
              * @description Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it. Covers both behavioral events (tool_result, tool_decision, user_prompt, api_error) from POST /otlp/v1/logs and outcome-metric data points (lines of code, commits, pull requests, active time) from POST /otlp/v1/metrics. Usage capture and billing are unaffected either way.
              */
@@ -9154,6 +10153,11 @@ export interface components {
              */
             key_name?: string | null;
             /**
+             * Max End Users
+             * @description Most live end users this key may have on the budgets it assigns (all of its owner's end users when it assigns none). A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is no cap.
+             */
+            max_end_users?: number | null;
+            /**
              * Metadata
              * @description Optional metadata
              */
@@ -9183,6 +10187,8 @@ export interface components {
         CreateKeyResponse: {
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry: boolean | null;
             /** Created At */
@@ -9199,6 +10205,11 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /**
+             * Is Organization Service Key
+             * @default false
+             */
+            is_organization_service_key: boolean;
             /** Is Service Key */
             is_service_key: boolean;
             /** Key */
@@ -9209,6 +10220,8 @@ export interface components {
             key_prefix: string | null;
             /** Key Suffix */
             key_suffix: string | null;
+            /** Max End Users */
+            max_end_users: number | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -9223,8 +10236,9 @@ export interface components {
          * @description Create-key body for the member surface.
          *
          *     Deliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner
-         *     is always the caller) and no ``exclude_from_budget`` (a member must not
-         *     exempt their own spend from enforcement).
+         *     is the caller, or one of the key's own for a service key) and no
+         *     ``exclude_from_budget`` (a member must not exempt their own spend from
+         *     enforcement). A field it does not take is refused rather than dropped.
          */
         CreateOwnKeyRequest: {
             /**
@@ -9233,20 +10247,46 @@ export interface components {
              */
             allowed_models?: string[] | null;
             /**
+             * Allowed Tools
+             * @description Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.
+             */
+            allowed_tools?: string[] | null;
+            /**
              * Capture Agent Telemetry
              * @description Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it.
              */
             capture_agent_telemetry?: boolean | null;
+            /**
+             * End User Budget Id
+             * @description Budget of this organization each end user this key creates is capped at, unless the request names another with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.
+             */
+            end_user_budget_id?: string | null;
+            /**
+             * End User Budget Ids
+             * @description Budgets of this organization a request may start a new end user on by naming one in Otari-End-User-Budget. Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.
+             */
+            end_user_budget_ids?: string[] | null;
             /**
              * Expires At
              * @description Optional expiration timestamp
              */
             expires_at?: string | null;
             /**
+             * Is Service Key
+             * @description When true, a request may name an end user in its 'user' field. Each end user is created on first use and billed to its own budget, while this key's own ceiling caps all of them together. Only an organization owner or admin may create one. It belongs to the organization rather than to you: every owner or admin manages it, and its end users are reachable from no other key. Fixed once the key exists.
+             * @default false
+             */
+            is_service_key: boolean;
+            /**
              * Key Name
              * @description Optional name for the key
              */
             key_name?: string | null;
+            /**
+             * Max End Users
+             * @description Most live end users this service key may have. A request that would create one more is refused with 403 and end_user_limit_reached; deleting end users frees room. Null is 10000: an organization's service key always has a cap.
+             */
+            max_end_users?: number | null;
             /**
              * Metadata
              * @description Optional metadata
@@ -9402,6 +10442,11 @@ export interface components {
              */
             allowed_models?: string[] | null;
             /**
+             * Allowed Tools
+             * @description Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).
+             */
+            allowed_tools?: string[] | null;
+            /**
              * Blocked
              * @description Whether user is blocked
              * @default false
@@ -9484,7 +10529,7 @@ export interface components {
         };
         /**
          * CurrentPricingPage
-         * @description One page of current model prices, with the total number of priced models.
+         * @description One page of current prices, with the total number of priced keys of any kind.
          */
         CurrentPricingPage: {
             /** Count */
@@ -9630,21 +10675,15 @@ export interface components {
          */
         DeploymentBootstrap: {
             /**
-             * Data Plane Url
-             * @description Where this deployment's inference traffic belongs, when it is not served here. The mirror of management_url: that one says where management lives when this deployment is not the control plane, this one says where the data plane is when this deployment is not it. Set only by a hosted control plane, which serves the dashboard but not inference (otari#822); null for standalone and hybrid, both of which serve inference at the address that reached this page. Not a human link target like management_url: it is the gateway's bare address, which the dashboard suffixes with the API root to build its request snippets. So it must carry no API root anywhere (a value ending in /api/v1, or a whole endpoint like /api/v1/chat/completions, renders that path twice) and no credential, since this response is unauthenticated. This gateway refuses both at startup; any deployment serving this contract should publish the same shape. Null on a hosted deployment means unconfigured, and the dashboard then shows no snippet rather than one naming this host.
-             */
-            data_plane_url: string | null;
-            /**
-             * Deployment Type
-             * @description Which deployment serves this URL. 'standalone' owns its own data and serves one tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment run as a control plane), which is why its management surfaces are the per-organization ones; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.
-             * @enum {string}
-             */
-            deployment_type: "standalone" | "hosted" | "hybrid";
-            /**
              * Docs Url
              * @description Where this deployment's documentation lives, when it is not docs.otari.ai. Set, the dashboard's Documentation links open it in a new tab; null, they open https://docs.otari.ai/. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
             docs_url: string | null;
+            /**
+             * Federation Member Rules
+             * @description Whether an organization's owners and admins may give their own API keys federation rules (the federation_member_rules setting), so the dashboard offers workload identity on their keys.
+             */
+            federation_member_rules: boolean;
             /**
              * Feedback Enabled
              * @description Whether this deployment accepts deliberate feedback submissions.
@@ -9652,37 +10691,32 @@ export interface components {
             feedback_enabled: boolean;
             /**
              * Mail Ready
-             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.
+             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.
              */
             mail_ready: boolean;
             /**
              * Maintenance Mode
-             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected. False for a hybrid gateway, which issues no session.
+             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.
              */
             maintenance_mode: boolean;
             /**
-             * Management Url
-             * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
-             */
-            management_url: string | null;
-            /**
              * Oauth Providers
-             * @description OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does. Empty for a hybrid gateway, which issues no session.
+             * @description OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does.
              */
             oauth_providers: string[];
             /**
              * Open Signup
-             * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches. False for a hybrid gateway, which holds no identities.
+             * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches.
              */
             open_signup: boolean;
             /**
              * Passkeys Enabled
-             * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so. False for a hybrid gateway, which issues no session of its own.
+             * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so.
              */
             passkeys_enabled: boolean;
             /**
              * Passkeys Ready
-             * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.
+             * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them.
              */
             passkeys_ready: boolean;
             /**
@@ -9692,19 +10726,13 @@ export interface components {
             privacy_url: string | null;
             /**
              * Public Catalog
-             * @description Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid gateway, which serves no catalog of its own.
+             * @description Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in.
              * @default false
              */
             public_catalog: boolean;
             /**
-             * Session Type
-             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
-             * @enum {string}
-             */
-            session_type: "local_operator" | "hosted_user" | "none";
-            /**
              * Sign In Methods
-             * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
+             * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. The login page renders from this rather than trying a credential to find out.
              */
             sign_in_methods: ("master_key" | "password" | "passkey")[];
             /**
@@ -9714,7 +10742,7 @@ export interface components {
             site_url: string | null;
             /**
              * Surfaces
-             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
+             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on: a fixed set plus one for each enabled feature. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis.
              */
             surfaces: string[];
             /**
@@ -9974,11 +11002,10 @@ export interface components {
             resource: components["schemas"]["TextResourceContents"] | components["schemas"]["BlobResourceContents"];
             /**
              * Type
+             * @default resource
              * @constant
              */
             type: "resource";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * EmbeddingData
@@ -10053,7 +11080,7 @@ export interface components {
             cost_usd?: string | null;
             /**
              * Pricing Source
-             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced
              */
             pricing_source?: string | null;
             /** Prompt Tokens */
@@ -10068,6 +11095,8 @@ export interface components {
         EndUserBudgetPublic: {
             /** Blocked End User Count */
             blocked_end_user_count: number;
+            /** Budget Duration Sec */
+            budget_duration_sec?: number | null;
             /** Budget Id */
             budget_id: string;
             /**
@@ -10080,6 +11109,23 @@ export interface components {
              * @description Whether a new end user starts here when its request names no budget
              */
             is_default: boolean;
+            /**
+             * Max Budget
+             * @description Dollars each end user may spend over the period
+             */
+            max_budget?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Request Limit */
+            request_limit?: number | null;
+            /** Reset Alignment */
+            reset_alignment?: string | null;
+            /** Rpm Limit */
+            rpm_limit?: number | null;
+            /** Token Limit */
+            token_limit?: number | null;
+            /** Tpm Limit */
+            tpm_limit?: number | null;
         };
         /**
          * EndUserPublic
@@ -10237,7 +11283,7 @@ export interface components {
             router_candidates?: string[];
             /**
              * Router Weights
-             * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.
+             * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so it is knowable here: the plan above is the real ordering by share, not the decline path.
              */
             router_weights?: {
                 [key: string]: number;
@@ -10368,6 +11414,11 @@ export interface components {
          */
         FallbackOfferingPublic: {
             /**
+             * Input Price
+             * @description USD per million input tokens at the organization's rates, the price the order ranks by. Null where the offering is unpriced.
+             */
+            input_price: number | null;
+            /**
              * Otari Tools
              * @description Built-in tools Otari runs in this provider's place, for that caller.
              */
@@ -10419,7 +11470,7 @@ export interface components {
             email?: string | null;
             /**
              * Issuer
-             * @description The token's 'iss', one of the deployment's federation_issuers.
+             * @description The token's 'iss'. On an operator's rule, one of the deployment's federation_issuers; on a member's own key, any https issuer, whose discovery document and signing keys are fetched only from a public host.
              */
             issuer: string;
             /**
@@ -10448,6 +11499,11 @@ export interface components {
             id: string;
             /** Issuer */
             issuer: string;
+            /**
+             * Member Managed
+             * @description Whether a member gave the rule to their own key: it then matches only in the token exchange.
+             */
+            member_managed: boolean;
             /** Subject */
             subject: string | null;
         };
@@ -10487,12 +11543,12 @@ export interface components {
             organization_id?: string | null;
             /**
              * Service Account Id
-             * @description When set, the id of the rule's key.
+             * @description Ignored. Accepted so that a client configured for Anthropic's service account id is not refused.
              */
             service_account_id?: string | null;
             /**
              * Workspace Id
-             * @description When set, the UUID of the rule's key's workspace.
+             * @description Ignored. Accepted so that a client configured for Anthropic's workspace id is not refused.
              */
             workspace_id?: string | null;
         };
@@ -10514,6 +11570,33 @@ export interface components {
              */
             token_type: string;
         };
+        /**
+         * GateDefinitionRequest
+         * @description One gate of a guardrail version: what it is, when it runs, and what it says when it fails.
+         */
+        GateDefinitionRequest: {
+            /**
+             * Enforcement
+             * @enum {string}
+             */
+            enforcement: "required" | "advisory";
+            /** Gate Id */
+            gate_id: string;
+            /**
+             * Gate Type
+             * @enum {string}
+             */
+            gate_type: "command" | "command_if_changed" | "judge" | "path" | "verifier";
+            /** Message */
+            message: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "repo" | "user";
+            /** Runs */
+            runs: ("pre_tool_use.edit_target" | "pre_tool_use.read_target" | "pre_tool_use.command" | "stop.working_tree" | "stop.session" | "stop.verifier")[];
+        };
         /** GateResultResponse */
         GateResultResponse: {
             /** Detail */
@@ -10526,6 +11609,63 @@ export interface components {
             message: string;
             /** Outcome */
             outcome: string;
+        };
+        /**
+         * GateSummaryPublic
+         * @description How often one agent guardrail gate ran in a session, by what it decided.
+         */
+        GateSummaryPublic: {
+            /**
+             * Blocked
+             * @description Checks where the gate stopped the agent.
+             */
+            blocked: number;
+            /** Enforcement */
+            enforcement: ("required" | "advisory") | null;
+            /**
+             * Flagged
+             * @description Checks an advisory gate failed; the agent went ahead.
+             */
+            flagged: number;
+            /** Gate Id */
+            gate_id: string;
+            /**
+             * Gate Type
+             * @description From the guardrail's definition, when it was sent.
+             */
+            gate_type: string | null;
+            /**
+             * Message
+             * @description What the gate says when it fails, from the guardrail's definition.
+             */
+            message: string | null;
+            /**
+             * Origin
+             * @description Whether the gate is the repository's (.otari/) or the user's own (~/.otari/).
+             */
+            origin: ("repo" | "user") | null;
+            /** Passed */
+            passed: number;
+            /**
+             * Refused
+             * @description Checks where the gate could not decide and held the agent anyway.
+             */
+            refused: number;
+            /**
+             * Runs
+             * @description The moments the gate runs at (pre_tool_use.edit_target, stop.session, ...).
+             */
+            runs: string[];
+            /**
+             * Span Id
+             * @description The check to open first: the earliest that did anything but pass. Null for a gate that never ran.
+             */
+            span_id: string | null;
+            /**
+             * Undecided
+             * @description Checks where the gate could not decide; the agent went ahead unchecked.
+             */
+            undecided: number;
         };
         /**
          * GatewaySettings
@@ -10546,8 +11686,6 @@ export interface components {
              * @enum {string}
              */
             master_key_source: "configured" | "generated";
-            /** Mode */
-            mode: string;
             /** Model Discovery */
             model_discovery: boolean;
             /** Require Pricing */
@@ -10619,6 +11757,18 @@ export interface components {
             validate_kwargs?: {
                 [key: string]: unknown;
             };
+        };
+        /** GuardrailDefinitionRequest */
+        GuardrailDefinitionRequest: {
+            /** Digest */
+            digest: string;
+            /** Gates */
+            gates: components["schemas"]["GateDefinitionRequest"][];
+        };
+        /** GuardrailDefinitionResponse */
+        GuardrailDefinitionResponse: {
+            /** Digest */
+            digest: string;
         };
         /**
          * GuardrailParameterSpec
@@ -10914,6 +12064,50 @@ export interface components {
             reason: string;
         };
         /**
+         * HostedCatalogPriceChangePublic
+         * @description One model whose models.dev price a catalog update adds, changes or removes.
+         */
+        HostedCatalogPriceChangePublic: {
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "changed" | "removed";
+            /** Model Key */
+            model_key: string;
+        };
+        /**
+         * HostedCatalogPriceUpdatePublic
+         * @description The models.dev price changes a catalog update would apply.
+         *
+         *     ``changes`` is a sample and the counts are the totals. ``digest`` names the
+         *     fetched prices, so applying them applies what was reviewed. ``needs_review``
+         *     is why the scheduled update would hold them for a person under ``auto``.
+         */
+        HostedCatalogPriceUpdatePublic: {
+            /** Added Count */
+            added_count: number;
+            /** Changed Count */
+            changed_count: number;
+            /** Changes */
+            changes: components["schemas"]["HostedCatalogPriceChangePublic"][];
+            /** Changes Truncated */
+            changes_truncated: boolean;
+            /** Digest */
+            digest: string;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Needs Review */
+            needs_review: boolean;
+            /** Removed Count */
+            removed_count: number;
+            /** Review Reason */
+            review_reason?: string | null;
+        };
+        /**
          * HostedCatalogProviderRefreshPublic
          * @description What one hosted provider newly lists, as a catalog sweep found it.
          *
@@ -10974,6 +12168,58 @@ export interface components {
             removed_price_rows: number;
         };
         /**
+         * HostedCatalogUpdatePreviewPublic
+         * @description What a catalog update would do: its price changes, then what each provider newly lists.
+         *
+         *     ``prices`` is ``None`` when models.dev changed nothing, or when it could not
+         *     be fetched, which ``price_error`` then says. ``catalog`` carries the cleanup
+         *     the preview was asked for, and no removals otherwise.
+         */
+        HostedCatalogUpdatePreviewPublic: {
+            catalog: components["schemas"]["HostedCatalogRefreshPublic"];
+            /** Price Error */
+            price_error?: string | null;
+            prices: components["schemas"]["HostedCatalogPriceUpdatePublic"] | null;
+        };
+        /**
+         * HostedCatalogUpdatePreviewRequest
+         * @description What to preview: the update alone, or with the cleanup.
+         */
+        HostedCatalogUpdatePreviewRequest: {
+            /**
+             * Cleanup
+             * @description Also preview removing the prices of models no hosted provider serves.
+             * @default false
+             */
+            cleanup: boolean;
+        };
+        /**
+         * HostedCatalogUpdatePublic
+         * @description What a catalog update did.
+         */
+        HostedCatalogUpdatePublic: {
+            catalog: components["schemas"]["HostedCatalogRefreshPublic"];
+            /** Prices Applied */
+            prices_applied: boolean;
+        };
+        /**
+         * HostedCatalogUpdateRequest
+         * @description What to apply, as the preview showed it.
+         */
+        HostedCatalogUpdateRequest: {
+            /**
+             * Cleanup
+             * @description Also remove the prices of models no hosted provider serves, with their history.
+             * @default false
+             */
+            cleanup: boolean;
+            /**
+             * Digest
+             * @description The `digest` of the previewed prices, to apply them; 409 when the pending prices differ. Without it, no price changes.
+             */
+            digest?: string | null;
+        };
+        /**
          * HostedModelCreateRequest
          * @description Offer a model on a hosted provider, optionally at a custom price.
          *
@@ -11000,7 +12246,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images") | null;
+            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelPublic
@@ -11012,7 +12258,9 @@ export interface components {
          *     supplies it, and None when nothing prices the model yet. ``unit`` says what
          *     the rates are per, so a per-request rate is not read as a per-token one.
          *     ``enabled`` is the serving switch; a model offered without a discoverable
-         *     price starts off.
+         *     price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
+         *     while it waits for a rate, ``operator`` when an operator switched it off,
+         *     ``unavailable`` when its provider refused to serve it.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -11024,6 +12272,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Disabled Reason */
+            disabled_reason?: ("unpriced" | "operator" | "unavailable") | null;
             /** Enabled */
             enabled: boolean;
             /**
@@ -11072,7 +12322,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images") | null;
+            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelsPublic
@@ -11124,7 +12374,9 @@ export interface components {
          *     every other one is served as if it were not configured.
          *     ``serves_unlisted_models`` serves a model the roster does not list, as a
          *     ``config.yml`` instance does, and switches on every model it offers
-         *     whether or not something prices it.
+         *     whether or not something prices it. ``supported_countries`` keeps the
+         *     provider to requests from those ISO country codes, checked as well as
+         *     ``provider_supported_countries``; null serves every country.
          * @example {
          *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
@@ -11155,6 +12407,8 @@ export interface components {
              * @default false
              */
             serves_unlisted_models: boolean;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProviderPublic
@@ -11176,7 +12430,8 @@ export interface components {
          *     and ``decryptable`` false for one whose key or extras no configured
          *     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
          *     ``serves_unlisted_models`` is true for one that serves a model its roster
-         *     does not list.
+         *     does not list. ``supported_countries`` is null for one that serves every
+         *     country.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -11225,6 +12480,8 @@ export interface components {
              * @enum {string}
              */
             source: "database" | "config";
+            /** Supported Countries */
+            supported_countries?: string[] | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -11290,7 +12547,8 @@ export interface components {
          *     without one. ``client_args`` omitted is left alone; an explicit
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
          *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
-         *     restriction, null lifts it.
+         *     restriction, null lifts it, and so does ``supported_countries``, where an
+         *     empty list closes the provider to every country.
          * @example {
          *       "enabled": false
          *     }
@@ -11310,6 +12568,8 @@ export interface components {
             restricted_to_organization_id?: string | null;
             /** Serves Unlisted Models */
             serves_unlisted_models?: boolean | null;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProvidersPublic
@@ -11339,7 +12599,7 @@ export interface components {
         };
         /**
          * Icon
-         * @description An icon for display in user interfaces.
+         * @description An optionally-sized icon for display in a user interface (2025-11-25+).
          */
         Icon: {
             /** Mimetype */
@@ -11348,12 +12608,12 @@ export interface components {
             sizes?: string[] | null;
             /** Src */
             src: string;
-        } & {
-            [key: string]: unknown;
+            /** Theme */
+            theme?: ("light" | "dark") | null;
         };
         /**
          * ImageContent
-         * @description Image content for a message.
+         * @description An image provided to or from an LLM.
          */
         ImageContent: {
             /** Meta */
@@ -11367,11 +12627,10 @@ export interface components {
             mimeType: string;
             /**
              * Type
+             * @default image
              * @constant
              */
             type: "image";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * ImageGenerationRequest
@@ -11578,6 +12837,8 @@ export interface components {
         KeyInfo: {
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry: boolean | null;
             /** Config Name */
@@ -11596,6 +12857,11 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /**
+             * Is Organization Service Key
+             * @default false
+             */
+            is_organization_service_key: boolean;
             /** Is Service Key */
             is_service_key: boolean;
             /** Key Name */
@@ -11606,10 +12872,17 @@ export interface components {
             key_suffix: string | null;
             /** Last Used At */
             last_used_at: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /**
+             * Operator Disabled
+             * @default false
+             */
+            operator_disabled: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
             /** User Id */
@@ -11671,24 +12944,6 @@ export interface components {
              * Name
              * @description Human-friendly display name.
              */
-            name: string;
-        };
-        /**
-         * LearnedPolicy
-         * @description A policy whose selection depends on routing memory, for the status overview.
-         *
-         *     Only a *learned* policy belongs here. A weighted policy names a router too, but
-         *     its split is written in the policy document, so listing it under a warmth report
-         *     would tie it to a pool it never reads.
-         */
-        LearnedPolicy: {
-            /** Backend */
-            backend: string;
-            /** Candidates */
-            candidates: string[];
-            /** Default Target */
-            default_target: string;
-            /** Name */
             name: string;
         };
         /**
@@ -11777,12 +13032,12 @@ export interface components {
         ManagedTool: {
             /**
              * Accepted Types
-             * @description Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled, and for code execution the provider-named keywords unless the deployment's executor is `provider`.
+             * @description Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled and the deployment has a search of its own, and for code execution the provider-named keywords unless the deployment's executor is `provider`.
              */
             accepted_types: string[];
             /**
              * Available
-             * @description Whether this deployment has enabled and configured the tool. A request declaring an unavailable tool is rejected with 400.
+             * @description Whether a request from this caller may declare the tool: the deployment has enabled and configured it and, for an API key, the key's workspace allows it. A master key or a dashboard session gets the deployment's answer alone. A request declaring an unavailable tool is refused.
              */
             available: boolean;
             /**
@@ -11815,6 +13070,11 @@ export interface components {
              * @constant
              */
             object: "tool";
+            /**
+             * Reason
+             * @description Why the tool is unavailable, `null` when it is available. `not_configured`: nothing is set up to run it (for web search, neither the deployment nor the API key's organization has a search provider). `workspace_disabled`: the API key's workspace does not allow it, which a workspace admin changes under Tools in the dashboard.
+             */
+            reason?: ("not_configured" | "workspace_disabled") | null;
         };
         /**
          * McpErrorBody
@@ -11963,7 +13223,7 @@ export interface components {
             server_id: string;
             /**
              * Server Revision
-             * @description An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side and platform-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.
+             * @description An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.
              */
             server_revision: string;
             /** Tools */
@@ -11982,6 +13242,8 @@ export interface components {
         MemberAttributionPublic: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Blocked */
             blocked: boolean;
             /** Reserved */
@@ -12108,7 +13370,7 @@ export interface components {
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Stop Sequences */
@@ -12142,6 +13404,16 @@ export interface components {
             top_k?: number | null;
             /** Top P */
             top_p?: number | null;
+        };
+        /**
+         * ModelArchitecture
+         * @description What a model reads and writes, in OpenRouter's ``architecture`` shape.
+         */
+        ModelArchitecture: {
+            /** Input Modalities */
+            input_modalities?: string[];
+            /** Output Modalities */
+            output_modalities?: string[];
         };
         /**
          * ModelListResponse
@@ -12220,6 +13492,11 @@ export interface components {
              * @default false
              */
             tool_call: boolean;
+            /**
+             * Type
+             * @description What kind of model models.dev says it is. Null where the catalog gives no kind.
+             */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
          * ModelMetadataResponse
@@ -12228,7 +13505,7 @@ export interface components {
         ModelMetadataResponse: {
             /**
              * Available
-             * @description False when metadata could not be loaded (enrichment disabled or models.dev unreachable).
+             * @description False when no models.dev catalog could be read, not even the one bundled with the gateway.
              */
             available: boolean;
             /** Models */
@@ -12246,6 +13523,7 @@ export interface components {
          * @description OpenAI-compatible model object.
          */
         ModelObject: {
+            architecture?: components["schemas"]["ModelArchitecture"] | null;
             /** Context Window */
             context_window?: number | null;
             /** Created */
@@ -12259,6 +13537,8 @@ export interface components {
             id: string;
             /** Max Output Tokens */
             max_output_tokens?: number | null;
+            /** Name */
+            name?: string | null;
             /**
              * Object
              * @default model
@@ -12272,6 +13552,10 @@ export interface components {
              * @default none
              */
             pricing_source: string;
+            /** Supported Parameters */
+            supported_parameters?: string[] | null;
+            /** Type */
+            type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
          * ModelPricingInfo
@@ -12293,8 +13577,9 @@ export interface components {
             /**
              * Unit
              * @default tokens
+             * @enum {string}
              */
-            unit: string;
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * ModerationRequest
@@ -12653,8 +13938,9 @@ export interface components {
             /**
              * Unit
              * @default tokens
+             * @enum {string}
              */
-            unit: string;
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
             /** Updated At */
             updated_at?: string | null;
         };
@@ -12785,22 +14071,45 @@ export interface components {
          * OrgWebSearchKeyCreateRequest
          * @description What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.
          * @example {
-         *       "api_key": "<your Tavily API key>",
+         *       "api_key": "<your Exa API key>",
+         *       "kind": "search",
          *       "name": "production",
-         *       "provider": "tavily"
+         *       "provider": "exa"
          *     }
          */
         OrgWebSearchKeyCreateRequest: {
-            /** Api Key */
-            api_key: string;
+            /**
+             * Api Base
+             * @description The provider's endpoint, when not its own. Must be https when the key carries an API key.
+             */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description Required unless the provider takes no key.
+             */
+            api_key?: string | null;
+            /**
+             * Kind
+             * @description Whether the key serves the search tool or the fetch tool, and enrichment. Fixed once created.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /**
              * Name
              * @description How the organization tells this key apart from its others.
              */
             name: string;
             /**
+             * Options
+             * @description Provider options, under the names the provider catalog lists for the provider.
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Provider
-             * @description The search provider the key is for: tavily or brave.
+             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily or brave for a search key.
              */
             provider: string;
         };
@@ -12809,6 +14118,8 @@ export interface components {
          * @description One key as the API shows it: never the key itself, only ``last4``.
          */
         OrgWebSearchKeyPublic: {
+            /** Api Base */
+            api_base?: string | null;
             /** Archived At */
             archived_at?: string | null;
             /**
@@ -12823,10 +14134,22 @@ export interface components {
             id: string;
             /** Is Org Default */
             is_org_default: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Last4 */
             last4?: string | null;
             /** Name */
             name: string;
+            /**
+             * Options
+             * @description The key's provider options, with any value whose name looks like a secret masked.
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Organization Id
              * Format: uuid
@@ -12838,19 +14161,27 @@ export interface components {
             updated_at?: string | null;
             /**
              * Usable
-             * @description False when this deployment cannot decrypt the stored key, so no search uses it. It is still listed, because replacing or deleting it is what fixes it.
+             * @description False when this deployment cannot decrypt the stored key, so no call uses it. It is still listed, because replacing or deleting it is what fixes it.
              */
             usable: boolean;
         };
         /**
          * OrgWebSearchKeyUpdateRequest
-         * @description A partial update: only what is set is applied.
+         * @description A partial update: only what is set is applied, and ``null`` clears ``api_base`` or ``options``.
+         *
+         *     ``kind`` is fixed once a key is created, so sending it is refused.
          */
         OrgWebSearchKeyUpdateRequest: {
+            /** Api Base */
+            api_base?: string | null;
             /** Api Key */
             api_key?: string | null;
             /** Name */
             name?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** OrgWebSearchKeysPublic */
         OrgWebSearchKeysPublic: {
@@ -13511,11 +14842,6 @@ export interface components {
          *     and what the caller may do there.
          */
         OrganizationMembershipContextPublic: {
-            /**
-             * Byo Provider Keys Allowed
-             * @default false
-             */
-            byo_provider_keys_allowed: boolean;
             caller?: components["schemas"]["CallerIdentityPublic"] | null;
             /**
              * Deployment Operator
@@ -13542,7 +14868,7 @@ export interface components {
         };
         /**
          * OrganizationModelPricingCreate
-         * @description Create one rate override for a model, for a period.
+         * @description Create one rate override for a model, or a search or fetch instance, for a period.
          */
         OrganizationModelPricingCreate: {
             /**
@@ -13571,8 +14897,13 @@ export interface components {
              */
             input_price_per_million: number;
             /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind?: ("model" | "search" | "fetch") | null;
+            /**
              * Model Key
-             * @description Model identifier in 'provider:model' form, matching the key the deployment price list uses. A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to.
+             * @description For a model, 'provider:model', matching the key the deployment price list uses; a provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to. For a search or fetch kind, the instance's name.
              */
             model_key: string;
             /**
@@ -13587,11 +14918,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingPublic
@@ -13621,6 +14952,11 @@ export interface components {
             id: string;
             /** Input Price Per Million */
             input_price_per_million: number;
+            /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind: string;
             /** Model Key */
             model_key: string;
             /**
@@ -13701,11 +15037,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingsPublic
@@ -14019,6 +15355,42 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["PendingOrganizationInvitationPublic"][];
+        };
+        /**
+         * PinnedTrafficPublic
+         * @description The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached.
+         */
+        PinnedTrafficPublic: {
+            /**
+             * Api Key Id
+             * @description The key, or null for requests made without one or whose key was deleted.
+             */
+            api_key_id: string | null;
+            /**
+             * Key Name
+             * @description The key's name, or null where it has none.
+             */
+            key_name: string | null;
+            /**
+             * Provider
+             * @description The provider instance the requests reached.
+             */
+            provider: string;
+            /** Requests */
+            requests: number;
+        };
+        /**
+         * PlatformBreakGlassCreate
+         * @description Why the deployment's operator is opening a session's content, and what asked for it.
+         */
+        PlatformBreakGlassCreate: {
+            /** Reason */
+            reason: string;
+            /**
+             * Reference
+             * @description What the opening answers: a legal request's number, a ticket.
+             */
+            reference: string;
         };
         /**
          * PlaygroundAttachment
@@ -14436,13 +15808,6 @@ export interface components {
             /** Workspace Id */
             workspace_id?: string | null;
         };
-        /** PoolStatus */
-        PoolStatus: {
-            /** Records */
-            records: number;
-            /** Warm */
-            warm: boolean;
-        };
         /**
          * PricingDriftRow
          * @description A stored deployment rate beside the default it shadows.
@@ -14491,17 +15856,6 @@ export interface components {
             model_key: string;
         };
         /**
-         * PricingRefreshConfirmationResponse
-         * @description Result of activating a reviewed models.dev refresh.
-         */
-        PricingRefreshConfirmationResponse: {
-            /**
-             * Applied
-             * @default true
-             */
-            applied: boolean;
-        };
-        /**
          * PricingRefreshPreviewResponse
          * @description Reviewable summary of a pending models.dev refresh.
          */
@@ -14516,7 +15870,7 @@ export interface components {
             changes_truncated: boolean;
             /**
              * Digest
-             * @description Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.
+             * @description Identity of the pending snapshot, to act on exactly this one: send it as `digest` to `POST /hosted-providers/catalog-update` to apply it, or to `POST /pricing/refresh/reject` to discard it.
              * @default
              */
             digest: string;
@@ -14556,6 +15910,11 @@ export interface components {
             effective_at: string;
             /** Input Price Per Million */
             input_price_per_million: number;
+            /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind: string;
             /** Model Key */
             model_key: string;
             /**
@@ -14565,6 +15924,11 @@ export interface components {
             origin: string | null;
             /** Output Price Per Million */
             output_price_per_million: number;
+            /**
+             * Price Per Request
+             * @description USD for each request, for a rate in requests; null for any other unit.
+             */
+            price_per_request?: number | null;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
             /**
@@ -14898,41 +16262,6 @@ export interface components {
             providers: components["schemas"]["ProviderInfoSchema"][];
         };
         /**
-         * RankRequest
-         * @description Record how well each candidate did, for one or many prompts.
-         *
-         *     A batch because of the arithmetic: a pool routes nothing until it holds
-         *     ``router_seed_count`` examples (20 by default) and the vote reads the ``k``
-         *     nearest (5 by default), so a useful first teaching pass is dozens of examples
-         *     across the kinds of prompt you care about.
-         */
-        RankRequest: {
-            /**
-             * Examples
-             * @description The scored prompts to record.
-             */
-            examples: components["schemas"]["ScoredExample"][];
-            /**
-             * User Id
-             * @description Whose routing memory these examples belong to.
-             */
-            user_id: string;
-            /**
-             * Workspace Id
-             * @description Which workspace's routing memory these examples belong to. Omit for the deployment's default workspace. Only requests billing to that workspace vote over them.
-             */
-            workspace_id?: string | null;
-        };
-        /** RankResponse */
-        RankResponse: {
-            /** Pools */
-            pools: components["schemas"]["RecordedPool"][];
-            /** Recorded */
-            recorded: number;
-            /** Seed Count */
-            seed_count: number;
-        };
-        /**
          * RateLimitRuleCreate
          * @description A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.
          * @example {
@@ -14944,6 +16273,11 @@ export interface components {
          */
         RateLimitRuleCreate: {
             /**
+             * Budgets
+             * @description The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -14954,6 +16288,13 @@ export interface components {
              * @description Requests in flight at once.
              */
             max_concurrent?: number | null;
+            /**
+             * Mode
+             * @description 'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "report";
             /**
              * Models
              * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
@@ -14969,7 +16310,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user" | "model";
+            per: "deployment" | "key" | "user" | "model" | "budget";
             /**
              * Rpm
              * @description Requests per minute.
@@ -14994,6 +16335,11 @@ export interface components {
          */
         RateLimitRulePublic: {
             /**
+             * Budgets
+             * @description The budget IDs a `per: budget` rule counts, each on its own; unset counts every budget. Refused on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -15004,6 +16350,13 @@ export interface components {
              * @description Requests in flight at once.
              */
             max_concurrent?: number | null;
+            /**
+             * Mode
+             * @description 'enforce' (the default) refuses a request over the limit with 429. 'report' counts the same way but serves the request, naming the rule in the Otari-Rate-Limit-Exceeded response header, so a limit can be watched before it is enforced.
+             * @default enforce
+             * @enum {string}
+             */
+            mode: "enforce" | "report";
             /**
              * Models
              * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
@@ -15019,7 +16372,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user" | "model";
+            per: "deployment" | "key" | "user" | "model" | "budget";
             /**
              * Rpm
              * @description Requests per minute.
@@ -15060,6 +16413,11 @@ export interface components {
          */
         RateLimitRuleUpdate: {
             /**
+             * Budgets
+             * @description The budget IDs a per: budget rule counts; null for every budget, and on any other rule.
+             */
+            budgets?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most.
              */
@@ -15070,6 +16428,11 @@ export interface components {
              */
             max_concurrent?: number | null;
             /**
+             * Mode
+             * @description 'enforce' refuses a request over the rule; 'report' serves it and names the rule.
+             */
+            mode?: ("enforce" | "report") | null;
+            /**
              * Models
              * @description The instance:model names a per: model rule limits; null for any other rule.
              */
@@ -15078,7 +16441,7 @@ export interface components {
              * Per
              * @description What one count is shared by.
              */
-            per?: ("deployment" | "key" | "user" | "model") | null;
+            per?: ("deployment" | "key" | "user" | "model" | "budget") | null;
             /**
              * Rpm
              * @description Requests per minute.
@@ -15104,16 +16467,15 @@ export interface components {
             rules: components["schemas"]["RateLimitRulePublic"][];
         };
         /**
-         * RecordedPool
-         * @description How warm one pool is after the write.
+         * RecommendationRefusal
+         * @description The body of a recommendation request the gateway refuses.
          */
-        RecordedPool: {
-            /** Records */
-            records: number;
-            /** Task Id */
-            task_id: string | null;
-            /** Warm */
-            warm: boolean;
+        RecommendationRefusal: {
+            /**
+             * Detail
+             * @description Why the request was refused.
+             */
+            detail: string;
         };
         /**
          * ReencryptSearchToolsResponse
@@ -15323,7 +16685,7 @@ export interface components {
             cost_usd?: string | null;
             /**
              * Pricing Source
-             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced
              */
             pricing_source?: string | null;
             /**
@@ -15398,16 +16760,12 @@ export interface components {
             title?: string | null;
             /**
              * Type
+             * @default resource_link
              * @constant
              */
             type: "resource_link";
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * ResponsesRequest
@@ -15485,7 +16843,7 @@ export interface components {
             service_tier?: string | null;
             /**
              * Session Label
-             * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
+             * @description Optional caller-supplied label for a run, experiment or conversation, which names the session the request's trace is grouped under. Stripped before the request is forwarded upstream to the provider.
              */
             session_label?: string | null;
             /** Store */
@@ -15536,40 +16894,36 @@ export interface components {
             master_key: string;
         };
         /**
-         * RouterStatus
-         * @description How warm this user's routing memory is, and what depends on it.
-         *
-         *     Routing memory has no single warmth: it is a set of independent pools.
-         *     ``default_pool`` is what a request with no ``Otari-Router-Task`` header votes
-         *     over (every record the user has in this workspace, labeled or not) and
-         *     ``tasks`` lists each partition, which only requests carrying that label use.
-         *     Each crosses ``seed_count`` on its own.
+         * SandboxCredentialPublic
+         * @description Where the key a hosted sandbox provider leases with comes from. Never the key itself.
          */
-        RouterStatus: {
-            /** Alpha */
-            alpha: number;
-            /** Confidence Floor */
-            confidence_floor: number;
-            default_pool: components["schemas"]["PoolStatus"];
-            /** Embedding Model */
-            embedding_model: string;
-            /** Granularity */
-            granularity: string;
-            /** K */
-            k: number;
-            /** Policies */
-            policies: components["schemas"]["LearnedPolicy"][];
-            /** Seed Count */
-            seed_count: number;
-            /** Tasks */
-            tasks: components["schemas"]["TaskPool"][];
-            /** User Id */
-            user_id: string;
+        SandboxCredentialPublic: {
             /**
-             * Workspace Id
-             * Format: uuid
+             * Env Var
+             * @description The environment variable a deployment that stores no key is read from.
              */
-            workspace_id: string;
+            env_var: string;
+            /**
+             * Last4
+             * @description The key's last four characters, to tell keys apart.
+             */
+            last4?: string | null;
+            /**
+             * Source
+             * @description 'stored' for a key set here, which wins; 'environment' for the provider's own environment variable; null when there is neither and code execution fails until one is set.
+             */
+            source: ("stored" | "environment") | null;
+        };
+        /**
+         * SandboxCredentialRequest
+         * @description The key to lease hosted sandboxes with.
+         * @example {
+         *       "api_key": "e2b_0123456789abcdef"
+         *     }
+         */
+        SandboxCredentialRequest: {
+            /** Api Key */
+            api_key: string;
         };
         /**
          * SandboxProvider
@@ -15658,35 +17012,6 @@ export interface components {
             type: "score";
         } & {
             [key: string]: unknown;
-        };
-        /**
-         * ScoredExample
-         * @description One prompt and how well each candidate answered it.
-         */
-        ScoredExample: {
-            /**
-             * Label Source
-             * @description Provenance of the scores: 'human' or 'judge'.
-             * @default human
-             */
-            label_source: string;
-            /**
-             * Prompt
-             * @description The prompt that was tried.
-             */
-            prompt: string;
-            /**
-             * Scores
-             * @description Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and meaningful: two models that both answered well is exactly the case where the router should take the cheaper one.
-             */
-            scores: {
-                [key: string]: number;
-            };
-            /**
-             * Task Id
-             * @description Partition this example belongs to, matching the Otari-Router-Task header requests send. Omit to file it in the user's default pool.
-             */
-            task_id?: string | null;
         };
         /**
          * SearchProviderOptionSchema
@@ -16154,17 +17479,27 @@ export interface components {
              * Input Price Per Million
              * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
-            input_price_per_million: number;
+            input_price_per_million?: number;
+            /**
+             * Kind
+             * @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate.
+             */
+            kind?: ("model" | "search" | "fetch") | null;
             /**
              * Model Key
-             * @description Model identifier in format 'provider:model'
+             * @description Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds
              */
             model_key: string;
             /**
              * Output Price Per Million
              * @description Price per 1M output tokens; unused by a rate in requests or images
              */
-            output_price_per_million: number;
+            output_price_per_million?: number;
+            /**
+             * Price Per Request
+             * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.
+             */
+            price_per_request?: number | null;
             /**
              * Pricing Tiers
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
@@ -16172,11 +17507,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).
+             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
              * @default tokens
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images";
+            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * SignupRequest
@@ -16218,7 +17553,7 @@ export interface components {
         };
         /**
          * SpanPublic
-         * @description One span of a session. Content is never part of a span.
+         * @description One span of a session. Its content is empty unless the deployment keeps content.
          */
         SpanPublic: {
             /**
@@ -16240,6 +17575,24 @@ export interface components {
              * @description Input tokens written to the prompt cache.
              */
             cache_write_tokens: number | null;
+            /**
+             * Content
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.
+             */
+            content: {
+                [key: string]: string;
+            };
+            /**
+             * Content Private
+             * @description The span holds content this reader may not open: it is private to the session's own user, unless they share the session.
+             * @default false
+             */
+            content_private: boolean;
+            /**
+             * Context Window
+             * @description The model's context window in tokens, where the catalog knows it. Null on a span that is not a model request, and for a model the catalog does not list.
+             */
+            context_window: number | null;
             /** Cost */
             cost: number | null;
             /** Duration Ms */
@@ -16282,7 +17635,7 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "ok" | "error" | "unknown";
+            outcome: "ok" | "error" | "unknown" | "blocked";
             /** Output Tokens */
             output_tokens: number | null;
             /** Parent Span Id */
@@ -16308,6 +17661,35 @@ export interface components {
             tool_name: string | null;
             /** Tool Type */
             tool_type: string | null;
+        };
+        /**
+         * StoredCountryDatabasePublic
+         * @description The country file stored in the database, which every replica reads.
+         */
+        StoredCountryDatabasePublic: {
+            /**
+             * Built At
+             * Format: date-time
+             * @description When the file was built, from its metadata.
+             */
+            built_at: string;
+            /**
+             * Database Type
+             * @description The type the file's metadata names, such as `GeoLite2-Country` or `DBIP-Country-Lite`.
+             */
+            database_type: string;
+            /**
+             * Sha256
+             * @description The file's SHA-256, in hex.
+             */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Uploaded At
+             * Format: date-time
+             */
+            uploaded_at: string;
         };
         /**
          * StoredSearchToolSchema
@@ -16388,15 +17770,6 @@ export interface components {
              */
             organization_id: string;
         };
-        /** TaskPool */
-        TaskPool: {
-            /** Records */
-            records: number;
-            /** Task Id */
-            task_id: string;
-            /** Warm */
-            warm: boolean;
-        };
         /**
          * TestServiceRequest
          * @description A (typically unsaved) URL to probe for reachability.
@@ -16414,7 +17787,7 @@ export interface components {
         };
         /**
          * TextContent
-         * @description Text content for a message.
+         * @description Text provided to or from an LLM.
          */
         TextContent: {
             /** Meta */
@@ -16426,11 +17799,10 @@ export interface components {
             text: string;
             /**
              * Type
+             * @default text
              * @constant
              */
             type: "text";
-        } & {
-            [key: string]: unknown;
         };
         /**
          * TextResourceContents
@@ -16445,13 +17817,8 @@ export interface components {
             mimeType?: string | null;
             /** Text */
             text: string;
-            /**
-             * Uri
-             * Format: uri
-             */
+            /** Uri */
             uri: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * TokenChargeLine
@@ -16487,12 +17854,18 @@ export interface components {
         };
         /**
          * ToolChargeLine
-         * @description A gateway-run tool's charge line, one per tool and label.
+         * @description A gateway-run tool's charge line, one per tool, label and payer.
          *
          *     A subclass with ``label`` required, rather than a defaulted field on
          *     :class:`UnitChargeLine`, so the per-request, rerank and image lines, and a
          *     stored tool line without a label, serialize back without a
          *     ``"label": null`` they never had.
+         *
+         *     A line written since tools are charged by whose account ran them also
+         *     carries ``deployment_paid``: true where the deployment's account ran the
+         *     calls, which charges the organization's funds where the deployment bills
+         *     them, and false where the organization's own key did. It is kept as an extra
+         *     key rather than declared, so an older line serializes back without it.
          */
         ToolChargeLine: {
             /**
@@ -16522,6 +17895,56 @@ export interface components {
             units: number;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * ToolCostPublic
+         * @description An estimate of what one tool call cost, from the model requests either side of it.
+         */
+        ToolCostPublic: {
+            /**
+             * Calling
+             * @description Its share of the output of the request that called it.
+             */
+            calling: number;
+            /**
+             * Calls Sharing Request
+             * @description Tool calls the request that called it made, sharing its output.
+             */
+            calls_sharing_request: number;
+            /**
+             * Calls Sharing Result
+             * @description Tool calls whose results arrived together, sharing that growth.
+             */
+            calls_sharing_result: number;
+            /**
+             * Later Requests
+             * @description The later requests that read its result again.
+             */
+            later_requests: number;
+            /**
+             * Rereading
+             * @description Reading its result again in later requests, until the context was compacted.
+             */
+            rereading: number;
+            /**
+             * Result Tokens
+             * @description About how many tokens its result added to the context.
+             */
+            result_tokens: number;
+            /** Span Id */
+            span_id: string;
+            /**
+             * Subagent
+             * @description What a subagent the call ran cost, exactly.
+             */
+            subagent: number | null;
+            /** Total */
+            total: number;
+            /**
+             * Writing
+             * @description Writing its result into the context, on the next request.
+             */
+            writing: number;
         };
         /**
          * ToolMeter
@@ -16572,6 +17995,8 @@ export interface components {
         ToolSettingsResponse: {
             /** Fields */
             fields: components["schemas"]["ToolSettingField"][];
+            /** @description The key a hosted sandbox_provider leases with. Null for the protocol provider, which takes none, and for a reader who does not operate the deployment. */
+            sandbox_credential?: components["schemas"]["SandboxCredentialPublic"] | null;
             /** @description What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment. */
             sandbox_provider?: components["schemas"]["SandboxProvider"] | null;
         };
@@ -16598,14 +18023,40 @@ export interface components {
             bucket: string;
             /**
              * Failed
-             * @description Sessions that started in the bucket and hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
+             * @description Sessions active in the bucket that hold an unrecovered error other than a tool's. A tool's error, an MCP tool's included, goes back to the model, so it alone does not fail a session.
              */
             failed: number;
             /**
              * Succeeded
-             * @description Sessions that started in the bucket and did not fail.
+             * @description Sessions active in the bucket that did not fail.
              */
             succeeded: number;
+        };
+        /**
+         * TraceContentPolicyPublic
+         * @description What this deployment keeps of agent sessions, and who besides a session's owner can open it.
+         */
+        TraceContentPolicyPublic: {
+            /**
+             * Content Available
+             * @description Whether this deployment lets a workspace keep what its agent sessions were about. A workspace keeps it only once its managers turn it on as well.
+             */
+            content_available: boolean;
+            /**
+             * Platform Break Glass
+             * @description Whether the deployment's operator may open any organization's session content without its owner's share, recorded with a reason and a reference.
+             */
+            platform_break_glass: boolean;
+            /**
+             * Retention Days
+             * @description Days after its last activity that a session, with what it was about and its shares, is deleted.
+             */
+            retention_days: number;
+            /**
+             * Session Max Age Days
+             * @description Days after it started that a session is deleted, however active it still is.
+             */
+            session_max_age_days: number;
         };
         /** TraceCountPublic */
         TraceCountPublic: {
@@ -16614,6 +18065,20 @@ export interface components {
         };
         /** TraceDetailPublic */
         TraceDetailPublic: {
+            /**
+             * Content Access
+             * @description How this read reached the session's content: 'owner' for its own user, 'share' through a share its user made, 'break_glass' for a recorded opening without one, 'none' otherwise.
+             * @default none
+             * @enum {string}
+             */
+            content_access: "owner" | "share" | "break_glass" | "none";
+            /** @description The share the content was read through, with its note. Its reads are not listed. */
+            content_share?: components["schemas"]["ContentSharePublic"] | null;
+            /**
+             * Gates
+             * @description Each agent guardrail gate a coding agent's hook reported, the ones that did something first.
+             */
+            gates: components["schemas"]["GateSummaryPublic"][];
             /** Spans */
             spans: components["schemas"]["SpanPublic"][];
             /**
@@ -16622,6 +18087,11 @@ export interface components {
              */
             state: "active" | "idle";
             summary: components["schemas"]["TraceSummaryPublic"];
+            /**
+             * Tool Costs
+             * @description An estimate for each tool call between two priced model requests, in the order they were made.
+             */
+            tool_costs: components["schemas"]["ToolCostPublic"][];
             /**
              * Truncated
              * @description True when the session holds more spans than one read returns.
@@ -16643,7 +18113,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "hour" | "day";
+            bucket: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
             /** Points */
             points: components["schemas"]["TraceBucketPublic"][];
         };
@@ -16818,6 +18288,8 @@ export interface components {
         UpdateKeyRequest: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
             /** End User Budget Id */
@@ -16834,6 +18306,8 @@ export interface components {
             is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
@@ -16859,19 +18333,31 @@ export interface components {
          *     The operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the
          *     reason the create body gives. The tri-state fields follow the same
          *     ``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,
-         *     a value = pin it.
+         *     a value = pin it. ``is_service_key`` is accepted only unchanged, and
+         *     ``max_end_users`` takes no null: an organization's service key always has a
+         *     cap, so null is refused with 400.
          */
         UpdateOwnKeyRequest: {
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
+            /** End User Budget Id */
+            end_user_budget_id?: string | null;
+            /** End User Budget Ids */
+            end_user_budget_ids?: string[] | null;
             /** Expires At */
             expires_at?: string | null;
             /** Is Active */
             is_active?: boolean | null;
+            /** Is Service Key */
+            is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
+            /** Max End Users */
+            max_end_users?: number | null;
             /** Metadata */
             metadata?: {
                 [key: string]: unknown;
@@ -17009,7 +18495,7 @@ export interface components {
             web_fetch_default_tool?: string | null;
             /**
              * Web Search Default Tool
-             * @description A search instance whose provider any-search serves, or 'none' to turn in-loop search off.
+             * @description A search instance whose provider any-search serves, or 'none' to turn off the deployment's own in-loop search, which an organization key still serves.
              */
             web_search_default_tool?: string | null;
             /** Web Search Engines */
@@ -17036,6 +18522,8 @@ export interface components {
             alias?: string | null;
             /** Allowed Models */
             allowed_models?: string[] | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
             /** Blocked */
             blocked?: boolean | null;
             /** Budget Id */
@@ -17569,6 +19057,8 @@ export interface components {
             alias: string | null;
             /** Allowed Models */
             allowed_models: string[] | null;
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
             /** Blocked */
             blocked: boolean;
             /** Budget Id */
@@ -17723,42 +19213,6 @@ export interface components {
             data: components["schemas"]["WebAuthnCredentialPublic"][];
         };
         /**
-         * WebSearchBackendResponse
-         * @description A SearXNG-compatible ``/search`` body.
-         */
-        WebSearchBackendResponse: {
-            /** Results */
-            results: components["schemas"]["WebSearchBackendResult"][];
-        };
-        /**
-         * WebSearchBackendResult
-         * @description One hit, in the shape ``WebSearchBackend`` reads off a SearXNG response.
-         */
-        WebSearchBackendResult: {
-            /**
-             * Content
-             * @default
-             */
-            content: string;
-            /**
-             * Extracted Content
-             * @description The page's own text, when the provider returned it, so the caller can skip fetching the page.
-             */
-            extracted_content?: string | null;
-            /**
-             * Published Date
-             * @description The provider's own recency string for the page, forwarded unparsed. Declared so a search over this hop renders the same date an in-process one does.
-             */
-            published_date?: string | null;
-            /**
-             * Title
-             * @default
-             */
-            title: string;
-            /** Url */
-            url: string;
-        };
-        /**
          * WorkspaceActivationPublic
          * @description Where a workspace stands on its first successful request.
          */
@@ -17889,6 +19343,36 @@ export interface components {
             name: string;
         };
         /**
+         * WorkspaceMcpServerCheckRequest
+         * @description Connection details to check without storing them, for a form to test before it saves.
+         *
+         *     ``server_id`` names a stored server whose token stands in when
+         *     ``authorization_token`` is omitted, so an edit form can test a new URL with
+         *     a token it was never shown. ``""`` checks with no token at all.
+         */
+        WorkspaceMcpServerCheckRequest: {
+            /**
+             * Allowed Tools
+             * @description The allow-list to report the catalog against
+             */
+            allowed_tools?: string[] | null;
+            /**
+             * Authorization Token
+             * @description Bearer token; omit to use the stored server's, if any
+             */
+            authorization_token?: string | null;
+            /**
+             * Server Id
+             * @description A stored server whose token to use
+             */
+            server_id?: string | null;
+            /**
+             * Url
+             * @description Streamable HTTP MCP endpoint
+             */
+            url: string;
+        };
+        /**
          * WorkspaceMcpServerCreate
          * @description Request body for registering a server.
          *
@@ -17930,6 +19414,45 @@ export interface components {
             url: string;
         };
         /**
+         * WorkspaceMcpServerHealth
+         * @description The last connection check: whether the gateway reached the server, and what it found.
+         *
+         *     Describes the server as the gateway saw it at ``checked_at``, not now: a
+         *     server that answered then can be down since, and the request path checks
+         *     nothing in advance on the strength of this.
+         */
+        WorkspaceMcpServerHealth: {
+            /** Checked At */
+            checked_at: string;
+            /** @description Why the check failed; null when healthy */
+            error?: components["schemas"]["CheckFailure"] | null;
+            /**
+             * Http Status
+             * @description The HTTP status the server refused with, if any
+             */
+            http_status?: number | null;
+            /**
+             * Missing Allowed Tools
+             * @description Allow-listed names the server did not offer
+             */
+            missing_allowed_tools?: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "healthy" | "failing";
+            /**
+             * Tool Count
+             * @description Live tools the allow-list admits; null when the check failed
+             */
+            tool_count?: number | null;
+            /**
+             * Tools
+             * @description Every tool name the server offers, allowed or not, up to 200; empty on a failure
+             */
+            tools?: string[];
+        };
+        /**
          * WorkspaceMcpServerPublic
          * @description The API-facing shape. Never carries the token, only whether one is set.
          *
@@ -17947,6 +19470,8 @@ export interface components {
             enabled: boolean;
             /** Has Token */
             has_token: boolean;
+            /** @description The last connection check; null until one has run */
+            health: components["schemas"]["WorkspaceMcpServerHealth"] | null;
             /**
              * Id
              * Format: uuid
@@ -18192,6 +19717,12 @@ export interface components {
              * Format: uuid
              */
             organization_id: string;
+            /**
+             * Trace Content Enabled
+             * @description Whether this workspace keeps what its agent sessions were about.
+             * @default false
+             */
+            trace_content_enabled: boolean;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -18201,6 +19732,11 @@ export interface components {
             description?: string | null;
             /** Name */
             name?: string | null;
+            /**
+             * Trace Content Enabled
+             * @description Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.
+             */
+            trace_content_enabled?: boolean | null;
         };
         /**
          * WorkspaceWebSearchConfigPublic
@@ -18219,6 +19755,7 @@ export interface components {
             default_enabled: boolean;
             /** Enabled */
             enabled: boolean;
+            fetch_executor: components["schemas"]["CodeExecutor"] | null;
             /** Max Results */
             max_results: number | null;
             /** Provider Options */
@@ -18227,6 +19764,7 @@ export interface components {
             } | null;
             /** Purpose Hint */
             purpose_hint: string | null;
+            search_executor: components["schemas"]["CodeExecutor"] | null;
             /** Updated At */
             updated_at: string | null;
             /** Web Search Configured */
@@ -18261,6 +19799,8 @@ export interface components {
              * @description False refuses web access for this workspace through otari_web_search, otari_web_fetch, and POST /api/v1/search.
              */
             enabled: boolean;
+            /** @description Who runs a provider-native web-fetch declaration (Anthropic's web_fetch_<date>) for this workspace, in search_executor's vocabulary. Pins over the request's Otari-Web-Fetch header; null leaves the header in charge */
+            fetch_executor?: components["schemas"]["CodeExecutor"] | null;
             /**
              * Max Results
              * @description Search only: ceiling on results one search returns, through otari_web_search and POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the provider's own maximum is the only limit.
@@ -18278,12 +19818,14 @@ export interface components {
              * @description Search only: hint used when a request declares otari_web_search without one of its own
              */
             purpose_hint?: string | null;
+            /** @description Who runs a provider-native web-search declaration (Anthropic's web_search_<date>, OpenAI's web_search) for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's search), 'otari' or 'provider'. Pins over the request's Otari-Web-Search header; null leaves the header in charge. The deployment's web_search_intercept still claims every search */
+            search_executor?: components["schemas"]["CodeExecutor"] | null;
         };
         /**
          * WorkspaceWebSearchKeyOverrideRequest
          * @description Tri-state: an omitted flag keeps its value.
          *
-         *     Pinning a key re-enables it and unpins any other key of the workspace, and turning a
+         *     Pinning a key re-enables it and unpins the workspace's other key of its kind, and turning a
          *     key off unpins it. Sending both flags true is refused. Both false deletes the override.
          * @example {
          *       "is_default": true
@@ -18307,14 +19849,25 @@ export interface components {
             disabled: boolean;
             /**
              * Is Default
-             * @description The workspace pinned this key as its own.
+             * @description The workspace pinned this key as its own for its kind.
              */
             is_default: boolean;
             /**
              * Is Effective
-             * @description This is the key the workspace's searches use.
+             * @description This is the key the workspace's calls of its kind use.
              */
             is_effective: boolean;
+            /**
+             * Is Org Default
+             * @description The organization's default of its kind, which a workspace that pinned no key uses unless it turned the key off or this deployment cannot decrypt it; the deployment's instance serves it then.
+             * @default false
+             */
+            is_org_default: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Last4 */
             last4?: string | null;
             /** Name */
@@ -18343,6 +19896,26 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WorkspaceWebSearchKeyPublic"][];
+            /**
+             * Deployment Fetch Tool
+             * @description The name of the deployment's fetch tool, which the workspace's fetches run on when no key serves them, whether or not one does now: builtin_fetch for the built-in fetcher.
+             */
+            deployment_fetch_tool?: string | null;
+            /**
+             * Deployment Search Tool
+             * @description The name of the deployment's search tool, which the workspace's searches run on when no key serves them, whether or not one does now. Null when the deployment has none.
+             */
+            deployment_search_tool?: string | null;
+            /**
+             * Fetch Provider
+             * @description The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the search's instance names a fetch instance of its own: its effective fetch key's, else the deployment's default fetch instance's, which is builtin for the built-in fetcher.
+             */
+            fetch_provider?: string | null;
+            /**
+             * Search Provider
+             * @description The provider the workspace's searches run on: its effective search key's, else the deployment's default search's. Null when nothing searches for it.
+             */
+            search_provider?: string | null;
         };
         /** WorkspacesPublic */
         WorkspacesPublic: {
@@ -18403,6 +19976,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentAdminAccessPublic"];
+                };
+            };
+        };
+    };
+    "admin-list_blocked_emails": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedEmailsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-block_email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockedEmailCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedEmailCreatedPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-unblock_email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -19922,6 +21591,8 @@ export interface operations {
                 output_modality?: string[];
                 /** @description Require every capability. */
                 capability?: components["schemas"]["CatalogCapability"][];
+                /** @description Match any kind; a model of unknown kind does not match. */
+                type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other")[];
                 /** @description Minimum context window; unknown windows do not match. */
                 min_context?: number;
                 /** @description Maximum cheapest input price per million tokens; unpriced models do not match. */
@@ -20016,7 +21687,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -20037,6 +21708,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "code-execution-execute_code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeExecuteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -20448,6 +22152,11 @@ export interface operations {
                 "application/json": {
                     /** Message */
                     message: string;
+                    /**
+                     * Share Email
+                     * @description The signed-in account's email as the form showed it, to send with the message so the Otari team can reply. Refused when the caller has no email the team can reply to, or when it is not this one.
+                     */
+                    share_email?: string | null;
                 };
             };
         };
@@ -20879,6 +22588,46 @@ export interface operations {
             };
         };
     };
+    "hooks-record_guardrail_definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuardrailDefinitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailDefinitionResponse"];
+                };
+            };
+            /** @description The workspace already keeps the most guardrail versions it may, and this one is new. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "hosted-providers-list_hosted_providers": {
         parameters: {
             query?: {
@@ -20931,6 +22680,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedCatalogUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedCatalogUpdatePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-preview_catalog_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedCatalogUpdatePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedCatalogUpdatePreviewPublic"];
                 };
             };
             /** @description Validation Error */
@@ -21042,46 +22857,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostedProvidersReencryptPublic"];
-                };
-            };
-        };
-    };
-    "hosted-providers-refresh_catalog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
-                };
-            };
-        };
-    };
-    "hosted-providers-preview_catalog_refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
                 };
             };
         };
@@ -22263,7 +24038,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -22286,13 +24061,22 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Validation Error */
-            422: {
+            /** @description The request was refused. */
+            "4XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
+                };
+            };
+            /** @description The request failed. */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
                 };
             };
         };
@@ -22319,13 +24103,22 @@ export interface operations {
                     "application/json": components["schemas"]["CountTokensResponse"];
                 };
             };
-            /** @description Validation Error */
-            422: {
+            /** @description The request was refused. */
+            "4XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
+                };
+            };
+            /** @description The request failed. */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicErrorResponse"];
                 };
             };
         };
@@ -22333,7 +24126,7 @@ export interface operations {
     "models-list_models": {
         parameters: {
             query?: {
-                /** @description Filter models by provider name */
+                /** @description Only the models this provider instance serves, described as served there. */
                 provider?: string | null;
             };
             header?: never;
@@ -23560,6 +25353,102 @@ export interface operations {
             };
         };
     };
+    "organization-keys-list_own_federation_rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationRulePublic"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-create_own_federation_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FederationRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-delete_own_federation_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-keys-rotate_own_key": {
         parameters: {
             query?: never;
@@ -23989,6 +25878,8 @@ export interface operations {
             query?: {
                 /** @description Return only this model's periods, in the canonical 'provider:model' form. */
                 model_key?: string | null;
+                /** @description Return only overrides of this kind. */
+                kind?: ("model" | "search" | "fetch") | null;
                 /** @description Number of records to skip */
                 skip?: number;
                 /** @description Maximum number of records to return */
@@ -24912,14 +26803,16 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -24955,19 +26848,53 @@ export interface operations {
             };
         };
     };
+    "organization-traces-list_organization_break_glass_reads": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BreakGlassReadListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-traces-count_traces": {
         parameters: {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -25037,17 +26964,19 @@ export interface operations {
     "organization-traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -25104,6 +27033,188 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-organization_break_glass": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BreakGlassCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-list_trace_content_shares": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentShareListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-share_trace_content": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentShareCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentSharePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-end_trace_content_share": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+                share_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-list_trace_content_share_reads": {
+        parameters: {
+            query?: {
+                /** @description The workspace the trace is in, as its list entry names it. */
+                workspace_id?: string | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+                share_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentReadListPublic"];
                 };
             };
             /** @description Validation Error */
@@ -25546,6 +27657,37 @@ export interface operations {
         };
     };
     "web-search-keys-set_org_default_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-unset_org_default_web_search_key": {
         parameters: {
             query?: never;
             header?: never;
@@ -26279,58 +28421,6 @@ export interface operations {
             };
         };
     };
-    "pricing-preview_pricing_refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PricingRefreshPreviewResponse"];
-                };
-            };
-        };
-    };
-    "pricing-confirm_pricing_refresh": {
-        parameters: {
-            query?: {
-                /** @description The `digest` of the previewed snapshot; 409 when the pending one differs. */
-                digest?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PricingRefreshConfirmationResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     "pricing-get_pending_pricing_refresh": {
         parameters: {
             query?: never;
@@ -26417,6 +28507,8 @@ export interface operations {
             query?: {
                 /** @description ISO datetime for effective lookup */
                 as_of?: string | null;
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
             };
             header?: never;
             path: {
@@ -26458,6 +28550,8 @@ export interface operations {
             query?: {
                 /** @description ISO datetime identifying a specific pricing row to delete */
                 effective_at?: string | null;
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
             };
             header?: never;
             path: {
@@ -26487,7 +28581,10 @@ export interface operations {
     };
     "pricing-get_pricing_history": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, keyed by the instance's name and priced per call. Only the deployment operator sets a search or fetch rate. */
+                kind?: "model" | "search" | "fetch";
+            };
             header?: never;
             path: {
                 model_key: string;
@@ -26945,7 +29042,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again. A retry while the original is still running is answered 409 with Retry-After. Reusing a key for a different body is refused with 422. Ignored for streaming requests and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
                 /** @description Tags for cost attribution, as comma-separated `key=value` pairs (`agent=bug-fix,run=1234`), for a client that cannot set the body's `metadata`. Keys and values are percent-decoded, so either may carry an encoded `,` or `=`, and a non-ASCII character must be encoded. Whitespace around a pair is ignored, and a repeated header is read as one list. The bounds are the body's: up to 16 pairs, keys up to 64 characters and values up to 512, counted after merging with the body's tags, which win on the same key. Never forwarded to the provider. */
                 "Otari-Tags"?: string | null;
@@ -27111,39 +29208,6 @@ export interface operations {
             };
         };
     };
-    "routing-rank_candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RankRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RankResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     "routing-recommend_model_for_agent": {
         parameters: {
             query?: never;
@@ -27166,6 +29230,15 @@ export interface operations {
                     "application/json": components["schemas"]["AgentModelRecommendation"];
                 };
             };
+            /** @description No subagent router is switched on, or a master-key call names no `user`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecommendationRefusal"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -27177,14 +29250,9 @@ export interface operations {
             };
         };
     };
-    "routing-routing_memory_status": {
+    "agent-recommenders-list_agent_recommenders": {
         parameters: {
-            query: {
-                /** @description Whose routing memory to report on. */
-                user_id: string;
-                /** @description Which workspace's routing memory to report on. Omit for the default workspace. */
-                workspace_id?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -27197,7 +29265,95 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RouterStatus"];
+                    "application/json": components["schemas"]["AgentRecommendersPublic"];
+                };
+            };
+        };
+    };
+    "agent-recommenders-create_agent_recommender": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRecommenderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRecommenderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "agent-recommenders-delete_agent_recommender": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recommender_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "agent-recommenders-update_agent_recommender": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recommender_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRecommenderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRecommenderPublic"];
                 };
             };
             /** @description Validation Error */
@@ -27744,6 +29900,85 @@ export interface operations {
             };
         };
     };
+    "settings-get_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryDatabaseStatus"];
+                };
+            };
+        };
+    };
+    "settings-upload_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description A MaxMind DB country file, such as GeoLite2 Country or DB-IP Lite Country. */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountryDatabaseStatus"];
+                };
+            };
+            /** @description The file is larger than 32 MiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body holds no file in the field ``file``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "settings-delete_country_database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     "settings-get_mail_settings": {
         parameters: {
             query?: never;
@@ -27996,6 +30231,59 @@ export interface operations {
             };
         };
     };
+    "tool-settings-set_sandbox_credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SandboxCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxCredentialPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "tool-settings-clear_sandbox_credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxCredentialPublic"];
+                };
+            };
+        };
+    };
     "tool-settings-test_service": {
         parameters: {
             query?: never;
@@ -28051,6 +30339,26 @@ export interface operations {
             };
         };
     };
+    "traces-get_trace_content_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceContentPolicyPublic"];
+                };
+            };
+        };
+    };
     "traces-list_traces": {
         parameters: {
             query?: {
@@ -28062,14 +30370,16 @@ export interface operations {
                 order?: "asc" | "desc";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -28105,19 +30415,53 @@ export interface operations {
             };
         };
     };
+    "traces-list_break_glass_reads": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BreakGlassReadListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "traces-count_traces": {
         parameters: {
             query?: {
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -28187,17 +30531,19 @@ export interface operations {
     "traces-trace_series": {
         parameters: {
             query?: {
-                bucket?: "hour" | "day";
+                bucket?: "1m" | "5m" | "30m" | "hour" | "6h" | "day";
                 /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
                 workspace_id?: string | null;
-                /** @description Last activity at or after this instant (ISO 8601). */
+                /** @description Sessions active at or after this instant (ISO 8601). */
                 start?: string | null;
-                /** @description Last activity before this instant (ISO 8601). */
+                /** @description Sessions started before this instant (ISO 8601). */
                 end?: string | null;
                 /** @description Owning users. */
                 user_id?: string[] | null;
                 /** @description API keys. */
                 api_key_id?: string[] | null;
+                /** @description Sessions with an LLM call recorded under any of these model ids (exact match). */
+                model?: string[] | null;
                 /** @description Agent harnesses. */
                 harness?: string[] | null;
                 /** @description What grouped the session. */
@@ -28246,6 +30592,44 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "traces-platform_break_glass": {
+        parameters: {
+            query: {
+                /** @description The workspace the session is in. */
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformBreakGlassCreate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -28883,45 +31267,6 @@ export interface operations {
             };
         };
     };
-    "web-search-web_search": {
-        parameters: {
-            query: {
-                /** @description The search query. */
-                q: string;
-                max_results?: number | null;
-                search_depth?: string | null;
-                topic?: string | null;
-                time_range?: string | null;
-                include_answer?: boolean | null;
-            };
-            header?: {
-                "x-gateway-token"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebSearchBackendResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     "workspaces-list_workspaces": {
         parameters: {
             query?: {
@@ -29347,6 +31692,55 @@ export interface operations {
             };
         };
     };
+    "mcp-servers-check_workspace_mcp_server_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerHealth"];
+                };
+            };
+            /** @description The URL failed the SSRF or TLS check; nothing was sent to it. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Every check slot on this gateway was busy. Try again shortly. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     "mcp-servers-delete_workspace_mcp_server": {
         parameters: {
             query?: never;
@@ -29412,6 +31806,45 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "mcp-servers-check_workspace_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Every check slot on this gateway was busy; nothing was recorded. Try again shortly. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -29612,6 +32045,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMemberPublic"];
+                };
+            };
+            /** @description The workspace does not exist, or was deleted during the add. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+            /** @description The user is already a member of the workspace. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
                 };
             };
             /** @description Validation Error */
@@ -29867,6 +32318,37 @@ export interface operations {
                 workspace_id: string;
                 key_id: string;
                 model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspaces-delete_workspace_trace_content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
             };
             cookie?: never;
         };

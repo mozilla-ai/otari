@@ -4,7 +4,7 @@
     "name": "Mozilla AI"
   },
   "metadata": {
-    "description": "Plugins that connect a coding agent to Otari, the open-source LLM gateway."
+    "description": "Plugins that connect a coding agent to Otari, the open-source AI gateway."
   },
   "plugins": [
     {

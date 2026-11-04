@@ -33,6 +33,12 @@ AnySearch.get_provider_metadata("fake")
   timeout, and never closes it or changes its settings. Without one, the provider opens a client
   with httpx's defaults and closes it in `aclose()`, which `async with` calls.
 
+Every request a provider sends carries `User-Agent: any-search/<version>`, the library's own
+version (`any_search.__version__`, which a change to the library bumps in the same PR), so a
+provider, or a proxy that allowlists outbound traffic, can tell the library's requests apart. A
+`client` that sets a `User-Agent` of its own keeps it: httpx's default is replaced, and a client
+that carries none is filled in.
+
 `search` takes two shared parameters, which every provider maps onto its own: `max_results` and
 `time_range` (`day`, `week`, `month` or `year`). Every other keyword is a native option, passed to
 the provider under its own name. An option the provider's metadata does not list raises
@@ -91,6 +97,40 @@ when it parses. `--json` prints the result as JSON without `raw`, `--raw` prints
 own response, and both together print the result with `raw` kept. `--describe PROVIDER` prints the
 provider's metadata and each native option with its type, allowed values, default and
 description, then exits without searching.
+
+## DeepSeek
+
+`deepseek` calls DeepSeek's [Search API](https://api-docs.deepseek.com/api/search),
+`POST /v1/tools/search`, a search engine of DeepSeek's own, apart from its models, with the key in
+a bearer header, read from `DEEPSEEK_API_KEY` when not passed. DeepSeek publishes no SDK for it, so
+the adapter sends the query, and `count` when `max_results` is passed, and nothing else unless you
+pass a native option.
+
+| `SearchHit` | From DeepSeek |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | `snippet`, DeepSeek's short text; its longer `summary`, written for a model, stays in `raw` |
+| `text` | `content`, which DeepSeek returns only with `need_content=True`; empty counts as none |
+| `published` | `date`, RFC 3339 in UTC, or `null` when DeepSeek does not know it |
+
+DeepSeek reports no cost. `max_results` becomes `count`, at most 50; without it DeepSeek returns
+its default of 10. DeepSeek has no recency parameter, so `time_range` becomes its `after:` query
+operator, the day the range starts on as `YYYY-MM-DD`, appended to the query. DeepSeek counts that
+day in from midnight China Standard Time (UTC+8), so the range covers at least its span. The
+operator counts toward DeepSeek's 128-character limit on the query, so a query within 17 characters of that limit is
+refused with a 400 when a `time_range` is passed. The other native options are `ori_question`,
+`localization` (an IP address) and `need_content`; an option set to `None` is not sent.
+
+A failed call raises `ProviderError` with DeepSeek's HTTP status, tagged with the `error.type` of
+its OpenAI-shaped body: `authentication_error` for a refused key, `invalid_request_error` for a bad
+request. Its `error.code` is `invalid_request_error` for every failure, so it is the tag only when
+there is no type. The message is never read, since for a refused key it quotes the key's last four
+characters. A successful search carries no error of its own.
+
+Every field read from a successful answer is checked: an answer without `results`, or an item
+without `url`, `title`, `snippet`, `content` or `date`, all of which DeepSeek documents on every
+result, or with any of them of the wrong type or a `date` that does not parse, raises
+`ProviderError` with the tag `unexpected_response`. Fields the adapter does not read are ignored.
 
 ## Exa
 
@@ -170,6 +210,38 @@ Mojeek's documentation lists `pdate` and `timestamp` on every result, but they c
 request (`timestamp` with `date=1`), so neither is required: the date is read from `pdate` when it
 is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
 behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
+
+## Serply
+
+`serply` calls Serply's [Google Search API](https://serply.io/docs/resources/google-search),
+`GET /v1/search`, with the key read from `SERPLY_API_KEY` when not passed. The key travels in the
+`X-Api-Key` header; the query travels in the URL, which the log filter above keeps out of httpx's
+log.
+
+| `SearchHit` | From Serply |
+|---|---|
+| `url`, `title` | `link`, `title` |
+| `snippet` | `description`; Serply returns no page text, so `text` is always `None` |
+| `published` | always `None`: Serply shows a result's date as display text in the language of the region that served the search, such as `May 27, 2026`, `17 hours ago` or `27.05.2026`, so it stays in `raw` |
+
+Serply reports no cost. `max_results` becomes `num`, at most 10, one page of Google's results;
+a page can hold one more than asked for, so the hits are cut to the count as well. `time_range`
+becomes Google's `tbs` window, `qdr:d`, `qdr:w`, `qdr:m` or `qdr:y`, and wins over the `tbs`
+option. The other native options are `gl`, `start`, `tbs` and `tbm` (`nws` for Google News),
+sent as query parameters, and `X-Proxy-Location` and `X-User-Agent`, sent as headers under those
+names; `--describe serply` lists them. An option set to `None` is not sent.
+
+Serply signals every failure with an HTTP status and a `detail` sentence in the body. Any status
+from 400 raises `ProviderError`, tagged `invalid_api_key` or `missing_api_key` from how the detail
+starts, else `http_error`; the detail itself never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `link`, `title` or `description`, or with any of these of the wrong type, raises
+`ProviderError` with the tag `unexpected_response`. A `link` that is not an http or https URL
+with a host, such as an opaque Google redirect token, which Serply sometimes returns in its place,
+is dropped rather than failing the search, and the count is filled from the items after it. Ads, the
+knowledge graph and Serply's other SERP features come in fields of their own, which the adapter
+does not read, so a field Serply adds breaks nothing.
 
 ## The fake provider
 

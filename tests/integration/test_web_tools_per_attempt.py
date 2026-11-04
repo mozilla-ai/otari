@@ -9,7 +9,7 @@ request. The pure decision is in ``tests/unit/test_candidate_tools.py``.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -49,6 +49,7 @@ from gateway.services.tools import (
     WebFetchBackend,
     WebSearchBackend,
     owning_backend,
+    tools_to_price,
 )
 
 from .conftest import declared_test_providers
@@ -116,6 +117,19 @@ def _web_tools(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig) -> N
 def _unavailable() -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     return httpx.HTTPStatusError("503", request=request, response=httpx.Response(503, request=request))
+
+
+def _billing_exhausted() -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return httpx.HTTPStatusError("402", request=request, response=httpx.Response(402, request=request))
+
+
+async def _failing_events(after_round: Callable[[], None] | None = None) -> AsyncIterator[MessageStreamEvent]:
+    """A tool-loop stream whose provider answers 402 before any event, after a hidden tool round if ``after_round``."""
+    if after_round is not None:
+        after_round()
+    raise _billing_exhausted()
+    yield  # pragma: no cover  (makes this an async generator)
 
 
 def _reply(text: str, content: list[Any] | None = None, stop_reason: str = "end_turn") -> MessageResponse:
@@ -252,6 +266,8 @@ def _post_messages(
     *,
     provider_fails: bool = False,
     loop_fails: bool = False,
+    loop_stream_fails: bool = False,
+    loop_stream_fails_after_round: bool = False,
     run_loop_for: str | None = None,
 ) -> tuple[Any, _Seen]:
     """POST ``body`` to Messages with the providers, loops and backends faked.
@@ -279,6 +295,10 @@ def _post_messages(
         *, completion_kwargs: Any, pool: Any, max_iterations: int, **extra: Any
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.loop_calls.append((completion_kwargs, extra))
+        if loop_stream_fails and len(seen.loop_calls) == 1:
+            return _failing_events()
+        if loop_stream_fails_after_round and len(seen.loop_calls) == 1:
+            return _failing_events(extra["on_first_response"])
         return _events("via-otari")
 
     rounds: list[dict[str, Any]] = []
@@ -461,11 +481,18 @@ def test_a_web_access_policy_refusal_skips_only_the_fallback_that_needs_it(
 def test_an_unpriced_tool_skips_only_the_fallback_that_needs_it(
     client: TestClient, api_key_header: dict[str, str], db_session: Session, tool: str
 ) -> None:
-    async def unpriced(_ctx: Any, tools: Any) -> str | None:
-        return _NAMES[tool] if _NAMES[tool] in list(tools) else None
+    async def unpriced(_ctx: Any, tools: Any) -> Any:
+        return next((priced for priced in tools if priced.name == _NAMES[tool]), None)
+
+    def checked(**kwargs: Any) -> Any:
+        # The module's client runs with require_pricing off, which an unpriced model needs.
+        return tools_to_price(**{**kwargs, "require_pricing": True})
 
     body = _messages_body("claude-then-vertex", _DECLARATIONS[tool])
-    with patch("gateway.api.routes._pipeline._unpriced_tool", new=unpriced):
+    with (
+        patch("gateway.api.routes._pipeline.tools_to_price", new=checked),
+        patch("gateway.api.routes._pipeline._unpriced_tool", new=unpriced),
+    ):
         served, _ = _post_messages(client, _auto(api_key_header, tool), body)
         failed, seen = _post_messages(client, _auto(api_key_header, tool), body, provider_fails=True)
 
@@ -474,8 +501,8 @@ def test_an_unpriced_tool_skips_only_the_fallback_that_needs_it(
     assert seen.loop_calls == []
     skipped = [row for row in _rows(db_session) if row.status == "absorbed" and row.provider == "vertexai"]
     assert len(skipped) == 1
-    assert f"otari:{_NAMES[tool]}" in (skipped[0].error_message or "")
-    rejections = [row for row in _rows(db_session) if row.provider == "otari" and row.status != "success"]
+    assert f"'{_NAMES[tool]}' has no pricing" in (skipped[0].error_message or "")
+    rejections = [row for row in _rows(db_session) if row.status == "error" and row.status_code == 402]
     assert rejections == [], "a refusal that answered no request was logged as one"
 
 
@@ -510,6 +537,124 @@ def test_otari_runs_otaris_tool_on_every_candidate(
     loop_kwargs, loop_extra = seen.loop_calls[0]
     assert seen.tool_types(loop_kwargs) == set()
     assert loop_extra.get("native_tools") == frozenset({_NAMES[tool]})
+
+
+_EXECUTOR_FIELDS = {"search": "search_executor", "fetch": "fetch_executor"}
+
+
+def _pin(client: TestClient, master_key_header: dict[str, str], tool: str, executor: str) -> None:
+    workspace_id = _default_workspace_id(client, master_key_header)
+    stored = client.put(
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search",
+        json={"enabled": True, _EXECUTOR_FIELDS[tool]: executor},
+        headers=master_key_header,
+    )
+    assert stored.status_code == 200, stored.text
+    assert stored.json()[_EXECUTOR_FIELDS[tool]] == executor
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_workspace_pin_runs_the_providers_own_keyword_on_otari_with_no_header(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    """An Anthropic SDK client changes nothing: the workspace's pin brings the tool here, answered natively."""
+    _pin(client, master_key_header, tool, "otari")
+
+    response, seen = _post_messages(client, api_key_header, _messages_body("claude-then-vertex", _DECLARATIONS[tool]))
+
+    assert response.status_code == 200, response.text
+    assert seen.provider_calls == []
+    loop_kwargs, loop_extra = seen.loop_calls[0]
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == frozenset({_NAMES[tool]})
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_header_that_disagrees_with_the_workspace_pin_is_refused(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    _pin(client, master_key_header, tool, "otari")
+
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, _HEADERS[tool]: "provider"},
+        _messages_body("claude-then-vertex", _DECLARATIONS[tool]),
+    )
+
+    assert response.status_code == 403, response.text
+    assert "web access policy decides who runs" in response.text
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []
+
+
+def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A streamed tool loop whose provider fails before any output falls over, as a plain stream does."""
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, WEB_SEARCH_HEADER: "otari"},
+        _messages_body("claude-then-vertex", _SEARCH, stream=True),
+        loop_stream_fails=True,
+    )
+
+    assert response.status_code == 200, response.text
+    assert "via-otari" in response.text
+    assert len(seen.loop_calls) == 2, "the walk must have tried both candidates' tool loops"
+
+
+class _McpPool:
+    """An MCP pool whose one server exposes a tool no built-in is named."""
+
+    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None) -> None:
+        return None
+
+    async def __aenter__(self) -> _McpPool:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "lookup", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "lookup"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+
+def test_a_streamed_mcp_only_loop_candidates_failure_falls_over_to_the_next_candidate(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A stream whose only gateway tools are MCP servers is held for its first chunk like any other."""
+    body = _messages_body(
+        "claude-then-vertex", mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}], stream=True
+    )
+
+    with patch("gateway.api.routes._pipeline.MCPClientPool", new=_McpPool):
+        response, seen = _post_messages(client, api_key_header, body, loop_stream_fails=True)
+
+    assert response.status_code == 200, response.text
+    assert "via-otari" in response.text
+    assert len(seen.loop_calls) == 2, "the walk must have tried both candidates' tool loops"
+
+
+def test_a_streamed_loop_that_ran_a_round_does_not_fall_over(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A failure after the first round stays on its candidate, so the next one does not run the tools again."""
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, WEB_SEARCH_HEADER: "otari"},
+        _messages_body("claude-then-vertex", _SEARCH, stream=True),
+        loop_stream_fails_after_round=True,
+    )
+
+    assert response.status_code >= 400, response.text
+    assert len(seen.loop_calls) == 1
 
 
 @pytest.mark.parametrize("tool", ["search", "fetch"])
@@ -788,3 +933,41 @@ def test_responses_decides_two_models_of_one_provider_apart(client: TestClient, 
     assert seen.tool_types(loop_kwargs) == set()
     assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
     assert len(seen.web_backends) == 1
+
+
+_RESPONSES_DECLARATIONS = {"search": {"type": "web_search"}, "fetch": _FETCH}
+# Responses has no fetch item of its own to answer a fetch with.
+_RESPONSES_NATIVE = {"search": frozenset({WEB_SEARCH_TOOL_NAME}), "fetch": None}
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_responses_runs_a_tool_the_workspace_pinned_to_otari_even_on_an_openai_head(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    """An OpenAI SDK client changes nothing: the pin takes the tool the provider would run."""
+    _pin(client, master_key_header, tool, "otari")
+
+    body = {**_responses_body(), "tools": [_RESPONSES_DECLARATIONS[tool]]}
+    response, seen = _post_responses(client, api_key_header, body)
+
+    assert response.status_code == 200, response.text
+    assert seen.provider_calls == []
+    loop_kwargs, loop_extra = seen.loop_calls[0]
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == _RESPONSES_NATIVE[tool]
+    assert len(seen.web_backends) == 1
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_responses_refuses_a_header_that_disagrees_with_the_workspace_pin(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    _pin(client, master_key_header, tool, "otari")
+
+    body = {**_responses_body(), "tools": [_RESPONSES_DECLARATIONS[tool]]}
+    response, seen = _post_responses(client, {**api_key_header, _HEADERS[tool]: "provider"}, body)
+
+    assert response.status_code == 403, response.text
+    assert "web access policy decides who runs" in response.json()["detail"]
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []

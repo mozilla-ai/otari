@@ -2,7 +2,11 @@ import { createHashHistory, createRouter } from "@tanstack/react-router"
 import { PendingPage } from "@/app/PendingPage"
 import { PageError } from "@/design-system/feedback/PageError"
 import { routeTree } from "@/routeTree.gen"
-import { parseSearch, stringifySearch } from "@/shared/helpers/search"
+import {
+  type DashboardSearch,
+  parseSearch,
+  stringifySearch,
+} from "@/shared/helpers/search"
 
 export const router = createRouter({
   routeTree,
@@ -36,5 +40,9 @@ export const router = createRouter({
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router
+  }
+  interface HistoryState {
+    /** The Models list's search a model was opened from, for its link back. */
+    catalogSearch?: DashboardSearch
   }
 }

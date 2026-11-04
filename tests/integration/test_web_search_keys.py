@@ -1,24 +1,42 @@
-"""An organization's own web search keys: managing them, and the request searching with them.
+"""An organization's own web search and fetch keys: managing them, and the requests using them.
 
-The request cases go through ``/api/v1/messages`` with the search backend patched out,
-so what is asserted is which provider and key the backend was built with.
+The cases on the older backend go through ``/api/v1/messages`` with it patched out, so
+what is asserted is which provider and key it was built with. The cases on the
+libraries go through ``/api/v1/chat/completions`` with a scripted model, and answer the
+provider's calls through the app's web provider client.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import contextmanager
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCall,
+    Choice,
+    CompletionUsage,
+    Function,
+)
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.api.deps import get_optional_web_provider_client, get_web_provider_client
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError
-from gateway.exceptions.tools_exceptions import WebSearchKeyNotFoundError
+from gateway.exceptions.tools_exceptions import WebSearchKeyDefaultConflictError, WebSearchKeyNotFoundError
 from gateway.models.tenancy import User, Workspace
+from gateway.models.tools import OrgWebSearchKey
+from gateway.models.usage import UsageLog
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -26,13 +44,18 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.repositories.tools import OrgWebSearchKeyRepository, WorkspaceWebSearchKeyOverrideRepository
+from gateway.repositories.tools import (
+    OrgWebSearchKeyRepository,
+    WebSearchKeyConflict,
+    WorkspaceWebSearchKeyOverrideRepository,
+)
 from gateway.schemas.tools import OrgWebSearchKeyCreateRequest, WorkspaceWebSearchKeyOverrideRequest
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
-from gateway.services.tools import WebSearchKeyService
+from gateway.services.tools import WebSearchKeyService, _web_search_keys
+
+from .conftest import MODEL_NAME, build_test_client
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _KEYS = f"{API_ROOT}/organizations/me/web-search-keys"
@@ -58,11 +81,25 @@ def _workspace_id(client: TestClient, headers: dict[str, str]) -> str:
 
 
 def _add_key(
-    client: TestClient, headers: dict[str, str], *, provider: str = "tavily", name: str = "ours", api_key: str
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    provider: str = "tavily",
+    name: str = "ours",
+    api_key: str,
+    default: bool = False,
+    **fields: Any,
 ) -> dict[str, Any]:
-    created = client.post(_KEYS, json={"provider": provider, "name": name, "api_key": api_key}, headers=headers)
+    """Add a key, and make it its kind's default when ``default``, so every workspace uses it."""
+    created = client.post(
+        _KEYS, json={"provider": provider, "name": name, "api_key": api_key, **fields}, headers=headers
+    )
     assert created.status_code == 201, created.text
     body: dict[str, Any] = created.json()
+    if default:
+        starred = client.post(f"{_KEYS}/{body['id']}/default", headers=headers)
+        assert starred.status_code == 200, starred.text
+        body = starred.json()
     return body
 
 
@@ -215,10 +252,11 @@ def test_a_workspace_pins_or_turns_off_a_key(client: TestClient, master_key_head
             key["name"] for key in client.get(view, headers=master_key_header).json()["data"] if key["is_effective"]
         ]
 
-    # No default and no pin: the oldest key.
-    assert effective() == ["t"]
+    # No default and no pin: the deployment's search.
+    assert effective() == []
     client.patch(f"{view}/{brave['id']}", json={"is_default": True}, headers=master_key_header)
     assert effective() == ["b"]
+    client.post(f"{_KEYS}/{tavily['id']}/default", headers=master_key_header)
     client.patch(f"{view}/{brave['id']}", json={"disabled": True}, headers=master_key_header)
     assert effective() == ["t"]
     client.patch(f"{view}/{tavily['id']}", json={"disabled": True}, headers=master_key_header)
@@ -226,6 +264,26 @@ def test_a_workspace_pins_or_turns_off_a_key(client: TestClient, master_key_head
     reset = client.delete(f"{view}/{tavily['id']}", headers=master_key_header)
     assert reset.status_code == 200
     assert effective() == ["t"]
+
+
+def test_removing_the_default_returns_unpinned_workspaces_to_the_deployments_search(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    view = f"{API_ROOT}/workspaces/{_workspace_id(client, master_key_header)}/web-search-keys"
+    key = _add_key(client, master_key_header, name="t", api_key="tvly-1", default=True)
+    listed = client.get(view, headers=master_key_header).json()
+    assert listed["search_provider"] == "tavily"
+    assert [row["is_org_default"] for row in listed["data"]] == [True]
+
+    removed = client.delete(f"{_KEYS}/{key['id']}/default", headers=master_key_header)
+    again = client.delete(f"{_KEYS}/{key['id']}/default", headers=master_key_header)
+
+    assert (removed.status_code, removed.json()["is_org_default"]) == (200, False)
+    assert (again.status_code, again.json()["is_org_default"]) == (200, False)
+    # The legacy URL is the deployment's search.
+    listed = client.get(view, headers=master_key_header).json()
+    assert listed["search_provider"] == "searxng"
+    assert [row["is_org_default"] for row in listed["data"]] == [False]
 
 
 def test_a_workspaces_keys_are_paged_and_the_effective_key_is_chosen_across_pages(
@@ -267,7 +325,7 @@ def test_pinning_and_turning_off_one_key_at_once_is_refused(
 def test_a_workspace_with_a_key_searches_with_it(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
-    _add_key(client, master_key_header, api_key="tvly-org-secret")
+    _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
 
     seen = _searched_with(client, api_key_header)
 
@@ -279,7 +337,7 @@ def test_a_workspace_that_turned_its_keys_off_uses_the_deployments_search(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
     workspace_id = _workspace_id(client, master_key_header)
-    key = _add_key(client, master_key_header, api_key="tvly-org-secret")
+    key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
     client.patch(
         f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys/{key['id']}",
         json={"disabled": True},
@@ -304,9 +362,12 @@ def test_a_workspace_with_no_key_uses_the_deployments_search_unchanged(
 def test_an_archived_key_is_not_searched_with(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
-    key = _add_key(client, master_key_header, api_key="tvly-org-secret")
-    client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
+    key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
+    assert _searched_with(client, api_key_header)["provider_api_key"] == "tvly-org-secret"
 
+    archived = client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
+
+    assert archived.status_code == 200
     assert "provider" not in _searched_with(client, api_key_header)
 
 
@@ -314,7 +375,7 @@ def test_an_archived_key_is_not_searched_with(
 
 
 def _service(db: AsyncSession) -> WebSearchKeyService:
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     uow = UnitOfWork(db)
     return WebSearchKeyService(
         uow,
@@ -323,6 +384,7 @@ def _service(db: AsyncSession) -> WebSearchKeyService:
         organizations=organizations,
         workspaces=WorkspaceAccess(db, organizations),
         lock_workspace=WorkspaceRepository(db).lock,
+        config=GatewayConfig(),
     )
 
 
@@ -367,6 +429,7 @@ async def test_a_workspace_member_sees_the_workspace_key_but_cannot_change_it(as
     key = await service.create_key(
         user=owner, request=OrgWebSearchKeyCreateRequest(provider="tavily", name="n", api_key="tvly-1")
     )
+    await service.set_default(user=owner, key_id=key.id)
 
     seen = await service.list_workspace_keys(user=member, workspace_id=workspace.id)
 
@@ -400,3 +463,455 @@ async def test_another_organizations_key_reads_as_absent(async_db: AsyncSession)
 
     with pytest.raises(WebSearchKeyNotFoundError):
         await service.archive_key(user=stranger, key_id=key.id)
+
+
+# --- keys of two kinds ---------------------------------------------------------------------
+
+
+def test_a_key_has_a_kind_and_may_carry_its_own_endpoint_and_options(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    search = _add_key(client, master_key_header, provider="exa", name="exa", api_key="exa-1")
+    fetch = _add_key(
+        client,
+        master_key_header,
+        provider="tabstack",
+        name="pages",
+        api_key="tbs-1",
+        kind="fetch",
+        api_base="https://1.1.1.1/v1",
+        options={"effort": "standard", "geo_target": {"api_token": "masked-in-the-answer"}},
+    )
+
+    assert (search["kind"], search["api_base"], search["options"]) == ("search", None, None)
+    assert (fetch["kind"], fetch["api_base"]) == ("fetch", "https://1.1.1.1/v1")
+    assert fetch["options"]["effort"] == "standard"
+    assert "masked-in-the-answer" not in str(fetch)
+    cleared = client.patch(f"{_KEYS}/{fetch['id']}", json={"api_base": None}, headers=master_key_header)
+    assert cleared.status_code == 200, cleared.text
+    assert (cleared.json()["api_base"], cleared.json()["options"]["effort"]) == (None, "standard")
+
+
+def test_moving_a_key_to_another_host_needs_its_secret_again(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The next call sends what the key holds to the new api_base, and an admin only ever reads ``last4``."""
+    key = _add_key(
+        client,
+        master_key_header,
+        provider="tabstack",
+        name="pages",
+        api_key="tbs-1",
+        kind="fetch",
+        api_base="https://1.1.1.1/v1",
+        options={"geo_target": {"api_token": "hidden-1"}},
+    )
+    url = f"{_KEYS}/{key['id']}"
+    elsewhere = "https://8.8.8.8/v1"
+
+    refused = [
+        client.patch(url, json=body, headers=master_key_header)
+        for body in (
+            {"api_base": elsewhere},
+            {"api_base": elsewhere, "api_key": "tbs-2"},
+            {"api_base": elsewhere, "api_key": "tbs-2", "options": {"geo_target": {"api_token": "***"}}},
+        )
+    ]
+    same_host = client.patch(url, json={"api_base": "https://1.1.1.1/v1", "name": "renamed"}, headers=master_key_header)
+    moved = client.patch(
+        url,
+        json={"api_base": elsewhere, "api_key": "tbs-2", "options": {"geo_target": {"api_token": "hidden-2"}}},
+        headers=master_key_header,
+    )
+
+    assert [response.status_code for response in refused] == [400, 400, 400], [r.text for r in refused]
+    assert "api_key" in refused[0].json()["detail"]
+    assert same_host.status_code == 200, same_host.text
+    assert moved.status_code == 200, moved.text
+    assert (moved.json()["api_base"], moved.json()["last4"]) == (elsewhere, "bs-2")
+
+
+def test_a_keys_kind_is_fixed(client: TestClient, master_key_header: dict[str, str]) -> None:
+    key = _add_key(client, master_key_header, provider="exa", api_key="exa-1")
+
+    response = client.patch(f"{_KEYS}/{key['id']}", json={"kind": "fetch"}, headers=master_key_header)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"provider": "fake"},
+        {"provider": "fake", "kind": "fetch"},
+        {"provider": "builtin", "kind": "fetch"},
+        {"provider": "tabstack"},
+        {"provider": "mojeek", "kind": "fetch"},
+        {"provider": "exa", "api_key": None},
+        {"provider": "tavily", "api_base": "https://tavily.example"},
+        {"provider": "brave", "options": {"country": "de"}},
+        {"provider": "exa", "api_base": "http://exa.example"},
+        {"provider": "exa", "options": {"no_such_option": 1}},
+    ],
+    ids=[
+        "fake-search",
+        "fake-fetch",
+        "builtin-fetch",
+        "search-on-a-fetch-provider",
+        "fetch-on-a-search-provider",
+        "keyless-on-a-keyed-provider",
+        "tavily-endpoint",
+        "brave-options",
+        "key-over-http",
+        "unknown-option",
+    ],
+)
+def test_a_key_its_provider_could_not_be_called_with_is_refused(
+    client: TestClient, master_key_header: dict[str, str], body: dict[str, Any]
+) -> None:
+    response = client.post(_KEYS, json={"name": "k", "api_key": "secret-1", **body}, headers=master_key_header)
+
+    assert response.status_code == 400, response.text
+    assert client.get(_KEYS, headers=master_key_header).json()["count"] == 0
+
+
+def test_renaming_a_key_or_replacing_its_secret_does_not_recheck_what_it_stores(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = _add_key(client, master_key_header, provider="exa", api_key="exa-1", options={"type": "fast"})
+    # As if a library upgrade had retired the option the key stores.
+    monkeypatch.setattr(
+        _web_search_keys, "option_problems", lambda *_args: {"type": "option 'type' is not one the provider knows"}
+    )
+
+    rotated = client.patch(
+        f"{_KEYS}/{key['id']}", json={"name": "renamed", "api_key": "exa-2"}, headers=master_key_header
+    )
+    resent = client.patch(f"{_KEYS}/{key['id']}", json={"options": {"type": "fast"}}, headers=master_key_header)
+
+    assert rotated.status_code == 200, rotated.text
+    assert (rotated.json()["name"], rotated.json()["last4"]) == ("renamed", "xa-2")
+    assert resent.status_code == 400
+
+
+def test_keys_of_different_kinds_may_share_a_provider_and_a_name(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _add_key(client, master_key_header, provider="exa", name="ours", api_key="exa-1")
+    _add_key(client, master_key_header, provider="exa", name="ours", api_key="exa-2", kind="fetch")
+
+    again = client.post(
+        _KEYS,
+        json={"provider": "exa", "name": "ours", "api_key": "exa-3", "kind": "fetch"},
+        headers=master_key_header,
+    )
+
+    assert again.status_code == 409
+    assert "fetch" in again.json()["detail"]
+
+
+def test_one_default_per_kind(client: TestClient, master_key_header: dict[str, str]) -> None:
+    exa = _add_key(client, master_key_header, provider="exa", name="exa", api_key="exa-1")
+    tavily = _add_key(client, master_key_header, provider="tavily", name="tavily", api_key="tvly-1")
+    pages = _add_key(client, master_key_header, provider="tabstack", name="pages", api_key="tbs-1", kind="fetch")
+    for key in (exa, pages, tavily):
+        assert client.post(f"{_KEYS}/{key['id']}/default", headers=master_key_header).status_code == 200
+
+    defaults = {
+        key["name"] for key in client.get(_KEYS, headers=master_key_header).json()["data"] if key["is_org_default"]
+    }
+
+    assert defaults == {"tavily", "pages"}
+
+
+@pytest.mark.asyncio
+async def test_two_defaults_of_one_kind_at_once_end_in_the_conflict_error(async_db: AsyncSession) -> None:
+    """The index arbitrates: a writer that did not clear the other default meets it there."""
+
+    class _NotClearing(OrgWebSearchKeyRepository):
+        async def set_org_default(self, key: OrgWebSearchKey) -> OrgWebSearchKey:
+            key.is_org_default = True
+            try:
+                await self.db.flush()
+            except Exception:
+                raise WebSearchKeyConflict from None
+            return key
+
+    owner, _, _ = await _tenant(async_db)
+    service = _service(async_db)
+    first = await service.create_key(
+        user=owner, request=OrgWebSearchKeyCreateRequest(provider="exa", name="a", api_key="exa-1")
+    )
+    second = await service.create_key(
+        user=owner, request=OrgWebSearchKeyCreateRequest(provider="mojeek", name="b", api_key="mjk-1")
+    )
+    await service.set_default(user=owner, key_id=first.id)
+    racing = _service(async_db)
+    racing.keys = _NotClearing(racing.uow)
+
+    with pytest.raises(WebSearchKeyDefaultConflictError):
+        await racing.set_default(user=owner, key_id=second.id)
+
+
+def test_pinning_a_key_unpins_only_the_workspaces_other_key_of_its_kind(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    workspace_id = _workspace_id(client, master_key_header)
+    view = f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys"
+    first = _add_key(client, master_key_header, provider="exa", name="first", api_key="exa-1")
+    second = _add_key(client, master_key_header, provider="mojeek", name="second", api_key="mjk-1")
+    pages = _add_key(client, master_key_header, provider="tabstack", name="pages", api_key="tbs-1", kind="fetch")
+    for key in (first, pages, second):
+        assert client.patch(f"{view}/{key['id']}", json={"is_default": True}, headers=master_key_header).is_success
+
+    listed = client.get(view, headers=master_key_header).json()
+
+    assert {key["name"] for key in listed["data"] if key["is_default"]} == {"second", "pages"}
+    assert {key["name"] for key in listed["data"] if key["is_effective"]} == {"second", "pages"}
+    assert (listed["search_provider"], listed["fetch_provider"]) == ("mojeek", "tabstack")
+
+
+def test_the_workspace_listing_reports_what_its_calls_run_on(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace_id = _workspace_id(client, master_key_header)
+    view = f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys"
+
+    on_the_deployment = client.get(view, headers=master_key_header).json()
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    on_nothing = client.get(view, headers=master_key_header).json()
+    key = _add_key(client, master_key_header, provider="exa", api_key="exa-1", default=True)
+    turned_off = client.patch(f"{view}/{key['id']}", json={"disabled": True}, headers=master_key_header).json()
+    on_its_key = client.delete(f"{view}/{key['id']}", headers=master_key_header).json()
+
+    # The legacy URL is the deployment's search; the built-in fetcher its fetch.
+    assert (on_the_deployment["search_provider"], on_the_deployment["fetch_provider"]) == ("searxng", "builtin")
+    assert (on_the_deployment["deployment_search_tool"], on_the_deployment["deployment_fetch_tool"]) == (
+        "searxng",
+        "builtin_fetch",
+    )
+    assert (on_nothing["search_provider"], on_nothing["fetch_provider"]) == (None, "builtin")
+    assert (on_nothing["deployment_search_tool"], on_nothing["deployment_fetch_tool"]) == (None, "builtin_fetch")
+    assert turned_off["search_provider"] is None
+    assert on_its_key["search_provider"] == "exa"
+
+
+@pytest.fixture
+def named_default_client(postgres_url: str) -> Iterator[TestClient]:
+    """A deployment whose default search is a named tool."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        search_tools={"fake-search": {"provider": "fake"}},
+        web_search_default_tool="fake-search",
+    )
+    yield from build_test_client(config)
+
+
+def test_the_workspace_listing_names_the_deployments_tools_while_a_key_serves(
+    named_default_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = named_default_client
+    view = f"{API_ROOT}/workspaces/{_workspace_id(client, master_key_header)}/web-search-keys"
+    _add_key(client, master_key_header, provider="exa", api_key="exa-1", default=True)
+
+    listed = client.get(view, headers=master_key_header).json()
+
+    assert listed["search_provider"] == "exa"
+    assert (listed["deployment_search_tool"], listed["deployment_fetch_tool"]) == ("fake-search", "builtin_fetch")
+
+
+# --- serving with them on a deployment with no search of its own ---------------------------------
+
+
+@pytest.fixture
+def no_search_of_its_own(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setattr(test_config, "web_search_extract", False)
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+
+
+def test_a_tavily_key_serves_an_explicit_declaration_where_the_deployment_has_no_search(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    no_search_of_its_own: None,
+) -> None:
+    _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
+
+    seen = _searched_with(client, api_key_header)
+
+    assert (seen["provider"], seen["provider_api_key"]) == ("tavily", "tvly-org-secret")
+
+
+def test_the_workspace_page_counts_its_key_where_the_deployment_has_no_search(
+    client: TestClient, master_key_header: dict[str, str], no_search_of_its_own: None
+) -> None:
+    page = f"{API_ROOT}/workspaces/{_workspace_id(client, master_key_header)}/web-search"
+
+    before = client.get(page, headers=master_key_header).json()
+    _add_key(client, master_key_header, provider="exa", api_key="exa-1", default=True)
+    after = client.get(page, headers=master_key_header).json()
+
+    assert (before["web_search_configured"], after["web_search_configured"]) == (False, True)
+
+
+def _call(name: str, arguments: str) -> ChatCompletion:
+    """A model round asking for one ``name`` call, or the answer when ``name`` is empty."""
+    calls = [
+        ChatCompletionMessageFunctionToolCall(
+            id="call_0", type="function", function=Function(name=name, arguments=arguments)
+        )
+    ]
+    return ChatCompletion(
+        id="chatcmpl-1",
+        object="chat.completion",
+        created=0,
+        model=MODEL_NAME,
+        choices=[
+            Choice(
+                index=0,
+                message=ChatCompletionMessage(
+                    role="assistant", content=None if name else "done", tool_calls=cast(Any, calls if name else None)
+                ),
+                finish_reason="tool_calls" if name else "stop",
+            )
+        ],
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+
+@contextmanager
+def _scripted(*rounds: ChatCompletion) -> Iterator[None]:
+    remaining = iter(rounds)
+
+    async def fake(**_kwargs: Any) -> ChatCompletion:
+        return next(remaining)
+
+    with patch("gateway.services.mcp_loop.acompletion", new=fake):
+        yield
+
+
+def _answer_provider_calls(client: TestClient, answer: Callable[[httpx.Request], httpx.Response]) -> None:
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as answering:
+            yield answering
+
+    # The completion routes take the optional client, direct search the required one.
+    for dependency in (get_optional_web_provider_client, get_web_provider_client):
+        client.app.dependency_overrides[dependency] = web_provider_client  # type: ignore[attr-defined]
+
+
+def _tool_line(db_session_factory: Callable[[], Session], user_id: str, meter: str) -> dict[str, Any]:
+    with db_session_factory() as db:
+        row = db.scalars(
+            select(UsageLog).where(UsageLog.user_id == user_id).order_by(UsageLog.timestamp.desc())
+        ).first()
+        assert row is not None
+        [line] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == meter]
+        return line
+
+
+def _price(client: TestClient, headers: dict[str, str], key: str, per_call: float) -> None:
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": key, "input_price_per_million": per_call * 1_000_000, "output_price_per_million": 0.0},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(("reported", "billed"), [(0.005, 0.005), (None, 0.002)], ids=["reported", "fallback-row"])
+def test_a_pinned_exa_key_searches_in_the_loop_and_is_billed_as_the_organizations(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    no_search_of_its_own: None,
+    reported: float | None,
+    billed: float,
+) -> None:
+    workspace_id = _workspace_id(client, master_key_header)
+    key = _add_key(client, master_key_header, provider="exa", api_key="exa-org-secret")
+    client.patch(
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys/{key['id']}",
+        json={"is_default": True},
+        headers=master_key_header,
+    )
+    _price(client, master_key_header, "otari:web_search", 0.002)
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        body: dict[str, Any] = {"results": [{"url": "https://a.example", "title": "A", "text": "Page A."}]}
+        if reported is not None:
+            body["costDollars"] = {"total": reported}
+        return httpx.Response(200, json=body)
+
+    _answer_provider_calls(client, answer)
+    with _scripted(_call("web_search", '{"query": "otari"}'), _call("", "")):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "q"}],
+                "tools": [{"type": "otari_web_search"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    [request] = seen
+    assert (request.url.host, request.headers["x-api-key"]) == ("api.exa.ai", "exa-org-secret")
+    line = _tool_line(db_session_factory, api_key_obj["user_id"], "web_search_calls")
+    assert (line["label"], line["units"]) == ("org:exa", 1)
+    assert line["cost"] == pytest.approx(billed)
+
+
+def test_a_fetch_key_serves_the_fetch_tool(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    no_search_of_its_own: None,
+) -> None:
+    _add_key(
+        client,
+        master_key_header,
+        provider="tabstack",
+        name="pages",
+        api_key="tbs-org-secret",
+        kind="fetch",
+        default=True,
+    )
+    _price(client, master_key_header, "otari:web_fetch", 0.001)
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        page = {"url": "https://example.com/", "content": "Example text.", "metadata": {"title": "Example"}}
+        return httpx.Response(200, json=page)
+
+    _answer_provider_calls(client, answer)
+    with _scripted(_call("web_fetch", '{"url": "https://example.com/"}'), _call("", "")):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "q"}],
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    [request] = seen
+    assert request.url.host == "api.tabstack.ai"
+    assert request.headers["authorization"] == "Bearer tbs-org-secret"
+    line = _tool_line(db_session_factory, api_key_obj["user_id"], "web_fetch_calls")
+    assert (line["label"], line["units"]) == ("org:tabstack", 1)
+    assert line["cost"] == pytest.approx(0.001)

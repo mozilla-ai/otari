@@ -2,7 +2,9 @@ import type { FormEvent, KeyboardEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { PlaygroundComparisonPreference, PlaygroundFile } from "@/client"
+import { canContributeToWorkspace } from "@/features/organization/roles"
 import { useCatalog } from "@/shared/api/models"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   fetchPlaygroundConversation,
   useDeletePlaygroundComparison,
@@ -84,6 +86,7 @@ export type PendingAttachment = {
 export function usePlayground() {
   const { selected, isLoading: isLoadingWorkspace } = useSelectedWorkspace()
   const workspaceId = selected?.workspace_id
+  const organizationContext = useOrganizationContext()
 
   // The grouped catalog, not the flat `/models` listing; playgroundModels.ts
   // says why.
@@ -585,7 +588,7 @@ export function usePlayground() {
     setIsComparing(next)
     if (next) {
       // Both columns start empty, which is where this port departs from the
-      // hosted original: that one kept panel A's transcript. Each model is sent
+      // otari.ai original: that one kept panel A's transcript. Each model is sent
       // its own panel's history, so a column carrying an earlier conversation
       // answers a different prompt from the one beside it, and the rating would
       // be a judgment over an unequal contest. A saved transcript is still in
@@ -628,9 +631,13 @@ export function usePlayground() {
   }
 
   const gate = derivePlaygroundGate({
-    isLoading: isLoadingWorkspace || (catalog.isPending && !catalog.data),
+    isLoading:
+      isLoadingWorkspace ||
+      organizationContext.isPending ||
+      (catalog.isPending && !catalog.data),
     isCatalogError: catalog.isError,
     hasWorkspace: workspaceId !== undefined,
+    canRun: canContributeToWorkspace(organizationContext.data, selected?.role),
     modelCount: models.length,
   })
 

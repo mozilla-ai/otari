@@ -16,26 +16,29 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import Session
 
 import any_fetch
 import any_search
-from gateway.api.deps import get_web_provider_client
+from gateway.api.deps import build_search_tool_service, get_web_provider_client
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.settings.tools import (
     ToolInstance,
     effective_fetch_instances,
     effective_search_instances,
-    in_loop_default,
 )
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.models.tools import SearchToolCredential
+from gateway.repositories.tools import SearchToolRepository
 from gateway.schemas.tools import SearchProviderOptionSchema
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.search_backend import SearchHit, SearchOutcome
-from gateway.services.search_tool_store_service import refresh_tool_instances, reset_search_tool_cache
 from gateway.services.secret_box import generate_secret_key
+from gateway.services.tools import reset_search_tool_cache
+from gateway.services.tools._web_search import in_loop_default
 from gateway.services.web_fetch_service import WebFetchHTTPStatusError, WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_network import (
     ContentDecodingError,
@@ -190,6 +193,40 @@ def test_duplicate_name_conflicts(client: TestClient, master_key_header: dict[st
     assert "already exists" in dup.json()["detail"]
 
 
+def test_a_create_that_races_past_the_duplicate_check_conflicts(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row committed after the create looked for one is refused by the primary key, with the same 409."""
+    assert _create(client, master_key_header).status_code == 201
+    monkeypatch.setattr(SearchToolRepository, "get", AsyncMock(return_value=None))
+    dup = _create(client, master_key_header)
+    assert dup.status_code == 409
+    assert "already exists" in dup.json()["detail"]
+
+
+@pytest.mark.parametrize(("operation", "method"), [("create", "insert"), ("update", "update"), ("delete", "delete")])
+def test_a_database_error_while_writing_answers_a_generic_500(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    method: str,
+) -> None:
+    if operation != "create":
+        assert _create(client, master_key_header).status_code == 201
+    refused = AsyncMock(side_effect=OperationalError("UPDATE", {}, Exception("connection lost")))
+    monkeypatch.setattr(SearchToolRepository, method, refused)
+    if operation == "create":
+        resp = _create(client, master_key_header)
+    elif operation == "update":
+        resp = client.patch(f"{API_ROOT}/search-tools/local", json={"timeout": 5}, headers=master_key_header)
+    else:
+        resp = client.delete(f"{API_ROOT}/search-tools/local", headers=master_key_header)
+    assert resp.status_code == 500
+    assert resp.json() == {"detail": "Database error"}
+    assert "connection lost" not in resp.text
+
+
 def test_patch_updates_base_keeps_key_then_rotates(client: TestClient, master_key_header: dict[str, str]) -> None:
     _create(client, master_key_header, provider="exa", api_base=None, api_key="exa-orig-1111")
 
@@ -304,7 +341,7 @@ def test_search_catalog_serves_the_library_metadata(
 ) -> None:
     catalog = _catalog(catalog_client, headers=master_key_header)
     # any-search's fake provider exists for tests: accepted in configuration, never offered.
-    assert list(catalog) == ["exa", "mojeek", "searxng"]
+    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng", "serply"]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
     assert exa["kind"] == "search"
@@ -321,6 +358,9 @@ def test_search_catalog_serves_the_library_metadata(
     # Mojeek's entry plan's cap and its key in the URL reach the catalog from the library, with no code here.
     mojeek = catalog["mojeek"]
     assert (mojeek["max_results"], mojeek["query_in_url"], mojeek["key_in_url"]) == (10, True, True)
+    # Serply's query is in the URL and its key in a header.
+    serply = catalog["serply"]
+    assert (serply["max_results"], serply["query_in_url"], serply["key_in_url"]) == (10, True, False)
 
 
 def test_searxng_keeps_its_entry_without_a_schema(
@@ -341,7 +381,7 @@ def test_searxng_keeps_its_entry_without_a_schema(
 def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
     catalog = _catalog(catalog_client, "fetch", headers=master_key_header)
     # builtin serves only the implicit builtin_fetch tool, and fake exists for tests.
-    assert list(catalog) == ["exa", "tabstack"]
+    assert list(catalog) == ["deepseek", "exa", "tabstack"]
     exa = catalog["exa"]
     metadata = any_fetch.AnyFetch.get_provider_metadata("exa")
     assert exa["kind"] == "fetch"
@@ -725,7 +765,7 @@ async def _refresh_replica(database_url: str, config: GatewayConfig) -> None:
     engine = create_async_engine(url)
     try:
         async with AsyncSession(engine) as session:
-            await refresh_tool_instances(session, config)
+            await build_search_tool_service(UnitOfWork(session), session, config=config).refresh()
     finally:
         await engine.dispose()
 

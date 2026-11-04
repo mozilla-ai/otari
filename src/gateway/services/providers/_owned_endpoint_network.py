@@ -8,7 +8,8 @@ checked, and the provider SDKs follow redirects by default.
 So every request goes through :class:`OwnedEndpointTransport`, which resolves
 the host itself, refuses the request unless every answer is publicly routable,
 and dials one of the admitted addresses rather than letting the connection
-resolve the name again. Redirects are not followed. The same check runs when an
+resolve the name again. Redirects are not followed, and no cookie is kept, since
+one client serves every tenant's endpoints. The same check runs when an
 endpoint is saved, so a bad URL is refused where it is written.
 """
 
@@ -19,8 +20,10 @@ import httpx
 
 from gateway.services.web_retrieval_network import (
     PINNED_TARGET_EXTENSION,
+    NoCookieJar,
     PinnedAsyncHTTPTransport,
     PinnedTransportError,
+    RetrievalAddressError,
     RetrievalTargetError,
     TransportFactory,
     validate_retrieval_target,
@@ -46,6 +49,11 @@ async def check_owned_endpoint_api_base(api_base: str) -> None:
     """Refuse a base URL unless every address its host resolves to is publicly routable."""
     try:
         await validate_retrieval_target(api_base)
+    except RetrievalAddressError as exc:
+        raise OwnedEndpointAddressError(
+            f"endpoint api_base refused: {exc}. A model server the deployment runs on a private "
+            "address is added as a hosted provider instead."
+        ) from None
     except RetrievalTargetError as exc:
         raise OwnedEndpointAddressError(f"endpoint api_base refused: {exc}") from None
 
@@ -82,6 +90,8 @@ def owned_endpoint_http_client() -> httpx.AsyncClient:
     loop = asyncio.get_running_loop()
     client = _clients.get(loop)
     if client is None or client.is_closed:
-        client = httpx.AsyncClient(transport=OwnedEndpointTransport(), follow_redirects=False, timeout=_TIMEOUT)
+        client = httpx.AsyncClient(
+            transport=OwnedEndpointTransport(), follow_redirects=False, timeout=_TIMEOUT, cookies=NoCookieJar()
+        )
         _clients[loop] = client
     return client

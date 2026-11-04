@@ -1,6 +1,5 @@
 """Manage the tenancy-scoped USD ceilings in ``scoped_budgets``.
 
-The router is mounted in standalone and hosted modes, and not in hybrid mode.
 It is operator-gated.
 These routes create, list, retime and remove a ceiling, and they enforce none.
 """

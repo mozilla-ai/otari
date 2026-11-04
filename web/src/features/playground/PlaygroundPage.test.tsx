@@ -34,7 +34,6 @@ import {
   catalogModelSummary,
   catalogResponse,
   organizationContext,
-  STANDALONE_SURFACES,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -356,12 +355,12 @@ function mockStream(frames: string[]) {
 const delta = (content: string) =>
   JSON.stringify({ choices: [{ delta: { content } }] })
 
-function renderPage({ surfaces = [...STANDALONE_SURFACES] } = {}) {
+function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={bootstrap({ surfaces })}>
+    <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
         <SelectedWorkspaceProvider>
           <WorkspacePicker />
@@ -457,19 +456,6 @@ describe("the Playground before the first question", () => {
     ).toHaveAttribute("href", "/admin/hosted-providers")
   })
 
-  it("points an operator at the organization's providers where Hosted providers is not published", async () => {
-    mockApi({ catalog: { ...CATALOG, models: [] } })
-    renderPage({
-      surfaces: STANDALONE_SURFACES.filter(
-        (surface) => surface !== "hosted_providers",
-      ),
-    })
-
-    expect(
-      await screen.findByRole("link", { name: "Providers" }),
-    ).toHaveAttribute("href", "/organization/provider-keys")
-  })
-
   it("points a caller who does not operate the deployment at the organization's providers", async () => {
     mockApi({
       catalog: { ...CATALOG, models: [] },
@@ -480,6 +466,24 @@ describe("the Playground before the first question", () => {
     expect(
       await screen.findByRole("link", { name: "Providers" }),
     ).toHaveAttribute("href", "/organization/provider-keys")
+  })
+
+  it("tells a viewer the Playground is not theirs to run", async () => {
+    mockApi({
+      context: organizationContext({
+        role: "viewer",
+        deployment_operator: false,
+        workspace_memberships: [
+          { workspace_id: WORKSPACE_ID, name: "Default", role: "member" },
+        ],
+      }) as OrganizationContext,
+    })
+    renderPage()
+
+    expect(
+      await screen.findByText("The Playground is not open to viewers"),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 })
 
@@ -932,7 +936,7 @@ describe("comparing two models", () => {
     // The two models are each sent their own column's history, so a column
     // carrying an earlier conversation answers a different prompt from the one
     // beside it, and a rating over that pair is a judgment on an unequal
-    // contest. The hosted original kept the first panel's transcript; this
+    // contest. otari.ai's original kept the first panel's transcript; this
     // deliberately does not.
     mockApi()
     mockStream([delta("an answer"), "[DONE]"])

@@ -1,14 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  CheckWorkspaceMcpServerRequest,
+  CreatedSearchTool,
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
   CreateWorkspaceMcpServerRequest,
   GuardrailCatalog,
   OrganizationGuardrail,
   OrganizationGuardrailTestResult,
+  SandboxCredentialPublic,
+  SandboxCredentialRequest,
   SearchProviderInfo,
   SearchToolsResponse,
+  SearchToolTestRequest,
+  SearchToolTestResponse,
   StoredSearchTool,
+  StoredSearchToolTestRequest,
   TestOrganizationGuardrailRequest,
   TestServiceResponse,
   ToolSettingsResponse,
@@ -21,6 +28,7 @@ import type {
   UpdateWorkspaceWebSearchConfigRequest,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
+  WorkspaceMcpServerHealth,
   WorkspaceMcpServers,
   WorkspaceWebSearchConfig,
 } from "@/client"
@@ -82,36 +90,96 @@ export function useUpdateToolSettings() {
   })
 }
 
+// The key a hosted sandbox provider leases with. Never read back: the answer is
+// where it comes from and its last four, which the settings query carries.
+function useSandboxCredentialWrite<TVariables>(
+  request: (variables: TVariables) => Promise<SandboxCredentialPublic>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (credential) => {
+      queryClient.setQueryData<ToolSettingsResponse>([TOOL_SETTINGS], (old) =>
+        old ? { ...old, sandbox_credential: credential } : old,
+      )
+    },
+  })
+}
+
+export function useSetSandboxCredential() {
+  return useSandboxCredentialWrite((body: SandboxCredentialRequest) =>
+    apiFetch<SandboxCredentialPublic>("/tool-settings/sandbox/credential", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  )
+}
+
+export function useClearSandboxCredential() {
+  return useSandboxCredentialWrite(() =>
+    apiFetch<SandboxCredentialPublic>("/tool-settings/sandbox/credential", {
+      method: "DELETE",
+    }),
+  )
+}
+
 // Search tools served by POST /v1/search: the editable rows plus the read-only
 // config-file entries, so the page can show every tool a caller could name.
-export function useSearchTools() {
+// `fetch` lists the fetch instances instead, `builtin_fetch` among them.
+export function useSearchTools(
+  kind: "search" | "fetch" = "search",
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [SEARCH_TOOLS],
-    queryFn: () => apiFetch<SearchToolsResponse>("/search-tools"),
+    queryKey: [SEARCH_TOOLS, kind],
+    queryFn: () =>
+      apiFetch<SearchToolsResponse>(
+        kind === "search" ? "/search-tools" : "/search-tools?kind=fetch",
+      ),
     staleTime: 60_000,
+    enabled,
   })
 }
 
-// Which search providers this build supports, and what each one needs, so the
-// add form asks for a key or a backend URL only when the provider requires it.
-export function useSearchProviders() {
+// Which search or fetch providers this build supports, what each one needs and
+// the options it takes, so the add form asks only for what the provider
+// requires. Keyed by kind under `SEARCH_PROVIDERS`, so `useUpdateToolSettings`'s
+// invalidation reaches both: a `searxng` tool's inherited endpoint follows
+// `web_search_url`.
+export function useSearchProviders(
+  kind: "search" | "fetch" = "search",
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [SEARCH_PROVIDERS],
-    queryFn: () => apiFetch<SearchProviderInfo[]>("/search-tools/providers"),
+    queryKey: [SEARCH_PROVIDERS, kind],
+    queryFn: () =>
+      apiFetch<SearchProviderInfo[]>(
+        kind === "search"
+          ? "/search-tools/providers"
+          : "/search-tools/providers?kind=fetch",
+      ),
     staleTime: 300_000,
+    enabled,
   })
 }
 
+// A create can store `web_search_default_tool` (the pin its `notice` reports)
+// and can turn the model's search on, so the settings and the tool list are
+// read again with the tools; the catalog lists each provider's tools by name.
 export function useCreateSearchTool() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateSearchToolRequest) =>
-      apiFetch<StoredSearchTool>("/search-tools", {
+      apiFetch<CreatedSearchTool>("/search-tools", {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
+      void queryClient.invalidateQueries({ queryKey: [TOOL_SETTINGS] })
+      void queryClient.invalidateQueries({ queryKey: [TOOLS] })
+    },
   })
 }
 
@@ -129,11 +197,15 @@ export function useUpdateSearchTool() {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
+    },
   })
 }
 
+// A default that names the deleted tool reads as unset, so the settings are
+// read again with the tools.
 export function useDeleteSearchTool() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -141,8 +213,42 @@ export function useDeleteSearchTool() {
       apiFetch<void>(`/search-tools/${encodeURIComponent(name)}`, {
         method: "DELETE",
       }),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
+      void queryClient.invalidateQueries({ queryKey: [TOOL_SETTINGS] })
+      void queryClient.invalidateQueries({ queryKey: [TOOLS] })
+    },
+  })
+}
+
+// One search or one fetch through a configuration that is not saved yet.
+// Read-only, so it invalidates nothing.
+export function useTestUnsavedSearchTool() {
+  return useMutation({
+    mutationFn: (body: SearchToolTestRequest) =>
+      apiFetch<SearchToolTestResponse>("/search-tools/test", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  })
+}
+
+// One search or one fetch through a configured or stored tool, `builtin_fetch`
+// included. Read-only, so it invalidates nothing.
+export function useTestSearchTool() {
+  return useMutation({
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: StoredSearchToolTestRequest
+    }) =>
+      apiFetch<SearchToolTestResponse>(
+        `/search-tools/${encodeURIComponent(name)}/test`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 
@@ -449,6 +555,49 @@ export function useUpdateWorkspaceMcpServer() {
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
     },
+  })
+}
+
+// Connects to a stored server now and records the outcome as its `health`. A
+// server that fails answers 200 like one that passes; only a busy gateway (429)
+// is an error here.
+export function useCheckWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}/check`,
+        { method: "POST" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+    },
+  })
+}
+
+// Checks connection details without storing anything: the dialog's Test
+// button. Nothing to invalidate, since nothing was written.
+export function useTestWorkspaceMcpServerConnection() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: CheckWorkspaceMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServerHealth>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/check`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 

@@ -7,7 +7,29 @@ import type { ScopedBudget } from "@/client"
 import { SessionsPage } from "@/features/traces/SessionsPage"
 import { jsonResponse, mockApi, renderPage } from "@/tests/activity"
 import { scopedBudget } from "@/tests/fixtures"
-import { traceDetail, traceSummary } from "@/tests/traceFixtures"
+import {
+  gateSummary,
+  traceDetail,
+  traceSpan,
+  traceSummary,
+} from "@/tests/traceFixtures"
+
+// The span a gate's check was recorded as, under the tool call it checked.
+function gateCheck(gateId: string) {
+  return traceSpan({
+    span_id: "gate-1",
+    parent_span_id: "call-toolu_1",
+    kind: "guardrail",
+    origin: "otlp",
+    outcome: "blocked",
+    attributes: {
+      "otari.guardrail.profile": gateId,
+      "otari.gate.id": gateId,
+      "otari.gate.outcome": "fail",
+      "otari.gate.blocked": true,
+    },
+  })
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -57,12 +79,27 @@ function SpanProbe() {
   )
 }
 
+function RangeProbe() {
+  const { searchStr } = useLocation()
+  return (
+    <output aria-label="Range in the URL">
+      {new URLSearchParams(searchStr).get("range") ?? ""}
+    </output>
+  )
+}
+
 async function openFirstSession(user: Pick<UserEvent, "click"> = userEvent) {
   const sessions = await screen.findByRole("grid", { name: "Sessions" })
   await user.click(
     await within(sessions).findByRole("row", { name: /claude-code/ }),
   )
   return screen.findByRole("complementary", { name: "Trace claude-code" })
+}
+
+// The total At a glance heads its Cost band with.
+async function costTotal(peek: HTMLElement) {
+  const heading = await within(peek).findByRole("heading", { name: /^Cost / })
+  return heading.lastElementChild?.textContent
 }
 
 describe("SessionsPage", () => {
@@ -114,13 +151,76 @@ describe("SessionsPage", () => {
     )
   })
 
+  it("forgets a break-glass opening once the peek closes, so seeing it again is a new recorded opening", async () => {
+    const user = userEvent.setup()
+    const privateDetail = traceDetail({
+      spans: traceDetail().spans.map((span) =>
+        span.span_id === "call-toolu_1"
+          ? { ...span, content: {}, content_private: true }
+          : span,
+      ),
+    })
+    const openedDetail = traceDetail({
+      content_access: "break_glass",
+      spans: traceDetail().spans.map((span) =>
+        span.span_id === "call-toolu_1"
+          ? { ...span, content: { command: "pytest -x" } }
+          : span,
+      ),
+    })
+    const { mock } = mockApi({
+      traces: [traceSummary()],
+      traceDetail: privateDetail,
+    })
+    const answer = mock.getMockImplementation() as typeof fetch
+    let openings = 0
+    mock.mockImplementation(async (input, init) => {
+      if (!/\/break-glass/.test(String(input)) || init?.method !== "POST") {
+        return answer(input, init)
+      }
+      openings += 1
+      return jsonResponse(openedDetail)
+    })
+    renderPage(<SessionsPage />, "/sessions")
+
+    const peek = await openFirstSession(user)
+    await user.click(
+      await screen.findByRole("button", { name: "Open by break-glass" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: /Reason/ }),
+      "HR investigation 2026-17, approved by legal",
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Open and record" }),
+    )
+    expect(await screen.findByText(/Opened by break-glass/)).toBeInTheDocument()
+
+    await user.click(within(peek).getByRole("button", { name: "Close" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Trace claude-code" }),
+      ).toBeNull(),
+    )
+    await openFirstSession(user)
+
+    expect(
+      await screen.findByRole("button", { name: "Open by break-glass" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Opened by break-glass/)).toBeNull()
+    expect(openings).toBe(1)
+  })
+
   it("lists sessions from the trace API and opens one into its spans", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
 
-    expect(await within(peek).findByText("Bash")).toBeInTheDocument()
+    expect(
+      await within(peek).findByRole("button", { name: /^Tool, Bash/ }),
+    ).toBeInTheDocument()
     expect(within(peek).getAllByText("gpt-5").length).toBeGreaterThan(0)
   })
 
@@ -157,7 +257,7 @@ describe("SessionsPage", () => {
 
     expect(
       await within(peek).findByText(
-        /This session cost \$0\.50\. That is 5\.0% of this key's \$10\.00 ceiling, which has \$6\.00 spent this period\./,
+        /This session is 5\.0% of this key's \$10\.00 ceiling, which has \$6\.00 spent this period\./,
       ),
     ).toBeInTheDocument()
     expect(
@@ -194,9 +294,7 @@ describe("SessionsPage", () => {
     renderPage(<SessionsPage />, "/sessions")
     const peek = await openFirstSession()
 
-    expect(
-      await within(peek).findByText("This session cost $0.02."),
-    ).toBeInTheDocument()
+    expect(await costTotal(peek)).toBe("$0.02")
     expect(calls.some((call) => call.url.includes("/scoped-budgets"))).toBe(
       false,
     )
@@ -236,6 +334,105 @@ describe("SessionsPage", () => {
     expect(within(peek).getByText("Reasoning tokens")).toBeInTheDocument()
   })
 
+  it("maps at a glance what fills the session's context window", async () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            model: "claude-sonnet-4-5",
+            input_tokens: 39_600,
+            context_window: 200_000,
+            attributes: {
+              "otari.context.system_chars": 4_000,
+              "otari.context.tools_chars": 12_000,
+              "otari.context.user_chars": 3_000,
+              "otari.context.assistant_chars": 5_000,
+              "otari.context.tool_result_chars": 30_000,
+              "otari.context.file_chars": 4_000,
+              "otari.context.tool_count": 12,
+              "otari.context.message_count": 41,
+            },
+          }
+        : span,
+    )
+    mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const context = await within(peek).findByRole("region", {
+      name: "Context",
+    })
+
+    expect(within(context).getByText("39.6k / 200k")).toBeInTheDocument()
+    expect(within(context).getByText("20% full")).toBeInTheDocument()
+    expect(
+      within(context).queryByText(/claude-sonnet-4-5/),
+    ).not.toBeInTheDocument()
+    expect(
+      within(context).getByRole("button", {
+        name: /^Tool definitions: .*12 tool definitions/,
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(context).getByRole("button", { name: /^Free:/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(context).getByText(
+        "From the session's only request. The split is estimated from its size; the total is exact.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("falls back to the cache split at a glance, and gives a model request no Context tab", async () => {
+    const detail = traceDetail()
+    const spans = detail.spans.map((span) =>
+      span.span_id === "llm-1"
+        ? {
+            ...span,
+            input_tokens: 1_000,
+            cache_read_tokens: 600,
+            context_window: null,
+          }
+        : span,
+    )
+    mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const context = await within(peek).findByRole("region", {
+      name: "Context",
+    })
+
+    expect(within(context).getByText("1.0k")).toBeInTheDocument()
+    // Said once, under the map, rather than also beside the total.
+    expect(
+      within(context).queryByText("Window unknown"),
+    ).not.toBeInTheDocument()
+    expect(
+      within(context).getByText(
+        /window is unknown, so free space is not shown/,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(context).getByRole("button", { name: /^Cache read:/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(context).getByText(
+        /The split is the provider's own\..*window is unknown/,
+      ),
+    ).toBeInTheDocument()
+    await userEvent.click(
+      within(peek).getAllByRole("button", { name: /^Generation, gpt-5/ })[0],
+    )
+    expect(
+      await within(peek).findByRole("button", { name: "Attributes" }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("button", { name: "Context" }),
+    ).not.toBeInTheDocument()
+  })
+
   it("opens the span a gateway decision is about", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
@@ -253,6 +450,566 @@ describe("SessionsPage", () => {
     expect(
       within(peek).getByText("error, recovered by a fallback"),
     ).toBeInTheDocument()
+  })
+
+  it("lists the gates the agent's hook ran, and opens the check that blocked", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            message: "CHANGELOG.md is generated.",
+            passed: 12,
+            blocked: 1,
+            flagged: 0,
+            undecided: 0,
+            span_id: "gate-1",
+          }),
+          gateSummary({
+            gate_id: "python-needs-check",
+            passed: 2,
+            blocked: 0,
+            flagged: 0,
+            undecided: 0,
+            span_id: null,
+          }),
+          gateSummary({ gate_id: "no-secret-reads", span_id: null }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const gatesTab = await within(peek).findByRole("button", {
+      name: "Gates · 1 blocked",
+    })
+    await userEvent.click(gatesTab)
+
+    expect(
+      await within(peek).findByText(
+        "2 gates ran 15 checks, and stopped the agent once.",
+      ),
+    ).toBeInTheDocument()
+    const gate = within(peek).getByRole("button", { name: /^no-changelog/ })
+    expect(gate).toHaveTextContent("1 blocked")
+    expect(gate).toHaveTextContent("12 passed")
+    expect(gate).toHaveTextContent("CHANGELOG.md is generated.")
+    const unlinked = within(peek).getByRole("button", {
+      name: /^python-needs-check/,
+    })
+    expect(unlinked).toHaveTextContent("2 passed")
+    expect(unlinked).toBeDisabled()
+    expect(
+      within(peek).getByText("Did not run in this session"),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("no-secret-reads")).toBeInTheDocument()
+
+    await userEvent.click(gate)
+
+    await waitFor(() =>
+      expect(
+        within(peek).getByRole("button", { current: true }),
+      ).toHaveAccessibleName(/no-changelog/),
+    )
+    expect(
+      within(peek).getByRole("button", { name: "Attributes" }),
+    ).toBeInTheDocument()
+  })
+
+  it("brings the check a gate blocked into view, inside a collapsed turn", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [...detail.spans, gateCheck("no-changelog")],
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            passed: 0,
+            blocked: 1,
+            flagged: 0,
+            undecided: 0,
+            span_id: "gate-1",
+          }),
+        ],
+      },
+    })
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView")
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Collapse all" }),
+    )
+    expect(
+      within(peek).queryByRole("button", { name: /^Tool, Bash/ }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(within(peek).getByRole("button", { name: /^Gates/ }))
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^no-changelog/ }),
+    )
+
+    await waitFor(() =>
+      expect(
+        within(peek).getByRole("button", { current: true }),
+      ).toHaveAccessibleName(/no-changelog/),
+    )
+    const check = within(peek).getByRole("button", { current: true })
+    expect(scrolled.mock.contexts).toContain(check)
+    expect(
+      within(peek).getByRole("button", { name: /^Tool, Bash/ }),
+    ).toBeInTheDocument()
+    scrolled.mockRestore()
+  })
+
+  it("marks a tool call's error result in the tree without calling it an error", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: detail.spans.map((span) =>
+          span.span_id === "call-toolu_1"
+            ? { ...span, attributes: { "otari.tool.succeeded": false } }
+            : span,
+        ),
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const bash = await within(peek).findByRole("button", {
+      name: /^Tool, Bash/,
+    })
+
+    expect(within(bash).getByText("Error result")).toBeInTheDocument()
+    expect(within(bash).queryByText("Error")).not.toBeInTheDocument()
+  })
+
+  it("estimates what a tool call cost, and says what went into it", async () => {
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...traceDetail(),
+        tool_costs: [
+          {
+            span_id: "call-toolu_1",
+            total: 0.62,
+            calling: 0.01,
+            writing: 0.05,
+            rereading: 0.56,
+            result_tokens: 12_300,
+            later_requests: 41,
+            calls_sharing_request: 2,
+            calls_sharing_result: 1,
+            subagent: null,
+          },
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^Tool, Bash/ }),
+    )
+
+    // On the call's row in the tree and on its card.
+    expect(await within(peek).findAllByText("≈ $0.62")).toHaveLength(2)
+    expect(
+      within(peek).getByRole("button", { name: "Re-reading it" }),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("in 41 later requests")).toBeInTheDocument()
+    expect(within(peek).getByText("≈ 12,300 tokens")).toBeInTheDocument()
+    expect(
+      within(peek).getByText("shared with 1 other call"),
+    ).toBeInTheDocument()
+  })
+
+  it("says at a glance what a session did and where its time went", async () => {
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(await within(peek).findByText("At a glance")).toBeInTheDocument()
+    expect(
+      within(peek).getByRole("button", { name: /^\d+ tool calls?$/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText(/^\d+ turns? · \d+ tool calls?/),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("Running tools")).toBeInTheDocument()
+  })
+
+  it("says in the header how many gates the hooks ran", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "call-toolu_1",
+            kind: "guardrail",
+            attributes: {
+              "otari.gate.id": "no-secrets",
+              "otari.gate.outcome": "pass",
+            },
+          }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(
+      await within(peek).findByRole("button", { name: "1 gate run" }),
+    ).toBeInTheDocument()
+  })
+
+  it("says what a judge gate's model calls used and cost", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        gates: [
+          gateSummary({
+            gate_id: "writing-style",
+            passed: 1,
+            span_id: "judge-1",
+          }),
+        ],
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "judge-1",
+            parent_span_id: "call-toolu_1",
+            kind: "guardrail",
+            model: "claude-haiku-4-5-20251001",
+            input_tokens: 6693,
+            output_tokens: 111,
+            cache_write_tokens: 6684,
+            cost: 0.0139,
+            attributes: {
+              "otari.gate.id": "writing-style",
+              "otari.gate.outcome": "pass",
+            },
+          }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(
+      await within(peek).findByText(
+        /^Judge gates made 1 model call, for \$0\.01\d*\.$/,
+      ),
+    ).toBeInTheDocument()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^Gates/ }),
+    )
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^writing-style/ }),
+    )
+    expect(await within(peek).findByText("Its model calls")).toBeInTheDocument()
+    expect(
+      within(peek).getByText(
+        "6,693 input (6,684 written to the cache), 111 output",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("says what each tool cost across the session, opening its dearest call", async () => {
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...traceDetail(),
+        tool_costs: [
+          {
+            span_id: "call-toolu_1",
+            total: 0.62,
+            calling: 0.01,
+            writing: 0.05,
+            rereading: 0.56,
+            result_tokens: 12_300,
+            later_requests: 41,
+            calls_sharing_request: 1,
+            calls_sharing_result: 1,
+            subagent: null,
+          },
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    expect(await within(peek).findByText("Cost by tool")).toBeInTheDocument()
+    await userEvent.click(
+      within(peek).getByRole("button", {
+        name: /^Bash, 1 call, about \$0\.62/,
+      }),
+    )
+
+    expect(
+      await within(peek).findByRole("button", { name: /^Tool, Bash/ }),
+    ).toHaveAttribute("aria-current", "true")
+  })
+
+  it("shows a quiet session's cost", async () => {
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(await costTotal(peek)).toBe("$0.02")
+  })
+
+  it("says what a gate is and what its check read when it is opened", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "call-toolu_1",
+            kind: "guardrail",
+            origin: "otlp",
+            name: "gate:no-changelog",
+            operation: "pre_tool_use.edit_target",
+            outcome: "blocked",
+            attributes: {
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": true,
+              "otari.policy.digest": "0123456789abcdef",
+            },
+            content: { "gate.evidence": "CHANGELOG.md" },
+          }),
+        ],
+        gates: [
+          gateSummary({
+            gate_id: "no-changelog",
+            blocked: 1,
+            span_id: "gate-1",
+            message: "CHANGELOG.md is generated.",
+          }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^Gates/ }),
+    )
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: /^no-changelog/ }),
+    )
+
+    expect(
+      await within(peek).findByText("The gate stopped the agent here."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("CHANGELOG.md is generated."),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("Before the agent edits a file"),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("Required: stops the agent when it fails"),
+    ).toBeInTheDocument()
+    expect(within(peek).getByText("What it checked")).toBeInTheDocument()
+  })
+
+  it("starts a tool call closed, its gates one row inside it", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "call-toolu_1",
+            kind: "guardrail",
+            origin: "otlp",
+            outcome: "blocked",
+            attributes: {
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": true,
+            },
+          }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    const tool = await within(peek).findByRole("button", {
+      name: /^Tool, Bash/,
+    })
+
+    expect(
+      within(peek).queryByRole("button", { name: /Gates · 1 blocked/ }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(
+      within(tool.closest("li") as HTMLElement).getByRole("button", {
+        name: "Expand",
+      }),
+    )
+    expect(
+      await within(peek).findByRole("button", { name: /Gates · 1 blocked/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("button", { name: /no-changelog/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("charts the sessions active each minute of the last hour", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?range=1h")
+
+    expect(
+      await screen.findByText("Active sessions / minute"),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.url.includes("/traces/series") &&
+            call.url.includes("bucket=1m"),
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it("counts a gate that could not decide but held the agent as stopping it", async () => {
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...traceDetail(),
+        gates: [gateSummary({ gate_id: "judge-review", refused: 1 })],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+    await userEvent.click(
+      await within(peek).findByRole("button", { name: "Gates · 1 blocked" }),
+    )
+
+    expect(
+      await within(peek).findByText(
+        "1 gate ran 1 check, and stopped the agent once.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).getByText("1 could not decide, held"),
+    ).toBeInTheDocument()
+  })
+
+  it("opens a link to a gate check with the tool call above it opened", async () => {
+    const summary = traceSummary()
+    const detail = traceDetail()
+    mockApi({
+      traces: [],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "gate-1",
+            parent_span_id: "call-toolu_1",
+            kind: "guardrail",
+            origin: "otlp",
+            outcome: "blocked",
+            attributes: {
+              "otari.guardrail.profile": "no-changelog",
+              "otari.gate.id": "no-changelog",
+              "otari.gate.outcome": "fail",
+              "otari.gate.blocked": true,
+            },
+          }),
+        ],
+      },
+    })
+
+    renderPage(
+      <SessionsPage />,
+      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace claude-code",
+    })
+
+    await waitFor(() =>
+      expect(
+        within(peek).getByRole("button", { current: true }),
+      ).toHaveAccessibleName(/no-changelog/),
+    )
+  })
+
+  it("leaves open a tool call another agent did work under", async () => {
+    const detail = traceDetail()
+    mockApi({
+      traces: [traceSummary()],
+      traceDetail: {
+        ...detail,
+        spans: [
+          ...detail.spans,
+          traceSpan({
+            span_id: "sub-llm",
+            parent_span_id: "call-toolu_1",
+            kind: "llm",
+            model: "subagent-model",
+          }),
+        ],
+      },
+    })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    const tool = await within(peek).findByRole("button", {
+      name: /^Tool, Bash/,
+    })
+    expect(
+      within(tool.closest("li") as HTMLElement).getByRole("button", {
+        name: "Collapse",
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("has no Gates tab for a session no hook reported to", async () => {
+    mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const peek = await openFirstSession()
+
+    expect(
+      await within(peek).findByRole("button", { name: "Log View" }),
+    ).toBeInTheDocument()
+    expect(
+      within(peek).queryByRole("button", { name: /^Gates/ }),
+    ).not.toBeInTheDocument()
   })
 
   it("says so when the session list cannot be read", async () => {
@@ -301,9 +1058,7 @@ describe("SessionsPage", () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
-    expect(
-      within(peek).getByText("This session cost $0.50."),
-    ).toBeInTheDocument()
+    expect(await costTotal(peek)).toBe("$0.50")
     expect(within(peek).queryByText(/ceiling/)).not.toBeInTheDocument()
     expect(within(peek).queryByRole("progressbar")).not.toBeInTheDocument()
   })
@@ -342,6 +1097,23 @@ describe("SessionsPage", () => {
           (params) => params.get("q") === "codex" && params.get("skip") === "0",
         ),
       ).toBe(true),
+    )
+  })
+
+  it("edits the search mid-text without the caret jumping to the end", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const search = await screen.findByRole("searchbox", {
+      name: "Search sessions",
+    })
+    await user.type(search, "deepseek")
+    await user.keyboard("{ArrowLeft>4/}XY")
+
+    expect(search).toHaveValue("deepXYseek")
+    await vi.waitFor(() =>
+      expect(listReads(calls).at(-1)?.get("q")).toBe("deepXYseek"),
     )
   })
 
@@ -386,6 +1158,116 @@ describe("SessionsPage", () => {
     const [params] = listReads(calls)
     expect(params.get("start")).toBe(start)
     expect(params.get("end")).toBe(end)
+  })
+
+  it("reads a window with only a start as running to now", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+    const start = "2026-10-01T00:00:00.000Z"
+
+    renderPage(<SessionsPage />, `/sessions?start_date=${start}`)
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    const [params] = listReads(calls)
+    expect(params.get("start")).toBe(start)
+    expect(Date.parse(params.get("end") ?? "")).toBeGreaterThan(
+      Date.parse(start),
+    )
+  })
+
+  it("sends the filters the Overview tabs share with the list, count and chart", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(
+      <SessionsPage />,
+      "/sessions?user_id=u1&user_id=u2&api_key_id=k1&status=error",
+    )
+
+    await waitFor(() =>
+      expect(
+        ["/traces?", "/traces/count", "/traces/series"].every((route) =>
+          calls.some((call) => call.url.includes(route)),
+        ),
+      ).toBe(true),
+    )
+    for (const call of calls.filter((c) => c.url.includes("/traces"))) {
+      if (/\/traces\/[^?]+/.test(call.url) && !/count|series/.test(call.url))
+        continue
+      const params = new URL(call.url, "http://localhost").searchParams
+      expect(params.getAll("user_id")).toEqual(["u1", "u2"])
+      expect(params.getAll("api_key_id")).toEqual(["k1"])
+      expect(params.get("has_error")).toBe("true")
+    }
+  })
+
+  it("reads status=success as sessions without an error", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?status=success")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].get("has_error")).toBe("false")
+  })
+
+  it("sends a model filter with the list", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?model=gpt-5.6&model=claude-x")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].getAll("model")).toEqual(["gpt-5.6", "claude-x"])
+  })
+
+  it("sends no has_error for a status with no session meaning", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage />, "/sessions?status=absorbed")
+
+    await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
+    expect(listReads(calls)[0].has("has_error")).toBe(false)
+  })
+
+  it("corrects a range this page has no preset for", async () => {
+    mockApi({ traces: [traceSummary()] })
+
+    renderPage(
+      <>
+        <SessionsPage />
+        <RangeProbe />
+      </>,
+      "/sessions?range=90d",
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status", { name: "Range in the URL" }),
+      ).not.toHaveTextContent("90d"),
+    )
+  })
+
+  it("keeps the range alone when explicit bounds are present", async () => {
+    mockApi({ traces: [traceSummary()] })
+
+    renderPage(
+      <>
+        <SessionsPage />
+        <RangeProbe />
+      </>,
+      "/sessions?range=90d&start_date=2026-10-01T00:00:00.000Z&end_date=2026-10-02T00:00:00.000Z",
+    )
+
+    await screen.findByRole("grid", { name: "Sessions" })
+    expect(
+      screen.getByRole("status", { name: "Range in the URL" }),
+    ).toHaveTextContent("90d")
+  })
+
+  it("omits its heading when embedded", async () => {
+    mockApi({ traces: [traceSummary()] })
+
+    renderPage(<SessionsPage embedded />, "/sessions")
+
+    await screen.findByRole("grid", { name: "Sessions" })
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
   })
 
   it("asks for the next page of sessions", async () => {

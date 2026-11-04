@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   CreateOrganizationPricingOverride,
   OrganizationPricingOverride,
@@ -7,7 +12,7 @@ import type {
   SetPricingRequest,
   UpdateOrganizationPricingOverride,
 } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import { ApiError, apiFetch } from "@/shared/api/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import {
@@ -28,6 +33,37 @@ export function usePricing(enabled = true) {
   })
 }
 
+/** One key of one kind, as `GET /pricing/{model_key}?kind=` names it. */
+export interface PricedKey {
+  kind: PricingResponse["kind"]
+  modelKey: string
+}
+
+/**
+ * The rate in force for each key, `null` where nothing prices it, in order.
+ *
+ * Targeted reads rather than the whole history `usePricing` walks: a page
+ * pricing a handful of tools needs a row each, and the 404 that says a key is
+ * unpriced is an answer here, not a failure.
+ */
+export function usePricesInEffect(keys: readonly PricedKey[], enabled = true) {
+  return useQueries({
+    queries: keys.map(({ kind, modelKey }) => ({
+      queryKey: [PRICING, "in-effect", kind, modelKey],
+      queryFn: () =>
+        apiFetch<PricingResponse>(
+          `/pricing/${encodeURIComponent(modelKey)}?kind=${encodeURIComponent(kind)}`,
+        ).catch((error: unknown) => {
+          if (error instanceof ApiError && error.status === 404) return null
+          throw error
+        }),
+      // As long as the other catalog reads: a write here invalidates it anyway.
+      staleTime: 60_000,
+      enabled,
+    })),
+  })
+}
+
 export function useSetPricing() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -35,6 +71,31 @@ export function useSetPricing() {
       apiFetch<PricingResponse>("/pricing", {
         method: "POST",
         body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PRICING] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+    },
+  })
+}
+
+/**
+ * Deletes every version of one key's deployment price, of one kind.
+ *
+ * A 404 means nothing priced the key, which is what the caller asked for, so
+ * it resolves rather than fails.
+ */
+export function useDeletePricing() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ kind, modelKey }: PricedKey) =>
+      apiFetch<void>(
+        `/pricing/${encodeURIComponent(modelKey)}?kind=${encodeURIComponent(kind)}`,
+        { method: "DELETE" },
+      ).catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 404) return
+        throw error
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })

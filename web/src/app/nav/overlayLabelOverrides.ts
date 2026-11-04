@@ -14,7 +14,7 @@ import type { NavLabelOverride } from "./types"
  *
  * The module name, this export's name, and the type and helper behind it are
  * `otari-ai/frontend/src/app/nav/overlayLabelOverrides.ts`'s, so the two
- * registries compose when the control-plane UI converges at M5. The entries
+ * registries compose when otari.ai's pages converge at M5. The entries
  * themselves are not interchangeable: two of `NavLabelOverride`'s field names
  * differ from the platform's, because the registries' shapes differ, and its
  * docstring in `types.ts` says which and why. Read that before porting a list

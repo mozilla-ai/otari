@@ -1,19 +1,33 @@
 """Shared pricing lookup utilities."""
 
+import time
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import ColumnElement, case, distinct, func, inspect, not_, or_, select, true
+from sqlalchemy import ColumnElement, case, distinct, func, inspect, not_, or_, select, true, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.metered_pricing import priced_per_request
 from gateway.log_config import logger
-from gateway.models.pricing import OPERATOR_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import (
+    MODEL_KIND,
+    OPERATOR_ORIGIN,
+    ModelPricing,
+    OrganizationModelPricing,
+    PriceSource,
+    PricingKind,
+)
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
+from gateway.repositories.pricing import (
+    OrganizationModelPricingRepository,
+    pending_price_writes,
+    price_write_generation,
+)
 from gateway.services.pricing import (
     PROVIDER_TOOL_LIST_PRICES,
     ModelsDevPrice,
@@ -23,6 +37,7 @@ from gateway.services.pricing import (
     active_timeline,
     billed_search_units,
     charge_tool_calls,
+    has_completion_meter,
     paid_by_the_deployment,
     request_rate,
     resolve_as_of,
@@ -32,7 +47,9 @@ from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER as GATEWAY_TOOL_PRICING_PROVIDER,
 )
 from gateway.types.tool_charges import (
+    InstanceRateKey,
     LabelCalls,
+    RateKey,
 )
 from gateway.types.tool_charges import (
     gateway_tool_pricing_key as gateway_tool_pricing_key,
@@ -280,6 +297,7 @@ async def _find_organization_override(
         select(OrganizationModelPricing)
         .where(
             OrganizationModelPricing.organization_id == organization_id,
+            OrganizationModelPricing.kind == MODEL_KIND,
             OrganizationModelPricing.model_key.in_(model_keys),
             OrganizationModelPricing.effective_from <= as_of,
             or_(
@@ -336,23 +354,24 @@ async def load_organization_override_index(
         chunk = keys[start : start + _KEY_CHUNK]
         stmt = select(OrganizationModelPricing).where(
             OrganizationModelPricing.organization_id == organization_id,
+            OrganizationModelPricing.kind == MODEL_KIND,
             OrganizationModelPricing.model_key.in_(chunk),
         )
         for row in (await db.execute(stmt)).scalars():
-            # ``effective_to`` keeps its ``None``: an open-ended period means "no
-            # end", where ``normalize_effective_at`` would read it as "ends now".
-            effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
-            index.setdefault(row.model_key, []).append(
-                OverridePeriod(
-                    normalize_effective_at(row.effective_from),
-                    effective_to,
-                    override_as_model_pricing(row),
-                    row.origin,
-                )
-            )
+            index.setdefault(row.model_key, []).append(_override_period(row))
     for periods in index.values():
         periods.sort(key=lambda period: period.effective_from)
     return index
+
+
+def _override_period(row: OrganizationModelPricing) -> OverridePeriod:
+    """One override row as the period, rate and origin resolution reads."""
+    # ``effective_to`` keeps its ``None``: an open-ended period means "no end",
+    # where ``normalize_effective_at`` would read it as "ends now".
+    effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
+    return OverridePeriod(
+        normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row), row.origin
+    )
 
 
 def resolve_organization_override(
@@ -406,10 +425,24 @@ def pricing_key_forms(model_key: str) -> list[str]:
     return [model_key, f"{instance}/{model}"] if separator else [model_key]
 
 
+def legacy_tool_price_keys(config: GatewayConfig) -> set[str]:
+    """Every stored spelling of the ``<provider>:<instance>`` keys tools were priced under before they had a kind.
+
+    Such a row is a tool's, never a model's, wherever the price list is read.
+    """
+    return {
+        form
+        for key in config.legacy_search_tool_keys() | config.legacy_fetch_tool_keys()
+        for form in pricing_key_forms(key)
+    }
+
+
 async def _find_by_model_key(db: AsyncSession, model_key: str, as_of: datetime) -> ModelPricing | None:
+    """The newest model version of ``model_key`` in effect at ``as_of``."""
     stmt = (
         select(ModelPricing)
         .where(
+            ModelPricing.kind == MODEL_KIND,
             ModelPricing.model_key == model_key,
             ModelPricing.effective_at <= as_of,
         )
@@ -444,13 +477,14 @@ async def rates_in_force(
     lookup_time = normalize_effective_at(as_of)
     latest_effective = (
         select(ModelPricing.model_key.label("model_key"), func.max(ModelPricing.effective_at).label("effective_at"))
-        .where(ModelPricing.effective_at <= lookup_time)
+        .where(ModelPricing.kind == MODEL_KIND, ModelPricing.effective_at <= lookup_time)
         .group_by(ModelPricing.model_key)
         .subquery()
     )
     stmt = select(ModelPricing).join(
         latest_effective,
-        (ModelPricing.model_key == latest_effective.c.model_key)
+        (ModelPricing.kind == MODEL_KIND)
+        & (ModelPricing.model_key == latest_effective.c.model_key)
         & (ModelPricing.effective_at == latest_effective.c.effective_at),
     )
     if exclude_key_prefix is not None:
@@ -525,11 +559,70 @@ async def pricing_versions_page(
     stmt = (
         select(ModelPricing)
         .where(_outside_providers(hidden_providers))
-        .order_by(ModelPricing.model_key, ModelPricing.effective_at.desc())
+        .order_by(ModelPricing.model_key, ModelPricing.kind, ModelPricing.effective_at.desc())
         .offset(skip)
         .limit(limit)
     )
     return list((await db.execute(stmt)).scalars())
+
+
+async def priced_model_count(db: AsyncSession) -> int:
+    """How many model keys have a stored rate; a search or fetch instance's rate is not a model's."""
+    stmt = select(func.count(distinct(ModelPricing.model_key))).where(ModelPricing.kind == MODEL_KIND)
+    return (await db.execute(stmt)).scalar_one()
+
+
+async def price_in_effect(
+    db: AsyncSession, keys: Sequence[str], as_of: datetime, kind: PricingKind = MODEL_KIND
+) -> ModelPricing | None:
+    """The newest ``kind`` version in effect at ``as_of``, under the first of ``keys`` that has one."""
+    for key in keys:
+        stmt = (
+            select(ModelPricing)
+            .where(ModelPricing.kind == kind, ModelPricing.model_key == key, ModelPricing.effective_at <= as_of)
+            .order_by(ModelPricing.effective_at.desc())
+            .limit(1)
+        )
+        if pricing := (await db.execute(stmt)).scalar_one_or_none():
+            return pricing
+    return None
+
+
+async def price_history(db: AsyncSession, keys: Sequence[str], kind: PricingKind = MODEL_KIND) -> list[ModelPricing]:
+    """Every ``kind`` version, newest first, under the first of ``keys`` that has any."""
+    for key in keys:
+        stmt = (
+            select(ModelPricing)
+            .where(ModelPricing.kind == kind, ModelPricing.model_key == key)
+            .order_by(ModelPricing.effective_at.desc())
+        )
+        if pricings := list((await db.execute(stmt)).scalars()):
+            return pricings
+    return []
+
+
+async def latest_price_version(db: AsyncSession, key: str, kind: PricingKind = MODEL_KIND) -> ModelPricing | None:
+    """The newest stored ``kind`` version of ``key``, whatever date it takes effect."""
+    stmt = (
+        select(ModelPricing)
+        .where(ModelPricing.kind == kind, ModelPricing.model_key == key)
+        .order_by(ModelPricing.effective_at.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def price_version_at(
+    db: AsyncSession, keys: Sequence[str], effective_at: datetime, kind: PricingKind = MODEL_KIND
+) -> ModelPricing | None:
+    """The ``kind`` version that takes effect exactly at ``effective_at``, under the first of ``keys`` that has one."""
+    for key in keys:
+        stmt = select(ModelPricing).where(
+            ModelPricing.kind == kind, ModelPricing.model_key == key, ModelPricing.effective_at == effective_at
+        )
+        if pricing := (await db.execute(stmt)).scalar_one_or_none():
+            return pricing
+    return None
 
 
 async def current_rates_page(
@@ -540,7 +633,7 @@ async def current_rates_page(
     as_of: datetime | None = None,
     hidden_providers: Collection[str] = (),
 ) -> tuple[list[ModelPricing], int]:
-    """One page of each priced model's current rate, with the total model count.
+    """One page of each priced key's current rate, of every kind, with the total key count.
 
     :func:`rates_in_force` answers what settlement would pick, so a key whose
     only row is scheduled for later has none. The catalog needs the wider view:
@@ -560,6 +653,7 @@ async def current_rates_page(
     # not portable to the SQLite the OSS edition runs on.
     chosen = (
         select(
+            ModelPricing.kind.label("kind"),
             ModelPricing.model_key.label("model_key"),
             func.coalesce(
                 func.max(case((ModelPricing.effective_at <= lookup_time, ModelPricing.effective_at))),
@@ -568,26 +662,25 @@ async def current_rates_page(
         )
         .where(ModelPricing.model_key.notin_(shadowed) if shadowed else true())
         .where(_outside_providers(hidden_providers))
-        .group_by(ModelPricing.model_key)
+        .group_by(ModelPricing.kind, ModelPricing.model_key)
         .subquery()
     )
-    # ``(model_key, effective_at)`` is the primary key, so the join keeps one row
-    # per model. Ordered by key so a page is stable between reads.
+    # ``(kind, model_key, effective_at)`` is the primary key, so the join keeps one
+    # row per priced key. Ordered by key so a page is stable between reads.
     stmt = (
         select(ModelPricing)
         .join(
             chosen,
-            (ModelPricing.model_key == chosen.c.model_key) & (ModelPricing.effective_at == chosen.c.effective_at),
+            (ModelPricing.kind == chosen.c.kind)
+            & (ModelPricing.model_key == chosen.c.model_key)
+            & (ModelPricing.effective_at == chosen.c.effective_at),
         )
-        .order_by(ModelPricing.model_key)
+        .order_by(ModelPricing.model_key, ModelPricing.kind)
         .offset(skip)
         .limit(limit)
     )
     rows = list((await db.execute(stmt)).scalars())
-    total = select(func.count(distinct(ModelPricing.model_key))).where(_outside_providers(hidden_providers))
-    if shadowed:
-        total = total.where(ModelPricing.model_key.notin_(shadowed))
-    count = await db.scalar(total)
+    count = await db.scalar(select(func.count()).select_from(chosen))
     return rows, count or 0
 
 
@@ -685,6 +778,63 @@ def pricing_provenance(resolved: ResolvedPricing) -> PricingProvenance:
     return PricingProvenance(resolved.source, reference, resolved.effective_at)
 
 
+# The stored half of :func:`resolve_model_pricing` at the current time, per
+# organization, model key and payer, so a request does not read two price rows
+# that change a few times a day. A miss is cached too; the models.dev fallback
+# behind it is in memory and always resolved fresh.
+#
+# A write takes effect at once in the process that made it: the pricing
+# repository counts every flush, commit and rollback of a price change, and a
+# new count drops the cache. A session holding an uncommitted price change
+# neither reads nor fills it, so its own write is what it sees and nobody else
+# does. Other workers and replicas pick a change up within
+# PRICING_CACHE_TTL_SECONDS, the window the alias and routing policy caches
+# already have, and so does a rate scheduled to start or end in the future.
+PRICING_CACHE_TTL_SECONDS = 30.0
+_PRICING_CACHE_MAX_ENTRIES = 10_000
+
+_stored_prices: dict[tuple[uuid.UUID | None, str, bool], tuple[float, ResolvedPricing | None]] = {}
+_stored_prices_generation = price_write_generation()
+
+
+def reset_pricing_cache() -> None:
+    """Drop every cached stored rate."""
+    _stored_prices.clear()
+
+
+def _cached_stored_pricing(key: tuple[uuid.UUID | None, str, bool]) -> tuple[bool, ResolvedPricing | None]:
+    """Whether ``key`` has an entry from the last TTL with no price write since, and that entry."""
+    global _stored_prices_generation
+    generation = price_write_generation()
+    if generation != _stored_prices_generation:
+        _stored_prices.clear()
+        _stored_prices_generation = generation
+    cached = _stored_prices.get(key)
+    if cached is None or cached[0] <= time.monotonic():
+        return False, None
+    return True, cached[1]
+
+
+def _cache_stored_pricing(
+    key: tuple[uuid.UUID | None, str, bool], resolved: ResolvedPricing | None, *, read_at_generation: int
+) -> ResolvedPricing | None:
+    """Keep ``resolved`` for the TTL unless a price write landed while it was read, and return what callers get."""
+    if resolved is not None and resolved.source == "deployment":
+        resolved = resolved._replace(pricing=_transient_copy(resolved.pricing))
+    if read_at_generation == price_write_generation():
+        if len(_stored_prices) >= _PRICING_CACHE_MAX_ENTRIES:
+            _stored_prices.clear()
+        _stored_prices[key] = (time.monotonic() + PRICING_CACHE_TTL_SECONDS, resolved)
+    return resolved
+
+
+def _transient_copy(row: ModelPricing) -> ModelPricing:
+    """``row`` as an object no session holds, so requests can share it."""
+    return ModelPricing(
+        **{attribute.key: getattr(row, attribute.key) for attribute in inspect(ModelPricing).column_attrs}
+    )
+
+
 async def resolve_model_pricing(
     db: AsyncSession,
     provider: str | None,
@@ -702,28 +852,36 @@ async def resolve_model_pricing(
     that override: one the organization wrote, whether under a provider key it
     has since archived or before the deployment served the model, would let a
     tenant name the deployment's cost basis, down to zero.
+
+    Without ``as_of``, the stored rates come from the process cache above, so a
+    write elsewhere reaches this process within ``PRICING_CACHE_TTL_SECONDS``.
     """
     lookup_time = normalize_effective_at(as_of)
     model_key = f"{provider}:{model}" if provider else model
-    key_forms = pricing_key_forms(model_key)
-    legacy_keys = key_forms[1:]
+    cache_key = (organization_id, model_key, deployment_paid)
+    use_cache = as_of is None and not pending_price_writes(db)
 
-    if organization_id is not None:
-        override = await _find_organization_override(
-            db, organization_id, key_forms, lookup_time, operator_set_only=deployment_paid
-        )
-        if override is not None:
-            pricing = override_as_model_pricing(override)
-            return ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
-
-    stored = await _find_by_model_key(db, model_key, lookup_time)
-
-    for legacy_key in legacy_keys:
-        if stored is not None:
-            break
-        stored = await _find_by_model_key(db, legacy_key, lookup_time)
+    hit, stored = _cached_stored_pricing(cache_key) if use_cache else (False, None)
+    if not hit:
+        generation = price_write_generation()
+        key_forms = pricing_key_forms(model_key)
+        if organization_id is not None:
+            override = await _find_organization_override(
+                db, organization_id, key_forms, lookup_time, operator_set_only=deployment_paid
+            )
+            if override is not None:
+                pricing = override_as_model_pricing(override)
+                stored = ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
+        for key in key_forms:
+            if stored is not None:
+                break
+            row = await _find_by_model_key(db, key, lookup_time)
+            if row is not None:
+                stored = ResolvedPricing(row, "deployment", row.model_key, normalize_effective_at(row.effective_at))
+        if use_cache:
+            stored = _cache_stored_pricing(cache_key, stored, read_at_generation=generation)
     if stored is not None:
-        return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
+        return stored
 
     if use_defaults and default_pricing_enabled():
         matched = default_pricing_match(provider, model, lookup_time)
@@ -777,9 +935,66 @@ class RequestPrices:
     is in flight applies from the next request on.
     """
 
-    def __init__(self, organization_id: uuid.UUID | None) -> None:
+    def __init__(self, organization_id: uuid.UUID | None, repository: OrganizationModelPricingRepository) -> None:
+        """Bind the request pricing cache to its organization and injected repository."""
         self.organization_id = organization_id
+        self._repository = repository
         self._resolved: dict[tuple[str | None, str, bool], ResolvedPricing | None] = {}
+
+    async def estimate_candidates(
+        self,
+        candidates: Sequence[tuple[str, str]],
+        estimate: Callable[[ModelPricing], Decimal],
+    ) -> dict[str, Decimal | None]:
+        """Estimate each candidate at this request's rates, retaining unknown prices.
+
+        A rate in a unit no completion meter reads is an unknown price too: it
+        would estimate at nothing, and an estimate of nothing ranks as the
+        cheapest candidate, which the pricing gate then refuses.
+        """
+        await self.prime(candidates)
+        costs: dict[str, Decimal | None] = {}
+        for provider, model in candidates:
+            resolved = self._resolved[provider, model, False]
+            priced = resolved is not None and has_completion_meter(resolved.pricing)
+            costs[f"{provider}:{model}"] = estimate(resolved.pricing) if priced and resolved is not None else None
+        return costs
+
+    async def prime(self, candidates: Sequence[tuple[str, str]]) -> None:
+        """Resolve a catalog's locally credentialed candidates in two batched reads.
+
+        Same precedence and provenance as resolve_model_pricing. These entries
+        never populate the separate deployment-paid cache.
+        """
+        pending = [
+            (provider, model) for provider, model in candidates if (provider, model, False) not in self._resolved
+        ]
+        if not pending:
+            return
+        now = normalize_effective_at(None)
+        forms = {(provider, model): pricing_key_forms(f"{provider}:{model}") for provider, model in pending}
+        keys = {key for values in forms.values() for key in values}
+        overrides = (
+            await self._repository.applicable_rows(self.organization_id, keys, now) if self.organization_id else {}
+        )
+        stored = await self._repository.deployment_rows(keys, now)
+        for provider, model in pending:
+            candidates_keys = forms[provider, model]
+            override = next((overrides[key] for key in candidates_keys if key in overrides), None)
+            row = next((stored[key] for key in candidates_keys if key in stored), None)
+            resolved: ResolvedPricing | None = None
+            if override is not None:
+                price = override_as_model_pricing(override)
+                resolved = ResolvedPricing(price, "organization", str(override.id), price.effective_at)
+            elif row is not None:
+                resolved = ResolvedPricing(row, "deployment", row.model_key, normalize_effective_at(row.effective_at))
+            elif default_pricing_enabled():
+                matched = default_pricing_match(provider, model, now)
+                if matched is not None:
+                    resolved = ResolvedPricing(matched[0], "defaults", matched[1])
+            if resolved is not None:
+                _detach(resolved.pricing)
+            self._resolved[provider, model, False] = resolved
 
     async def resolve(
         self, db: AsyncSession, provider: str | None, model: str, *, deployment_paid: bool = False
@@ -816,21 +1031,36 @@ async def price_tool_calls(
     return charge_tool_calls(calls, rates)
 
 
+async def tool_unit_rate(db: AsyncSession, call: LabelCalls, *, organization_id: uuid.UUID | None = None) -> Decimal:
+    """What one call under ``call``'s label costs when it reports no cost, before any rounding.
+
+    The rate :func:`price_tool_calls` charges such a call at, for a caller that
+    holds a price before the calls run. Zero when no pricing row prices the label.
+    """
+    lookup = tool_rate_lookup(replace(call, calls=1, unreported_calls=1))
+    if lookup is None or not lookup.rate_keys:
+        return Decimal(0)
+    rate = (await _tool_rates(db, {lookup}, as_of=None, organization_id=organization_id))[lookup]
+    return rate.unit_rate if rate is not None else Decimal(0)
+
+
 async def resolve_tool_rate(
     db: AsyncSession,
-    rate_keys: Sequence[str],
+    rate_keys: Sequence[RateKey],
     *,
     label: str | None = None,
+    deployment_paid: bool | None = None,
     as_of: datetime | None = None,
     organization_id: uuid.UUID | None = None,
 ) -> ToolRate | None:
     """The rate one call's rate keys resolve to, or ``None`` when none has a pricing row.
 
     The lookup :func:`price_tool_calls` prices each label with, for a caller that
-    holds one resolved call, such as a pricing gate. ``label`` decides whose
-    overrides count, as it does at settlement.
+    holds one resolved call, such as a pricing gate. ``deployment_paid`` decides
+    whose overrides count, as it does at settlement; ``None`` reads it off ``label``.
     """
-    lookup = ToolRateLookup(tuple(rate_keys), paid_by_the_deployment(label))
+    paid = deployment_paid if deployment_paid is not None else paid_by_the_deployment(label)
+    lookup = ToolRateLookup(tuple(rate_keys), paid)
     return (await _tool_rates(db, {lookup}, as_of=as_of, organization_id=organization_id))[lookup]
 
 
@@ -844,9 +1074,12 @@ async def _tool_rates(
     """The rate each lookup resolves to: its first rate key with a pricing row.
 
     Each key resolves as :func:`resolve_model_pricing` resolves one: the
-    organization's override first, through :func:`resolve_organization_override`,
-    the in-memory statement of the same rule, then the deployment price list in
-    both spellings, canonical first. The models.dev fallback is not consulted:
+    organization's override in any of the key's spellings first, through
+    :func:`resolve_organization_override`, the in-memory statement of the same
+    rule, then the deployment price list in the same spellings. An instance's key
+    is spelled as its kind and name, then as its old model-kind
+    ``<provider>:<instance>``; a model-kind key in both of its spellings,
+    canonical first. The models.dev fallback is not consulted:
     MCP tool names come from a caller-supplied server, and the fallback matches
     on a bare name, so a tool named after a real model would otherwise be billed
     at that model's per-million-token rate divided by a million.
@@ -858,51 +1091,90 @@ async def _tool_rates(
     if not lookups:
         return {}
     lookup_time = normalize_effective_at(as_of)
-    forms = {form for lookup in lookups for key in lookup.rate_keys for form in pricing_key_forms(key)}
-    overrides = (
-        await load_organization_override_index(db, organization_id, forms) if organization_id is not None else {}
-    )
+    forms = {form for lookup in lookups for rate_key in lookup.rate_keys for form in _rate_key_forms(rate_key)}
+    overrides = await _tool_override_indexes(db, organization_id, forms) if organization_id is not None else {}
     deployment = await _deployment_rates(db, forms, lookup_time)
     return {lookup: _first_tool_rate(lookup, overrides, deployment, lookup_time) for lookup in lookups}
 
 
-async def _deployment_rates(db: AsyncSession, model_keys: Collection[str], as_of: datetime) -> dict[str, ModelPricing]:
-    """The deployment price list's version in force at ``as_of`` for each stored key that has one.
+def _rate_key_forms(rate_key: RateKey) -> list[tuple[PricingKind, str]]:
+    """The ``(kind, stored key)`` pairs that spell ``rate_key``, the preferred first."""
+    if isinstance(rate_key, InstanceRateKey):
+        legacy = pricing_key_forms(rate_key.legacy_key) if rate_key.legacy_key is not None else []
+        return [(rate_key.kind, rate_key.name), *((MODEL_KIND, form) for form in legacy)]
+    return [(MODEL_KIND, form) for form in pricing_key_forms(rate_key)]
 
-    Chunked over the key list, as :func:`load_organization_override_index` is.
+
+async def _tool_override_indexes(
+    db: AsyncSession, organization_id: uuid.UUID, forms: Collection[tuple[PricingKind, str]]
+) -> dict[str, dict[str, list[OverridePeriod]]]:
+    """:func:`load_organization_override_index` for ``(kind, key)`` pairs, one index per kind."""
+    pairs = sorted(set(forms))
+    indexes: dict[str, dict[str, list[OverridePeriod]]] = {}
+    for start in range(0, len(pairs), _KEY_CHUNK):
+        stmt = select(OrganizationModelPricing).where(
+            OrganizationModelPricing.organization_id == organization_id,
+            tuple_(OrganizationModelPricing.kind, OrganizationModelPricing.model_key).in_(
+                pairs[start : start + _KEY_CHUNK]
+            ),
+        )
+        for row in (await db.execute(stmt)).scalars():
+            indexes.setdefault(row.kind, {}).setdefault(row.model_key, []).append(_override_period(row))
+    for index in indexes.values():
+        for periods in index.values():
+            periods.sort(key=lambda period: period.effective_from)
+    return indexes
+
+
+async def _deployment_rates(
+    db: AsyncSession, forms: Collection[tuple[PricingKind, str]], as_of: datetime
+) -> dict[tuple[str, str], ModelPricing]:
+    """The deployment price list's version in force at ``as_of`` for each ``(kind, key)`` pair that has one.
+
+    Chunked over the pairs, as :func:`load_organization_override_index` is over keys.
     """
-    keys = sorted(set(model_keys))
-    found: dict[str, ModelPricing] = {}
-    for start in range(0, len(keys), _KEY_CHUNK):
-        chunk = keys[start : start + _KEY_CHUNK]
+    pairs = sorted(set(forms))
+    found: dict[tuple[str, str], ModelPricing] = {}
+    for start in range(0, len(pairs), _KEY_CHUNK):
         stmt = (
             select(ModelPricing)
-            .where(ModelPricing.model_key.in_(chunk), ModelPricing.effective_at <= as_of)
+            .where(
+                tuple_(ModelPricing.kind, ModelPricing.model_key).in_(pairs[start : start + _KEY_CHUNK]),
+                ModelPricing.effective_at <= as_of,
+            )
             # Oldest first, so the last row kept for a key is its newest version.
             .order_by(ModelPricing.effective_at)
         )
         for row in (await db.execute(stmt)).scalars():
-            found[row.model_key] = row
+            found[(row.kind, row.model_key)] = row
     return found
 
 
 def _first_tool_rate(
     lookup: ToolRateLookup,
-    overrides: dict[str, list[OverridePeriod]],
-    deployment: Mapping[str, ModelPricing],
+    overrides: Mapping[str, dict[str, list[OverridePeriod]]],
+    deployment: Mapping[tuple[str, str], ModelPricing],
     as_of: datetime,
 ) -> ToolRate | None:
+    """The first of ``lookup``'s rate keys that has a price, its overrides in every spelling ahead of its row.
+
+    The provider's list price applies only when no key has one and default
+    pricing is on.
+    """
     for rate_key in lookup.rate_keys:
-        forms = pricing_key_forms(rate_key)
-        override = resolve_organization_override(overrides, forms, as_of, deployment_paid=lookup.operator_set_only)
-        if override is not None:
-            return ToolRate(rate_key, flat_request_cost(override), "organization")
+        forms = _rate_key_forms(rate_key)
+        for kind, key in forms:
+            override = resolve_organization_override(
+                overrides.get(kind, {}), [key], as_of, deployment_paid=lookup.operator_set_only
+            )
+            if override is not None:
+                return ToolRate(rate_key, flat_request_cost(override), "organization")
         stored = next((deployment[form] for form in forms if form in deployment), None)
         if stored is not None:
             return ToolRate(rate_key, flat_request_cost(stored), "deployment")
     if default_pricing_enabled():
         for rate_key in lookup.rate_keys:
-            list_price = PROVIDER_TOOL_LIST_PRICES.get(rate_key)
+            list_price = PROVIDER_TOOL_LIST_PRICES.get(rate_key) if isinstance(rate_key, str) else None
             if list_price is not None:
                 return ToolRate(rate_key, list_price, "defaults")
     return None
@@ -917,12 +1189,14 @@ def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricin
     user, a blocked user, or an exhausted budget (404/403) take precedence over
     the missing-pricing rejection (402) — and refund the reservation before
     raising. When ``require_pricing`` is False, the legacy behavior is preserved
-    (the request is served and logged without cost).
+    (the request is served and logged without cost). A rate in a unit no
+    completion meter reads yet (``second``, ``minute``) is missing in the same
+    sense: it cannot bill the request either.
     """
-    return pricing is None and require_pricing
+    return require_pricing and not has_completion_meter(pricing)
 
 
-def no_pricing_error_detail(model: str) -> str:
+def no_pricing_error_detail(model: str, *, unit: str | None = None) -> str:
     """The 402 body for an unpriced model: what went wrong, why, and how to fix it.
 
     A new operator adding a provider in the dashboard hits this on their first
@@ -931,6 +1205,12 @@ def no_pricing_error_detail(model: str) -> str:
     bundled price list missed the name, most often because it is misspelled, so
     that is named first and enabling the fallback is not offered again.
     """
+    if unit is not None:
+        return (
+            f"Model '{model}' is priced per {unit}, which no completion meter reads yet, and require_pricing is on, "
+            f"so it cannot be billed. Price it in tokens or per request (POST {API_ROOT}/pricing, or the pricing "
+            "section of config.yml)."
+        )
     cause = f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
     if default_pricing_enabled():
         return (

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react"
 
 import { useOrganizationContext } from "@/shared/api/organizations"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 /**
@@ -33,7 +32,6 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
  * this component.
  */
 export function TelemetryIdentity() {
-  const { session_type } = useDeployment()
   const { data } = useOrganizationContext()
   const { consent, identify } = useTelemetry()
   // Whether this component has handed the tracker an actor. Revoking consent
@@ -69,20 +67,11 @@ export function TelemetryIdentity() {
     identified.current = true
     identify({
       actorId,
-      sessionType: session_type,
       organizationId,
       organizationName,
       role,
     })
-  }, [
-    consent,
-    identify,
-    actorId,
-    organizationId,
-    organizationName,
-    role,
-    session_type,
-  ])
+  }, [consent, identify, actorId, organizationId, organizationName, role])
 
   return null
 }

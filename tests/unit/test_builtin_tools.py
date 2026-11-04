@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
-from gateway.api.routes.tools import _managed_tools
+from gateway.api.routes.tools import _managed_tools, _WorkspaceSwitches
 from gateway.api.routes.usage import GATEWAY_TOOL_NAMES
 from gateway.core.config import GatewayConfig
 from gateway.services._tool_loop import ToolBackend
@@ -113,10 +113,10 @@ def test_a_listed_tool_is_reachable_by_name_in_every_dialect_it_renders(tool: Bu
             assert native_rendering(tool.name, dialect) is None
 
 
-def test_chat_completions_reports_the_web_tools_and_not_code_execution() -> None:
+def test_chat_completions_reports_every_builtin_tool() -> None:
     assert native_rendering(WEB_SEARCH_TOOL_NAME, Dialect.CHAT) is not None
     assert native_rendering(WEB_FETCH_TOOL_NAME, Dialect.CHAT) is not None
-    assert native_rendering(CODE_EXECUTION_TOOL_NAME, Dialect.CHAT) is None
+    assert native_rendering(CODE_EXECUTION_TOOL_NAME, Dialect.CHAT) is not None
 
 
 @pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
@@ -130,16 +130,16 @@ def test_only_chat_completions_announces_a_call_as_it_starts(tool: BuiltinTool) 
 @pytest.mark.parametrize(
     ("declared_type", "expected"),
     [
-        ("code_execution_20250825", {Dialect.MESSAGES}),
-        ("code_interpreter", {Dialect.RESPONSES}),
-        ("code_execution", set()),
-        ("otari_code_execution", set()),
+        ("code_execution_20250825", {Dialect.CHAT, Dialect.MESSAGES}),
+        ("code_interpreter", {Dialect.CHAT, Dialect.RESPONSES}),
+        ("code_execution", {Dialect.CHAT}),
+        ("otari_code_execution", {Dialect.CHAT}),
     ],
 )
 def test_code_execution_is_rendered_only_in_the_dialect_whose_keyword_declared_it(
     declared_type: str, expected: set[Dialect]
 ) -> None:
-    """A provider's keyword asks for that provider's blocks back; the gateway's own words ask for none."""
+    """A provider's keyword asks for that provider's blocks back; Chat Completions reports every declaration."""
     rendered = {
         dialect
         for dialect in Dialect
@@ -191,6 +191,6 @@ def test_configured_agrees_with_what_the_tools_endpoint_reports(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
 
-    reported = {tool.id: tool.available for tool in _managed_tools(config)}
+    reported = {tool.id: tool.available for tool in _managed_tools(config, _WorkspaceSwitches())}
 
     assert reported == {f"otari_{tool.name}": tool.configured(config) for tool in BUILTIN_TOOLS}

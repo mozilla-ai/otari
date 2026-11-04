@@ -13,8 +13,7 @@ the self-review, [`frontend-standards`](../frontend-standards/SKILL.md) before a
 (its [testing.md](../frontend-standards/testing.md) is the dashboard's test guidance), and
 [`backend-standards`](../backend-standards/SKILL.md) before any `src/gateway/` edit (its "Before
 you finish" section carries the backend test bar). [AGENTS.md](../../../AGENTS.md) owns the
-repo-wide facts this skill leans on: the two runtime modes, the test notes, and the generated
-artifacts.
+repo-wide facts this skill leans on: the test notes and the generated artifacts.
 
 ## The cycle (one PR)
 
@@ -23,8 +22,7 @@ artifacts.
 2. **Understand the issue.** Read it and the exact files and lines it names, and verify current
    signatures before editing rather than trusting the issue's snippet. Read `AGENTS.md` plus the
    scoped one for the directory you are in (`web/`, `src/gateway/`). A backend edit respects the
-   layer rules `scripts/check_architecture.py` enforces; a management route is standalone-only,
-   so check `register_routers()` placement.
+   layer rules `scripts/check_architecture.py` enforces.
 3. **Implement.** For a refactor, keep it strictly **behavior-preserving**: no change to a
    public API, a route, a query key, or an invalidation. Correctness over speed.
 4. **Tests.** Happy path and error path, next to the behavior they cover (unit for pure logic,
@@ -113,7 +111,7 @@ PR with almost no CI, and neither of them reports anything:
 
   A GitHub stack is the exception. A PR that `gh stack submit` (the `github/gh-stack`
   extension) opens on its parent's branch still runs the workflows filtered on `main`: #1816
-  ran the full set, the hybrid and Docker smokes included. So stack with `gh stack`. Everything
+  ran the full set, every smoke included. So stack with `gh stack`. Everything
   above describes a PR whose base was set to another branch by hand.
 - **A `CONFLICTING` PR.** A `pull_request` workflow builds the PR's merge ref, and a conflicting
   PR has none, so nothing runs until the conflict is resolved. The tell is
@@ -140,10 +138,10 @@ A small set is not always one of the two faults above, though. Every one of thes
 carries a `paths` filter, so a change that touches nothing they watch correctly runs almost
 nothing: a PR editing only `.github/skills/`, or a `docs/` file other than `dashboard.md` and
 `public/openapi.json`, gets the title and template checks and no more, and that is the right
-answer rather than a symptom. Those two `docs/` paths are the exception, watched by
-`otari-dashboard.yml`, `otari-dashboard-parity.yml`, `otari-dashboard-serving.yml` and
-`otari-docker-build.yml` because the dashboard bundles the guide and generates its client from
-the spec, so a one-line edit to either runs `dashboard`, `e2e`, `serving` and `build`. The
+answer rather than a symptom. Those two `docs/` paths are the exception:
+`otari-dashboard.yml` watches the spec, because the dashboard generates its client from it, and
+`otari-dashboard-serving.yml` and `otari-docker-build.yml` still watch `dashboard.md`, so a
+one-line edit to either runs more than the title and template checks. The
 question to ask is whether the set matches the change, not whether the set is large.
 
 ## Generated artifacts a PR can owe

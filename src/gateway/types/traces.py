@@ -23,16 +23,22 @@ The records carry the privacy rules, so nothing downstream can weaken them:
 
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, Protocol
+
+from otari_agent.domain.definitions import GateDefinition
+from otari_agent.domain.policy import MAX_GATE_ID_LENGTH
 
 # The longest id the tables hold: a gateway request id (a UUID, 36), an OTel
 # trace id (32 hex) or span id (16 hex), and the hashes derived from them.
 TRACE_ID_MAX_LENGTH = 64
+
+# A trace's key: its workspace and its id.
+TraceKey = tuple[uuid.UUID, str]
 
 SpanKind = Literal["turn", "step", "llm", "tool", "routing_attempt", "guardrail", "mcp_connect", "agent", "other"]
 SPAN_KINDS: tuple[SpanKind, ...] = (
@@ -53,8 +59,10 @@ SpanOrigin = Literal["gateway", "otlp"]
 SPAN_ORIGINS: tuple[SpanOrigin, ...] = ("gateway", "otlp")
 
 # ``unknown`` is a client-run tool whose result no later request has carried yet.
-SpanOutcome = Literal["ok", "error", "unknown"]
-SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown")
+# ``blocked`` is work a guardrail stopped on purpose: the guardrail doing its job,
+# so it is never counted as an error.
+SpanOutcome = Literal["ok", "error", "unknown", "blocked"]
+SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown", "blocked")
 
 # The signal that grouped a trace's requests into one session. ``none`` is a request
 # that named no session, which is a trace of its own: the gateway never infers that
@@ -106,12 +114,51 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.mcp.tool_count": int,
     "otari.tool_loop.round": int,
     "otari.harness.version": str,
+    "otari.llm.ttft_ms": int,
+    # USD per million tokens a priced model request paid on each meter, as a decimal.
+    "otari.llm.rate.input": str,
+    "otari.llm.rate.output": str,
+    "otari.llm.rate.cache_read": str,
+    "otari.llm.rate.cache_write": str,
+    # Characters per kind of input in a model request, and how many tool definitions and
+    # messages it held. Sizes only, never text; the dashboard scales them to the exact input tokens.
+    "otari.context.system_chars": int,
+    "otari.context.tools_chars": int,
+    "otari.context.user_chars": int,
+    "otari.context.assistant_chars": int,
+    "otari.context.tool_result_chars": int,
+    "otari.context.file_chars": int,
+    "otari.context.tool_count": int,
+    "otari.context.message_count": int,
+    "otari.tool.decision": str,
+    "otari.tool.decision_source": str,
+    "otari.tool.succeeded": bool,
+    "otari.gate.id": str,
+    "otari.gate.type": str,
+    "otari.gate.origin": str,
+    "otari.gate.outcome": str,
+    "otari.gate.moment": str,
+    "otari.gate.blocked": bool,
+    "otari.policy.digest": str,
 }
 # The allowlisted attributes OTel defines as an array of strings. Each is stored as
 # its elements joined by LIST_SEPARATOR, so every stored attribute stays a scalar,
 # and each element is held to the identifier rule on its own.
 LIST_ATTRIBUTES = frozenset({"gen_ai.response.finish_reasons"})
 LIST_SEPARATOR = ","
+
+
+# What a span may say it was about, when a deployment keeps content
+# (``trace_content_enabled``). Prose, so never a typed field or an attribute,
+# and never searched: shown on the span, and only there.
+SPAN_CONTENT_KEYS = frozenset({"prompt", "command", "file_path", "gate.evidence", "gate.detail"})
+SPAN_CONTENT_MAX_LENGTH = 4_000
+# How long the note on a share of a session's content may be.
+SHARE_NOTE_MAX_LENGTH = 500
+# What opening a session's content without its owner's share has to say for itself.
+BREAK_GLASS_REASON_MIN_LENGTH = 10
+BREAK_GLASS_REASON_MAX_LENGTH = 1_000
+BREAK_GLASS_REFERENCE_MAX_LENGTH = 200
 
 
 class InvalidSpanError(ValueError):
@@ -126,6 +173,11 @@ class InvalidSpanError(ValueError):
 def is_identifier(value: str) -> bool:
     """Whether a client-supplied name is safe to store as it is."""
     return IDENTIFIER_PATTERN.fullmatch(value) is not None and not any(pattern.search(value) for pattern in _NOT_A_NAME)
+
+
+def is_gate_id(value: object) -> bool:
+    """Whether a value is a gate id a guardrail could declare, which is held to that rule, not the identifier one."""
+    return isinstance(value, str) and 0 < len(value) <= MAX_GATE_ID_LENGTH
 
 
 def is_identifier_list(value: str) -> bool:
@@ -151,6 +203,16 @@ def _check_id(name: str, value: str | None) -> None:
 def _check_identifier(name: str, value: str | None) -> None:
     if value is not None and not is_identifier(value):
         raise InvalidSpanError(f"{name} must be identifier-shaped")
+
+
+# The operation of a span that carries only what a model request cost, priced by
+# the usage ledger after the request: a read folds it onto that request.
+USAGE_OPERATION = "usage"
+# A judge's further model is priced under ``<gate request id><separator><span id>``,
+# so a read adds that cost to its gate's.
+GATE_USAGE_SEPARATOR = ":"
+# The meters a model request is priced on, each a rate attribute ``otari.llm.rate.<meter>``.
+RATE_METERS = ("input", "output", "cache_read", "cache_write")
 
 
 @dataclass(frozen=True)
@@ -189,12 +251,15 @@ class SpanRecord:
     otel_trace_id: str | None = None
     otel_span_id: str | None = None
     attributes: Mapping[str, str | int | float | bool] = field(default_factory=dict)
+    content: Mapping[str, str] = field(default_factory=dict)
+    # The span holds content the reader may not open: it is private to the session's owner.
+    content_private: bool = False
 
     def __post_init__(self) -> None:
         _check_choice("kind", self.kind, SPAN_KINDS)
         _check_choice("origin", self.origin, SPAN_ORIGINS)
         _check_choice("outcome", self.outcome, SPAN_OUTCOMES)
-        for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id"):
+        for name in ("span_id", "parent_span_id", "request_id", "otel_trace_id", "otel_span_id", "tool_call_id"):
             _check_id(name, getattr(self, name))
         if not (self.origin == "gateway" and self.kind == "step" and is_endpoint(self.name)):
             _check_identifier("name", self.name)
@@ -205,7 +270,6 @@ class SpanRecord:
             "provider",
             "tool_name",
             "tool_type",
-            "tool_call_id",
         ):
             _check_identifier(name, getattr(self, name))
         # Copied before it is checked and frozen after, so the mapping a caller still
@@ -217,11 +281,23 @@ class SpanRecord:
                 raise InvalidSpanError("attributes may only hold allowlisted keys")
             if type(value) is not expected:
                 raise InvalidSpanError(f"attribute {key} must be a {expected.__name__}")
-            if isinstance(value, str) and not (
+            if key == "otari.gate.id":
+                if not is_gate_id(value):
+                    raise InvalidSpanError(f"attribute {key} must be a gate id")
+            elif isinstance(value, str) and not (
                 is_identifier_list(value) if key in LIST_ATTRIBUTES else is_identifier(value)
             ):
                 raise InvalidSpanError(f"attribute {key} must be identifier-shaped")
         object.__setattr__(self, "attributes", MappingProxyType(attributes))
+        content = dict(self.content)
+        for key, value in content.items():
+            if key not in SPAN_CONTENT_KEYS:
+                raise InvalidSpanError("content may only hold its known keys")
+            if not isinstance(value, str) or len(value) > SPAN_CONTENT_MAX_LENGTH:
+                raise InvalidSpanError(
+                    f"content {key} must be a string of at most {SPAN_CONTENT_MAX_LENGTH} characters"
+                )
+        object.__setattr__(self, "content", MappingProxyType(content))
 
 
 @dataclass(frozen=True)
@@ -241,6 +317,15 @@ class TraceWrite:
     spans: tuple[SpanRecord, ...]
     harness: str | None = None
     name: str | None = None
+    captured_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """When the gateway took these spans in, which an erasure of their user since then outranks."""
+    content_generation: int | None = None
+    """The workspace's content generation when its spans' content was captured.
+
+    Content is stored only while the workspace is still on that generation, so
+    content queued before the workspace turned content off, or deleted it, is
+    dropped however late it is written. None keeps no content.
+    """
 
     def __post_init__(self) -> None:
         _check_id("trace_id", self.trace_id)
@@ -262,6 +347,39 @@ class WriteResult:
     rejected: int = 0
 
 
+ShareAudience = Literal["organization_admins", "deployment_operator"]
+# How a read reached a session's content: as its owner, through a share, by
+# break-glass (an organization owner or the deployment's operator, recorded), or not at all.
+ContentAccess = Literal["owner", "share", "break_glass", "none"]
+BreakGlassKind = Literal["organization", "deployment"]
+
+
+@dataclass(frozen=True)
+class ContentReader:
+    """Who is reading a session's content, and which shares they may read it through."""
+
+    user_id: uuid.UUID
+    email: str
+    audiences: frozenset[ShareAudience] = frozenset()
+    """The shares this reader may read through: none for a member who manages nothing.
+
+    More than one where a reader is both, such as an operator who also owns or
+    administers the organization.
+    """
+
+
+class SessionOwners(Protocol):
+    """Who still belongs where a session was kept, asked before content opens for anyone but its owner."""
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        """Whether ``user_id`` names a person who currently sees ``workspace_id``."""
+        ...
+
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        """Which of these (workspace, user) pairs :meth:`is_member` holds for, asked at once."""
+        ...
+
+
 @dataclass(frozen=True)
 class TraceScope:
     """The tenants a read may touch, derived from the authenticated caller.
@@ -269,29 +387,46 @@ class TraceScope:
     Built through :meth:`deployment` or :meth:`workspaces`, never directly, so
     "every workspace" is always a deliberate choice: an empty workspace set
     matches nothing.
+
+    A session's content (prompts, commands, file paths) opens for the user it
+    belongs to and nobody else, managers and operators included, unless its owner
+    shared it with them while still a member. Content is kept only for a session
+    a current member owns, so no session's content belongs to nobody.
+    ``all_content`` is for the deployment's own reads, never a person's.
     """
 
     workspace_ids: frozenset[uuid.UUID]
     deployment_wide: bool = False
+    all_content: bool = False
+    reader: ContentReader | None = None
 
     @classmethod
     def deployment(cls) -> "TraceScope":
-        """Every workspace: only for a deployment operator."""
-        return cls(workspace_ids=frozenset(), deployment_wide=True)
+        """Every workspace, with every session's content: for the deployment's own reads, never a person's."""
+        return cls(workspace_ids=frozenset(), deployment_wide=True, all_content=True)
 
     @classmethod
-    def workspaces(cls, workspace_ids: frozenset[uuid.UUID]) -> "TraceScope":
-        """Only these workspaces."""
-        return cls(workspace_ids=workspace_ids)
+    def workspaces(cls, workspace_ids: frozenset[uuid.UUID], *, reader: ContentReader | None = None) -> "TraceScope":
+        """Only these workspaces, read by ``reader``; without one, no session's content opens."""
+        return cls(workspace_ids=workspace_ids, reader=reader)
+
+    def owns(self, user_id: str | None) -> bool:
+        """Whether the reader is the user a session belongs to."""
+        return self.reader is not None and user_id is not None and user_id == str(self.reader.user_id)
+
+    def reads_content_of(self, user_id: str | None) -> bool:
+        """Whether a read in this scope opens the content of a session ``user_id`` owns, without a share."""
+        return self.all_content or self.owns(user_id)
 
 
 @dataclass(frozen=True)
 class TraceFilter:
     """What narrows a read, inside its scope.
 
-    Every field narrows; an unset field does not filter. ``start`` is inclusive
-    and ``end`` exclusive, and both apply to a trace's last activity. A naive
-    bound means UTC. Several values in a tuple match any of them. ``workspace_ids``
+    Every field narrows; an unset field does not filter. ``start`` and ``end``
+    keep the traces active in ``[start, end)``: last active at or after ``start``
+    and started before ``end``, so a session still running past ``end`` stays in.
+    A naive bound means UTC. Several values in a tuple match any of them. ``workspace_ids``
     narrows inside the scope like every other field: a workspace outside the scope
     matches nothing, never widens it.
     """
@@ -301,6 +436,7 @@ class TraceFilter:
     end: datetime | None = None
     user_ids: tuple[str, ...] = ()
     api_key_ids: tuple[str, ...] = ()
+    models: tuple[str, ...] = ()
     harnesses: tuple[str, ...] = ()
     session_sources: tuple[str, ...] = ()
     has_error: bool | None = None
@@ -343,13 +479,27 @@ class TraceSummary:
 
 
 # The grain a series is bucketed by. Bucket starts cross the seam as canonical UTC
-# strings (``YYYY-MM-DDTHH:00:00Z``), so two adapters cannot disagree about a bucket.
-TraceBucketGrain = Literal["hour", "day"]
+# strings (``YYYY-MM-DDTHH:MM:SSZ``), so two adapters cannot disagree about a bucket.
+TraceBucketGrain = Literal["1m", "5m", "30m", "hour", "6h", "day"]
+TRACE_BUCKET_DURATION: Mapping[str, timedelta] = MappingProxyType(
+    {
+        "1m": timedelta(minutes=1),
+        "5m": timedelta(minutes=5),
+        "30m": timedelta(minutes=30),
+        "hour": timedelta(hours=1),
+        "6h": timedelta(hours=6),
+        "day": timedelta(days=1),
+    }
+)
 
 
 @dataclass(frozen=True)
 class TraceBucket:
-    """How many traces started in one bucket, split by whether any of their spans failed unrecovered."""
+    """How many sessions were active in one bucket, split by whether any of their spans failed unrecovered.
+
+    A session is active in every bucket between its start and its last activity, so
+    a long one counts in each bucket it ran through, not only in the one it began in.
+    """
 
     bucket: str
     succeeded: int
@@ -365,13 +515,83 @@ class TracePage:
 
 
 @dataclass(frozen=True)
+class GuardrailDefinition:
+    """One version of an agent guardrail, by the fingerprint its gate spans name."""
+
+    digest: str
+    gates: tuple[GateDefinition, ...]
+
+
+@dataclass(frozen=True)
 class TraceDetail:
     """A trace and its spans, in start order.
 
     ``truncated`` says the trace holds more spans than the read was allowed to
     return, so a caller never mistakes a cut-off trace for a short one.
+    ``definitions`` are the guardrail versions its gate spans name, those stored.
     """
 
     summary: TraceSummary
     spans: tuple[SpanRecord, ...]
     truncated: bool
+    definitions: tuple[GuardrailDefinition, ...] = ()
+    content_access: ContentAccess = "none"
+    content_share: "ContentShare | None" = None
+    """The share the content was read through, where it was."""
+
+
+@dataclass(frozen=True)
+class BreakGlass:
+    """Why a session's content is being opened without its owner's share, and by whom."""
+
+    kind: BreakGlassKind
+    organization_id: uuid.UUID
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    reason: str
+    reference: str | None = None
+
+
+@dataclass(frozen=True)
+class BreakGlassRead:
+    """One recorded break-glass opening of a session's content."""
+
+    id: uuid.UUID
+    kind: BreakGlassKind
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID
+    trace_id: str
+    session_user_id: str | None
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    reason: str
+    reference: str | None
+    read_at: datetime
+
+
+@dataclass(frozen=True)
+class ContentRead:
+    """One read of a session's content through a share."""
+
+    reader_user_id: uuid.UUID | None
+    reader_email: str
+    read_at: datetime
+
+
+@dataclass(frozen=True)
+class ContentShare:
+    """A session's owner letting an audience read what it was about, and the reads made through it."""
+
+    id: uuid.UUID
+    audience: ShareAudience
+    note: str | None
+    created_at: datetime
+    revoked_at: datetime | None
+    reads: tuple[ContentRead, ...] = ()
+    """Its newest reads; ``read_count`` says how many there are in all."""
+    read_count: int = 0
+
+    @property
+    def active(self) -> bool:
+        """Whether it still lets its audience read."""
+        return self.revoked_at is None

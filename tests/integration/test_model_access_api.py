@@ -14,6 +14,8 @@ from gateway.core.config import API_ROOT
 
 DENIED = "gemini:gemini-2.5-flash"
 ALLOWED = "openai:gpt-4o"
+# The catalog ids GET /models lists the two under.
+CATALOG_ID = {DENIED: "google/gemini-2.5-flash", ALLOWED: "openai/gpt-4o"}
 
 
 def _make_key(client: TestClient, headers: dict[str, str], allowed_models: Any) -> dict[str, str]:
@@ -91,12 +93,12 @@ def test_list_models_filtered_by_key(client: TestClient, master_key_header: dict
     scoped = _make_key(client, master_key_header, ["openai:*"])
 
     ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=scoped).json()["data"]}
-    assert ALLOWED in ids
-    assert DENIED not in ids
+    assert CATALOG_ID[ALLOWED] in ids
+    assert CATALOG_ID[DENIED] not in ids
 
     # Master key sees everything.
     master_ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=master_key_header).json()["data"]}
-    assert {ALLOWED, DENIED} <= master_ids
+    assert {CATALOG_ID[ALLOWED], CATALOG_ID[DENIED]} <= master_ids
 
 
 def test_list_models_empty_for_deny_all(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -182,4 +184,4 @@ def test_master_key_never_restricted_on_catalog(
 ) -> None:
     _seed_pricing(client, master_key_header, model)
     ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=master_key_header).json()["data"]}
-    assert model in ids
+    assert CATALOG_ID[model] in ids

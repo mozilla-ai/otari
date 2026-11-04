@@ -22,6 +22,7 @@ export const PRICING = "pricing"
 export const SETTINGS = "settings"
 export const MAIL_SETTINGS = "mail-settings"
 export const MAINTENANCE_MODE = "maintenance-mode"
+export const COUNTRY_DATABASE = "country-database"
 export const RATE_LIMIT_RULES = "rate-limit-rules"
 // One indexed single-row read, and only while the settings page is mounted.
 export const MAINTENANCE_MODE_POLL_MS = 30_000
@@ -44,7 +45,6 @@ export const BUILTIN_GUARDRAIL_CATALOG = "builtin-guardrail-catalog"
 // sibling share a head that one invalidation covers. See `useRoutingScope`.
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
-export const ROUTER_STATUS = "router-status"
 export const AUTOMATIC_FALLBACKS = "automatic-fallbacks"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
@@ -59,8 +59,11 @@ export const HEALTH_CHECKS = "health-checks"
 // at the same pace while it is open.
 export const HEALTH_CHECKS_POLL_MS = 15_000
 export const BUILD = "build"
-export const HEALTH = "health"
 export const KEYS = "keys"
+// One key's federation rules. Its own root rather than a child of KEYS: a key
+// edit invalidates KEYS, and that changes nothing about which identities may
+// stand in for the key.
+export const FEDERATION_RULES = "federation-rules"
 export const BUDGETS = "budgets"
 export const SCOPED_BUDGETS = "scoped-budgets"
 export const USERS = "users"
@@ -82,14 +85,16 @@ export const DEPLOYMENT_ADMIN = "deployment-admin"
 // offered models: a catalog sweep touches every provider at once, so one
 // invalidation of the root covers the list and every open panel.
 export const HOSTED_PROVIDERS = "hosted-providers"
-// What a provider says it serves on the stored key, and what a sweep would
-// remove. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
+// What a provider says it serves on the stored key, and what a catalog update
+// would do. Both dial the upstream, so neither sits under HOSTED_PROVIDERS: every
 // save there would re-dial, and the preview would refetch while its confirm
 // dialog is still open, asking every provider a second time.
 export const HOSTED_PROVIDER_AVAILABLE_MODELS =
   "hosted-provider-available-models"
-export const HOSTED_PROVIDERS_REFRESH_PREVIEW =
-  "hosted-providers-refresh-preview"
+export const HOSTED_CATALOG_UPDATE_PREVIEW = "hosted-catalog-update-preview"
+// The decision models that pick a subagent's model. One root: switching one on
+// switches the others off on the server, so every write refetches the list.
+export const AGENT_RECOMMENDERS = "agent-recommenders"
 // The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
 // the organization context cannot describe because it has no organization. Not
 // a child of ORGANIZATIONS: switching organization does not change who you are.
@@ -113,6 +118,10 @@ export const ORGANIZATION_GUARDRAIL_DEFINITIONS =
 // reason the two above have one: this is read by one page, and a credential
 // edit has no business refetching the organization context every page reads.
 export const ORGANIZATION_PROVIDER_KEYS = "organization-provider-keys"
+// The organization's own search and fetch keys, for the same reason: one page
+// reads them. A write also moves each workspace's view of them, which sits
+// under WORKSPACES, so the hooks invalidate that view by name.
+export const ORGANIZATION_WEB_SEARCH_KEYS = "organization-web-search-keys"
 // The models an organization offers on one of its provider keys. Its own root
 // key rather than a child of ORGANIZATION_PROVIDER_KEYS: making a key default or
 // archiving one does not move a model row, and nesting would refetch every open
@@ -161,12 +170,6 @@ export const MAILED_LINK_STATUS = "mailed-link-status"
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 export const BUILD_POLL_MS = 60_000
-// How often the hybrid landing page re-asks whether this gateway is up and can
-// still reach its control plane. That pair is the only thing on that page which
-// changes, and it is the reason to leave the page open, so it ticks faster than
-// the build check. The gateway bounds its own upstream probe (`resolve_timeout_ms`),
-// so a stalled control plane answers "no" rather than piling up requests.
-export const HEALTH_POLL_MS = 15_000
 
 // The four queries below are backed by provider or models.dev fan-out
 // gateway-side. That is cached and refreshed in the background now, so they are

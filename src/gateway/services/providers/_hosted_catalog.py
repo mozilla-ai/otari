@@ -20,8 +20,8 @@ from gateway.services.provider_kwargs import split_selector
 # the operator verbatim: this is an operator surface with no translation layer,
 # and the reason is the whole value of showing the group at all.
 KEEP_GATEWAY_TOOL = "prices a gateway-run tool, not a model"
-KEEP_SEARCH_TOOL = "prices a configured search tool, not a model"
-KEEP_FETCH_TOOL = "prices a configured fetch tool, not a model"
+KEEP_SEARCH_TOOL = "prices a configured search tool under its old key, not a model"
+KEEP_FETCH_TOOL = "prices a configured fetch tool under its old key, not a model"
 KEEP_DEPLOYMENT_INSTANCE = "served by a provider instance configured on this deployment"
 KEEP_OWNED_ENDPOINT = "served by a provider endpoint a workspace or user owns"
 KEEP_UNLISTED = "served by a hosted provider that serves models not on its roster"
@@ -59,10 +59,11 @@ class CatalogVerdict(NamedTuple):
 
 def _keep_reason(
     prefix: str | None,
+    canonical: str,
     *,
     deployment_instances: frozenset[str],
-    search_providers: frozenset[str],
-    fetch_providers: frozenset[str],
+    legacy_search_tool_keys: frozenset[str],
+    legacy_fetch_tool_keys: frozenset[str],
     owned_endpoints: frozenset[str],
     unlisted_providers: frozenset[str],
 ) -> str | None:
@@ -71,9 +72,9 @@ def _keep_reason(
         return KEEP_UNATTRIBUTABLE
     if prefix == GATEWAY_TOOL_PRICING_PROVIDER:
         return KEEP_GATEWAY_TOOL
-    if prefix in search_providers:
+    if canonical in legacy_search_tool_keys:
         return KEEP_SEARCH_TOOL
-    if prefix in fetch_providers:
+    if canonical in legacy_fetch_tool_keys:
         return KEEP_FETCH_TOOL
     if prefix in deployment_instances:
         return KEEP_DEPLOYMENT_INSTANCE
@@ -89,8 +90,8 @@ def classify_priced_keys(
     *,
     offered: frozenset[str],
     deployment_instances: frozenset[str],
-    search_providers: frozenset[str] = frozenset(),
-    fetch_providers: frozenset[str] = frozenset(),
+    legacy_search_tool_keys: frozenset[str] = frozenset(),
+    legacy_fetch_tool_keys: frozenset[str] = frozenset(),
     owned_endpoints: frozenset[str] = frozenset(),
     unlisted_providers: frozenset[str] = frozenset(),
 ) -> list[CatalogVerdict]:
@@ -112,14 +113,12 @@ def classify_priced_keys(
     no longer offers would serve it hosted. That organization's own override is
     spared by the sweep instead, and its requests settle there.
 
-    NOTE: not every rate on the list prices a model. A gateway-run tool is keyed
-    under the reserved ``otari`` provider, and a configured search tool is keyed
-    ``<provider>:<tool>`` off ``config.search_tools`` rather than
-    ``config.providers``, so ``search_providers`` has to be passed or a
-    deployment with ``search_tools:`` configured loses the rate ``POST
-    /v1/search`` reserves against. A fetch instance is keyed the same way off
-    the fetch instances, the built-in fetcher's ``builtin:builtin_fetch``
-    among them, so ``fetch_providers`` has to be passed too.
+    NOTE: not every model-kind rate on the list prices a model. A gateway-run
+    tool is keyed under the reserved ``otari`` provider, and a search or fetch
+    tool's rate written before tools had a kind of their own is still keyed
+    ``<provider>:<instance>``, so the legacy keys have to be passed or the sweep
+    deletes a rate that tool still bills at. A tool's own search or fetch row
+    is never on this list.
 
     NOTE: a provider credentialed from the
     environment alone, with no ``providers:`` entry and no hosted provider, is
@@ -141,9 +140,10 @@ def classify_priced_keys(
             continue
         reason = _keep_reason(
             prefix,
+            canonical,
             deployment_instances=deployment_instances,
-            search_providers=search_providers,
-            fetch_providers=fetch_providers,
+            legacy_search_tool_keys=legacy_search_tool_keys,
+            legacy_fetch_tool_keys=legacy_fetch_tool_keys,
             owned_endpoints=owned_endpoints,
             unlisted_providers=unlisted_providers,
         )

@@ -12,7 +12,7 @@ describe("absoluteDashboardLink", () => {
     ).toBe("https://otari.example.com/#/accept?token=a")
   })
 
-  it("resolves a relative link against the page, keeping a hosted path prefix", () => {
+  it("resolves a relative link against the page, keeping its path prefix", () => {
     expect(
       absoluteDashboardLink("/#/accept-invitation?token=abc", {
         origin: "https://app.example.com",

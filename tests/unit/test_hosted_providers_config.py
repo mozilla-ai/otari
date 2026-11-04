@@ -142,16 +142,22 @@ DOCUMENTED_KEYLESS = {
 
 @pytest.mark.parametrize("provider", sorted(DOCUMENTED_KEYLESS))
 def test_a_keyless_backend_may_leave_the_key_out(provider: str) -> None:
-    entry = _validated({provider: {"api_base": "http://localhost:8000/v1"}}).hosted_provider_entries()[provider]
+    block = {"own": {"provider": provider, "api_base": "http://localhost:8000/v1"}}
 
-    assert entry.api_key is None
+    assert _validated(block).hosted_provider_entries()["own"].api_key is None
+
+
+def test_an_otari_entry_must_take_a_name_of_its_own() -> None:
+    """``otari`` prefixes the gateway's own tool prices, so a provider under it would lose its model prices."""
+    with pytest.raises(ValueError, match=r"hosted_providers\.otari: the name is reserved; give the provider a name"):
+        _validated({"otari": {"api_base": "http://localhost:8000/v1"}})
 
 
 def test_the_documented_keyless_providers_are_exactly_those_accepted_without_a_key() -> None:
     accepted = set()
     for provider in LLMProvider:
         try:
-            _validated({provider.value: {}})
+            _validated({"own": {"provider": provider.value}})
         except ValueError:
             continue
         accepted.add(provider.value)
@@ -314,3 +320,18 @@ async def test_with_private_hosts_refused_a_private_endpoint_fails_the_start(mon
 @pytest.mark.asyncio
 async def test_by_default_a_private_endpoint_is_accepted() -> None:
     await refuse_unsafe_configured_endpoints(_validated({"vllm": {"api_base": "http://127.0.0.1:8000/v1"}}))
+
+
+def test_an_entry_serves_every_country_by_default() -> None:
+    assert _validated({"openai": {"api_key": KEY}}).hosted_provider_entries()["openai"].supported_countries is None
+
+
+def test_an_entry_normalizes_its_supported_countries() -> None:
+    entry = _validated({"openai": {"api_key": KEY, "supported_countries": ["us", " de ", "US"]}})
+
+    assert entry.hosted_provider_entries()["openai"].supported_countries == ("US", "DE")
+
+
+def test_an_entry_with_a_value_that_is_no_country_code_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"hosted_providers\.openai\.supported_countries"):
+        _validated({"openai": {"api_key": KEY, "supported_countries": ["USA"]}})

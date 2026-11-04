@@ -11,10 +11,19 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from any_llm.types.completion import CompletionUsage
 
 from gateway.core.metered_pricing import billable_usage, price_billable_usage, price_request
 from gateway.models.pricing import ModelPricing
-from gateway.services.pricing import UsageCharge, can_price, price_usage, validated_units
+from gateway.services.pricing import (
+    UsageCharge,
+    can_price,
+    estimate_settles,
+    has_completion_meter,
+    price_completion,
+    price_usage,
+    validated_units,
+)
 
 _CASES: list[dict[str, Any]] = json.loads(
     (Path(__file__).resolve().parents[1] / "fixtures" / "usage_pricing_cases.json").read_text()
@@ -40,7 +49,6 @@ def _price(case: dict[str, Any]) -> UsageCharge | None:
         if tokens is None or not (tokens["input"] or tokens["output"])
         else billable_usage(input_tokens=tokens["input"], output_tokens=tokens["output"], cache_tokens_included=True),
         units=case["units"],
-        legacy_unit_reading=case["legacy"],
     )
 
 
@@ -84,9 +92,7 @@ def test_the_gate_admits_exactly_what_settlement_can_price(case: dict[str, Any])
     meters = [meter for meter in ("images", "requests", "search_units") if meter in case["units"]]
     meter = meters[0] if meters else None
 
-    admitted = can_price(
-        _rate(case["rate"]), meter=meter, reports_tokens=reports_tokens, legacy_unit_reading=case["legacy"]
-    )
+    admitted = can_price(_rate(case["rate"]), meter=meter, reports_tokens=reports_tokens)
 
     assert admitted == (_price(case) is not None)
 
@@ -96,7 +102,7 @@ def test_a_count_that_is_not_a_whole_number_in_range_is_refused(count: object) -
     with pytest.raises(ValueError, match="whole number"):
         validated_units({"images": count})
     with pytest.raises(ValueError, match="whole number"):
-        price_usage(None, tokens=None, units={"requests": count}, legacy_unit_reading=True)
+        price_usage(None, tokens=None, units={"requests": count})
 
 
 def test_an_unknown_meter_is_dropped_rather_than_refused() -> None:
@@ -111,7 +117,7 @@ def test_a_requests_rate_settles_a_completion_as_the_cost_core_does() -> None:
 
     cost, meters, lines = price_request(rate)
 
-    assert price_usage(rate, tokens=tokens, units={}, legacy_unit_reading=False) == UsageCharge(cost, meters, lines)
+    assert price_usage(rate, tokens=tokens, units={}) == UsageCharge(cost, meters, lines)
 
 
 def test_a_token_rate_with_no_counts_settles_as_the_cost_core_does() -> None:
@@ -125,7 +131,7 @@ def test_a_token_rate_with_no_counts_settles_as_the_cost_core_does() -> None:
 
     cost, meters, lines = price_billable_usage(rate, tokens)
 
-    assert price_usage(rate, tokens=tokens, units={}, legacy_unit_reading=True) == UsageCharge(cost, meters, lines)
+    assert price_usage(rate, tokens=tokens, units={}) == UsageCharge(cost, meters, lines)
 
 
 @pytest.mark.parametrize("bad", ["NaN", "-1", "Infinity"])
@@ -134,24 +140,33 @@ def test_an_unusable_rate_prices_nothing_rather_than_serving_free(unit: str, bad
     rate = ModelPricing(model_key="provider:model", input_price_per_million=Decimal(bad), unit=unit)
     tokens = billable_usage(input_tokens=1000, output_tokens=0, cache_tokens_included=True)
 
-    assert price_usage(rate, tokens=tokens, units={"images": 1, "requests": 1}, legacy_unit_reading=True) is None
-    assert not can_price(rate, meter="images", reports_tokens=True, legacy_unit_reading=True)
+    assert price_usage(rate, tokens=tokens, units={"images": 1, "requests": 1}) is None
+    assert not can_price(rate, meter="images", reports_tokens=True)
 
 
-def test_an_unknown_rate_unit_prices_nothing() -> None:
-    rate = ModelPricing(model_key="provider:model", input_price_per_million=Decimal(1), unit="seconds")
+# The five units stored ahead of their meters, and one no rate can name.
+@pytest.mark.parametrize("unit", ["character", "megapixel", "second", "minute", "web_search", "seconds"])
+def test_a_rate_in_a_unit_with_no_meter_prices_nothing(unit: str) -> None:
+    rate = ModelPricing(model_key="provider:model", input_price_per_million=Decimal(1), unit=unit)
 
-    assert price_usage(rate, tokens=None, units={"requests": 1}, legacy_unit_reading=True) is None
-    assert not can_price(rate, meter="requests", reports_tokens=False, legacy_unit_reading=True)
+    assert price_usage(rate, tokens=None, units={"requests": 1}) is None
+    assert (
+        price_usage(
+            rate, tokens=billable_usage(input_tokens=100, output_tokens=50, cache_tokens_included=True), units={}
+        )
+        is None
+    )
+    assert not can_price(rate, meter="requests", reports_tokens=False)
+    assert not can_price(rate, meter=None, reports_tokens=True)
 
 
-def test_the_legacy_reading_warns_once_per_model_and_meter(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_token_rate_read_per_unit_warns_once_per_model_and_meter(caplog: pytest.LogCaptureFixture) -> None:
     rate = ModelPricing(model_key="legacy:warned-once", input_price_per_million=Decimal("0.04"), unit="tokens")
 
     with caplog.at_level(logging.WARNING):
         for _ in range(3):
-            price_usage(rate, tokens=None, units={"images": 1}, legacy_unit_reading=True)
-        price_usage(rate, tokens=None, units={"requests": 1}, legacy_unit_reading=True)
+            price_usage(rate, tokens=None, units={"images": 1})
+        price_usage(rate, tokens=None, units={"requests": 1})
 
     warnings = [record.getMessage() for record in caplog.records if "legacy:warned-once" in record.getMessage()]
     assert len(warnings) == 2
@@ -159,10 +174,60 @@ def test_the_legacy_reading_warns_once_per_model_and_meter(caplog: pytest.LogCap
     assert "set its unit to requests, keeping its price" in warnings[1]
 
 
-def test_the_strict_reading_never_warns(caplog: pytest.LogCaptureFixture) -> None:
-    rate = ModelPricing(model_key="strict:never-warned", input_price_per_million=Decimal(5), unit="tokens")
+_REPORTED = CompletionUsage(prompt_tokens=12, completion_tokens=34, total_tokens=46)
 
-    with caplog.at_level(logging.WARNING):
-        price_usage(rate, tokens=None, units={"images": 1}, legacy_unit_reading=False)
 
-    assert not [record for record in caplog.records if "strict:never-warned" in record.getMessage()]
+def test_a_completion_at_a_token_rate_settles_its_tokens_even_when_it_failed() -> None:
+    rate = _rate({"input": "1000", "output": "2000", "unit": "tokens"})
+    assert rate is not None
+
+    for succeeded in (True, False):
+        priced = price_completion(rate, _REPORTED, succeeded=succeeded)
+        assert priced is not None
+        assert priced[0] == Decimal("0.080000")
+    assert price_completion(rate, None, succeeded=True) is None
+
+
+def test_a_completion_at_a_per_request_rate_settles_one_request_only_when_it_succeeded() -> None:
+    rate = _rate({"input": "5000", "unit": "requests"})
+    assert rate is not None
+
+    priced = price_completion(rate, _REPORTED, succeeded=True)
+    assert priced is not None
+    assert (priced[0], priced[1]) == (Decimal("0.005"), {"requests": 1})
+    assert price_completion(rate, _REPORTED, succeeded=False) is None
+    assert price_completion(rate, None, succeeded=True) is not None
+
+
+@pytest.mark.parametrize("unit", ["character", "megapixel", "second", "minute", "web_search"])
+def test_a_completion_at_a_rate_with_no_completion_meter_prices_nothing(unit: str) -> None:
+    rate = _rate({"input": "1000", "output": "2000", "unit": unit})
+
+    assert rate is not None
+    assert price_completion(rate, _REPORTED, succeeded=True) is None
+
+
+@pytest.mark.parametrize(
+    ("unit", "metered"),
+    [
+        ("tokens", True),
+        ("images", True),
+        ("requests", True),
+        # Stored ahead of their meters.
+        ("character", False),
+        ("megapixel", False),
+        ("second", False),
+        ("minute", False),
+        ("web_search", False),
+    ],
+)
+def test_a_completion_has_a_meter_only_for_tokens_images_and_requests(unit: str, *, metered: bool) -> None:
+    rate = _rate({"input": "1", "unit": unit})
+
+    assert has_completion_meter(rate) is metered
+    assert estimate_settles(rate) is metered
+
+
+def test_no_rate_has_no_completion_meter_and_its_zero_estimate_settles() -> None:
+    assert not has_completion_meter(None)
+    assert estimate_settles(None)

@@ -45,7 +45,7 @@ import any_search
 from any_fetch import FetchedPage
 from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
 from gateway.log_config import logger
-from gateway.services.tool_usage import is_tool_error
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, is_tool_error
 from gateway.services.tools._web_call_cap import SEARCH_CALL_LIMIT_TEXT, WebToolCallCap
 from gateway.services.tools._web_display import published_date
 from gateway.services.tools._web_fetch import FetchFailure, fetch_page, retrieval_client
@@ -55,7 +55,9 @@ from gateway.services.tools._web_names import (
     WEB_SEARCH_TOOL_NAME,
     web_search_tool_definition,
 )
+from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_tool_failure import (
+    BUDGET_EXCEEDED_TAG,
     CALL_LIMIT_TAG,
     INTERNAL_ERROR_TAG,
     MISSING_CREDENTIAL_TAG,
@@ -200,10 +202,17 @@ class WebSearchBackend:
             span.set_attribute("tool.type", "otari_web_search")
             span.set_attribute("web_search.provider", self._search.provider)
             try:
-                if self._cap.claim():
-                    searched = await self._call(arguments)
-                else:
+                if not self._cap.claim():
                     searched = _Searched(self._refused(CALL_LIMIT_TAG, SEARCH_CALL_LIMIT_TEXT))
+                elif self._tally is not None and not await self._tally.admit(
+                    WEB_SEARCH_TOOL_NAME,
+                    label=self._search.label,
+                    rate_keys=self._search.rate_keys,
+                    deployment_paid=not self._search.on_credential,
+                ):
+                    searched = _Searched(self._refused(BUDGET_EXCEEDED_TAG, TOOL_BUDGET_EXCEEDED_TEXT))
+                else:
+                    searched = await self._call(arguments)
             except Exception:
                 # Every failure the backend knows is returned; one it does not is counted and
                 # traced as failed before the loop turns it into its generic text.
@@ -226,6 +235,7 @@ class WebSearchBackend:
                 rate_keys=self._search.rate_keys,
                 cost=searched.cost,
                 enrichment_cost=searched.enrichment_cost,
+                deployment_paid=not self._search.on_credential,
             )
         self._record_span(started, ok=not is_tool_error(searched.text))
         return searched.text
@@ -248,7 +258,7 @@ class WebSearchBackend:
                 api_key=resolved.api_key,
                 api_base=resolved.api_base,
                 timeout=resolved.timeout,
-                client=self._web_provider_client,
+                client=web_provider_client_for(self._web_provider_client, tenant_endpoint=resolved.tenant_endpoint),
             ) as engine:
                 # The count is always passed, so a native count option cannot raise it.
                 result = await engine.search(query, max_results=self._max_results, **resolved.options)

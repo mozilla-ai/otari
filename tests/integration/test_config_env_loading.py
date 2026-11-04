@@ -183,41 +183,17 @@ def test_load_config_otari_prefix_covers_all_scalar_fields(tmp_path: Path, monke
     assert config.db_pool_timeout == 12.5
 
 
-def test_router_knob_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Clear both namespaces: config layering honors OTARI_ but still accepts the
-    # legacy GATEWAY_ fallback, so an ambient var in either would skew the defaults.
-    knobs = ("ALPHA", "K", "SEED_COUNT", "GRANULARITY", "EMBEDDING_MODEL", "CONFIDENCE_FLOOR")
-    for prefix in ("OTARI_ROUTER_", "GATEWAY_ROUTER_"):
-        for knob in knobs:
-            monkeypatch.delenv(f"{prefix}{knob}", raising=False)
-    config = GatewayConfig()
-    assert config.router_alpha == 0.3
-    assert config.router_k == 5
-    assert config.router_seed_count == 20
-    assert config.router_confidence_floor == 0.0
-    assert config.router_granularity == "trace_sticky"
-    assert config.router_embedding_model == "openai:text-embedding-3-small"
-
-
-def test_router_knobs_otari_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retired_router_settings_still_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployment still setting the removed learned router's knobs keeps booting."""
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("{}\n", encoding="utf-8")
-
+    config_file.write_text("router_k: 9\n", encoding="utf-8")
     monkeypatch.setenv("OTARI_ROUTER_ALPHA", "0.7")
-    monkeypatch.setenv("OTARI_ROUTER_K", "9")
-    monkeypatch.setenv("OTARI_ROUTER_GRANULARITY", "step")
+    monkeypatch.setenv("OTARI_ROUTER_GRANULARITY", "per-token")
 
     config = load_config(str(config_file))
-    assert config.router_alpha == 0.7
-    assert config.router_k == 9
-    assert config.router_granularity == "step"
 
-
-def test_router_granularity_rejects_an_unknown_value() -> None:
-    # There is no on/off switch to get wrong (a policy naming a router is the
-    # switch), so granularity is the one router enum a typo can break.
-    with pytest.raises(ValueError, match="router_granularity must be one of"):
-        GatewayConfig(router_granularity="per-token")
+    assert not hasattr(config, "router_alpha")
+    assert not hasattr(config, "router_k")
 
 
 def test_load_config_promotes_service_level_fields_from_otari_prefix(
@@ -461,185 +437,6 @@ def test_load_config_otari_env_overrides_yaml(tmp_path: Path, monkeypatch: pytes
     assert config.budget_strategy == "disabled"
 
 
-def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hybrid\n", encoding="utf-8")
-
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    monkeypatch.setenv("PLATFORM_BASE_URL", "http://localhost:8100/api/v1")
-    monkeypatch.setenv("PLATFORM_HEALTH_PATH", "/healthz")
-    monkeypatch.setenv("PLATFORM_HEALTH_URL", "http://localhost:8100/health")
-    monkeypatch.setenv("PLATFORM_RESOLVE_TIMEOUT_MS", "1234")
-    monkeypatch.setenv("PLATFORM_USAGE_TIMEOUT_MS", "2345")
-    monkeypatch.setenv("PLATFORM_USAGE_INLINE_TIMEOUT_MS", "150")
-    monkeypatch.setenv("PLATFORM_USAGE_MAX_RETRIES", "7")
-    monkeypatch.setenv("STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS", "3000")
-    monkeypatch.setenv("STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP", "12000")
-    monkeypatch.setenv("STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS", "4000")
-
-    config = load_config(str(config_file))
-
-    assert config.is_hybrid_mode
-    assert config.platform["base_url"] == "http://localhost:8100/api/v1"
-    assert config.platform["health_path"] == "/healthz"
-    assert config.platform["health_url"] == "http://localhost:8100/health"
-    assert config.platform["resolve_timeout_ms"] == 1234
-    assert config.platform["usage_timeout_ms"] == 2345
-    assert config.platform["usage_inline_timeout_ms"] == 150
-    assert config.platform["usage_max_retries"] == 7
-    assert config.platform["streaming_first_chunk_timeout_ms"] == 3000
-    assert config.platform["streaming_first_chunk_timeout_ms_tool_loop"] == 12000
-    assert config.platform["streaming_final_attempt_extra_first_chunk_timeout_ms"] == 4000
-
-
-def test_load_config_sets_default_platform_base_url_when_token_is_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hybrid\n", encoding="utf-8")
-
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    monkeypatch.delenv("PLATFORM_BASE_URL", raising=False)
-
-    config = load_config(str(config_file))
-
-    assert config.is_hybrid_mode
-    assert config.platform["base_url"] == "https://api.otari.ai/api/v1"
-
-
-def test_load_config_rejects_hybrid_mode_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hybrid\n", encoding="utf-8")
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-
-    with pytest.raises(ValueError, match="OTARI_AI_TOKEN"):
-        load_config(str(config_file))
-
-
-def test_load_config_derives_hybrid_mode_from_token_when_mode_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Token present and no explicit mode: the runtime mode is derived as hybrid.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    config = load_config(str(config_file))
-
-    assert config.mode is None
-    assert config.is_hybrid_mode
-    assert config.effective_mode == "hybrid"
-
-
-def test_load_config_rejects_standalone_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Explicitly asserting standalone while a platform token selects hybrid is a
-    # conflicting configuration and must fail at startup rather than silently
-    # running hybrid.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: standalone\n", encoding="utf-8")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
-        load_config(str(config_file))
-
-
-def test_load_config_rejects_standalone_mode_from_env_when_token_is_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The conflict check also covers OTARI_MODE supplied via the environment.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-    monkeypatch.setenv("OTARI_MODE", "standalone")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
-        load_config(str(config_file))
-
-
-def test_load_config_honors_explicit_standalone_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: standalone\n", encoding="utf-8")
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-
-    config = load_config(str(config_file))
-
-    assert config.mode == "standalone"
-    assert not config.is_hybrid_mode
-    assert config.effective_mode == "standalone"
-
-
-def test_load_config_unset_mode_without_token_is_standalone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-
-    config = load_config(str(config_file))
-
-    assert config.mode is None
-    assert not config.is_hybrid_mode
-    assert config.effective_mode == "standalone"
-
-
-def test_load_config_honors_hosted_mode_without_making_it_a_data_plane(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Hosted is standalone's multi-tenant sibling, so it holds its own control
-    # plane: every request path that asks whether this is a hybrid gateway has to
-    # keep getting "no".
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hosted\n", encoding="utf-8")
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-
-    config = load_config(str(config_file))
-
-    assert config.effective_mode == "hosted"
-    assert config.is_hosted_mode
-    assert not config.is_hybrid_mode
-
-
-def test_load_config_rejects_hosted_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Same conflict as standalone, for the same reason: a deployment holding its
-    # own management API is not also reporting to somebody else's control plane.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: hosted\n", encoding="utf-8")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
-        load_config(str(config_file))
-
-
-def test_load_config_accepts_legacy_platform_mode_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # "platform" is the pre-rename alias for the "hybrid" mode; it must keep
-    # working so existing configs do not break.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: platform\n", encoding="utf-8")
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-
-    config = load_config(str(config_file))
-
-    assert config.is_hybrid_mode
-    assert config.effective_mode == "hybrid"
-
-
-@pytest.mark.parametrize("legacy_token_var", ["OTARI_PLATFORM_TOKEN", "ANY_LLM_PLATFORM_TOKEN"])
-def test_load_config_ignores_legacy_platform_token_aliases(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_token_var: str
-) -> None:
-    # The pre-rename platform-token env aliases were removed: only OTARI_AI_TOKEN
-    # selects hybrid mode now, so a legacy alias alone leaves the gateway
-    # standalone.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-
-    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-    monkeypatch.setenv(legacy_token_var, "legacy-token")
-
-    config = load_config(str(config_file))
-
-    assert not config.is_hybrid_mode
-    assert config.platform_token is None
-
-
 def _isolate_structured_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Clear any structured-config vars and run from an empty dir so load_config()
     # cannot pick up a developer's repo-root .env.
@@ -808,3 +605,26 @@ def test_feedback_rejects_invalid_env(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setenv("OTARI_FEEDBACK_ENABLED", "maybe")
     with pytest.raises(ValueError):
         load_config(str(config_file))
+
+
+def test_automatic_routing_loads_yaml_and_structured_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Structured environment settings override YAML while defaults fill omitted routing options."""
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(
+        "automatic_routing:\n  country_header: Trusted-Country\n  offerings:\n    european: {region: eu, capacity: 4}\n"
+    )
+    config = load_config(str(config_file))
+    assert config.automatic_routing.enabled
+    assert config.automatic_routing.session_ttl_seconds == 3600
+    assert config.automatic_routing.country_header == "Trusted-Country"
+    assert config.automatic_routing.offerings["european"].region == "eu"
+    assert config.automatic_routing.offerings["european"].capacity == 4
+    monkeypatch.setenv(
+        "OTARI_AUTOMATIC_ROUTING", '{"enabled": false, "default_region": "us", "session_ttl_seconds": 120}'
+    )
+    overridden = load_config(str(config_file))
+    assert not overridden.automatic_routing.enabled
+    assert overridden.automatic_routing.default_region == "us"
+    assert overridden.automatic_routing.session_ttl_seconds == 120

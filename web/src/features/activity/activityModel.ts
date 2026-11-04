@@ -491,6 +491,23 @@ export function findGroupsMissingEarlierAttempts(
   })
 }
 
+// The row that stands for request `requestId` among `rows`: its outcome (the
+// attempt that served, or the terminal failure), else its latest attempt while the
+// request is still settling. `requestId` is the `Otari-Request-ID` the caller got
+// back, which every row the request wrote carries as its `request_group_id`.
+export function findRequestOutcome(
+  rows: readonly UsageEntry[],
+  requestId: string,
+): UsageEntry | undefined {
+  const attempts = sortPlanRows(
+    rows.filter((row) => row.request_group_id === requestId),
+  )
+  return (
+    attempts.find((row) => row.status !== "absorbed") ??
+    attempts[attempts.length - 1]
+  )
+}
+
 // One line of prose for a row's place in its plan, replacing the "attempt 1/2 ·
 // default" shorthand: that read as a fraction of something unnamed, said nothing
 // about whether the attempt worked, and pointed at no other row. `outcome` is the

@@ -48,7 +48,7 @@ def test_a_per_request_endpoint_and_a_per_request_model_write_the_same_charge_li
     pricing = _pricing(Decimal(5000), unit="requests")
 
     cost, meters, lines = price_request(pricing)
-    charge = price_usage(pricing, tokens=None, units={"requests": 1}, legacy_unit_reading=True)
+    charge = price_usage(pricing, tokens=None, units={"requests": 1})
 
     assert charge is not None
     assert (charge.cost, charge.meters, charge.lines) == (cost, meters, lines)

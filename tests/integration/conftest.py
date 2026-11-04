@@ -33,9 +33,6 @@ if "gateway" in sys.modules:
 from gateway.api.deps import (
     build_hosted_provider_service,
     get_membership_listener,
-    get_workspace_code_execution_policies,
-    get_workspace_listener,
-    get_workspace_search_keys,
     set_config,
 )
 from gateway.container import build_container
@@ -217,6 +214,13 @@ def clean_database(postgres_url: str) -> None:
     """
     _run_alembic_migrations(postgres_url)
     reset_database(postgres_url)
+
+
+@pytest.fixture
+def unpriced_builtin_fetch(postgres_url: str, clean_database: None) -> None:
+    """A database whose ``builtin_fetch`` has no price: a migration gives it 0 on a fresh one."""
+    with _reset_engine(postgres_url).begin() as conn:
+        conn.execute(text("DELETE FROM model_pricing WHERE kind = 'fetch' AND model_key = 'builtin_fetch'"))
 
 
 @pytest.fixture
@@ -407,9 +411,6 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         config.bootstrap,
         config=config,
         membership_listener=get_membership_listener,
-        workspace_listener=functools.partial(get_workspace_listener, config=config),
-        search_keys=get_workspace_search_keys,
-        code_execution_policies=get_workspace_code_execution_policies,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
     install_rate_limits(app, config)

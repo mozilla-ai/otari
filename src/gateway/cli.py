@@ -10,7 +10,7 @@ import uvicorn
 from uvicorn.config import logger
 
 from gateway.core.config import API_ROOT, load_config
-from gateway.log_config import setup_logger
+from gateway.log_config import setup_logger, uvicorn_log_config
 from gateway.services.url_safety import redact_url_secrets
 
 _LOG_LEVEL_NAMES: dict[str, int] = {
@@ -114,29 +114,14 @@ def serve(
     if auto_migrate is not None:
         gateway_config.auto_migrate = auto_migrate
 
-    gateway_config.validate_mode_selection()
-
-    if gateway_config.is_hybrid_mode:
-        platform_base_url = gateway_config.platform.get("base_url")
-        if not platform_base_url:
-            raise click.ClickException("platform.base_url is required when hybrid mode is active")
-        if gateway_config.providers:
-            raise click.ClickException(
-                "Local provider credentials are not supported in hybrid mode. Remove configured providers."
-            )
-        logger.info("Hybrid mode active. Base URL: %s", platform_base_url)
-
-    if not gateway_config.master_key and not gateway_config.is_hybrid_mode:
+    if not gateway_config.master_key:
         logger.info(
             "No master key configured; one will be generated and printed at startup. "
             "Set OTARI_MASTER_KEY (or --master-key) to choose your own instead.",
         )
 
     logger.info("Starting Otari on %s:%s", gateway_config.host, gateway_config.port)
-    if gateway_config.is_hybrid_mode:
-        logger.info("Database: disabled (hybrid mode)")
-    else:
-        logger.info("Database: %s", gateway_config.database_url)
+    logger.info("Database: %s", gateway_config.database_url)
 
     if gateway_config.providers:
         logger.info("Configured providers: %s", ", ".join(gateway_config.providers.keys()))
@@ -149,6 +134,7 @@ def serve(
             host=gateway_config.host,
             port=gateway_config.port,
             forwarded_allow_ips=gateway_config.forwarded_allow_ips,
+            log_config=uvicorn_log_config(),
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")
@@ -368,7 +354,7 @@ def routing_explain(
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
     # Keyed on the backend rather than on the shares: a weighted policy whose whole
     # split is filtered out for this caller has no shares to print, and the decline
-    # text below is the learned router's vocabulary, which would misdescribe it.
+    # text below would misdescribe it.
     if backend_is_weighted(spec.router_backend):
         click.echo(
             "  weighted: one candidate is drawn per request in proportion to its share, and a candidate "
@@ -385,14 +371,13 @@ def routing_explain(
             "rate limits, then on_failure. A candidate that fails before responding falls to the next one."
         )
     elif spec.router_backend is not None:
-        # The plan above is the *decline* path, because a router needs a live
-        # request (a prompt to embed, stored examples to compare it against) and
-        # this command deliberately touches neither. Saying so beats printing a
-        # one-candidate plan that looks like the router was ignored.
+        # The plan above is the *decline* path: this command sends no request, so
+        # no other router is asked. Saying so beats printing a one-candidate plan
+        # that looks like the router was ignored.
         click.echo(
             f"  router: '{spec.router_backend}' ranks {', '.join(spec.router_candidates)} at request time. "
-            f"The plan above is what serves when it declines (cold pool, low confidence, tools present, "
-            f"or Otari-Router: off)."
+            f"The plan above is what serves when it declines, when this build has no such router, "
+            f"or on Otari-Router: off."
         )
     if plan.guardrails:
         click.echo("  guardrails (always enforced):")

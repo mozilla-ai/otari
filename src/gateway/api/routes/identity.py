@@ -1,4 +1,4 @@
-"""Checks a page runs on a mailed link before it asks for a password (standalone mode only).
+"""Checks a page runs on a mailed link before it asks for a password.
 
 Public for the reason ``auth_signup.py`` gives: the token in the link is the
 caller's whole proof. A check reads the token and never spends it, so a page

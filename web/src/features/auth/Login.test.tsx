@@ -84,6 +84,21 @@ vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
   ),
 }))
 
+vi.mock("@/features/auth/overlayLoginRefusalHint", () => ({
+  LOGIN_REFUSAL_HINT_ID: "refusal-hint",
+  LoginRefusalHint: ({
+    email,
+    refused,
+  }: {
+    email: string
+    refused: boolean
+  }) => (
+    <div data-testid="refusal-seam">
+      {refused ? <p id="refusal-hint">{`refusal hint for ${email}`}</p> : null}
+    </div>
+  ),
+}))
+
 describe("Login", () => {
   it("leaves the edition's region choice to the page's header, not the card", () => {
     render(
@@ -551,6 +566,123 @@ describe("Login", () => {
       await screen.findByText("Incorrect email or password"),
     ).toBeInTheDocument()
     expect(screen.queryByText("SIGNED IN")).not.toBeInTheDocument()
+  })
+
+  it("hands the edition's refusal hint the typed address after a rejected password, until either box changes", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Incorrect email or password" }, 401),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    // Mounted before any refusal, so a live region in it is there to announce.
+    expect(screen.getByTestId("refusal-seam")).toBeInTheDocument()
+    expect(screen.queryByText(/refusal hint/)).toBeNull()
+    expect(screen.getByLabelText("Password")).not.toHaveAttribute(
+      "aria-describedby",
+    )
+    await user.type(screen.getByLabelText("Email"), " operator@example.com ")
+    await user.type(screen.getByLabelText("Password"), "wrong")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(
+      await screen.findByText("refusal hint for operator@example.com"),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "aria-describedby",
+      "login-password-error refusal-hint",
+    )
+
+    await user.type(screen.getByLabelText("Password"), "x")
+    expect(screen.queryByText(/refusal hint/)).toBeNull()
+    expect(screen.getByLabelText("Password")).not.toHaveAttribute(
+      "aria-describedby",
+    )
+  })
+
+  it("drops the refusal hint when the address is edited", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Incorrect email or password" }, 401),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    await user.type(screen.getByLabelText("Password"), "wrong")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+    expect(await screen.findByText(/refusal hint for/)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText("Email"), "x")
+    expect(screen.queryByText(/refusal hint/)).toBeNull()
+  })
+
+  it("offers no refusal hint for a refusal that is not a rejected password", async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+
+    // An unverified address has its own remedy, the resend link.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "Verify your email before signing in" }, 403),
+    )
+    const first = render(
+      <Mounted signInMethods={["password"]} mailReady>
+        <Harness />
+      </Mounted>,
+    )
+    await user.type(screen.getByLabelText("Email"), "member@example.com")
+    await user.type(screen.getByLabelText("Password"), "right-but-unverified")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+    expect(
+      await screen.findByText("Verify your email before signing in"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/refusal hint/)).toBeNull()
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "aria-describedby",
+      "login-password-error",
+    )
+    first.unmount()
+
+    // The gateway being unreachable says nothing about the account.
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await user.type(screen.getByLabelText("Email"), "member@example.com")
+    await user.type(screen.getByLabelText("Password"), "whatever")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+    await screen.findByRole("alert")
+    expect(screen.queryByText(/refusal hint/)).toBeNull()
+  })
+
+  it("offers no refusal hint on the master-key form", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Invalid master key" }, 401),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Master key"), "wrong-key")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText("Invalid master key")).toBeInTheDocument()
+    expect(screen.queryByText(/refusal hint/)).toBeNull()
   })
 
   it("offers a fresh verification link when sign-in is refused for an unverified address", async () => {

@@ -5,7 +5,6 @@ from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
-from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exception_handlers import http_exception_handler
@@ -22,18 +21,21 @@ import any_fetch
 import any_search
 from gateway import features
 from gateway.api.deps import (
+    DatabaseSessionOwners,
     build_budget_service,
     build_file_service,
     build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
+    build_scheduled_catalog_update,
+    build_search_tool_refresh,
+    build_search_tool_service,
     build_trace_service,
+    get_api_key_service,
     get_membership_listener,
-    get_workspace_code_execution_policies,
-    get_workspace_listener,
-    get_workspace_search_keys,
     set_config,
 )
+from gateway.api.error_body import BodyHTTPException
 from gateway.api.main import register_routers
 from gateway.api.request_id import with_request_id
 from gateway.api.trace_capture import TraceCaptureMiddleware
@@ -42,22 +44,21 @@ from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
-    GATEWAY_TOKEN_HEADER,
+    CONVERSATION_HEADER,
     TAGS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
 )
-from gateway.core.database import create_session, describe_database_error, dispose_db, init_db
+from gateway.core.database import create_session, describe_database_error, dispose_db, init_db, release_session
 from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import CoreFeature, Worker
-from gateway.core.settings.tools import warn_about_tool_instances
-from gateway.core.unit_of_work import create_unit_of_work
+from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
-from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
@@ -74,18 +75,20 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
-from gateway.services.inference import close_decision_client, run_idempotency_sweeper
+from gateway.services.inference import (
+    close_decision_client,
+    load_stored_country_database_at_startup,
+    open_country_database,
+    reset_stored_country_database,
+    run_idempotency_sweeper,
+    run_stored_country_database_refresher,
+)
 from gateway.services.log_writer import (
     LogWriter,
-    NoopLogWriter,
     TracingLogWriter,
     create_log_writer,
 )
 from gateway.services.master_key_service import ensure_master_key
-from gateway.services.model_catalog_service import (
-    clear_catalog_cache,
-    run_catalog_refresher,
-)
 from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
@@ -96,17 +99,21 @@ from gateway.services.policy_store import (
     reset_policy_cache,
     run_policy_refresher,
 )
+from gateway.services.pricing import load_bundled_index
 from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
+    initialize_tool_prices_from_config,
+    warn_about_legacy_tool_prices,
+    warn_about_unpriced_web_tools,
     warn_if_gateway_tools_lack_pricing,
     warn_if_require_pricing_without_pricing,
-    warn_if_router_candidates_lack_pricing,
-    warn_if_search_tools_lack_flat_pricing,
 )
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
+    load_stored_models_dev_catalog,
+    reset_catalog_refresh_state,
+    run_catalog_refresher,
     run_price_snapshot_refresher,
-    run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 from gateway.services.provider_kwargs import (
@@ -121,17 +128,18 @@ from gateway.services.providers import (
     refuse_unsafe_configured_endpoints,
     reset_hosted_name_index,
     reset_provider_endpoint_cache,
+    run_catalog_updater,
     run_hosted_name_refresher,
     run_provider_endpoint_refresher,
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
-from gateway.services.runtime_settings_service import apply_overrides_from_db
-from gateway.services.search_tool_store_service import (
-    load_search_tools_at_startup,
-    reset_search_tool_cache,
-    run_search_tool_refresher,
+from gateway.services.routing import (
+    load_agent_recommenders_at_startup,
+    reset_agent_recommenders,
+    run_agent_recommender_refresher,
 )
-from gateway.services.secret_box import shares_secret_key, validate_secret_key
+from gateway.services.runtime_settings_service import apply_overrides_from_db
+from gateway.services.secret_box import secret_box_configured, shares_secret_key, validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,
@@ -144,9 +152,20 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
-from gateway.services.tools import build_web_provider_client, register_builtin_fetcher
-from gateway.services.traces import RequestTraces, TraceWriter, stored_by
+from gateway.services.tools import (
+    SANDBOX_KEY_ENV,
+    build_web_provider_client,
+    load_sandbox_credentials_at_startup,
+    register_builtin_fetcher,
+    reset_sandbox_credential_cache,
+    reset_search_tool_cache,
+    run_sandbox_credential_refresher,
+    run_search_tool_refresher,
+    warn_about_tool_instances,
+)
+from gateway.services.traces import RequestTraces, SpanContent, TraceWriter
 from gateway.services.workspace_scope import default_workspace_id
+from gateway.types.traces import TraceWrite, WriteResult
 from gateway.version import __version__
 
 if TYPE_CHECKING:
@@ -175,11 +194,6 @@ _COOKIE_AUTH_PREFIXES = (f"{API_ROOT}/auth/session",)
 # request's own token, and bootstrap's changes with the deployment's
 # configuration, so a shared cache must not serve any of them to a different
 # caller/gateway.
-# Paths a gateway calls on another gateway, authenticated by the deployment's own
-# shared token rather than by either API-key header. Stamped separately below
-# because the difference is not decoration: an API key does not open these, and
-# a published contract that says it does sends a caller to a 401.
-_GATEWAY_TOKEN_PATHS = frozenset({f"{API_ROOT}/web-search/search"})
 _UNAUTHENTICATED_PATHS = frozenset(
     {
         f"{API_ROOT}/bootstrap",
@@ -208,11 +222,32 @@ _UNAUTHENTICATED_PATHS = frozenset(
         f"{API_ROOT}/auth/oauth/{{provider}}/callback",
     }
 )
+# Headers the official OpenAI and Anthropic JS SDKs add to every request, so a
+# browser app built on either (dangerouslyAllowBrowser) passes the preflight.
+# Named one by one rather than allowing every header, which would let a browser
+# send the trace-context headers too (see accept_incoming_trace_context).
+_SDK_CORS_HEADERS = (
+    "anthropic-beta",
+    "anthropic-dangerous-direct-browser-access",
+    "anthropic-version",
+    "x-stainless-arch",
+    "x-stainless-custom-poll-interval",
+    "x-stainless-helper",
+    "x-stainless-helper-method",
+    "x-stainless-lang",
+    "x-stainless-os",
+    "x-stainless-package-version",
+    "x-stainless-poll-helper",
+    "x-stainless-retry-count",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+    "x-stainless-timeout",
+)
 
 
 @dataclass(frozen=True)
 class _LifespanWorker:
-    """One periodic background task a standalone deployment runs.
+    """One periodic background task the gateway runs.
 
     ``start`` returns the task's coroutine, or None for a worker this config does
     not run. ``reset`` clears the cache the worker keeps warm.
@@ -255,6 +290,35 @@ def _resolve_file_store(config: GatewayConfig, container: Container) -> FileStor
         return None
 
 
+def _resolve_trace_content(config: GatewayConfig, container: Container) -> SpanContent:
+    """The keys trace content is sealed and opened with, built once for every request and the writer.
+
+    Keys that cannot be built stop the boot while content is kept, because none
+    would be. With content off the deployment starts and says so, since a
+    stored span's content then only reads back empty.
+    """
+    try:
+        return SpanContent(container.resolve(ContentKeyPort, None))
+    except (ValueError, ImportError) as exc:
+        if config.trace_content_enabled:
+            raise
+        logger.warning("Trace content keys cannot be built, so stored trace content will read back empty: %s", exc)
+        return SpanContent.disabled()
+
+
+async def _check_trace_content(content: SpanContent) -> None:
+    """Try the trace content keys once, and say plainly if they do not work."""
+    failure = await content.check()
+    if failure is None:
+        logger.info("Trace content keys passed their startup check")
+        return
+    logger.error(
+        "Trace content keys failed their startup check, so no session content is kept until they work (%s: %s)",
+        failure.reason,
+        failure,
+    )
+
+
 def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the file retention sweep, or None when files or the interval disable it.
 
@@ -276,19 +340,21 @@ def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> 
     )
 
 
-def _records_traces(config: GatewayConfig, enabled_features: tuple[CoreFeature, ...]) -> bool:
-    """Whether this deployment records agent traces: where the traces feature is on and it holds a database.
-
-    A hybrid data plane holds no database to keep them in, so it records none:
-    collecting spans it could only drop would cost every request for nothing.
-    """
-    return any(feature.name == "traces" for feature in enabled_features) and not config.is_hybrid_mode
+def _records_traces(enabled_features: tuple[CoreFeature, ...]) -> bool:
+    """Whether this deployment records agent traces: where the traces feature is on."""
+    return any(feature.name == "traces" for feature in enabled_features)
 
 
-def _build_trace_writer(config: GatewayConfig) -> TraceWriter:
-    """The writer every request's trace is handed to."""
+def _build_trace_writer(config: GatewayConfig, content: SpanContent) -> TraceWriter:
+    """The writer every request's trace is handed to, sealing what it keeps with ``content``."""
+
+    async def store(batch: tuple[TraceWrite, ...]) -> WriteResult:
+        # On one session: the writer asks it whether each session's user is still a member.
+        async with create_unit_of_work_with_session() as (session, uow):
+            return await build_trace_service(uow, content, DatabaseSessionOwners(session)).write(batch)
+
     return TraceWriter(
-        stored_by(build_trace_service),
+        store,
         max_queued_spans=config.trace_queue_max_spans,
         batch_spans=config.trace_flush_max_spans,
         interval_s=config.trace_flush_interval_s,
@@ -302,6 +368,16 @@ def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Co
     if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
         return None
     return run_sandbox_container_sweeper()
+
+
+async def _warn_about_legacy_tool_grants(config: GatewayConfig) -> None:
+    """Log the keys and users still granted search tools through ``allowed_models``, on a Unit of Work of its own."""
+    try:
+        async with create_unit_of_work() as uow:
+            await get_api_key_service(uow).warn_about_legacy_tool_grants(config)
+    except Exception as exc:
+        # Advisory only, like the hosted providers report below.
+        logger.warning("Could not check for deprecated search tool grants: %s", describe_database_error(exc))
 
 
 async def _report_hosted_providers_config(config: GatewayConfig) -> None:
@@ -416,7 +492,7 @@ async def _import_configured_providers(config: GatewayConfig) -> None:
         )
 
 
-# The periodic background workers a standalone deployment runs.
+# The periodic background workers the gateway runs.
 # A new worker is one entry here.
 #
 # Each ``start`` resolves its refresher by name in this module when the lifespan
@@ -440,6 +516,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "hosted provider name", lambda config, _container: run_hosted_name_refresher(config), reset_hosted_name_index
     ),
+    _LifespanWorker(
+        "subagent router",
+        lambda _config, _container: run_agent_recommender_refresher(),
+        reset_agent_recommenders,
+    ),
     # Not a cache of rows like its neighbours: this holds constructed vendor
     # clients, so its tick rebuilds only what a write moved and its reset gives
     # the threads back as well as dropping what was built.
@@ -449,14 +530,32 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         reset_guardrail_runner,
     ),
     _LifespanWorker(
-        "search tool", lambda config, _container: run_search_tool_refresher(config), reset_search_tool_cache
+        "search tool",
+        lambda config, _container: run_search_tool_refresher(build_search_tool_refresh(config)),
+        reset_search_tool_cache,
+    ),
+    _LifespanWorker(
+        "sandbox credential",
+        lambda _config, _container: run_sandbox_credential_refresher(),
+        reset_sandbox_credential_cache,
     ),
     # No reset: the stored rules live on the config, which the startup load rebuilds.
     _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
+    # Not run where client_country_database is set: that file wins, and the stored one is not read.
+    _LifespanWorker(
+        "stored country file",
+        lambda config, _container: (
+            run_stored_country_database_refresher() if config.client_country_database is None else None
+        ),
+        reset_stored_country_database,
+    ),
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
-    _LifespanWorker("price update poll", lambda config, _container: run_price_update_poller(config)),
+    _LifespanWorker(
+        "catalog update",
+        lambda config, _container: run_catalog_updater(config, build_scheduled_catalog_update(config)),
+    ),
     # Started whatever ``model_cache_ttl_seconds`` says, for the same reason.
     # Gating on it would strand the gateway: the TTL is runtime-settable, and
     # raising it from 0 flips every read onto a cache nothing then fills.
@@ -466,7 +565,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         reset_discovery_cache,
     ),
     _LifespanWorker(
-        "models.dev catalog", lambda config, _container: run_catalog_refresher(config), clear_catalog_cache
+        "models.dev catalog", lambda config, _container: run_catalog_refresher(config), reset_catalog_refresh_state
     ),
     # The short model spellings, rebuilt from the deployment's catalog view,
     # with the hosted port resolved per tick as a request would resolve it.
@@ -589,9 +688,6 @@ def _add_security_headers(headers: MutableHeaders, path: str, status_code: int) 
         return
     # A cacheable path's policy describes its content, so it applies only to a
     # response that carries any: an error under it is a fact about right now.
-    # A hybrid gateway serves no /pwa/, and a day-long 404 there would outlive
-    # a switch to standalone, keeping the install prompt away from a
-    # deployment that had since started offering it.
     serves_content = status_code < 400
     if serves_content and path.startswith(_CACHEABLE_PREFIXES):
         headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
@@ -625,23 +721,23 @@ def _validate_metrics_support(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+def _validate_client_country_database(config: GatewayConfig) -> None:
+    """Refuse to start on a country file that cannot be read, rather than finding no country for every request."""
+    if config.client_country_database is not None:
+        open_country_database(config.client_country_database)
+
+
 def install_rate_limits(app: FastAPI, config: GatewayConfig) -> None:
     """Put the per-user limit and the ``rate_limits`` rules on the app, counting in the container's store.
 
-    A standalone gateway always holds the rules, because the dashboard can add
-    one at runtime; a hybrid one, which refuses ``rate_limits``, holds them only
-    for ``rate_limit_rpm``. Resolving the store opens no connection.
+    The gateway always holds the rules, because the dashboard can add one at
+    runtime. Resolving the store opens no connection.
     """
-    rules_possible = not config.is_hybrid_mode
-    store: RateLimitStorePort | None = (
-        app.state.container.resolve(RateLimitStorePort, None)
-        if config.rate_limit_rpm is not None or rules_possible
-        else None
-    )
+    store: RateLimitStorePort | None = app.state.container.resolve(RateLimitStorePort, None)
     app.state.rate_limit_store = store
     rpm = config.rate_limit_rpm
     app.state.rate_limiter = UserRateLimiter(store, rpm) if store is not None and rpm is not None else None
-    app.state.rate_limit_rules = RateLimitRules(store, config) if store is not None and rules_possible else None
+    app.state.rate_limit_rules = RateLimitRules(store, config) if store is not None else None
 
 
 def _validate_rate_limit_store(config: GatewayConfig) -> None:
@@ -650,11 +746,7 @@ def _validate_rate_limit_store(config: GatewayConfig) -> None:
     Falling back to counting per process would quietly multiply the limit by
     the number of replicas, which is the thing a shared store was asked for to
     prevent, so a missing URL or client library stops startup instead.
-    ``rate_limits`` is refused in hybrid mode, which does not enforce it yet.
     """
-    if config.rate_limits and config.is_hybrid_mode:
-        msg = "rate_limits is not supported in hybrid mode yet"
-        raise ValueError(msg)
     if config.rate_limit_store != "redis":
         return
     if not config.rate_limit_redis_url:
@@ -676,22 +768,25 @@ def _refuse_shared_secret(name: str, value: str, config: GatewayConfig) -> None:
 
 
 def _validate_provider_account_pepper(config: GatewayConfig) -> None:
-    """Refuse to start a deployment that makes provider copies without its own pepper.
+    """Turn provider copies off when no pepper is set, and refuse a pepper shared with another secret.
 
-    The pepper keys the digest that names a provider account, so it must be set
-    and must share no value with another secret. A shared value would let a leak
-    of one secret expose the other, and tie their rotations together.
+    The pepper keys the digest that names a provider account. A missing one only
+    warns, so a first run needs no secret invented for a feature it may never
+    use. A shared value would let a leak of one secret expose the other, and tie
+    their rotations together.
     """
     makes_copies = config.files_enabled and config.files_provider_upload_enabled
-    if not makes_copies or config.is_hybrid_mode or config.is_hosted_mode:
+    if not makes_copies:
         return
     pepper = config.provider_account_pepper
     if pepper is None:
-        msg = (
-            "OTARI_PROVIDER_ACCOUNT_PEPPER must be set while files_provider_upload_enabled is on; "
-            "set it to a random value of at least 32 characters, or turn provider copies off"
+        logger.warning(
+            "OTARI_PROVIDER_ACCOUNT_PEPPER is unset, so provider copies of attached files are off: a request that "
+            "asks a provider's own code execution to run over an attached file is refused. Set it to a random "
+            "value of at least 32 characters (for example `otari gen-provider-account-pepper`) to turn them on."
         )
-        raise ValueError(msg)
+        config.files_provider_upload_enabled = False
+        return
     _refuse_shared_secret("OTARI_PROVIDER_ACCOUNT_PEPPER", pepper, config)
 
 
@@ -699,16 +794,15 @@ def _validate_provider_user_identifier_key(config: GatewayConfig) -> None:
     """Refuse an end-user identifier key that shares a value with another secret.
 
     A missing key only warns: refusing to start would take down every deployment
-    that upgrades with the identifier on, which is the default.
+    that upgrades without one.
     """
     key = config.provider_user_identifier_key
     if key is None:
-        if config.provider_user_identifier_enabled:
-            logger.warning(
-                "provider_user_identifier_enabled is on with no OTARI_PROVIDER_USER_IDENTIFIER_KEY, so the "
-                "end-user identifier sent to providers is an unkeyed digest: anyone who knows a workspace id "
-                "can test a guessed user tag against it. Set the key to a random value of at least 32 characters."
-            )
+        logger.warning(
+            "OTARI_PROVIDER_USER_IDENTIFIER_KEY, which keys the opaque end-user id sent to providers so it cannot "
+            "be matched to a guessed user, is unset; set it to a random value of at least 32 characters (for "
+            "example `openssl rand -hex 32`), different from the master key and OTARI_SECRET_KEY."
+        )
         return
     _refuse_shared_secret("OTARI_PROVIDER_USER_IDENTIFIER_KEY", key, config)
 
@@ -733,48 +827,6 @@ async def apply_declared_access(config: GatewayConfig, session: "AsyncSession", 
             len(config.budgets),
             len(config.api_keys),
         )
-
-
-def _validate_platform_config(config: GatewayConfig) -> None:
-    config.validate_mode_selection()
-    if not config.is_hybrid_mode:
-        return
-    if not config.platform.get("base_url"):
-        msg = "platform.base_url is required when hybrid mode is active"
-        raise ValueError(msg)
-    if config.providers:
-        msg = "Local provider credentials are not supported in hybrid mode"
-        raise ValueError(msg)
-    # The deployment bootstrap publishes this to the browser as a link target, so
-    # a scheme that is not http(s) would be a script URL in an operator's own
-    # config. Rejected at boot rather than dropped per request, so a typo is a
-    # startup error instead of a landing page that silently loses its link.
-    management_url = urlsplit(config.platform_management_url)
-    if management_url.scheme not in {"http", "https"} or not management_url.netloc:
-        msg = "platform.management_url must be an absolute http(s) URL"
-        raise ValueError(msg)
-
-
-def _warn_if_hosted_has_no_data_plane(config: GatewayConfig) -> None:
-    """Warn when a hosted control plane cannot say where its data plane is.
-
-    A hosted deployment serves the dashboard but is not where customer inference
-    belongs (otari#822), so the dashboard needs ``data_plane_url`` to build a
-    runnable snippet for a key it has just issued. Without it the snippet is
-    withheld rather than pointed at this host, which is correct but leaves an
-    operator wondering where it went, so the reason is said once at startup.
-
-    A warning and not a startup error: the alternative would take a running
-    control plane down on its next redeploy over a dashboard affordance, and the
-    management API this deployment exists to serve is unaffected either way.
-    """
-    if not config.is_hosted_mode or config.data_plane_url:
-        return
-    logger.warning(
-        "Hosted mode is active with no data_plane_url configured, so the dashboard will not "
-        "show request snippets beside a new key: it has no data-plane gateway address to put "
-        "in one, and this host is not it. Set data_plane_url (or OTARI_DATA_PLANE_URL)."
-    )
 
 
 # How long shutdown waits for refreshers and feature workers to acknowledge cancellation.
@@ -843,11 +895,15 @@ async def _run_feature_worker(name: str, worker: Worker, config: GatewayConfig) 
 
 
 def _create_lifespan() -> Callable[[FastAPI], Any]:
+    """The app's lifespan: startup's checks, migrations and seeding, then shutdown's cleanup."""
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        """Prepare the database, prices and background tasks for ``app``, and stop them when it ends."""
         # From the app, not a closure: app.state.config is what get_config hands
         # every request, so startup reads the same object.
         config: GatewayConfig = app.state.config
+        app.state.automatic_router = None
         configure_default_pricing(config.default_pricing)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
@@ -864,124 +920,146 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
         feature_workers: list[tuple[asyncio.Task[None], str]] = []
-        if config.is_hybrid_mode:
-            log_writer = NoopLogWriter()
-            # No stored search tools or tool settings to wait for on a hybrid gateway.
-            warn_about_tool_instances(config)
-        else:
-            init_db(config)
-            # On a session of its own, committed before the startup session below
-            # opens, so SQLite's one writer is never held twice. Before the
-            # bootstrap key, which a deployment that declares its keys does not need.
-            async with create_session() as session:
-                await apply_declared_access(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
-            async with create_session() as session:
-                # Persisted dashboard overrides win over config/env; apply them
-                # before pricing init so default-pricing behavior is consistent.
-                await apply_overrides_from_db(config, session)
-                # Checked when serving starts rather than when the app is built,
-                # so a tool that only reads the schema needs no pepper, and after
-                # the overrides, so it sees the copy setting this process serves.
-                _validate_provider_account_pepper(config)
-                await load_persisted_price_snapshot(session)
-                # Persisted tool/guardrail overrides (service URLs + web-search
-                # knobs) win over config/env too; apply them so the running worker
-                # reflects a dashboard change made in a prior run.
-                await apply_tool_overrides_from_db(config, session)
-                # Overlay dashboard-stored search tools before the checks below,
-                # so a tool added through the dashboard is one the backend-URL
-                # warning and the flat-pricing warning can see.
-                await load_search_tools_at_startup(session, config)
-                # Before the first request, so a stored rule never lets a burst through at boot.
-                await load_rate_limit_rules_at_startup(config)
-                # After the overrides, not at config load: the web-search URL a
-                # searxng search tool inherits can be the dashboard-stored one
-                # applied just above, and that tool is only broken if nothing
-                # supplied it at all.
-                if missing_backend_url := config.search_tools_without_backend_url():
-                    logger.warning(
-                        "No backend URL for search tool(s): %s. POST /api/v1/search refuses them with a 400 until "
-                        "each declares an 'api_base' or a web-search URL is set (web_search_url, "
-                        "OTARI_WEB_SEARCH_URL, or the dashboard's Tools page).",
-                        ", ".join(sorted(missing_backend_url)),
-                    )
-                # After the stored search tools and tool settings, for the same
-                # reason: a default set in the dashboard counts.
-                warn_about_tool_instances(config)
-                # Generate + persist a master key on first run when none is set,
-                # so the dashboard is reachable without hand-editing config, and
-                # the management API is never left unauthenticated.
-                await ensure_master_key(config, session)
-                # Dashboard sessions must not outlive the key they were minted
-                # under: revoke them all when the master key changed across a
-                # restart (e.g. OTARI_MASTER_KEY was rotated).
-                await revoke_sessions_on_master_key_change(config, session)
-                # Before pricing init, so nothing reads an entry that declares no credential.
-                settle_configured_providers(config)
-                warn_about_ignored_provider_variables(config)
-                # Organization-scoped provider keys (otari-ai#1748, otari#643):
-                # an overlay keyed by (workspace_id, provider) rather than
-                # instance name. Empty on a fresh database (no workspace or key
-                # exists yet).
-                await load_org_provider_keys_at_startup(session)
-                await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
-                await initialize_pricing_from_config(config, session)
-                await warn_if_require_pricing_without_pricing(config, session)
-                await warn_if_search_tools_lack_flat_pricing(config, session)
-                await warn_if_gateway_tools_lack_pricing(config, session)
-                await warn_if_router_candidates_lack_pricing(config, session)
-                await load_aliases_at_startup(session)
-                await load_policies_at_startup(session)
-            # After the session above and not inside it: the runner reads through
-            # a repository, which reaches the database only through a Unit of
-            # Work of its own. It builds each stored definition into a vendor
-            # client here so the first request to need one does not wait for a
-            # vendor handshake.
-            await load_guardrail_runner_at_startup()
-            await load_provider_endpoints_at_startup()
-            await _move_deployment_providers(config)
-            await _import_configured_providers(config)
-            await load_hosted_names_at_startup(config)
-            # On a Unit of Work of its own, after the session above has closed.
-            await _report_hosted_providers_config(config)
-            container: Container = app.state.container
-            # Only here: a hybrid gateway writes no usage rows, so it has none to report.
-            log_writer = create_log_writer(config.log_writer_strategy, container.resolve(UsageSignalPort, None))
-            # The retention sweep below resolves this same port, so both it and
-            # the request path use whatever store this build bound.
-            app.state.file_store = _resolve_file_store(config, container)
-            app.state.provider_files = container.resolve(ProviderFilePort, None)
-            workers = _start_lifespan_workers(config, container)
-            # Workers of the enabled features. Same supervisor as the registry
-            # above: created here, cancelled together in ``finally`` under one
-            # shared bound.
-            feature_workers = [
-                (
-                    asyncio.create_task(_run_feature_worker(feature.name, feature.worker, config)),
-                    f"{feature.name} worker",
+        init_db(config)
+        # On a session of its own, committed before the startup session below
+        # opens, so SQLite's one writer is never held twice. Before the
+        # bootstrap key, which a deployment that declares its keys does not need.
+        async with create_session() as session:
+            await apply_declared_access(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
+        async with create_session() as session:
+            # Persisted dashboard overrides win over config/env; apply them
+            # before pricing init so default-pricing behavior is consistent.
+            await apply_overrides_from_db(config, session)
+            # The bundled catalog is several MB of JSON: read it here, off the
+            # event loop, so no request waits on it.
+            await asyncio.to_thread(load_bundled_index)
+            # After the overrides, so it sees the copy setting this process serves.
+            _validate_provider_account_pepper(config)
+            await load_persisted_price_snapshot(session)
+            # So the first request after a restart lists the stored model facts.
+            await load_stored_models_dev_catalog(session)
+            # Persisted tool/guardrail overrides (service URLs + web-search
+            # knobs) win over config/env too; apply them so the running worker
+            # reflects a dashboard change made in a prior run.
+            await apply_tool_overrides_from_db(config, session)
+            # Overlay dashboard-stored search tools before the checks below,
+            # so a tool added through the dashboard is one the backend-URL
+            # warning and the unpriced-tool warning can see. On a session of its
+            # own, once this one has handed its connection back, so startup
+            # holds one pooled connection at a time.
+            await release_session(session)
+            async with create_unit_of_work_with_session() as (search_tool_session, uow):
+                stored_tools_loaded = await build_search_tool_service(
+                    uow, search_tool_session, config=config
+                ).load_at_startup()
+            # Before the first request, so a stored rule never lets a burst through at boot.
+            await load_rate_limit_rules_at_startup(config)
+            # After the overrides, not at config load: the web-search URL a
+            # searxng search tool inherits can be the dashboard-stored one
+            # applied just above, and that tool is only broken if nothing
+            # supplied it at all.
+            if missing_backend_url := config.search_tools_without_backend_url():
+                logger.warning(
+                    "No backend URL for search tool(s): %s. POST /api/v1/search refuses them with a 400 until "
+                    "each declares an 'api_base' or a web-search URL is set (web_search_url, "
+                    "OTARI_WEB_SEARCH_URL, or the dashboard's Tools page).",
+                    ", ".join(sorted(missing_backend_url)),
                 )
-                for feature in app.state.enabled_features
-                if feature.worker is not None
-            ]
+            # After the stored search tools and tool settings, for the same
+            # reason: a default set in the dashboard counts.
+            warn_about_tool_instances(config)
+            # Generate + persist a master key on first run when none is set,
+            # so the dashboard is reachable without hand-editing config, and
+            # the management API is never left unauthenticated.
+            await ensure_master_key(config, session)
+            # Dashboard sessions must not outlive the key they were minted
+            # under: revoke them all when the master key changed across a
+            # restart (e.g. OTARI_MASTER_KEY was rotated).
+            await revoke_sessions_on_master_key_change(config, session)
+            # Before pricing init, so nothing reads an entry that declares no credential.
+            settle_configured_providers(config)
+            warn_about_ignored_provider_variables(config)
+            # Organization-scoped provider keys (otari-ai#1748, otari#643):
+            # an overlay keyed by (workspace_id, provider) rather than
+            # instance name. Empty on a fresh database (no workspace or key
+            # exists yet).
+            await load_org_provider_keys_at_startup(session)
+            await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
+            await initialize_pricing_from_config(config, session)
+            # Only with the stored tools applied, since the writer reads the
+            # merged instance maps, where a stored instance hides the config
+            # entry of its name and kind, price included.
+            if stored_tools_loaded:
+                await initialize_tool_prices_from_config(config, session)
+            else:
+                logger.warning(
+                    "The stored search and fetch tools did not load, so this start writes no config.yml tool "
+                    "prices; the next start that loads them writes them."
+                )
+            await warn_if_require_pricing_without_pricing(config, session)
+            await warn_about_unpriced_web_tools(config, session)
+            await warn_about_legacy_tool_prices(config, session)
+            await warn_if_gateway_tools_lack_pricing(config, session)
+            await load_aliases_at_startup(session)
+            await load_policies_at_startup(session)
+        # After the session above and not inside it: the runner reads through
+        # a repository, which reaches the database only through a Unit of
+        # Work of its own. It builds each stored definition into a vendor
+        # client here so the first request to need one does not wait for a
+        # vendor handshake.
+        await load_guardrail_runner_at_startup()
+        await load_provider_endpoints_at_startup()
+        await load_stored_country_database_at_startup(config)
+        if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
+            await load_sandbox_credentials_at_startup(config.effective_sandbox_provider())
+        await _move_deployment_providers(config)
+        await _import_configured_providers(config)
+        await load_hosted_names_at_startup(config)
+        await load_agent_recommenders_at_startup()
+        # On a Unit of Work of its own, after the session above has closed.
+        await _report_hosted_providers_config(config)
+        await _warn_about_legacy_tool_grants(config)
+        container: Container = app.state.container
+        log_writer = create_log_writer(config.log_writer_strategy, container.resolve(UsageSignalPort, None))
+        # The retention sweep below resolves this same port, so both it and
+        # the request path use whatever store this build bound.
+        app.state.file_store = _resolve_file_store(config, container)
+        app.state.trace_content = _resolve_trace_content(config, container)
+        app.state.provider_files = container.resolve(ProviderFilePort, None)
+        workers = _start_lifespan_workers(config, container)
+        # Workers of the enabled features. Same supervisor as the registry
+        # above: created here, cancelled together in ``finally`` under one
+        # shared bound.
+        feature_workers = [
+            (
+                asyncio.create_task(_run_feature_worker(feature.name, feature.worker, config)),
+                f"{feature.name} worker",
+            )
+            for feature in app.state.enabled_features
+            if feature.worker is not None
+        ]
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
         log_writer_started = False
         trace_writer: TraceWriter | None = None
         trace_writer_started = False
+        content_check: asyncio.Task[None] | None = None
         try:
             # First inside the try, after every step that can refuse to start, so a
-            # refused start never leaves one open. One per app, on every plane: the
-            # direct search endpoint, the hop route and the connection tests call
-            # their providers through it (decision 55).
+            # refused start never leaves one open. One per app: web tools, the search
+            # endpoint and the connection tests call their providers through it.
             app.state.web_provider_client = build_web_provider_client()
+            # In the background, so a slow key source never holds the boot.
+            if config.trace_capture_enabled and config.trace_content_enabled:
+                content_check = asyncio.create_task(_check_trace_content(app.state.trace_content))
             # Inside the try, so a failure here still stops the workers started above.
             # Wired only where create_app set up trace capture, which a bare app has not.
             request_traces: RequestTraces | None = getattr(app.state, "request_traces", None)
             if request_traces is not None:
                 # Each usage row a request settles also becomes an LLM span on its trace.
                 log_writer = TracingLogWriter(log_writer, request_traces)
-                trace_writer = _build_trace_writer(config)
+                trace_writer = _build_trace_writer(config, app.state.trace_content)
             await log_writer.start()
             log_writer_started = True
             app.state.log_writer = log_writer
@@ -1004,6 +1082,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             if trace_writer is not None and trace_writer_started:
                 app.state.trace_writer = None
                 await trace_writer.stop()
+            # After the writer's last batch, which may still seal with them.
+            if content_check is not None:
+                content_check.cancel()
+            trace_content: SpanContent | None = getattr(app.state, "trace_content", None)
+            if trace_content is not None:
+                trace_content.close()
             # Removed before it closes, so a route served after shutdown fails plainly
             # rather than on a closed client.
             web_provider_client = getattr(app.state, "web_provider_client", None)
@@ -1017,7 +1101,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             if rate_limit_store is not None:
                 await rate_limit_store.aclose()
             # After the log writer, whose final flush is the last thing to need
-            # a session. Hybrid mode never opened an engine, so this is a no-op there.
+            # a session.
             await dispose_db()
 
     return lifespan
@@ -1028,10 +1112,14 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
 
     A body field survives where a header does not (a proxy that drops it, an SDK
     that surfaces only the body), so a client can map the refusal from either.
+    A ``BodyHTTPException`` is answered with its own body rather than under ``detail``.
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
     code = error_code_of(exc.headers)
+    if isinstance(exc, BodyHTTPException):
+        body = exc.body if code is None else {**exc.body, "code": code}
+        return with_request_id(request, JSONResponse(body, status_code=exc.status_code, headers=exc.headers))
     if code is None:
         return with_request_id(request, await http_exception_handler(request, exc))
     return with_request_id(
@@ -1071,23 +1159,6 @@ async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
         content={"detail": exc.message, "code": exc.error_code},
         headers=error_headers(exc.error_code),
     )
-
-
-async def _control_plane_error_handler(_: Request, exc: Exception) -> Response:
-    """Render a control plane failure as the answer the caller has always had.
-
-    Registered ahead of the tenancy family it belongs to, which would replace a
-    502 body with the generic internal-error detail and drop a rate limit's
-    ``Retry-After``. Both are part of this deployment's published contract with
-    a caller, so a peer's refusal reaches them whole.
-    """
-    if not isinstance(exc, ControlPlaneError):  # pragma: no cover - registered for ControlPlaneError only
-        raise exc
-    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
-        logger.error("Control plane request failed: %s", exc.message)
-    retry_after = getattr(exc, "retry_after", None)
-    headers = {"Retry-After": retry_after} if retry_after else None
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message}, headers=headers)
 
 
 async def _validation_error_handler(_: Request, exc: Exception) -> Response:
@@ -1130,15 +1201,20 @@ async def _validation_error_handler(_: Request, exc: Exception) -> Response:
 def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
-    _validate_platform_config(config)
-    _warn_if_hosted_has_no_data_plane(config)
     _validate_metrics_support(config)
+    _validate_client_country_database(config)
     _validate_rate_limit_store(config)
     config.validate_declared_access()
     refuse_unusable_declared_secrets(config.api_keys, config.master_key)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
+    if (
+        config.trace_content_enabled
+        and config.trace_content_key_backend == "secret_key"
+        and not secret_box_configured()
+    ):
+        logger.warning("OTARI_TRACE_CONTENT_ENABLED is on but OTARI_SECRET_KEY is not set, so no trace content is kept")
     set_config(config)
     # The search and fetch libraries leave their log filters to the host, so a
     # provider URL carrying a query or a key never reaches httpx's own logging.
@@ -1150,7 +1226,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app = FastAPI(
         title="otari",
-        description="Otari, an OpenAI-compatible LLM gateway with API key management",
+        description="Otari, an OpenAI-compatible AI gateway with API key management",
         version=__version__,
         docs_url=f"{API_ROOT}/docs" if config.enable_docs else None,
         redoc_url=f"{API_ROOT}/redoc" if config.enable_docs else None,
@@ -1190,16 +1266,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
             "name": X_API_KEY_HEADER,
             "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
         }
-        openapi_schema["components"]["securitySchemes"]["GatewayTokenAuth"] = {
-            "type": "apiKey",
-            "in": "header",
-            "name": GATEWAY_TOKEN_HEADER,
-            "description": (
-                "A deployment's own data-plane gateway identifies itself here. Not an API key: "
-                "no key or session opens these paths, and no application holds this credential."
-            ),
-        }
-
         validation_error = openapi_schema["components"].get("schemas", {}).get("HTTPValidationError")
         if validation_error is not None:
             # What `_validation_error_handler` adds to FastAPI's own 422 body.
@@ -1213,11 +1279,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         for path, path_item in openapi_schema.get("paths", {}).items():
             if path in _UNAUTHENTICATED_PATHS or _under(path, _PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):
                 continue
-            requirement: list[dict[str, list[str]]] = (
-                [{"GatewayTokenAuth": []}]
-                if path in _GATEWAY_TOKEN_PATHS
-                else [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
-            )
+            requirement: list[dict[str, list[str]]] = [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
             for operation in path_item.values():
                 if isinstance(operation, dict):
                     operation["security"] = requirement
@@ -1227,54 +1289,37 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app.openapi = custom_openapi  # type: ignore[method-assign]
 
-    if not config.is_hybrid_mode:
+    @app.get("/auth/{provider}/callback", include_in_schema=False)
+    async def oauth_callback_landing(provider: str, request: Request) -> RedirectResponse:
+        """Bounce a provider's redirect into the dashboard page that finishes it.
 
-        @app.get("/auth/{provider}/callback", include_in_schema=False)
-        async def oauth_callback_landing(provider: str, request: Request) -> RedirectResponse:
-            """Bounce a provider's redirect into the dashboard page that finishes it.
+        This path exists because a redirect URI may not carry a fragment
+        (RFC 6749; Google rejects one outright) and every dashboard page in
+        front of a session is a hash route. So the provider is given an
+        ordinary path, and this turns it into the hash route
+        ``DeploymentRoot`` renders ahead of the auth gate, carrying the
+        query the provider appended.
 
-            This path exists because a redirect URI may not carry a fragment
-            (RFC 6749; Google rejects one outright) and every dashboard page in
-            front of a session is a hash route. So the provider is given an
-            ordinary path, and this turns it into the hash route
-            ``DeploymentRoot`` renders ahead of the auth gate, carrying the
-            query the provider appended.
+        It holds no credential and decides nothing: the code in that query
+        is spent by ``POST /api/v1/auth/oauth/{provider}/callback``, which the
+        page reaches only after checking the state against the value the
+        browser stored. 303 rather than 307, so a browser that followed a
+        POST here would not repeat it against a page.
 
-            It holds no credential and decides nothing: the code in that query
-            is spent by ``POST /api/v1/auth/oauth/{provider}/callback``, which the
-            page reaches only after checking the state against the value the
-            browser stored. 303 rather than 307, so a browser that followed a
-            POST here would not repeat it against a page.
+        Not gated on the provider being configured, and not on the bundle
+        being built. A person is here because a provider sent them, and
+        landing on the dashboard's own "that did not work" panel beats a
+        bare 404 from a path they never typed.
 
-            Not gated on the provider being configured, and not on the bundle
-            being built. A person is here because a provider sent them, and
-            landing on the dashboard's own "that did not work" panel beats a
-            bare 404 from a path they never typed.
-
-            The target is built from ``effective_ui_base_url`` rather than as
-            a root-absolute path, so a deployment whose dashboard sits under a
-            path prefix (``https://example.com/otari``) sends the browser there
-            rather than to the origin's root.
-            """
-            return RedirectResponse(
-                url=callback_landing_target(request.app.state.config, provider, request.url.query),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-
-    else:
-
-        @app.get("/auth/{provider}/callback", include_in_schema=False)
-        async def oauth_callback_landing_disabled() -> JSONResponse:
-            """Explain to a provider redirect or an old bookmark that sign-in happens on the platform.
-
-            The wording matches the hybrid stubs under the API root, which this path is outside of.
-            """
-            return JSONResponse(
-                status_code=status.HTTP_404_NOT_FOUND,
-                content={
-                    "detail": "Dashboard sign-in is not available in hybrid mode. Sign in through the platform UI."
-                },
-            )
+        The target is built from ``effective_ui_base_url`` rather than as
+        a root-absolute path, so a deployment whose dashboard sits under a
+        path prefix (``https://example.com/otari``) sends the browser there
+        rather than to the origin's root.
+        """
+        return RedirectResponse(
+            url=callback_landing_target(request.app.state.config, provider, request.url.query),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     @app.get("/welcome", response_class=HTMLResponse, include_in_schema=False)
     async def root_tutorial() -> str:
@@ -1288,12 +1333,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
-    # The same bundle is the root in both modes, because the mode is not this
-    # process's decision to make in the filesystem: the page reads /api/v1/bootstrap
-    # and renders either the management shell (standalone) or the data-plane
-    # landing page (hybrid), which is what keeps "which surfaces exist here" in
-    # one answer rather than two. A hybrid gateway still hosts no management API;
-    # the page it serves says so and links to otari.ai. The dashboard is a
+    # The page reads /api/v1/bootstrap to learn which surfaces exist here. The dashboard is a
     # single-page app, so a static mount for /assets plus an index.html at / is
     # all it needs (navigation is client-side).
     dashboard_dir = get_dashboard_dir()
@@ -1305,13 +1345,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
             name="dashboard-assets",
         )
         # Installing the dashboard to a phone home screen needs the manifest and
-        # the PNG icons it points at (index.html links them from /pwa/). Only the
-        # standalone dashboard is an app worth installing: a hybrid gateway's root
-        # is a status page for a control plane that lives elsewhere, and an
-        # installed icon named "Otari" would promise the wrong thing. The index still
-        # links the manifest there, which 404s and means no browser offers the install.
+        # the PNG icons it points at (index.html links them from /pwa/).
         pwa_dir = dashboard_dir / "pwa"
-        if pwa_dir.is_dir() and not config.is_hybrid_mode:
+        if pwa_dir.is_dir():
             app.mount("/pwa", StaticFiles(directory=pwa_dir), name="dashboard-pwa")
         # The dashboard's brand faces, which its stylesheet asks for by absolute
         # path (/fonts/...). Self-hosted so the page needs no third-party request,
@@ -1340,8 +1376,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         # A missing bundle means nobody built it, which is the ordinary state of a
         # source checkout now that the bundle is gitignored rather than committed.
         # Say so once at startup, so "/" serving the tutorial reads as a build step
-        # not taken rather than as a broken dashboard. Reported in both modes, since
-        # a hybrid gateway now serves the same bundle as its landing page.
+        # not taken rather than as a broken dashboard.
         logger.info(
             'No dashboard bundle found at gateway/%s, so "/" serves the get-started tutorial '
             "(the API is unaffected). Run `make dashboard` to build it; the Docker image builds it for you.",
@@ -1363,12 +1398,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
             CORSMiddleware,
             allow_origins=config.cors_allow_origins,
             allow_credentials=allow_credentials,
-            # A hybrid deployment mounts the platform's own routes behind this
-            # same app (see the platform's OTARI_CORS_ALLOW_ORIGINS, enabled
-            # wherever a shared dashboard needs its session cookie honored
-            # cross-origin), so this list has to cover every method the
-            # platform's own routes use too, not just the gateway's. A
-            # workspace's web-search config is PUT, and was rejected with
+            # An overlay mounts its own routes behind this same app, so this
+            # list has to cover every method those routes use too, not just
+            # the gateway's. A workspace's web-search config is PUT, and was rejected with
             # "Disallowed CORS method" everywhere this middleware was enabled
             # (mozilla-ai/infrastructure -- reported from both EU stacks,
             # which are the only ones that set cors_allow_origins at all).
@@ -1379,6 +1411,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 API_KEY_HEADER,
                 X_API_KEY_HEADER,
                 TAGS_HEADER,
+                CONVERSATION_HEADER,
+                "Otari-Region",
+                *_SDK_CORS_HEADERS,
             ],
         )
 
@@ -1395,11 +1430,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # in-flight entry is dropped there: it is the one place every request passes once.
     app.state.request_traces = None
     app.state.trace_writer = None
-    if _records_traces(config, app.state.enabled_features):
+    if _records_traces(app.state.enabled_features):
         app.state.request_traces = RequestTraces()
         app.add_middleware(TraceCaptureMiddleware, traces=app.state.request_traces)
-    if not config.is_hybrid_mode:
-        app.add_middleware(RateLimitGrantMiddleware)
+    app.add_middleware(RateLimitGrantMiddleware)
 
     if config.enable_metrics:
         from gateway.metrics import MetricsMiddleware
@@ -1436,9 +1470,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
         config.bootstrap,
         config=config,
         membership_listener=get_membership_listener,
-        workspace_listener=functools.partial(get_workspace_listener, config=config),
-        search_keys=get_workspace_search_keys,
-        code_execution_policies=get_workspace_code_execution_policies,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
     install_rate_limits(app, config)
@@ -1446,7 +1477,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
     register_routers(app, config)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)
-    app.add_exception_handler(ControlPlaneError, _control_plane_error_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
 
     if config.enable_metrics:

@@ -13,94 +13,104 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-const OWN = ["code_execution", "web_fetch", "web_search"]
-
 const offering = (
   selector: string,
-  tools: "own" | "otari" | "none" = "otari",
+  input_price: number | null,
 ): FallbackOffering => {
   const provider = selector.split(":")[0]
   return {
     selector,
     provider,
     provider_type: provider,
-    own_tools: tools === "own" ? OWN : [],
-    otari_tools: tools === "otari" ? OWN : [],
+    input_price,
+    own_tools: [],
+    otari_tools: [],
   }
 }
 
 const fallback = (
   overrides: Partial<AutomaticFallback> &
-    Pick<AutomaticFallback, "id" | "name" | "offerings">,
+    Pick<AutomaticFallback, "id" | "offerings">,
 ): AutomaticFallback => ({
+  name: overrides.id,
   requests: 0,
   fell_back: 0,
   pinned: 0,
   pinned_provider: null,
+  pinned_keys: [],
   ...overrides,
 })
 
 const FALLBACKS: AutomaticFallback[] = [
   fallback({
-    id: "anthropic/claude-sonnet-5.5",
-    name: "Claude Sonnet 5.5",
+    id: "deepseek/deepseek-v4.1-flash-1017",
     offerings: [
-      offering("anthropic:claude-sonnet-5-5", "own"),
-      offering("bedrock:anthropic.claude-sonnet-5-5-v1:0"),
-      offering("azureanthropic:claude-sonnet-5-5"),
+      offering("deepinfra:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.098),
+      offering("nebius:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.3),
+      offering("together:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.3),
+    ],
+    requests: 6600,
+    pinned: 5800,
+    pinned_provider: "together",
+    pinned_keys: [
+      {
+        api_key_id: "key-zed",
+        key_name: "zed-laptop",
+        provider: "together",
+        requests: 3300,
+      },
+      {
+        api_key_id: "key-desktop",
+        key_name: "ci-agent",
+        provider: "together",
+        requests: 700,
+      },
+      {
+        api_key_id: "key-mbp",
+        key_name: "notebook",
+        provider: "deepinfra",
+        requests: 292,
+      },
+    ],
+  }),
+  fallback({
+    id: "anthropic/claude-sonnet-5.5",
+    offerings: [
+      offering("anthropic:claude-sonnet-5-5", 3),
+      offering("bedrock:anthropic.claude-sonnet-5-5-v1:0", 3),
+      offering("azureanthropic:claude-sonnet-5-5", 3),
     ],
     requests: 1840,
     fell_back: 42,
   }),
   fallback({
-    id: "anthropic/claude-haiku-5.5",
-    name: "Claude Haiku 5.5",
+    id: "z-ai/glm-5.3",
     offerings: [
-      offering("anthropic:claude-haiku-5-5", "own"),
-      offering("bedrock:anthropic.claude-haiku-5-5-v1:0"),
-    ],
-    requests: 960,
-    fell_back: 17,
-  }),
-  fallback({
-    id: "openai/gpt-6.1-sol",
-    name: "GPT-6.1 Sol",
-    offerings: [
-      offering("openai:gpt-6.1-sol", "own"),
-      offering("bedrock:openai.gpt-6.1-sol"),
-      offering("azureopenai:gpt-6.1-sol"),
+      offering("fireworks:accounts/fireworks/models/glm-5p3", 0.4),
+      offering("together:zai-org/GLM-5.3", 0.45),
     ],
     requests: 410,
-    fell_back: 3,
+    pinned: 12,
+    pinned_provider: "together",
+    pinned_keys: [
+      {
+        api_key_id: null,
+        key_name: null,
+        provider: "together",
+        requests: 12,
+      },
+    ],
   }),
   fallback({
     id: "google/gemini-3.8-flash",
-    name: "Gemini 3.8 Flash",
-    offerings: [offering("gemini:gemini-3.8-flash")],
+    offerings: [offering("gemini:gemini-3.8-flash", 0.15)],
     requests: 260,
     pinned: 260,
     pinned_provider: "gemini",
   }),
-  fallback({
-    id: "moonshotai/kimi-k3",
-    name: "Kimi K3",
-    offerings: [
-      offering("fireworks:accounts/fireworks/models/kimi-k3"),
-      offering("bedrock:us.moonshotai.kimi-k3"),
-    ],
-    requests: 90,
-    pinned: 90,
-    pinned_provider: "bedrock",
-  }),
 ]
 
-export const Default: Story = {
-  args: {
-    fallbacks: FALLBACKS,
-    toolsNote:
-      "Tools shown for callers that declare them in the provider's own words and leave the choice to Otari: a provider's own where it runs them, Otari's where it does not.",
-  },
-}
+export const Default: Story = { args: { fallbacks: FALLBACKS } }
 
 export const Empty: Story = { args: { fallbacks: [] } }
 

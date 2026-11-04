@@ -77,6 +77,12 @@ class RateLimitService:
             if changes.get("per") not in (None, "model") and "models" not in changes:
                 # Only a per-model rule names models, so a rule moved off per: model drops them.
                 changes["models"] = None
+            if changes.get("per") not in (None, "budget") and "budgets" not in changes:
+                # Likewise budgets, which only a per-budget rule names.
+                changes["budgets"] = None
+            if changes.get("mode", "") is None:
+                # Not nullable: an explicit null keeps the rule as it is.
+                del changes["mode"]
             try:
                 merged = RateLimitRule(**{**rule_of(row).model_dump(), **changes})
             except ValidationError as exc:

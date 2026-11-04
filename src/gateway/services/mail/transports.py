@@ -23,7 +23,7 @@ from typing import Protocol
 
 from gateway.core.addresses import normalized_address
 from gateway.core.config import GatewayConfig
-from gateway.log_config import logger
+from gateway.log_config import CARRIES_CREDENTIAL, logger
 from gateway.services.mail.message import MailDeliveryError, MailEnvelope
 
 # Every SMTP step (connect, STARTTLS, login, sendmail) is bounded by this, so a
@@ -161,6 +161,7 @@ class ConsoleTransport:
             envelope.sender_email,
             envelope.message.subject,
             envelope.message.text,
+            extra=CARRIES_CREDENTIAL,
         )
 
 

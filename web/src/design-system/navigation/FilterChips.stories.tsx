@@ -53,6 +53,46 @@ export const WithChips: Story = {
   },
 }
 
+/** `alwaysOpen`: the pickers are the page's main control, so no toggle. */
+export const AlwaysOpen: Story = {
+  args: {
+    alwaysOpen: true,
+    chips: [
+      { key: "status", label: "Status", value: "Failed", onClear: () => {} },
+    ],
+    onClearAll: () => {},
+    children: (
+      <FilterSelect
+        label="Status"
+        value="error"
+        onChange={() => {}}
+        options={[
+          { value: "", label: "Any status" },
+          { value: "error", label: "Failed" },
+        ]}
+      />
+    ),
+  },
+}
+
+/** `toggleLabel` tells apart two disclosures on one page. */
+export const NamedToggle: Story = {
+  args: {
+    toggleLabel: "More filters",
+    children: (
+      <FilterSelect
+        label="Tool"
+        value=""
+        onChange={() => {}}
+        options={[
+          { value: "", label: "All" },
+          { value: "web_search", label: "Web search" },
+        ]}
+      />
+    ),
+  },
+}
+
 /** `start` and `end` slot a page's own controls into the same row. */
 export const WithSlots: Story = {
   args: {

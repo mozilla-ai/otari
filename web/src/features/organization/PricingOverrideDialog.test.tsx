@@ -28,6 +28,7 @@ function pricingOverride(
   return {
     id: "11111111-1111-1111-1111-111111111111",
     organization_id: "org-1",
+    kind: "model",
     model_key: "openai:gpt-4o",
     input_price_per_million: 2.5,
     output_price_per_million: 5,

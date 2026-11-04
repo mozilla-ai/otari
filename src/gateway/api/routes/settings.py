@@ -7,7 +7,7 @@ and, where safe, control runtime behavior. Two layers:
   operator should see, grouped, each marked ``settable`` (hot-changeable) or not
   (startup-only, display only). Secrets (master key, provider credentials) and
   the complex catalog fields managed on their own pages (providers, pricing,
-  aliases, model capabilities, the platform block) are deliberately omitted.
+  aliases, model capabilities) are deliberately omitted.
 * The writable subset (see ``runtime_settings_service.SETTABLE_KEYS``), persisted
   so a change survives a restart and applied to the running worker immediately.
 """
@@ -99,7 +99,6 @@ class GatewaySettings(BaseModel):
     read-only view with the settable/startup-only marking.
     """
 
-    mode: str
     version: str
     model_discovery: bool
     default_pricing: bool
@@ -179,10 +178,8 @@ _REDACTED_URL_FIELDS = frozenset({"database_url", "sandbox_url", "guardrails_url
 
 
 def _field_value(config: GatewayConfig, name: str) -> bool | int | float | str | list[str] | None:
-    # Both are often unset with the real value derived elsewhere; show what is
-    # in use so the viewer is not misleading.
-    if name == "mode":
-        return config.effective_mode
+    # Often unset with the real value derived elsewhere; show what is in use so
+    # the viewer is not misleading.
     if name == "ui_base_url":
         return config.effective_ui_base_url or None
     value: bool | int | float | str | list[str] | None = getattr(config, name)
@@ -216,7 +213,6 @@ def _config_fields(config: GatewayConfig) -> list[ConfigField]:
 
 def _current_settings(config: GatewayConfig) -> GatewaySettings:
     return GatewaySettings(
-        mode=config.effective_mode,
         version=__version__,
         model_discovery=config.model_discovery,
         default_pricing=config.default_pricing,

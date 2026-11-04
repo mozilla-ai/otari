@@ -501,8 +501,8 @@ function isTimeout(error: unknown): boolean {
  * Read the body of a response that already looked like an answer.
  *
  * A body that is not JSON is never the gateway's: it is an intermediary
- * answering in its place, which the edge in front of a hosted deployment does
- * by serving the dashboard's own page at 200 for the statuses it remaps. The
+ * answering in its place, as an edge in front of the gateway does when it
+ * serves the dashboard's own page at 200 for the statuses it remaps. The
  * gateway's real answer is gone either way, so what a banner can usefully say
  * is which side of the gateway replied. `response.json()`'s own `SyntaxError`
  * says the opposite: `errorMessage` renders it verbatim, and the markup it

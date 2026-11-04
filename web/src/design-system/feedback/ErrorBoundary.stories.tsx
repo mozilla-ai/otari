@@ -8,8 +8,8 @@ import { ErrorBoundary } from "./ErrorBoundary"
  * The catch above the router, and the only one the pre-session pages have.
  *
  * Everything inside `RouterProvider` is already caught, so this covers `App`'s
- * four branches above it: the sign-in screen, the public auth pages, the
- * invitation page, and the hybrid landing. A throw in one of those unmounts to
+ * branches above it: the sign-in screen, the public auth pages, the invitation
+ * page, and the public catalog. A throw in one of those unmounts to
  * a blank document, which is the worst place in the app to lose, because the
  * sign-in screen is the only page reachable before every other one.
  *

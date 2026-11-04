@@ -1,4 +1,4 @@
-"""Workspaces and workspace membership (standalone mode only).
+"""Workspaces and workspace membership.
 
 Thin composition over `gateway.services.tenancy.workspace_service`. Every path
 resolves its workspace inside the caller's active organization, so a workspace id
@@ -6,17 +6,15 @@ from another tenant answers 404 rather than reaching the service's logic.
 """
 
 import uuid
+from collections.abc import Awaitable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
-    MembershipListenerDep,
-    UnitOfWorkDep,
-    WorkspaceListenerDep,
-    get_db,
+    TraceServiceDep,
+    WorkspaceServiceDep,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
@@ -30,7 +28,7 @@ from gateway.models.tenancy import (
     WorkspacesPublic,
     WorkspaceUpdate,
 )
-from gateway.services.tenancy import WorkspaceService
+from gateway.schemas.organizations import OrganizationRefusal
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # every handler here happens to take one today, and a future handler that did
@@ -44,19 +42,6 @@ router = APIRouter(
 SURFACE = Surface("workspaces")
 
 WORKSPACE_ROLE_DESCRIPTION = "Role to assign in this workspace."
-
-
-def get_workspace_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
-) -> WorkspaceService:
-    """Build the workspace service on the request's session."""
-    return WorkspaceService(db, uow=uow, membership_listener=membership_listener, workspace_listener=workspace_listener)
-
-
-WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -93,16 +78,40 @@ async def get_workspace(
 @router.patch("/{workspace_id}")
 async def update_workspace(
     service: WorkspaceServiceDep,
+    traces: TraceServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     body: WorkspaceUpdate,
 ) -> WorkspacePublic:
-    """Rename a workspace or change its description."""
-    return await service.update_workspace(
-        user=current_identity,
-        workspace_id=workspace_id,
-        workspace_update=body,
+    """Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+
+    Turning content off keeps nothing new from the next export on; what is already
+    stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
+    """
+
+    def update() -> Awaitable[WorkspacePublic]:
+        return service.update_workspace(user=current_identity, workspace_id=workspace_id, workspace_update=body)
+
+    if body.trace_content_enabled is not False:
+        return await update()
+    return await traces.turn_content_off(
+        workspace_id,
+        authorize=lambda: service.require_management_access(user=current_identity, workspace_id=workspace_id),
+        switch=update,
     )
+
+
+@router.delete("/{workspace_id}/trace-content")
+async def delete_workspace_trace_content(
+    service: WorkspaceServiceDep,
+    traces: TraceServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+) -> Message:
+    """Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only."""
+    await service.require_management_access(user=current_identity, workspace_id=workspace_id)
+    await traces.forget_content(workspace_id)
+    return Message(message="Session content deleted")
 
 
 @router.delete("/{workspace_id}")
@@ -133,7 +142,20 @@ async def list_workspace_members(
     )
 
 
-@router.post("/{workspace_id}/members/{user_id}", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{workspace_id}/members/{user_id}",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": OrganizationRefusal,
+            "description": "The workspace does not exist, or was deleted during the add.",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": OrganizationRefusal,
+            "description": "The user is already a member of the workspace.",
+        },
+    },
+)
 async def add_workspace_member(
     service: WorkspaceServiceDep,
     current_identity: CurrentIdentity,
@@ -141,7 +163,11 @@ async def add_workspace_member(
     user_id: uuid.UUID,
     role: Annotated[WorkspaceMemberRole, Query(description=WORKSPACE_ROLE_DESCRIPTION)] = "member",
 ) -> WorkspaceMemberPublic:
-    """Add an existing organization member to a workspace."""
+    """Add an existing organization member to a workspace.
+
+    The 404 for a workspace deleted during the add describes PostgreSQL. SQLite does not name the
+    foreign key it enforced, so it surfaces that race as a 500.
+    """
     return await service.add_member(
         user=current_identity,
         workspace_id=workspace_id,

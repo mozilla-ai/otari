@@ -5,7 +5,6 @@ import {
   useOrganizationContext,
   useOrganizationMembers,
 } from "@/shared/api/organizations"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { memberLabel } from "./roles"
 
@@ -34,14 +33,9 @@ export function memberLabelsByAttributionId(
 
 /**
  * Names the people behind the request-plane owner ids that keys and usage carry.
- *
- * Gated on the `organizations` surface: a deployment that does not host the
- * roster has no route to ask, and an owner id then stays the bare string it
- * always was, which is what every page rendered before members existed.
  */
 export function useMemberAttributionLabels(): ReadonlyMap<string, string> {
-  const hasSurface = useSurfaces()
-  const members = useOrganizationMembers(hasSurface("organizations"))
+  const members = useOrganizationMembers()
   return useMemo(
     () => memberLabelsByAttributionId(members.data),
     [members.data],
@@ -63,8 +57,7 @@ function memberEmailsByAttributionId(
 
 /** The addresses behind `useMemberAttributionLabels`, from the same roster read. */
 export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
-  const hasSurface = useSurfaces()
-  const members = useOrganizationMembers(hasSurface("organizations"))
+  const members = useOrganizationMembers()
   return useMemo(
     () => memberEmailsByAttributionId(members.data),
     [members.data],
@@ -72,21 +65,52 @@ export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
 }
 
 /**
- * The owner id the signed-in person bills through. Undefined while the reads
- * are pending or failed, and for a member with no attribution row.
+ * The owner id the signed-in person bills through, with whether it is still
+ * being resolved. `ownerId` is "" while pending, for a member with no
+ * attribution row, and when the roster could not be read (`isFailed`), so a
+ * caller that must tell those apart reads the flags.
+ *
+ * A failed roster read is settled from its first failure rather than after the
+ * query's retries: a caller waiting on the owner id would otherwise hold its
+ * page for those seconds, and it already has an answer, which is "not known".
  */
-export function useCurrentOwnerId(): string | undefined {
-  const hasSurface = useSurfaces()
+export function useCurrentOwner(enabled = true): {
+  ownerId: string
+  isPending: boolean
+  isFailed: boolean
+} {
   const context = useOrganizationContext()
-  const members = useOrganizationMembers(hasSurface("organizations"))
+  // The roster is asked once the context has answered: a caller it failed for
+  // has no organization to read it from.
+  const rosterEnabled = enabled && context.data !== undefined
+  const members = useOrganizationMembers(rosterEnabled)
   const callerId = context.data?.caller?.user_id
   const memberId = context.data?.organization_member_id
-  return useMemo(() => {
+  const ownerId = useMemo(() => {
     const me = (members.data ?? []).find(
       (member) =>
         (callerId && member.user_id === callerId) ||
         (memberId && member.organization_member_id === memberId),
     )
-    return me?.attribution_user_id ?? undefined
+    return me?.attribution_user_id ?? ""
   }, [members.data, callerId, memberId])
+  const isFailed =
+    rosterEnabled &&
+    members.data === undefined &&
+    (members.isError || members.failureCount > 0)
+  return {
+    ownerId,
+    isPending:
+      enabled &&
+      (context.isPending || (rosterEnabled && members.isPending && !isFailed)),
+    isFailed,
+  }
+}
+
+/**
+ * The owner id the signed-in person bills through. Undefined while the reads
+ * are pending or failed, and for a member with no attribution row.
+ */
+export function useCurrentOwnerId(): string | undefined {
+  return useCurrentOwner().ownerId || undefined
 }

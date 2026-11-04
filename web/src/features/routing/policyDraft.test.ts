@@ -46,12 +46,12 @@ describe("draftFromSpec and buildSpec", () => {
   it("normalize a loosely spelled backend and add a default the pool omits", () => {
     const draft = draftFromSpec({
       select: [
-        { router: " KNN ", candidates: ["openai:gpt-5-nano"] },
+        { router: " PRIORITY ", candidates: ["openai:gpt-5-nano"] },
         { default: "openai:gpt-5" },
       ],
     })
     expect(buildSpec(draft).select).toEqual([
-      { router: "knn", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
+      { router: "priority", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
       { default: "openai:gpt-5" },
     ])
   })
@@ -79,7 +79,7 @@ describe("seedDraft", () => {
   })
 
   it("starts every other kind with no backup", () => {
-    for (const intent of ["weighted", "knn", "priority", "tierdown"] as const) {
+    for (const intent of ["weighted", "priority", "tierdown"] as const) {
       expect(seedDraft(intent).backups).toEqual([])
     }
   })
@@ -101,7 +101,7 @@ describe("seedDraft", () => {
 describe("switchSelection", () => {
   it("moves the main model into a new pool, and the marked one back out", () => {
     const single = draftFromSpec({ select: [{ default: "openai:gpt-5" }] })
-    const routed = switchSelection(single, "knn")
+    const routed = switchSelection(single, "priority")
     expect(routed.pool.models).toEqual(["openai:gpt-5", ""])
     const marked = {
       ...routed,
@@ -114,13 +114,13 @@ describe("switchSelection", () => {
   })
 
   it("gives a split an even share when no model has one", () => {
-    const learned = draftFromSpec({
+    const ordered = draftFromSpec({
       select: [
-        { router: "knn", candidates: ["a:x", "b:y"] },
+        { router: "priority", candidates: ["a:x", "b:y"] },
         { default: "b:y" },
       ],
     })
-    expect(switchSelection(learned, "weighted").pool.weights).toEqual([
+    expect(switchSelection(ordered, "weighted").pool.weights).toEqual([
       "50",
       "50",
     ])

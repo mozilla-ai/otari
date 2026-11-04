@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -28,9 +28,32 @@ async def _order_of(dialect: str, *events: Any) -> list[str]:
     async def copy(files: list[ProviderFile]) -> None:
         order.append("copied " + ",".join(file.file_id for file in files))
 
-    async for event in _copying_produced_files(upstream(), dialect, copy):
+    async def store(data: bytes, mime_type: str) -> str:
+        order.append(f"stored {len(data)} bytes")
+        return "file-stored"
+
+    bridge = SimpleNamespace(store_provider_output=store)
+    async for event in _copying_produced_files(upstream(), dialect, copy, cast(Any, bridge)):
         order.append(f"sent {event.type}")  # noqa: PERF401 - the test checks when each append happens
     return order
+
+
+@pytest.mark.asyncio
+async def test_a_file_gemini_sent_inline_is_stored_before_its_event_goes_on() -> None:
+    result = {
+        "type": "code_execution_result",
+        "content": [],
+        "inline_outputs": [{"mime_type": "image/png", "data": "iVBORw=="}],
+    }
+    event = SimpleNamespace(
+        type="content_block_start", index=0, content_block={"type": "code_execution_tool_result", "content": result}
+    )
+
+    order = await _order_of("messages", event)
+
+    assert order == ["stored 4 bytes", "sent content_block_start"]
+    assert result["content"] == [{"type": "code_execution_output", "file_id": "file-stored"}]
+    assert "inline_outputs" not in result
 
 
 @pytest.mark.asyncio

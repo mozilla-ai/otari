@@ -43,7 +43,7 @@ export interface PlaygroundStream {
  * abort handle behind the Stop control.
  *
  * **The cost comes from the gateway's own usage chunk, not from a second call.**
- * The hosted original priced a reply by POSTing the token counts back to a
+ * otari.ai's original priced a reply by POSTing the token counts back to a
  * `/chat/completions/cost` endpoint, which is gone with the rest of that
  * backend (otari-ai#1920). It is not missed: this gateway settles the request
  * itself and the figures the stats line shows are the ones it metered, so

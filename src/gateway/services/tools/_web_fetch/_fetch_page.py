@@ -27,6 +27,7 @@ from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
 from gateway.log_config import logger
 from gateway.services.tools._web_display import fetched_url
 from gateway.services.tools._web_fetch._builtin import DOMAIN_POLICY_TAG, URL_INVALID_TAG
+from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_tool_failure import (
     INTERNAL_ERROR_TAG,
     MISSING_CREDENTIAL_TAG,
@@ -91,7 +92,7 @@ async def fetch_page(
                 api_key=resolved.api_key,
                 api_base=resolved.api_base,
                 timeout=resolved.timeout,
-                client=client,
+                client=web_provider_client_for(client, tenant_endpoint=resolved.tenant_endpoint),
             )
         )
         async with fetcher:

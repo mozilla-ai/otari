@@ -1,5 +1,5 @@
 import { Button, buttonVariants } from "@heroui/react"
-import { Link } from "@tanstack/react-router"
+import { Link, useLocation } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
@@ -9,7 +9,6 @@ import type { CatalogOffering } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Badge } from "@/design-system/indicators/Badge"
 import { Dot } from "@/design-system/indicators/Dot"
@@ -103,31 +102,12 @@ function rate(value: number | null | undefined): string {
   return value == null ? "—" : formatRate(value)
 }
 
-// How far the metered rate may sit from the provider's published list price
-// before the row says so. The listed price is the live models.dev catalog's and
-// the default is billed from the accepted snapshot, so a hair's width of
-// disagreement is rounding; a real gap is a stale stored price, a deliberate
-// markup or a snapshot update awaiting review, and each is worth a glance.
-const LIST_PRICE_TOLERANCE = 0.02
-
-/** The provider's list price, where it disagrees with what is metered. */
-export function listPriceNote(
-  metered: number | null | undefined,
-  listed: number | null | undefined,
-): string | null {
-  if (metered == null || listed == null || listed <= 0) return null
-  if (Math.abs(metered - listed) / listed <= LIST_PRICE_TOLERANCE) return null
-  return `list ${formatRate(listed)}`
-}
-
 function RateCell({
   metered,
-  listed,
   unit,
   tokenOnly = false,
 }: {
   metered: number | null | undefined
-  listed: number | null | undefined
   /** What the offering's price is per; a non-token rate names its unit. */
   unit: PricingUnit
   /** A rate only a token price has (output), shown as a dash on any other unit. */
@@ -140,13 +120,7 @@ function RateCell({
       </span>
     )
   }
-  const note = listPriceNote(metered, listed)
-  return (
-    <span className="flex flex-col items-end">
-      <span className="text-mono-caption">{rate(metered)}</span>
-      {note ? <span className="text-caption text-subtle">{note}</span> : null}
-    </span>
-  )
+  return <span className="text-mono-caption">{rate(metered)}</span>
 }
 
 function percent(value: number | null): string {
@@ -207,9 +181,11 @@ function compareOfferings(
 function offeringColumns({
   canOverride,
   withUsage,
+  withSource,
 }: {
   canOverride: boolean
   withUsage: boolean
+  withSource: boolean
 }): DataTableColumn<OfferingRow>[] {
   // Lane order is what a laptop sees without scrolling: the provider and its
   // selector, then the prices the page exists to compare, then where each came
@@ -260,7 +236,6 @@ function offeringColumns({
       cell: (row) => (
         <RateCell
           metered={row.input}
-          listed={row.offering.metadata_input_price_per_million}
           unit={pricingUnitOf(row.offering.pricing?.unit)}
         />
       ),
@@ -273,7 +248,6 @@ function offeringColumns({
       cell: (row) => (
         <RateCell
           metered={row.output}
-          listed={row.offering.metadata_output_price_per_million}
           unit={pricingUnitOf(row.offering.pricing?.unit)}
           tokenOnly
         />
@@ -290,11 +264,17 @@ function offeringColumns({
         </span>
       ),
     },
-    {
-      id: "source",
-      header: "Price from",
-      cell: ({ offering: row }) => <SourceMark source={row.price_source} />,
-    },
+    ...(withSource
+      ? [
+          {
+            id: "source",
+            header: "Price from",
+            cell: ({ offering: row }: OfferingRow) => (
+              <SourceMark source={row.price_source} />
+            ),
+          },
+        ]
+      : []),
     {
       id: "context",
       header: "Context / max out",
@@ -359,6 +339,22 @@ function offeringColumns({
   return columns
 }
 
+/** Back to the Models list, with its search and filters when it opened this page. */
+function CatalogBackLink() {
+  const search = useLocation({
+    select: (location) => location.state.catalogSearch,
+  })
+  return (
+    <Link
+      to="/models"
+      search={search ?? {}}
+      className="text-link hover:text-link-hover"
+    >
+      ← Models
+    </Link>
+  )
+}
+
 export function ModelDetailView({
   modelId,
   publicView = false,
@@ -374,7 +370,7 @@ export function ModelDetailView({
   // at deployment-wide pages.
   const operator = useDeploymentOperator(!publicView)
   const isOperator = !publicView && operator.isOperator
-  // Includes an operator: on a standalone deployment they are also the single
+  // Includes an operator: on a single-tenant deployment they are also the
   // organization's owner, and excluding them would leave the one caller who can
   // set a rate without the link to set it.
   const canOverride = !publicView && canManage(organization.data)
@@ -423,17 +419,6 @@ export function ModelDetailView({
   const hasCapabilities = CAPABILITY_LABELS.some(
     ({ key }) => model.capabilities[key],
   )
-  const listPriceDiffers = model.offerings.some(
-    (model) =>
-      listPriceNote(
-        model.pricing?.input_price_per_million,
-        model.metadata_input_price_per_million,
-      ) !== null ||
-      listPriceNote(
-        model.pricing?.output_price_per_million,
-        model.metadata_output_price_per_million,
-      ) !== null,
-  )
   const modalities = (list: string[]) =>
     list.length === 0
       ? "—"
@@ -452,12 +437,10 @@ export function ModelDetailView({
             href={publicCatalogHref()}
             className="text-link hover:text-link-hover"
           >
-            ← All models
+            ← Models
           </a>
         ) : (
-          <Link to="/models" className="text-link hover:text-link-hover">
-            ← All models
-          </Link>
+          <CatalogBackLink />
         )}
       </nav>
 
@@ -508,18 +491,10 @@ export function ModelDetailView({
             {model.description}
           </p>
         ) : null}
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
           <Stat
             label="Modalities"
             value={`${modalities(model.input_modalities)} → ${modalities(model.output_modalities)}`}
-          />
-          <Stat
-            label="In / out price"
-            value={
-              model.min_input_price_per_million == null
-                ? "unpriced"
-                : `${formatRate(model.min_input_price_per_million)} / ${rate(model.min_output_price_per_million)} per 1M`
-            }
           />
           <Stat
             label="Context"
@@ -603,11 +578,9 @@ export function ModelDetailView({
             </h2>
             <p className="max-w-prose text-sm text-muted">
               Several providers serve the same model. Each row is one offering:
-              what {publicView ? "this deployment lists it at" : "you pay"} and
-              where that price comes from.{" "}
               {publicView
-                ? null
-                : `"Use this model" has the request to send, to the gateway's pick or a provider you pin. `}
+                ? " what it costs. "
+                : ` what you pay and where that price comes from. "Use this model" has the request to send, to the gateway's pick or a provider you pin. `}
               {model.offering_count} on {model.provider_count}{" "}
               {model.provider_count === 1 ? "provider" : "providers"}, cheapest
               first.
@@ -636,6 +609,7 @@ export function ModelDetailView({
                 columns={offeringColumns({
                   canOverride,
                   withUsage,
+                  withSource: !publicView,
                 })}
                 rows={rows}
                 getRowKey={(row) => row.offering.selector}
@@ -654,16 +628,9 @@ export function ModelDetailView({
           {unpriced > 0 && defaultPricing === false ? (
             <p className="text-caption">
               Default pricing is off, so an offering with no stored rate is
-              unpriced here even where models.dev publishes one.
+              unpriced.
               {isOperator ? " Both switches live on Settings." : ""}
             </p>
-          ) : null}
-          {listPriceDiffers ? (
-            <InfoBanner>
-              A rate marked <em>list</em> differs from the price the provider
-              publishes on models.dev. What is metered here is the rate shown;
-              the list price is what the provider would charge you directly.
-            </InfoBanner>
           ) : null}
         </section>
       </div>

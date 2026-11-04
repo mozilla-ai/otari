@@ -4,14 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ActivityPage } from "@/features/activity/ActivityPage"
 import { entry, mockApi, renderPage } from "@/tests/activity"
-import { STANDALONE_SURFACES } from "@/tests/fixtures"
+import { SURFACES } from "@/tests/fixtures"
 import { traceSummary } from "@/tests/traceFixtures"
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const WITH_TRACES = { surfaces: [...STANDALONE_SURFACES, "traces"] }
+const WITH_TRACES = { surfaces: [...SURFACES, "traces"] }
 
 const lookups = (calls: ReturnType<typeof mockApi>["calls"]) =>
   calls.filter((call) => call.url.includes("/traces/requests/"))
@@ -53,7 +53,9 @@ describe("ActivityPage trace link", () => {
     await openRow()
 
     await waitFor(() => expect(lookups(calls)).toHaveLength(1))
-    expect(screen.getByText("Request detail")).toBeInTheDocument()
+    expect(
+      screen.getByRole("complementary", { name: "Request detail" }),
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("link", { name: "View trace" }),
     ).not.toBeInTheDocument()
@@ -68,7 +70,9 @@ describe("ActivityPage trace link", () => {
 
     await openRow()
 
-    expect(await screen.findByText("Request detail")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("complementary", { name: "Request detail" }),
+    ).toBeInTheDocument()
     expect(lookups(calls)).toEqual([])
     expect(
       screen.queryByRole("link", { name: "View trace" }),

@@ -3,6 +3,7 @@ import { Link, type LinkProps } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import type { IconType } from "react-icons"
+import { FaDiscord } from "react-icons/fa"
 import {
   FiBookOpen,
   FiChevronDown,
@@ -26,11 +27,8 @@ import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
-import { useProfile } from "@/shared/api/auth"
-import {
-  isNoOrganizationError,
-  useOrganizationContext,
-} from "@/shared/api/organizations"
+import { useSessionCaller } from "@/shared/api/auth"
+import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTheme } from "@/shared/hooks/useTheme"
@@ -48,7 +46,7 @@ import {
 // menu repeated it under an avatar the trigger already draws, so that block is
 // gone and /account is where an identity is actually read.
 //
-// Three of these are real in a standalone gateway. Appearance drives the dark
+// Three of these are real in this build. Appearance drives the dark
 // token block globals.css has carried since the design foundation was rehomed,
 // logging out ends the session, and Account settings opens the page that owns
 // the credential it was minted from (otari#653): a session is per-identity
@@ -76,16 +74,11 @@ const MENU_ICON_CLASS = `${NAV_ICON_CLASS} text-muted`
 const MENU_DIVIDER = "h-px shrink-0 bg-border"
 
 // Whose session this is, as the trigger at the foot of the rail names it: the
-// person, not their standing. It used to name a standing, because nothing
-// authenticated reported the caller's own identity and the bootstrap's
-// `session_type` was the only thing to hand; keyed on that, the trigger read
-// "Operator" for every signed-in caller, which is a role rather than a name and
-// on a hosted deployment was not even true of the person reading it (#832).
+// person, not their standing (#832).
 // `OrganizationMembershipContextPublic.caller` is the identity itself, on the
 // read `AppShellChrome` already makes, so naming the person costs no request.
 //
-// A standalone operator still reads "Operator", now because that *is* their
-// name: first boot provisions the identity with it (`OPERATOR_FULL_NAME`), and
+// The operator reads "Operator" because that *is* their name: first boot provisions the identity with it (`OPERATOR_FULL_NAME`), and
 // the roster shows the same word in the same place.
 //
 // Three answers, each for a real identity this deployment can hold. A member
@@ -338,12 +331,8 @@ export function AccountMenu({
   const { logout } = useAuth()
   const { docs_url, terms_url, privacy_url, feedback_enabled } = useDeployment()
   const isNavVisible = useNavVisibility()
-  const organization = useOrganizationContext()
-  // A caller with no organization has no context to read a name from, so the
-  // profile names them instead; everyone else needs no second request.
-  const profile = useProfile(isNoOrganizationError(organization.error))
   const [open, setOpen] = useState(false)
-  const identity = sessionIdentity(organization.data?.caller ?? profile.data)
+  const identity = sessionIdentity(useSessionCaller())
   const badgeLabel = useAccountBadgeLabel()
   const triggerLabel = badgeLabel
     ? `Account: ${identity.name}, ${badgeLabel}`
@@ -504,6 +493,12 @@ export function AccountMenu({
               }}
             />
           ) : null}
+          <MenuExternalLink
+            label="Community"
+            icon={FaDiscord}
+            href={OTARI_COMMUNITY_URL}
+            className="md:hidden"
+          />
           {terms_url ? (
             <MenuExternalLink
               label="Terms of service"

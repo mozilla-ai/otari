@@ -15,18 +15,68 @@ from datetime import datetime
 from typing import Any, cast
 
 from pydantic import BaseModel
-from sqlalchemy import CursorResult, and_, delete, func, or_, select
+from sqlalchemy import CursorResult, and_, delete, event, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import ORMExecuteState, Session
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import MODEL_KIND, ModelPricing, OrganizationModelPricing, PricingKind
 from gateway.repositories.base_repository import BaseRepository
 
 # The bound `services.pricing_service` chunks its own key lookups at, for the
 # same reason: a key list long enough to exceed SQLite's default limit on bind
 # parameters in one statement is a realistic page of one provider's models.
 _KEY_CHUNK = 500
+
+# Every session's writes to either price table, counted, so a process cache of
+# rates (`services.pricing_service`) can tell that what it holds may be stale.
+# The count moves when a session flushes a price change, on an added row, a
+# changed attribute or a bulk statement, and again when that transaction ends.
+_PRICE_MODELS = (ModelPricing, OrganizationModelPricing)
+_PRICE_TABLES = frozenset({ModelPricing.__table__, OrganizationModelPricing.__table__})
+_PRICES_WRITTEN = "gateway.prices_written"
+_price_writes = 0
+
+
+def price_write_generation() -> int:
+    """How many price writes this process has seen flushed, committed or rolled back."""
+    return _price_writes
+
+
+def pending_price_writes(db: AsyncSession) -> bool:
+    """Whether ``db`` holds a price change it has not yet committed or rolled back, flushed or not."""
+    return bool(db.info.get(_PRICES_WRITTEN, False)) or _holds_price_change(db.sync_session)
+
+
+def _holds_price_change(session: Session) -> bool:
+    return any(isinstance(row, _PRICE_MODELS) for row in (*session.new, *session.dirty, *session.deleted))
+
+
+def _count_price_write(session: Session) -> None:
+    global _price_writes
+    session.info[_PRICES_WRITTEN] = True
+    _price_writes += 1
+
+
+@event.listens_for(Session, "after_flush")
+def _count_flushed_price_write(session: Session, _flush_context: object) -> None:
+    if _holds_price_change(session):
+        _count_price_write(session)
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _count_price_statement(state: ORMExecuteState) -> None:
+    if not state.is_select and getattr(state.statement, "table", None) in _PRICE_TABLES:
+        _count_price_write(state.session)
+
+
+@event.listens_for(Session, "after_commit")
+@event.listens_for(Session, "after_rollback")
+def _count_price_transaction_end(session: Session) -> None:
+    global _price_writes
+    if session.info.pop(_PRICES_WRITTEN, False):
+        _price_writes += 1
 
 
 class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing, BaseModel, BaseModel]):
@@ -63,6 +113,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                 select(OrganizationModelPricing)
                 .where(
                     col(OrganizationModelPricing.organization_id) == organization_id,
+                    col(OrganizationModelPricing.kind) == MODEL_KIND,
                     col(OrganizationModelPricing.model_key).in_(chunk),
                     col(OrganizationModelPricing.effective_from) <= as_of,
                     # The half-open period, stated in SQL rather than walked in
@@ -106,6 +157,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                     func.max(col(ModelPricing.effective_at)).label("effective_at"),
                 )
                 .where(
+                    col(ModelPricing.kind) == MODEL_KIND,
                     col(ModelPricing.model_key).in_(chunk),
                     col(ModelPricing.effective_at) <= as_of,
                 )
@@ -116,6 +168,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                 select(ModelPricing).join(
                     newest,
                     and_(
+                        col(ModelPricing.kind) == MODEL_KIND,
                         col(ModelPricing.model_key) == newest.c.model_key,
                         col(ModelPricing.effective_at) == newest.c.effective_at,
                     ),
@@ -135,6 +188,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
         organization_id: uuid.UUID,
         *,
         model_key: str | None = None,
+        kind: PricingKind | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[OrganizationModelPricing], int]:
@@ -147,6 +201,8 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
         where = [col(OrganizationModelPricing.organization_id) == organization_id]
         if model_key is not None:
             where.append(col(OrganizationModelPricing.model_key) == model_key)
+        if kind is not None:
+            where.append(col(OrganizationModelPricing.kind) == kind)
         total = (
             await self.db.execute(select(func.count()).select_from(OrganizationModelPricing).where(*where))
         ).scalar_one()
@@ -157,6 +213,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                     .where(*where)
                     .order_by(
                         col(OrganizationModelPricing.model_key),
+                        col(OrganizationModelPricing.kind),
                         col(OrganizationModelPricing.effective_from).desc(),
                     )
                     .offset(skip)
@@ -182,7 +239,7 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
                     OrganizationModelPricing.id,
                     OrganizationModelPricing.organization_id,
                     OrganizationModelPricing.model_key,
-                ).where(OrganizationModelPricing.model_key.in_(chunk))
+                ).where(OrganizationModelPricing.kind == MODEL_KIND, OrganizationModelPricing.model_key.in_(chunk))
             )
             found.extend((row_id, organization_id, key) for row_id, organization_id, key in result.all())
         return found

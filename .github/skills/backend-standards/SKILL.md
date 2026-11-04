@@ -9,7 +9,7 @@ The gateway is an async FastAPI service: request handlers in `api/routes/`, busi
 `services/`, queries in `repositories/`, ORM in `models/`, migrations in `alembic/versions/`.
 This guide is the backend counterpart to the frontend skill and to the path-scoped review
 instructions in `.github/instructions/` (architecture, performance and security). `AGENTS.md`
-is the source of truth for build/test/lint commands and runtime modes; read it first. This file
+is the source of truth for build/test/lint commands; read it first. This file
 captures the conventions that keep new backend code correct and consistent.
 
 ## Async SQLAlchemy 2.0: the house style
@@ -36,7 +36,7 @@ count = (await db.execute(select(func.count()).select_from(ModelPricing))).scala
 - A request's session comes from the `get_db` dependency, and non-request code uses
   `create_session()` (`core/database.py`). Don't open ad-hoc engines.
 
-## The SQLModel half: the reconciled control plane's tables
+## The SQLModel half: the tenancy tables
 
 `models/tenancy.py` (organizations, workspaces, identities, memberships) is SQLModel rather
 than the declarative `Base` style of the other domain modules, because its `Create`/`Update`/`Public` schemas are the
@@ -70,7 +70,7 @@ moving one domain into the shape. This section adds the house style for code in 
 
 **New and moved code follows the target shape. Most existing code does not, so never copy the
 module beside yours.** `SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE`, `FLAT_MODULE_BASELINE`,
-`SERVICE_MODE_READ_BASELINE`, `LISTENER_DEFAULT_BASELINE` and the baseline on each `MODEL_ACCESS`
+`LISTENER_DEFAULT_BASELINE` and the baseline on each `MODEL_ACCESS`
 entry in `scripts/check_architecture.py` name the code still in the old shape. A baseline only shrinks:
 remove a name when you move its code, and never add one.
 
@@ -102,10 +102,8 @@ Catch specific exceptions, not a broad `except Exception`.
 
 A domain's service is its Service Layer, and [DOMAINS.md](../../../DOMAINS.md#the-target-shape)
 gives its shape: one service per domain with a small public API, built by constructor injection,
-from a builder in `api/deps.py`. Two rules add to it:
+from a builder in `api/deps.py`. One rule adds to it:
 
-- **Hybrid mode.** A hybrid gateway has no local database, so a service that needs one is not
-  built there.
 - **Moving old code.** A module-level function that takes a session becomes a method of its
   domain's service, or a repository method when all it does is run a query. A helper that
   needs no database stays a plain function.
@@ -135,7 +133,6 @@ rolls back.
 - Only a service opens a block. A repository never commits, and a route never opens a block.
 - A request whose database work all runs in blocks needs no `release_session` before it
   dispatches upstream.
-- Hybrid mode has no local database and no Unit of Work.
 
 Code still in the old shape commits in its services, and some routes still commit. A domain's
 commits move into blocks when the domain moves
@@ -174,8 +171,6 @@ A reservation that never settles leaks and permanently shrinks the user's budget
   client-supplied `user` field.
 - Enforce budgets atomically (the reservation is a single conditional `UPDATE`), not
   check-then-act. Use `is None` for "absent" vs a legitimate `0` (falsy-zero traps).
-- New billable logic must be correct in every applicable runtime mode. Verify whether it
-  belongs in the local control-plane branch (`db is not None`), the data plane, or both.
 
 ## Migrations (Alembic)
 

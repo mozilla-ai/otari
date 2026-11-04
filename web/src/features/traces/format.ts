@@ -1,4 +1,4 @@
-import { formatLatency } from "@/shared/helpers/format"
+import { formatLatency, formatNumber } from "@/shared/helpers/format"
 
 const pad = (n: number, width = 2) => String(n).padStart(width, "0")
 
@@ -19,7 +19,22 @@ export function formatDuration(ms: number): string {
     return `${Math.floor(seconds / 60)}m ${pad(seconds % 60)}s`
   }
   const minutes = Math.round(seconds / 60)
-  return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`
+  if (minutes < 24 * 60) {
+    return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`
+  }
+  const hours = Math.round(minutes / 60)
+  return `${Math.floor(hours / 24)}d ${pad(hours % 24)}h`
+}
+
+export function plural(count: number, word: string): string {
+  return `${formatNumber(count)} ${word}${count === 1 ? "" : "s"}`
+}
+
+// A part's share of a whole, in whole percent. A part too small to round to 1%
+// still happened, so it reads "<1%" rather than "0%".
+export function formatShare(fraction: number): string {
+  const pct = Math.round(fraction * 100)
+  return fraction > 0 && pct === 0 ? "<1%" : `${pct}%`
 }
 
 // Log View's Start column: `m:ss`, or `m:ss.mmm`, relative to the trace start.

@@ -21,9 +21,7 @@ from sqlmodel import SQLModel
 from gateway.api.deps import (
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
-    get_db_if_needed,
     get_unit_of_work,
-    get_unit_of_work_if_needed,
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session, get_db, init_db, reset_db
@@ -282,41 +280,6 @@ def test_the_request_dependency_produces_a_unit_of_work_over_the_request_session
     assert response.json() == {"is_unit_of_work": True, "wraps_request_session": True}
 
 
-def _probe_app(config: GatewayConfig) -> FastAPI:
-    """A one-route app whose handler reports what the optional dependencies gave it."""
-    app = FastAPI()
-    app.state.config = config
-
-    @app.get("/probe")
-    async def probe(
-        db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
-        uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
-    ) -> dict[str, bool]:
-        if uow is None:
-            return {"has_unit_of_work": False, "has_session": db is not None}
-        async with uow:
-            return {"has_unit_of_work": True, "wraps_route_session": session_for(uow) is db}
-
-    return app
-
-
-def test_the_optional_request_dependency_produces_a_unit_of_work_over_the_route_session(tmp_path: Path) -> None:
-    reset_db()
-    init_db(GatewayConfig(database_url=f"sqlite+aiosqlite:///{tmp_path / 'uow.db'}", auto_migrate=False))
-    try:
-        response = TestClient(_probe_app(GatewayConfig())).get("/probe")
-    finally:
-        reset_db()
-
-    assert response.json() == {"has_unit_of_work": True, "wraps_route_session": True}
-
-
-def test_the_optional_request_dependency_produces_no_unit_of_work_in_hybrid_mode() -> None:
-    response = TestClient(_probe_app(GatewayConfig(mode="hybrid"))).get("/probe")
-
-    assert response.json() == {"has_unit_of_work": False, "has_session": False}
-
-
 class _StubCodeExecutionPort:
     """Only ``label`` is read when the registry is built."""
 
@@ -329,7 +292,7 @@ def _stub_request() -> Request:
     return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
 
 
-def _build_bridge(uow: UnitOfWork | None) -> SandboxFileBridge | None:
+def _build_bridge(uow: UnitOfWork) -> SandboxFileBridge | None:
     return build_sandbox_file_bridge(
         raw_request=_stub_request(),
         config=GatewayConfig(public_base_url="http://testserver"),
@@ -340,7 +303,7 @@ def _build_bridge(uow: UnitOfWork | None) -> SandboxFileBridge | None:
     )
 
 
-def _build_registry(uow: UnitOfWork | None) -> SandboxContainerRegistry | None:
+def _build_registry(uow: UnitOfWork) -> SandboxContainerRegistry | None:
     return build_sandbox_container_registry(
         config=GatewayConfig(),
         uow=uow,
@@ -352,11 +315,9 @@ def _build_registry(uow: UnitOfWork | None) -> SandboxContainerRegistry | None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("build", [_build_bridge, _build_registry], ids=["file bridge", "container registry"])
-async def test_a_sandbox_collaborator_needs_a_unit_of_work(
-    notes_database: None, build: Callable[[UnitOfWork | None], object | None]
+async def test_a_sandbox_collaborator_is_built_on_the_requests_unit_of_work(
+    notes_database: None, build: Callable[[UnitOfWork], object | None]
 ) -> None:
-    """Hybrid mode has no Unit of Work, and a collaborator that writes cannot be built without one."""
-    assert build(None) is None
     async with create_unit_of_work() as uow:
         assert build(uow) is not None
 

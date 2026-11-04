@@ -8,7 +8,7 @@ from any_llm.types.image import ImageGenerationParams, ImagesResponse
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key_if_needed
+from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -44,8 +44,8 @@ async def create_image(
     raw_request: Request,
     response: Response,
     request: ImageGenerationRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any]:

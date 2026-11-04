@@ -59,16 +59,37 @@ export function buildTraceTree(detail: TraceDetail): TraceTree {
   return { turns, roots }
 }
 
+// A command or path in a tree row: its first line, short enough to scan.
+const LABEL_TARGET_LENGTH = 80
+
+export function clip(text: string): string {
+  const line = text.trim().split("\n", 1)[0].trim()
+  return line.length > LABEL_TARGET_LENGTH
+    ? `${line.slice(0, LABEL_TARGET_LENGTH - 1)}…`
+    : line
+}
+
+// A path keeps its end, where the file's own name is.
+export function clipPath(path: string): string {
+  return path.length > LABEL_TARGET_LENGTH
+    ? `…${path.slice(-(LABEL_TARGET_LENGTH - 1))}`
+    : path
+}
+
 // What a span is called in the tree: the thing it acted on where there is one
 // (the model, the tool), and its kind where there is not.
 export function spanLabel(span: TraceSpan): string {
   switch (span.kind) {
     case "llm":
       return span.model || "LLM call"
-    case "tool":
-      return span.tool_name || "Tool call"
+    case "tool": {
+      const name = span.tool_name || "Tool call"
+      const { command, file_path: path } = span.content
+      if (command) return `${name} · ${clip(command)}`
+      return path ? `${name} · ${clipPath(path)}` : name
+    }
     case "step":
-      return "Request"
+      return span.operation === "interaction" ? "Prompt" : "Request"
     case "routing_attempt":
       return "Routing attempt"
     case "guardrail":
@@ -78,6 +99,13 @@ export function spanLabel(span: TraceSpan): string {
     case "agent":
       return span.name
     default:
+      if (span.operation === "tool.blocked_on_user") {
+        const decision = span.attributes["otari.tool.decision"]
+        if (decision === "accept") return "Permission · allowed"
+        if (decision === "reject") return "Permission · refused"
+        return "Permission"
+      }
+      if (span.operation === "tool.execution") return "Ran"
       return span.name
   }
 }

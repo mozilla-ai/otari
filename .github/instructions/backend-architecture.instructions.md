@@ -18,7 +18,7 @@ against the rules below, and do not accept "the module next to it does the
 same" as a reason.
 
 `SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE`, `FLAT_MODULE_BASELINE`,
-`SERVICE_MODE_READ_BASELINE`, `LISTENER_DEFAULT_BASELINE` and the baseline on each
+`LISTENER_DEFAULT_BASELINE` and the baseline on each
 `MODEL_ACCESS` entry in `scripts/check_architecture.py` name the code still in
 the old shape.
 
@@ -73,41 +73,26 @@ the old shape.
 - Code still in the old shape commits in its services. Do not flag a commit
   the PR does not add.
 
-## Deployment modes
+## Core and overlays
 
-The behavior for each deployment mode belongs in a binding chosen where the app
-is wired, not in a branch on the mode. The check refuses a read of
-`configured_mode`, `effective_mode`, `is_hosted_mode` or `is_hybrid_mode`, or a
-call to `deployment_for`, under `services/`. It does not catch the cases below.
+Otari runs as one process over its own database. An overlay, such as
+otari.ai's, runs in that same process: `OTARI_BOOTSTRAP` names a module that
+binds its adapters into the container and contributes capability-gated
+routers. `ARCHITECTURE.md` places each piece of work with one question: does
+Otari need it to stand alone? Yes puts it in the core, and no in an overlay.
 
-- Flag a service that branches on the mode another way, such as on
-  `config.mode`, on whether `config.platform_token` is set, or on the
-  `OTARI_AI_TOKEN` or `OTARI_MODE` environment variable.
-- Flag a PR that makes a builder in `api/deps.py` or a factory in
-  `container.py` read the mode and pass the answer to a service as an argument,
-  such as `on_by_default=config.is_hosted_mode`. The service then branches on
-  that argument. The builder or factory binds a different implementation for
-  each mode instead.
-- Flag a mode read added to a module already on `SERVICE_MODE_READ_BASELINE`.
-  The baseline lists modules, not reads.
-
-## Planes and overlays
-
-`ARCHITECTURE.md` places each piece of work with two questions. Does Otari need
-it to stand alone? Yes puts it in the core, and no in an overlay. Does it see
-customer content while it serves a caller's request? Yes puts it in the data
-plane, and no in the control plane. Customer content is prompts, completions,
-tool inputs and outputs, search queries, sandbox code, file bytes and captured
-agent telemetry.
-
-- Flag new control-plane code that receives customer content from a caller's
-  request or writes it to a store. Content goes from the data plane straight to
-  where it is served or stored. A person's read of stored content through the
-  control plane, after an access check and an audit record, is the exception.
-- Flag a design that needs an overlay adapter for a port whose adapter sees
-  customer content. An overlay loads into a control plane only. The core holds
-  every such adapter, and it speaks a published protocol. An overlay runs a
-  service behind that protocol, and the data plane reaches it with a grant.
+- Flag core code that imports an overlay, or that branches on which edition or
+  deployment it runs in instead of resolving a port.
+- Flag a new port whose core adapter does not work on its own. Every port
+  ships a real lightweight adapter or an honest Null Object, so Otari boots
+  with no bootstrap configured.
+- Flag a concrete adapter named anywhere but the composition root,
+  `container.py`.
+- Flag overlay code that sees customer content (prompts, completions, tool
+  inputs and outputs, search queries, sandbox code, file bytes, captured
+  agent telemetry) outside an Otari port, and a change that removes or stubs
+  out the core's working adapter for such a port. An overlay may replace that
+  adapter; the core must keep one that works.
 
 ## Table writers
 

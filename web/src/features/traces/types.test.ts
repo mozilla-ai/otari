@@ -119,6 +119,7 @@ describe("summarizeTrace", () => {
       promptTokens: 0,
       completionTokens: 0,
       cachedTokens: 0,
+      cacheWriteTokens: 0,
       totalTokens: 0,
       totalCost: 0,
       models: [],

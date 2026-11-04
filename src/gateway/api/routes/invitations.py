@@ -1,4 +1,4 @@
-"""Accepting an organization invitation (standalone mode only).
+"""Accepting an organization invitation.
 
 Deliberately public: the person following an emailed link holds no master
 key and no session, and the token in the link is their whole proof of
@@ -17,6 +17,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
+    IdentityServiceDep,
     InvitationClaimSettingsDep,
     MembershipOrganizationServiceDep,
     OrganizationServiceDep,
@@ -57,6 +58,7 @@ async def accept_invitation(
     service: MembershipOrganizationServiceDep,
     claims: InvitationClaimSettingsDep,
     growth: GrowthSignalPortDep,
+    identities: IdentityServiceDep,
     body: AcceptInvitationRequest,
 ) -> AcceptInvitationResultPublic:
     """Accept a pending invitation, resolving it to an active membership and optionally setting a first password.
@@ -68,6 +70,7 @@ async def accept_invitation(
     acceptance = await service.accept_invitation(
         body.token,
         claims=claims,
+        blocked_addresses=identities,
         password=body.password,
         full_name=body.full_name,
         terms_accepted=body.terms_accepted,

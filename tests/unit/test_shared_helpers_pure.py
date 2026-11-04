@@ -258,6 +258,7 @@ def test_budget_response_from_model_nullable_fields() -> None:
 
 def test_pricing_response_from_model() -> None:
     pricing = MagicMock()
+    pricing.kind = "model"
     pricing.model_key = "openai:gpt-4"
     pricing.effective_at = datetime(2025, 2, 1, tzinfo=UTC)
     pricing.input_price_per_million = 30.0

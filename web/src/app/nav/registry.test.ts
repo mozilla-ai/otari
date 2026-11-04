@@ -1,7 +1,6 @@
 import { FiBox } from "react-icons/fi"
 import { describe, expect, it } from "vitest"
 import { BASE_CAPABILITIES } from "@/shared/hooks/useEntitlements"
-import { HOSTED_SURFACES } from "@/tests/fixtures"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
 import { OVERLAY_NAV_ITEMS } from "./overlayNavItems"
 import { OVERLAY_DEPLOYMENT_NAV_SECTIONS } from "./overlaySections"
@@ -59,12 +58,11 @@ describe("nav registry", () => {
       "org-observe",
       "org-people",
       "org-money",
-      "org-gateway",
       "org-general",
     ])
   })
 
-  it("declares every destination the standalone dashboard serves", () => {
+  it("declares every destination the dashboard serves", () => {
     // The whole list, not a sample: the registry is now the only place a
     // destination exists, so an entry dropped in a refactor is a page that
     // silently stops being reachable.
@@ -73,9 +71,6 @@ describe("nav registry", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Playground",
       "Overview",
-      "Activity",
-      "Sessions",
-      "Usage",
       "Models",
       "Routing",
       "Tools",
@@ -92,6 +87,9 @@ describe("nav registry", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
+      "Subagent router",
+      "Web search",
+      "Code execution pricing",
       "Health",
     ])
   })
@@ -133,6 +131,9 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/recommender",
+      "/admin/web-search",
+      "/admin/code-execution",
       "/health-checks",
     ])
   })
@@ -153,6 +154,9 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/recommender",
+      "/admin/web-search",
+      "/admin/code-execution",
       "/health-checks",
     ])
     // And on neither of the others. A destination drawn on two rails would
@@ -163,6 +167,9 @@ describe("nav registry", () => {
     expect(others).not.toContain("/settings")
     expect(others).not.toContain("/admin/accounts")
     expect(others).not.toContain("/admin/hosted-providers")
+    expect(others).not.toContain("/admin/recommender")
+    expect(others).not.toContain("/admin/web-search")
+    expect(others).not.toContain("/admin/code-execution")
     expect(others).not.toContain("/health-checks")
   })
 
@@ -177,6 +184,9 @@ describe("nav registry", () => {
       ["/settings", "settings", "refused"],
       ["/admin/accounts", "admin", "unlisted"],
       ["/admin/hosted-providers", "hosted_providers", "unlisted"],
+      ["/admin/recommender", "agent_recommenders", "unlisted"],
+      ["/admin/web-search", "tools", "refused"],
+      ["/admin/code-execution", "pricing", "refused"],
       ["/health-checks", "health_checks", "refused"],
     ] as const) {
       const item = navItemForPath(to)
@@ -305,19 +315,15 @@ describe("nav registry", () => {
     expect(overview?.capability).toBeUndefined()
   })
 
-  it("names the surface each observability page reads", () => {
-    // Activity and Usage are two views over /v1/usage, so they gate together on
-    // the surface rather than each on a name of its own; Sessions reads traces.
-    const observability = NAV_SECTIONS.find(
-      (section) => section.id === "observe",
-    )
-    // The whole section now: the index moved out to its own group above, so
-    // there is nothing ungated left in here to skip past.
-    expect(observability?.items.map((item) => item.surface)).toEqual([
-      "usage",
-      "traces",
-      "usage",
-    ])
+  it("files the Overview's tabs under the index rather than a section", () => {
+    // Usage, Requests and Sessions are views of the landing page, each gated
+    // on its own surface inside it, so they add no row.
+    const overview = NAV_ITEMS.find((item) => item.label === "Overview")
+    expect(overview?.views).toEqual(["/requests", "/sessions"])
+    // The section stays declared, empty, for the rows an overlay files under it.
+    expect(
+      NAV_SECTIONS.find((section) => section.id === "observe")?.items,
+    ).toEqual([])
   })
 
   it("gates no base entry on a capability", () => {
@@ -331,7 +337,7 @@ describe("nav registry", () => {
     // Vacuous while the assertion above holds, and deliberately kept: it arms
     // itself the moment someone adds the first tag. A base entry gated on a
     // capability the base build does not grant disappears from the sidebar of
-    // every standalone gateway, and the two lists are maintained in different
+    // every gateway, and the two lists are maintained in different
     // files, which is exactly the pair a single commit forgets to update.
     for (const item of NAV_ITEMS) {
       if (item.capability === undefined) continue
@@ -339,13 +345,13 @@ describe("nav registry", () => {
     }
   })
 
-  it("gates every organization destination on a surface standalone reports", () => {
+  it("gates every organization destination on a surface the bootstrap reports", () => {
     // Pinned as the whole rail, because the failure mode is silent in both
     // directions: a missing gate ships a link to a page that cannot work, and a
     // gate on a surface the bootstrap does not report hides a page that can. A
     // typo in a surface name is silent the same way, since `NavItemBase.surface`
     // is a bare string.
-    const standalone = [
+    const surfaces = [
       "admin",
       "budgets",
       "keys",
@@ -363,7 +369,7 @@ describe("nav registry", () => {
       "workspaces",
     ]
     for (const item of ORG_NAV_SECTIONS.flatMap(({ items }) => items)) {
-      expect(standalone).toContain(item.surface)
+      expect(surfaces).toContain(item.surface)
     }
     expect(navItemForPath("/organization/usage")?.surface).toBe(
       "organization_usage",
@@ -371,39 +377,28 @@ describe("nav registry", () => {
     expect(navItemForPath("/organization/provider-keys")?.surface).toBe(
       "organization_providers",
     )
-    // The other direction, read from the fixture the hosted-shell tests render
-    // with, which is what keeps that fixture honest: a surface added to the
-    // backend's HOSTED_SURFACES and not to the fixture leaves those tests
-    // quietly rendering a rail the product does not have, and fails here
-    // instead.
-    for (const surface of [
-      "organization_guardrails",
+    expect(navItemForPath("/organization/web-search-keys")?.surface).toBe(
       "organization_providers",
-      "organization_usage",
-    ]) {
-      expect(HOSTED_SURFACES).toContain(surface)
-    }
+    )
     expect(navItemForPath("/organization/guardrails")?.surface).toBe(
       "organization_guardrails",
     )
   })
 
   it("declares no destination an overlay owns", () => {
-    // Billing and Gateways are the two rows the design draws that this registry
-    // deliberately does not declare: Billing is ARCHITECTURE.md's overlay-only
-    // capability, and the attached-gateway surface behind Gateways is hosted
-    // depth (otari-ai#1779). Declaring either back is not the harmless
+    // Billing is the row the design draws that this registry deliberately does
+    // not declare: it is ARCHITECTURE.md's overlay-only capability. Declaring
+    // it back is not the harmless
     // redundancy it looks like. The route file a nav entry needs would sit at a
     // path the overlay's own route file also claims, and the generator refuses
     // that pair ("Conflicting configuration paths were found") rather than
     // letting the overlay shadow the base, so the composed build gets no route
-    // tree for the overlay's page. An overlay contributes both through
+    // tree for the overlay's page. An overlay contributes it through
     // `OVERLAY_NAV_ITEMS`.
-    const paths = NAV_ITEMS.map((item) => item.to)
-    expect(paths).not.toContain("/organization/billing")
-    expect(paths).not.toContain("/organization/gateways")
+    expect(NAV_ITEMS.map((item) => item.to)).not.toContain(
+      "/organization/billing",
+    )
     expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("billing")
-    expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("gateways")
   })
 
   it("appends overlay sections after the base sections", () => {
@@ -449,6 +444,13 @@ describe("nav registry", () => {
       "Providers",
       "Guardrails",
       "Org settings",
+    ])
+    // Providers groups the organization's two kinds of provider key.
+    expect(
+      general?.items[0]?.children?.map((child) => [child.label, child.to]),
+    ).toEqual([
+      ["Inference", "/organization/provider-keys"],
+      ["Web search", "/organization/web-search-keys"],
     ])
   })
 
@@ -569,6 +571,13 @@ describe("isPathVisible", () => {
 
   it("inherits the gate of the destination a deeper path sits under", () => {
     expect(isPathVisible("/routing/new", without("routing"))).toBe(false)
+  })
+
+  it("answers a tab of the Overview with the Overview", () => {
+    expect(navItemForPath("/requests")?.label).toBe("Overview")
+    expect(navItemForPath("/sessions")?.label).toBe("Overview")
+    // Ungated, like the page it is a view of: each tab gates itself.
+    expect(isPathVisible("/sessions", without("traces"))).toBe(true)
   })
 
   it("leaves a path the registry does not declare ungated", () => {
@@ -756,7 +765,8 @@ describe("composeNavItems", () => {
 
 describe("pageLabelForPath", () => {
   it("names a rail page and a chrome page from one place", () => {
-    expect(pageLabelForPath("/usage")).toBe("Usage")
+    expect(pageLabelForPath("/keys")).toBe("API keys")
+    expect(pageLabelForPath("/sessions")).toBe("Overview")
     expect(pageLabelForPath("/invitations")).toBe("Invitations")
     expect(pageLabelForPath("/account")).toBe("Account")
     expect(pageLabelForPath("/nowhere")).toBeUndefined()

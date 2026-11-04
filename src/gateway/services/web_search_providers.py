@@ -1,6 +1,6 @@
 """Commercial search APIs as first-party web-search backends.
 
-:mod:`gateway.services.web_search_backend` dispatches the in-loop
+:mod:`gateway.services.web_retrieval_backend` dispatches the in-loop
 ``otari_web_search`` tool to a SearXNG-shaped backend. Reaching a licensed API
 (Tavily, Brave) that way used to mean running a translating adapter container
 next to the gateway, one per provider, each holding the provider's key. This
@@ -8,16 +8,9 @@ module is that translation, in-process: one function per provider, mapping a
 query onto the provider's native request and its answer back onto the
 SearXNG-shaped hits ``WebSearchBackend`` already understands.
 
-Two callers, and the difference between them is where the credential may sit:
-
-* **Standalone.** ``WebSearchBackend`` calls :func:`provider_search` directly
-  when ``web_search_provider`` is configured, so a self-hosted deployment
-  reaches Tavily or Brave with no adapter container, no second URL, and no
-  extra hop.
-* **Hosted.** The data plane is a separate process on separate hardware, and a
-  deployment-owned search key must not be on it. There the control plane serves
-  :mod:`gateway.api.routes.web_search_backend` over the same SearXNG shape, calls
-  this module on the gateway's behalf, and the key stays where it was configured.
+``WebSearchBackend`` calls :func:`provider_search` directly when
+``web_search_provider`` is configured, so a deployment reaches Tavily or Brave
+with no adapter container, no second URL, and no extra hop.
 
 The key is the caller's to pass: the deployment's, or the workspace's own
 organization key. Nothing here reads tenancy, and no response carries a

@@ -39,16 +39,11 @@ def generate_openapi_spec() -> dict[str, object]:
         config = GatewayConfig(
             database_url=database_url,
             bootstrap_api_key=False,
-            # Placeholders, so the conditionally mounted routes are in the
-            # published contract: the web-search backend route, mounted only where
-            # a provider and a backend token are both configured, and the token
-            # exchange, mounted only where a federation issuer is trusted. The spec
-            # has to describe every route this app can serve, not only the ones a
-            # bare default config happens to reach. Nothing is called during
-            # generation; these values are never used to authenticate anything.
-            web_search_provider="tavily",
-            web_search_provider_api_key="openapi-generation-placeholder",
-            web_search_backend_token="openapi-generation-placeholder",
+            # A placeholder, so the conditionally mounted token exchange (mounted
+            # only where a federation issuer is trusted) is in the published
+            # contract. The spec has to describe every route this app can serve,
+            # not only the ones a bare default config happens to reach. Nothing is
+            # called during generation; it never authenticates anything.
             federation_issuers=[FederationIssuer(issuer="https://openapi-generation-placeholder.invalid")],
         )
         # The token exchange needs a secret to start; a throwaway one, for this process only.

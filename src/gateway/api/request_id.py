@@ -1,4 +1,4 @@
-"""The ``Otari-Request-ID`` a completion is answered under, on an error as on a success.
+"""The ``Otari-Request-ID`` a request is answered under, on an error as on a success.
 
 FastAPI copies the headers of the response it injects into a route only onto the
 response it builds from the route's return value. A Response the route returns
@@ -21,9 +21,13 @@ if TYPE_CHECKING:
 _SCOPE_KEY = "otari.request_id"
 
 
-def set_request_id(request: Request, response: Response, request_id: str) -> None:
-    """Answer ``request`` under ``request_id``, whether its route returns ``response`` or raises."""
-    response.headers[REQUEST_ID_HEADER] = request_id
+def set_request_id(request: Request, response: Response | None, request_id: str) -> None:
+    """Answer ``request`` under ``request_id``, whether its route returns ``response`` or raises.
+
+    A route that builds its own response passes ``None`` and sets the header on it.
+    """
+    if response is not None:
+        response.headers[REQUEST_ID_HEADER] = request_id
     request.scope[_SCOPE_KEY] = request_id
 
 

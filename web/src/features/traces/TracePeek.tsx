@@ -1,59 +1,50 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import {
-  FiChevronDown,
-  FiChevronLeft,
-  FiChevronUp,
-  FiMaximize2,
-  FiMinimize2,
-  FiX,
-} from "react-icons/fi"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { FiChevronLeft } from "react-icons/fi"
 
 import { Button } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
-import { IconButton } from "@/design-system/actions/IconButton"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Skeleton } from "@/design-system/feedback/Skeleton"
-import { Kbd } from "@/design-system/indicators/Kbd"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
-import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
 
+import { PeekPanel, ResizeHandle } from "@/shared/components/PeekPanel"
+import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
+import { CostCard } from "./CostCard"
+import { ExplainCard } from "./ExplainCard"
 import {
   formatDuration,
   formatRelativeTime,
   formatTraceTimestamp,
 } from "./format"
+import { GateCard, VERDICT } from "./GateCard"
+import { GatesView, stoppedBy } from "./GatesView"
+import { GatewayCall } from "./GatewayCall"
 import { GatewayPanel } from "./GatewayPanel"
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { NavHeader, type NavView } from "./NavHeader"
 import { TypeMark } from "./observationTypes"
+import type { SessionStats } from "./sessionStats"
 import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
 import { type Observation, summarizeTrace, type Trace } from "./types"
 
-type PeekTab = "preview" | "attributes" | "log"
+type PeekTab = "preview" | "attributes" | "log" | "gates"
 
 // Attributes belong to a span, so that tab shows only while one is selected.
 const ALL_TABS: { id: PeekTab; label: string }[] = [
   { id: "preview", label: "Preview" },
   { id: "attributes", label: "Attributes" },
   { id: "log", label: "Log View" },
+  { id: "gates", label: "Gates" },
 ]
 
 const FORMAT_OPTIONS = [
   { value: "formatted", label: "Formatted" },
   { value: "raw", label: "Raw" },
 ]
-
-const MIN_PX = 640 // 40rem
-const MAX_FRACTION = 0.9
-const DEFAULT_FRACTION = 0.5
-const DEFAULT_CAP_PX = 1400 // 87.5rem
-// One arrow press on the panel's edge, as a share of the window.
-const WIDTH_STEP = 0.05
-const EXIT_MS = 250
 
 // The tree pane's share of the body, between these bounds, and one arrow
 // press on its divider.
@@ -66,82 +57,6 @@ const NAV_STEP = 0.04
 const NAV_MIN = "17.5rem"
 const DETAIL_MIN = "22.5rem"
 const NAV_COLLAPSED = "2.5rem"
-
-function defaultWidth(): number {
-  return Math.max(
-    MIN_PX,
-    Math.min(window.innerWidth * DEFAULT_FRACTION, DEFAULT_CAP_PX),
-  )
-}
-
-// A 4px bar in a 12px strip straddling an edge: transparent at rest, drawn on
-// hover, focus and drag. Shared by the panel's outer edge and the inner divider.
-// A drag writes at most once a frame, from the last pointer position.
-function ResizeHandle({
-  label,
-  className,
-  onDragStart,
-  onDrag,
-  onStep,
-  valueNow,
-  valueMin,
-  valueMax,
-}: {
-  label: string
-  className: string
-  onDragStart?: () => void
-  onDrag: (clientX: number) => void
-  onStep: (direction: -1 | 1) => void
-  valueNow: number
-  valueMin: number
-  valueMax: number
-}) {
-  const [dragging, setDragging] = useState(false)
-  const frame = useRef(0)
-  const latestX = useRef(0)
-  useEffect(() => () => cancelAnimationFrame(frame.current), [])
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: an <hr> cannot take focus or a drag
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={label}
-      aria-valuenow={valueNow}
-      aria-valuemin={valueMin}
-      aria-valuemax={valueMax}
-      tabIndex={0}
-      className={`otari-trace-ring group absolute inset-y-0 z-10 w-3 cursor-ew-resize touch-none ${className}`}
-      onPointerDown={(event) => {
-        event.currentTarget.setPointerCapture(event.pointerId)
-        onDragStart?.()
-        setDragging(true)
-      }}
-      onPointerMove={(event) => {
-        if (!dragging) return
-        latestX.current = event.clientX
-        if (frame.current) return
-        frame.current = requestAnimationFrame(() => {
-          frame.current = 0
-          onDrag(latestX.current)
-        })
-      }}
-      onPointerUp={() => setDragging(false)}
-      onPointerCancel={() => setDragging(false)}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-          event.preventDefault()
-          onStep(event.key === "ArrowLeft" ? -1 : 1)
-        }
-      }}
-    >
-      <span
-        className={`absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 transition-colors group-hover:bg-control-border group-focus-visible:bg-control-border motion-reduce:transition-none ${
-          dragging ? "bg-control-border" : "bg-transparent"
-        }`}
-      />
-    </div>
-  )
-}
 
 function Breakdown({ rows }: { rows: [string, string | undefined][] }) {
   return (
@@ -258,16 +173,76 @@ function Attributes({
     ...Object.entries(observation.metadata ?? {}),
   ]
   return (
-    <dl className="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2">
+    // Keys and values wrap anywhere: a dotted attribute key or an ID has no
+    // space to break at, and would otherwise run into the next column.
+    <dl className="grid grid-cols-[fit-content(16rem)_minmax(0,1fr)] gap-x-4 gap-y-2">
       {rows
         .filter(([, value]) => value)
         .map(([key, value]) => (
           <div key={key} className="contents">
-            <dt className="text-muted">{key}</dt>
-            <dd className="break-words text-body">{value}</dd>
+            <dt className="wrap-anywhere text-muted">{key}</dt>
+            <dd className="wrap-anywhere text-body">{value}</dd>
           </div>
         ))}
     </dl>
+  )
+}
+
+// The session's tool calls and gate runs, each with its breakdown on hover.
+function SessionCounts({ stats }: { stats: SessionStats }) {
+  const calls = stats.toolCalls
+  const runs = stats.gates.runs
+  return (
+    <>
+      {calls > 0 ? (
+        <Tooltip
+          content={
+            <Breakdown
+              rows={[
+                ...stats.tools.map((tally): [string, string] => [
+                  tally.tool,
+                  formatNumber(tally.calls),
+                ]),
+                ...(stats.inSubagents > 0
+                  ? [
+                      ["In subagents", formatNumber(stats.inSubagents)] as [
+                        string,
+                        string,
+                      ],
+                    ]
+                  : []),
+              ]}
+            />
+          }
+        >
+          {(props) => (
+            <button type="button" {...props} className={DOTTED}>
+              {formatNumber(calls)} tool call{calls === 1 ? "" : "s"}
+            </button>
+          )}
+        </Tooltip>
+      ) : null}
+      {runs > 0 ? (
+        <Tooltip
+          content={
+            <Breakdown
+              rows={Object.entries(stats.gates.verdicts).map(
+                ([verdict, count]): [string, string] => [
+                  VERDICT[verdict as keyof typeof VERDICT].word,
+                  formatNumber(count),
+                ],
+              )}
+            />
+          }
+        >
+          {(props) => (
+            <button type="button" {...props} className={DOTTED}>
+              {formatNumber(runs)} gate{runs === 1 ? "" : "s"} run
+            </button>
+          )}
+        </Tooltip>
+      ) : null}
+    </>
   )
 }
 
@@ -279,6 +254,8 @@ export function TracePeek({
   onClose,
   onPrevious,
   onNext,
+  notice,
+  actions,
 }: {
   trace: Trace
   /** Why the session's spans could not be read, when they could not. */
@@ -290,35 +267,27 @@ export function TracePeek({
   onClose: () => void
   onPrevious?: () => void
   onNext?: () => void
+  /** Said on the session itself, not on each span: who may read what it was about. */
+  notice?: ReactNode
+  /** Controls for the whole session, beside the format switch. */
+  actions?: ReactNode
 }) {
   const [tab, setTab] = useState<PeekTab>("preview")
   const [format, setFormat] = useState<Format>("formatted")
-  const [width, setWidth] = useState(defaultWidth)
-  const [expanded, setExpanded] = useState(false)
-  const [entered, setEntered] = useState(false)
-  // The session being closed, so a row opened during the exit is not closed
-  // with it.
-  const [leavingId, setLeavingId] = useState<string | null>(null)
   const [navFraction, setNavFraction] = useState(NAV_DEFAULT_FRACTION)
   const [navView, setNavView] = useState<NavView>("tree")
   const [navCollapsed, setNavCollapsed] = useState(false)
   const [navQuery, setNavQuery] = useState("")
-  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
-    new Set(),
-  )
+  // The rows a person opened or closed, against the default below, so a tool
+  // call a live session adds later starts closed like the rest.
+  const [toggledIds, setToggledIds] = useState<ReadonlySet<string>>(new Set())
   const bodyRef = useRef<HTMLDivElement>(null)
   const bodyBox = useRef<DOMRect | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const backRef = useRef<HTMLButtonElement>(null)
   const navRef = useRef<HTMLDivElement>(null)
-  const exitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const shownTraceId = useRef(trace.id)
-  useLayoutEffect(() => {
-    shownTraceId.current = trace.id
-  })
   const summary = summarizeTrace(trace)
   const loaded = trace.gateway !== undefined
-  const leaving = leavingId === trace.id
   // Below md one pane shows at a time: picking a row (the session's included)
   // shows what it opened, and Back returns to the tree.
   const [selection, setSelection] = useState<{
@@ -342,9 +311,14 @@ export function TracePeek({
     setSelection({ traceId: trace.id, id: selectedId, isDetailShown: false })
   const observation =
     trace.observations.find((o) => o.id === selectedId) ?? null
-  const tabs = observation
-    ? ALL_TABS
-    : ALL_TABS.filter((t) => t.id !== "attributes")
+  const gates = trace.gateway?.gates ?? []
+  const blockedChecks = gates.reduce((sum, gate) => sum + stoppedBy(gate), 0)
+  // Attributes only for a picked span, Gates only for a session a hook reported to.
+  const tabs = ALL_TABS.filter(
+    (t) =>
+      (t.id !== "attributes" || observation) &&
+      (t.id !== "gates" || gates.length > 0),
+  )
   const parentIds = useMemo(
     () => [
       ...new Set(
@@ -355,10 +329,79 @@ export function TracePeek({
     ],
     [trace],
   )
+  // A tool call and a group of gates start closed: their row says enough until
+  // someone asks for more.
+  const defaultCollapsed = useMemo(() => {
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+    // Only a row whose children are all details of it, so a tool call another
+    // agent made with work of its own under it never hides that work.
+    const onlyDetails = new Map<string, boolean>()
+    for (const o of trace.observations) {
+      if (o.parentObservationId === null) continue
+      onlyDetails.set(
+        o.parentObservationId,
+        (onlyDetails.get(o.parentObservationId) ?? true) && o.detail === true,
+      )
+    }
+    return new Set(
+      parentIds.filter((id) => {
+        const row = byId.get(id)
+        return (
+          (row?.type === "TOOL" || row?.detail === true) &&
+          onlyDetails.get(id) === true
+        )
+      }),
+    )
+  }, [trace, parentIds])
+  const collapsedIds = useMemo(
+    () =>
+      new Set(
+        parentIds.filter(
+          (id) => defaultCollapsed.has(id) !== toggledIds.has(id),
+        ),
+      ),
+    [parentIds, defaultCollapsed, toggledIds],
+  )
+  const setCollapsedIds = (collapsed: ReadonlySet<string>) =>
+    setToggledIds(
+      new Set(
+        parentIds.filter(
+          (id) => defaultCollapsed.has(id) !== collapsed.has(id),
+        ),
+      ),
+    )
   const everythingCollapsed =
     parentIds.length > 0 && parentIds.every((id) => collapsedIds.has(id))
+  // Opens a span from outside the tree (a gate, a gateway decision): selects it,
+  // opens every collapsed parent above it and clears a search that hides it, then
+  // scrolls it into view once that has rendered.
+  const isRevealPending = useRef(false)
+  const reveal = (spanId: string) => {
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+    const ancestors = new Set<string>()
+    let parent = byId.get(spanId)?.parentObservationId ?? null
+    while (parent && !ancestors.has(parent)) {
+      ancestors.add(parent)
+      parent = byId.get(parent)?.parentObservationId ?? null
+    }
+    setCollapsedIds(
+      new Set([...collapsedIds].filter((id) => !ancestors.has(id))),
+    )
+    setNavQuery("")
+    setNavCollapsed(false)
+    setTab("preview")
+    setSelectedId(spanId)
+    isRevealPending.current = true
+  }
+  useEffect(() => {
+    if (!isRevealPending.current) return
+    isRevealPending.current = false
+    navRef.current
+      ?.querySelector('[aria-current="true"]')
+      ?.scrollIntoView({ block: "center" })
+  })
   const toggleCollapsed = (id: string) =>
-    setCollapsedIds((current) => {
+    setToggledIds((current) => {
       const next = new Set(current)
       if (!next.delete(id)) next.add(id)
       return next
@@ -376,6 +419,7 @@ export function TracePeek({
         promptTokens: observation.promptTokens ?? 0,
         completionTokens: observation.completionTokens ?? 0,
         cachedTokens: observation.cachedTokens ?? 0,
+        cacheWriteTokens: observation.cacheWriteTokens ?? 0,
         totalTokens:
           (observation.promptTokens ?? 0) + (observation.completionTokens ?? 0),
         model: observation.model,
@@ -389,40 +433,19 @@ export function TracePeek({
         promptTokens: summary.promptTokens,
         completionTokens: summary.completionTokens,
         cachedTokens: summary.cachedTokens,
+        cacheWriteTokens: summary.cacheWriteTokens,
         totalTokens: summary.totalTokens,
         model: summary.models[0],
       }
 
-  // setTimeout rather than requestAnimationFrame: a hidden tab never fires rAF.
-  useEffect(() => {
-    const timer = setTimeout(() => setEntered(true), 20)
-    return () => clearTimeout(timer)
-  }, [])
-
-  // Focus moves into the panel as it opens and back to whatever opened it as
-  // it closes, so a keyboard user is neither left behind on the list nor
-  // dropped to the top of the document.
-  useEffect(() => {
-    const opener =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null
-    headingRef.current?.focus()
-    return () => {
-      clearTimeout(exitTimer.current)
-      if (opener?.isConnected) opener.focus()
-    }
-  }, [])
-
-  // A panel opened on a span brings it into view once the spans arrive.
+  // A panel opened on a span opens the rows above it and brings it into view
+  // once the spans arrive, as picking it from the panel would.
   const isSpanUnseen = useRef(initialSpanId !== "")
   useEffect(() => {
-    if (!loaded || !isSpanUnseen.current) return
+    if (!loaded || !isSpanUnseen.current || !initialSpanId) return
     isSpanUnseen.current = false
-    navRef.current
-      ?.querySelector('[aria-current="true"]')
-      ?.scrollIntoView({ block: "nearest" })
-  }, [loaded])
+    reveal(initialSpanId)
+  })
 
   // The pane swap below md moves focus with it, as ListDetail does. Only on a
   // change, and a no-op from md up, where the Back control is not displayed.
@@ -437,41 +460,9 @@ export function TracePeek({
         ?.focus()
   }, [isDetailShown])
 
-  const close = () => {
-    if (leaving) return
-    const closing = trace.id
-    setLeavingId(closing)
-    clearTimeout(exitTimer.current)
-    exitTimer.current = setTimeout(() => {
-      if (shownTraceId.current === closing) onClose()
-    }, EXIT_MS)
-  }
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      // A field owns its own keys, Escape included: in the span search it
-      // clears the query rather than closing the panel.
-      if (event.defaultPrevented) return
-      if (
-        event.target instanceof Element &&
-        event.target.closest("input, textarea, [contenteditable='true']")
-      )
-        return
-      if (event.metaKey || event.ctrlKey || event.altKey) return
-      if (event.key === "Escape") close()
-      else if (event.key === "k") onPrevious?.()
-      else if (event.key === "j") onNext?.()
-    }
-    document.addEventListener("keydown", onKeyDown)
-    return () => document.removeEventListener("keydown", onKeyDown)
-  })
-
-  const clampWidth = (px: number) =>
-    Math.min(window.innerWidth * MAX_FRACTION, Math.max(MIN_PX, px))
   const clampNav = (fraction: number) =>
     Math.min(NAV_MAX_FRACTION, Math.max(NAV_MIN_FRACTION, fraction))
 
-  const shownWidth = expanded ? window.innerWidth * MAX_FRACTION : width
   const model = shown.model
   const navWidth = navCollapsed
     ? NAV_COLLAPSED
@@ -480,99 +471,24 @@ export function TracePeek({
       : `min(max(${navFraction * 100}%, ${NAV_MIN}), calc(100% - ${DETAIL_MIN}))`
 
   return (
-    <aside
-      aria-label={`Trace ${trace.name}`}
-      style={{ "--peek-width": `${shownWidth}px` } as React.CSSProperties}
-      className={`fixed top-14 right-0 bottom-0 z-30 flex w-full flex-col border-l border-border-strong bg-surface transition-transform duration-250 ease-out-fluid motion-reduce:transition-none md:w-(--peek-width) ${
-        entered && !leaving ? "translate-x-0" : "translate-x-full"
-      }`}
+    <PeekPanel
+      label={`Trace ${trace.name}`}
+      kind="Trace"
+      identity={
+        <CopyableValue
+          value={trace.id}
+          label="trace ID"
+          className="text-mono-caption"
+          isTruncated
+        />
+      }
+      noun="trace"
+      recordKey={trace.id}
+      focusRef={headingRef}
+      onClose={onClose}
+      onPrevious={onPrevious}
+      onNext={onNext}
     >
-      <ResizeHandle
-        label="Resize trace panel"
-        className="-left-1 max-md:hidden"
-        onDrag={(clientX) => {
-          setExpanded(false)
-          setWidth(clampWidth(window.innerWidth - clientX))
-        }}
-        onStep={(direction) => {
-          setExpanded(false)
-          setWidth(
-            clampWidth(shownWidth - direction * window.innerWidth * WIDTH_STEP),
-          )
-        }}
-        valueNow={Math.round(shownWidth)}
-        valueMin={MIN_PX}
-        valueMax={Math.round(window.innerWidth * MAX_FRACTION)}
-      />
-
-      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="shrink-0 text-overline">Trace</span>
-          <span className="flex min-w-0">
-            <CopyableValue
-              value={trace.id}
-              label="trace ID"
-              className="text-mono-caption"
-              isTruncated
-            />
-          </span>
-        </div>
-        <div className="otari-toolbar flex shrink-0 items-center gap-1">
-          <Tooltip
-            content={
-              <span className="flex items-center gap-2">
-                Previous trace <Kbd keys={["K"]} />
-              </span>
-            }
-          >
-            <IconButton
-              label="Previous trace"
-              size="sm"
-              onPress={onPrevious}
-              isDisabled={!onPrevious}
-            >
-              <FiChevronUp aria-hidden="true" className="size-4" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip
-            content={
-              <span className="flex items-center gap-2">
-                Next trace <Kbd keys={["J"]} />
-              </span>
-            }
-          >
-            <IconButton
-              label="Next trace"
-              size="sm"
-              onPress={onNext}
-              isDisabled={!onNext}
-            >
-              <FiChevronDown aria-hidden="true" className="size-4" />
-            </IconButton>
-          </Tooltip>
-          <span className="max-md:hidden">
-            <Tooltip content={expanded ? "Collapse" : "Expand"}>
-              <IconButton
-                label={expanded ? "Collapse" : "Expand"}
-                size="sm"
-                onPress={() => setExpanded((value) => !value)}
-              >
-                {expanded ? (
-                  <FiMinimize2 aria-hidden="true" className="size-4" />
-                ) : (
-                  <FiMaximize2 aria-hidden="true" className="size-4" />
-                )}
-              </IconButton>
-            </Tooltip>
-          </span>
-          <Tooltip content="Close">
-            <IconButton label="Close" size="sm" onPress={close}>
-              <FiX aria-hidden="true" className="size-4" />
-            </IconButton>
-          </Tooltip>
-        </div>
-      </div>
-
       <div className="flex shrink-0 flex-col gap-2 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="grid size-6 shrink-0 place-items-center">
@@ -607,6 +523,12 @@ export function TracePeek({
                         ? formatPct(shown.cachedTokens / shown.promptTokens)
                         : undefined,
                     ],
+                    [
+                      "Written to the cache",
+                      shown.cacheWriteTokens
+                        ? formatNumber(shown.cacheWriteTokens)
+                        : undefined,
+                    ],
                     ["Output", formatNumber(shown.completionTokens)],
                   ]}
                 />
@@ -620,6 +542,9 @@ export function TracePeek({
             </Tooltip>
           ) : null}
           {model ? <span>{model}</span> : null}
+          {!observation && trace.gateway ? (
+            <SessionCounts stats={trace.gateway.stats} />
+          ) : null}
         </div>
       </div>
 
@@ -632,18 +557,27 @@ export function TracePeek({
               onPress={() => setTab(id)}
             >
               {label}
+              {id === "gates" && blockedChecks > 0 ? (
+                <>
+                  {" "}
+                  <span className="text-warning">{`· ${blockedChecks} blocked`}</span>
+                </>
+              ) : null}
             </Tab>
           ))}
         </TabRow>
-        {observation || activeTab === "log" ? (
-          <Segmented
-            size="sm"
-            label="Format"
-            options={FORMAT_OPTIONS}
-            value={format}
-            onChange={(next) => setFormat(next as Format)}
-          />
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {actions}
+          {observation || activeTab === "log" ? (
+            <Segmented
+              size="sm"
+              label="Format"
+              options={FORMAT_OPTIONS}
+              value={format}
+              onChange={(next) => setFormat(next as Format)}
+            />
+          ) : null}
+        </div>
       </div>
 
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 overflow-auto">
@@ -659,6 +593,8 @@ export function TracePeek({
           </div>
         ) : activeTab === "log" ? (
           <LogView trace={trace} format={format} />
+        ) : activeTab === "gates" ? (
+          <GatesView gates={gates} onSelect={reveal} />
         ) : (
           <>
             <div
@@ -735,27 +671,57 @@ export function TracePeek({
                   Back to the spans
                 </Button>
               </div>
+              {observation ? null : notice}
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
               ) : !observation && trace.gateway ? (
                 <GatewayPanel
                   gateway={trace.gateway}
                   startedAt={trace.timestamp}
-                  onSelect={setSelectedId}
+                  onSelect={reveal}
                 />
+              ) : observation?.gate ? (
+                <GateCard gate={observation.gate} />
               ) : observation ? (
-                <PreviewBody
-                  input={observation.input}
-                  output={observation.output}
-                  statusMessage={observation.statusMessage}
-                  level={observation.level}
-                  format={format}
-                />
+                <>
+                  {observation.requestGroupId ? (
+                    <GatewayCall
+                      attemptId={observation.id}
+                      requestGroupId={observation.requestGroupId}
+                      startMs={
+                        Date.parse(trace.timestamp) + observation.startMs
+                      }
+                      endMs={Date.parse(trace.timestamp) + observation.endMs}
+                      summary={
+                        observation.explain ? (
+                          <ExplainCard explanation={observation.explain} />
+                        ) : null
+                      }
+                    />
+                  ) : observation.explain ? (
+                    <ExplainCard explanation={observation.explain} />
+                  ) : null}
+                  {observation.estimate ? (
+                    <CostCard cost={observation.estimate} />
+                  ) : null}
+                  {observation.explain &&
+                  observation.input == null &&
+                  observation.output == null &&
+                  !observation.statusMessage ? null : (
+                    <PreviewBody
+                      input={observation.input}
+                      output={observation.output}
+                      statusMessage={observation.statusMessage}
+                      level={observation.level}
+                      format={format}
+                    />
+                  )}
+                </>
               ) : null}
             </div>
           </>
         )}
       </div>
-    </aside>
+    </PeekPanel>
   )
 }

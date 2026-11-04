@@ -11,7 +11,7 @@ from gateway.services.api_keys import (
     AccessTokenClaims,
     FederationRefusedError,
     access_token_expiry,
-    grant_names_key,
+    grant_names_organization,
     is_access_token,
     mint_access_token,
     read_access_token,
@@ -103,29 +103,13 @@ def test_the_expiry_is_the_ttl_capped_by_the_identity_token() -> None:
 
 
 ORGANIZATION = uuid.uuid4()
-WORKSPACE = uuid.uuid4()
 
 
-def _names(**requested: str | None) -> bool:
-    scope: dict[str, str | None] = {"organization_id": None, "workspace_id": None, "service_account_id": None}
-    scope.update(requested)
-    return grant_names_key(**scope, key_organization_id=ORGANIZATION, key_workspace_id=WORKSPACE, api_key_id="key-1")
+def test_a_grant_naming_no_organization_or_the_keys_own_is_accepted() -> None:
+    assert grant_names_organization(organization_id=None, key_organization_id=ORGANIZATION)
+    assert grant_names_organization(organization_id=str(ORGANIZATION).upper(), key_organization_id=ORGANIZATION)
 
 
-def test_a_grant_naming_nothing_or_the_keys_own_scope_is_accepted() -> None:
-    assert _names()
-    assert _names(organization_id=str(ORGANIZATION).upper(), workspace_id=WORKSPACE.hex, service_account_id="key-1")
-
-
-@pytest.mark.parametrize(
-    "requested",
-    [
-        {"organization_id": str(uuid.uuid4())},
-        {"organization_id": "org-1"},
-        {"workspace_id": str(uuid.uuid4())},
-        {"workspace_id": "default"},
-        {"service_account_id": "key-2"},
-    ],
-)
-def test_a_grant_naming_another_scope_is_refused(requested: dict[str, str]) -> None:
-    assert not _names(**requested)
+@pytest.mark.parametrize("organization_id", [str(uuid.uuid4()), "org-1"], ids=["another", "not-a-uuid"])
+def test_a_grant_naming_another_organization_is_refused(organization_id: str) -> None:
+    assert not grant_names_organization(organization_id=organization_id, key_organization_id=ORGANIZATION)

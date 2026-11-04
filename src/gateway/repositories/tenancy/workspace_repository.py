@@ -5,10 +5,13 @@ from collections.abc import Collection, Sequence
 from typing import Any
 
 from sqlalchemy import Select, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.database import database_refusal
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.organizations_exceptions import WorkspaceMemberAlreadyExistsError, WorkspaceNotFoundError
 from gateway.models.tenancy import (
     User,
     Workspace,
@@ -20,8 +23,16 @@ from gateway.models.tenancy import (
 from gateway.repositories.base_repository import BaseRepository
 from gateway.repositories.tenancy.user_repository import user_alphabetical_order
 
+_MEMBER_UNIQUE = "uq_workspace_member_workspace_user"
+# PostgreSQL's default name for the unnamed workspace foreign key in the tenancy migration.
+_MEMBER_WORKSPACE_FK = "workspace_member_workspace_id_fkey"
+_UNIQUE_VIOLATION = frozenset({"23505", "SQLITE_CONSTRAINT_UNIQUE"})
+# SQLite's foreign-key refusal carries no constraint name, so it cannot be told
+# from any other foreign key on this table and is not listed here.
+_FOREIGN_KEY_VIOLATION = frozenset({"23503"})
 
-def ids_in_organization(organization_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
+
+def ids_in_organization(organization_id: uuid.UUID) -> Select[uuid.UUID]:
     """Select the ID of every workspace in an organization, for use as a subquery."""
     return select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
 
@@ -65,6 +76,19 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         load-bearing.
         """
         await self.db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id).with_for_update())
+
+    async def lock_in_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Take ``lock`` on every workspace in an organization, in id order, and return their ids.
+
+        In id order so two callers locking overlapping sets cannot deadlock.
+        """
+        result = await self.db.execute(
+            select(col(Workspace.id))
+            .where(col(Workspace.organization_id) == organization_id)
+            .order_by(col(Workspace.id))
+            .with_for_update()
+        )
+        return list(result.scalars().all())
 
     async def get_by_ids(self, workspace_ids: Collection[uuid.UUID]) -> Sequence[Workspace]:
         """Return the workspaces named by a batch of ids (order unspecified).
@@ -220,6 +244,21 @@ class WorkspaceMemberRepository:
         )
         return result.scalars().first()
 
+    async def get_active_pairs(
+        self, workspace_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID]
+    ) -> set[tuple[uuid.UUID, uuid.UUID]]:
+        """Return each (workspace, user) of these that an *active* membership joins, in one query."""
+        if not workspace_ids or not user_ids:
+            return set()
+        result = await self.db.execute(
+            select(col(WorkspaceMember.workspace_id), col(WorkspaceMember.user_id)).where(
+                col(WorkspaceMember.workspace_id).in_(list(workspace_ids)),
+                col(WorkspaceMember.user_id).in_(list(user_ids)),
+                col(WorkspaceMember.status) == "active",
+            )
+        )
+        return set(result.tuples().all())
+
     async def get_by_workspaces_and_user(
         self,
         workspace_ids: Collection[uuid.UUID],
@@ -355,6 +394,39 @@ class WorkspaceMemberRepository:
         member = WorkspaceMember(workspace_id=workspace_id, user_id=user_id, role=role, status=status)
         self.db.add(member)
         await self.db.flush()
+        await self.db.refresh(member)
+        return member
+
+    async def add(self, *, workspace_id: uuid.UUID, user_id: uuid.UUID, role: str = "member") -> WorkspaceMember:
+        """Stage a new active membership and return it with its generated values.
+
+        The refusal is read from the error itself. The caller's Unit of Work rolls the
+        whole step back when this raises, so nothing is queried afterwards and no
+        savepoint is needed. A savepoint here would also be the outermost transaction on
+        SQLite, which begins none for a SELECT, and releasing it would commit the member
+        before the caller's listener has run.
+
+        A refusal that is neither a duplicate nor a deleted workspace is raised as it came,
+        so it fails the step instead of being reported as one of them. SQLite does not name
+        the foreign key it enforced, so there a missing workspace is raised as it came too.
+
+        Raises:
+            WorkspaceMemberAlreadyExistsError: the user is already a member of this workspace.
+            WorkspaceNotFoundError: the workspace no longer exists.
+        """
+        member = WorkspaceMember(workspace_id=workspace_id, user_id=user_id, role=role, status="active")
+        self.db.add(member)
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            code, constraint = database_refusal(exc)
+            # SQLite names no constraint, but the pair is the table's only unique one
+            # besides the generated primary key.
+            if code in _UNIQUE_VIOLATION and constraint in (_MEMBER_UNIQUE, None):
+                raise WorkspaceMemberAlreadyExistsError(user_id) from None
+            if code in _FOREIGN_KEY_VIOLATION and constraint == _MEMBER_WORKSPACE_FK:
+                raise WorkspaceNotFoundError(workspace_id) from None
+            raise
         await self.db.refresh(member)
         return member
 

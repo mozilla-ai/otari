@@ -260,10 +260,7 @@ itself to the rows it owns rather than to a global count, and an open react-aria
 popover `aria-hidden`s the rest of the page, so `dismissComboBox` runs before asserting
 anything outside it. `playwright.config.ts` carries the rest.
 
-A fourth project, `hybrid`, runs against a second gateway booted in hybrid mode
-(`e2e/serve-hybrid.sh`), because a deployment attached to a control plane elsewhere is a
-different shape rather than a different page, and only a server can put the browser in one.
-It shares no state with the three above. Two mechanical rules come with adding any spec here:
+Two mechanical rules come with adding any spec here:
 a file collected by no project's `testMatch`/`testIgnore` is dropped from the run with a green
 exit, and `package.json`'s `e2e` script names each project it runs, so a project missing from
 that list never runs in CI (`src/e2eProjects.test.ts` fails on that half). The gate is
@@ -281,8 +278,7 @@ should have to learn each one. Keep them recognizably the same file.
 
 **Adding a page means adding an entry**, in the registry that matches how it is reached: a
 route in `WORKSPACE_ROUTES` in `authenticated.spec.ts` for anything behind a session, a
-test in `public.spec.ts` for anything in front of one, or a test in `hybrid.spec.ts` for
-the hybrid landing surface. One entry buys six captures. A page with no entry is a page
+test in `public.spec.ts` for anything in front of one. One entry buys six captures. A page with no entry is a page
 whose mobile and dark rendering nobody checks.
 
 What the harness already handles, so you do not work around it:

@@ -2,15 +2,13 @@
 
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     HostedProviderServiceDep,
     RequestSessionModelProviderPortDep,
-    extract_credential_token,
     get_config,
     get_db,
     get_session_identity,
@@ -19,14 +17,12 @@ from gateway.api.deps import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
-from gateway.exceptions.control_plane_exceptions import ControlPlaneUnavailableError
 from gateway.models.api_keys import APIKey
-from gateway.models.pricing import ModelPricing
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.services.catalog import apply_model_limits, load_catalog_metadata
-from gateway.services.control_plane import UNAVAILABLE_DETAIL, ResolveEndpoint, resolve
+from gateway.services.catalog import ModelType, apply_model_metadata, load_catalog_metadata
 from gateway.services.merged_catalog_service import (
+    CatalogScope,
     ModelObject,
     alias_model,
     apply_default_pricing,
@@ -51,14 +47,15 @@ from gateway.services.model_catalog_service import (
     background_catalog_enabled,
     build_metadata_map,
     load_models_dev_catalog,
-    token_limit,
 )
 from gateway.services.model_discovery_service import (
     background_discovery_enabled,
     discover_models_with_status,
     get_model_cache,
 )
+from gateway.services.pricing_service import latest_price_version
 from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.selector_index_service import answered_by_listing, models_by_identity
 
 if TYPE_CHECKING:
     pass
@@ -77,11 +74,6 @@ catalog_router = APIRouter(
     tags=["models"],
     dependencies=[Depends(verify_catalog_reader)],
 )
-
-# A hybrid gateway owns no catalog, so its ``GET /models`` asks the control
-# plane which models the caller's key may use. Mounted on the data plane in
-# hybrid mode only; the routers above answer every other deployment.
-hybrid_router = APIRouter(tags=["models"])
 
 SURFACE = Surface("models")
 
@@ -154,6 +146,10 @@ class ModelMetadata(BaseModel):
     deprecated: bool = False
     cost_input: float | None = None
     cost_output: float | None = None
+    type: ModelType | None = Field(
+        default=None,
+        description="What kind of model models.dev says it is. Null where the catalog gives no kind.",
+    )
 
 
 class ModelMetadataResponse(BaseModel):
@@ -161,7 +157,7 @@ class ModelMetadataResponse(BaseModel):
 
     source: str = "models.dev"
     available: bool = Field(
-        description="False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+        description="False when no models.dev catalog could be read, not even the one bundled with the gateway.",
     )
     models: dict[str, ModelMetadata] = Field(default_factory=dict)
 
@@ -187,34 +183,62 @@ def _to_metadata_schema(entry: ModelCatalogEntry) -> ModelMetadata:
         deprecated=entry.deprecated,
         cost_input=entry.cost_input,
         cost_output=entry.cost_output,
+        type=entry.type,
     )
 
 
-@catalog_router.get("/models")
+@catalog_router.get("/models", response_model_exclude_none=True)
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
-    provider: Annotated[str | None, Query(description="Filter models by provider name")] = None,
+    provider: Annotated[
+        str | None, Query(description="Only the models this provider instance serves, described as served there.")
+    ] = None,
 ) -> ModelListResponse:
-    """List all available models.
+    """List all available models, one entry per model however many providers serve it.
 
-    Returns models auto-discovered from configured providers, enriched with
-    pricing data from the model_pricing table when available, and with each
-    model's token limits: the context window from the live models.dev catalog,
-    or from the pricing snapshot where it has none, and the output limit from the
-    live catalog alone. A limit neither knows is null. Models that only exist in the pricing
-    table are also included for backward compatibility.
+    Each `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a
+    request sends as `model` to let the gateway choose the provider: it tries the
+    model's offerings best first and falls back down the list. An entry's price,
+    token limits and capabilities are those of the offering tried first, at the
+    caller's own rate. A value nobody knows is omitted rather than sent as null.
+
+    Aliases and routing policies are listed beside the models. An
+    `instance:model` selector still pins a request to one provider, and
+    GET /api/v1/catalog/models/{model_id} lists the offerings of a model.
     """
+    return ModelListResponse(data=await _listing(db, config, auth, session_identity, model_provider, provider=provider))
+
+
+async def _listing(
+    db: AsyncSession,
+    config: GatewayConfig,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    model_provider: ModelProviderPort,
+    *,
+    provider: str | None = None,
+) -> list[ModelObject]:
+    # Alias targets are kept so a model's row is chosen among the offerings a
+    # request by its catalog id tries; ``models_by_identity`` still hides them.
     catalog = await build_merged_catalog(
-        db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
+        db,
+        config,
+        auth=auth,
+        session_identity=session_identity,
+        provider=provider,
+        model_provider=model_provider,
+        withhold_alias_targets=False,
     )
-    models = sorted(catalog.models.values(), key=lambda m: m.id)
+    models = list(catalog.models.values())
     organization_id = await viewer_organization(db, auth, session_identity)
     await apply_organization_pricing(db, config, models, catalog.aliases, organization_id)
-    return ModelListResponse(data=models)
+    return models_by_identity(
+        config, catalog.models_dev, models, organization_id=organization_id, alias_targets=catalog.alias_targets
+    )
 
 
 # Served before GET /models/{model_id:path}, which FastAPI would otherwise match
@@ -279,9 +303,10 @@ async def list_model_metadata(
     """Per-model metadata for the dashboard's detail view, from models.dev.
 
     Covers every model models.dev lists under a configured provider, keyed by the
-    ``instance:model`` selector the dashboard uses. ``available`` is false when
-    enrichment is disabled (``models_dev_metadata``) or models.dev could not be
-    reached; the response is then empty and the UI falls back to bundled data.
+    ``instance:model`` selector the dashboard uses. Until models.dev has been
+    fetched, and always when ``models_dev_metadata`` is off, it comes from the
+    catalog bundled with the gateway. ``available`` is false only when no catalog
+    could be read; the response is then empty.
     Operator-gated: it describes the gateway's configured providers.
 
     Answers from the cached catalog, kept warm by a background refresher, so the
@@ -295,7 +320,7 @@ async def list_model_metadata(
     )
 
 
-@catalog_router.get("/models/{model_id:path}")
+@catalog_router.get("/models/{model_id:path}", response_model_exclude_none=True)
 async def get_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -304,22 +329,30 @@ async def get_model(
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
 ) -> ModelObject:
-    """Get details for a specific model."""
-    obj, aliases = await _find_model(db, config, model_id, auth, session_identity, model_provider)
+    """Get details for a specific model, by catalog id, alias or `instance:model` selector.
+
+    A value the gateway does not know is omitted rather than sent as null.
+    """
+    scope, aliases = await _caller_scope(db, config, auth, session_identity, model_provider)
+    if answered_by_listing(model_id, aliases):
+        listed = await _listing(db, config, auth, session_identity, model_provider)
+        found = next((obj for obj in listed if obj.id == model_id), None)
+        if found is not None:
+            return found
+    obj = await _find_model(db, config, model_id, scope, aliases)
     organization_id = await viewer_organization(db, auth, session_identity)
     await apply_organization_pricing(db, config, [obj], aliases, organization_id)
     return obj
 
 
-async def _find_model(
+async def _caller_scope(
     db: AsyncSession,
     config: GatewayConfig,
-    model_id: str,
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
     model_provider: ModelProviderPort,
-) -> tuple[ModelObject, dict[str, str]]:
-    """The model ``model_id`` names, priced from the deployment's list, with the caller's aliases."""
+) -> tuple[CatalogScope, dict[str, str]]:
+    """The caller's catalog scope and the aliases it reads."""
     api_key, _is_master_key = auth
     # Same scoping as the listing, the workspace layer included: the caller's own
     # aliases, plus their workspace's and the configured ones. A master-key caller
@@ -331,7 +364,13 @@ async def _find_model(
         caller_workspace_id=api_key.workspace_id if api_key is not None else None,
         workspace_layer=scope.reads_workspace_layer,
     )
+    return scope, aliases
 
+
+async def _find_model(
+    db: AsyncSession, config: GatewayConfig, model_id: str, scope: CatalogScope, aliases: dict[str, str]
+) -> ModelObject:
+    """The model ``model_id`` names, priced from the deployment's list."""
     # Model access control: a denied model returns 404, indistinguishable from a
     # missing one, so this endpoint cannot be used to probe which models exist
     # behind an allow-list. Uses the same matcher/canonical key as the listing and
@@ -358,16 +397,10 @@ async def _find_model(
             alias_target,
             normalized_pricing_lookup(config, pricing_map),
             models_dev=await load_catalog_metadata(config),
-        ), aliases
+        )
 
     # Check the pricing table first.
-    stmt = (
-        select(ModelPricing)
-        .where(ModelPricing.model_key == model_id)
-        .order_by(ModelPricing.effective_at.desc())
-        .limit(1)
-    )
-    pricing = (await db.execute(stmt)).scalar_one_or_none()
+    pricing = await latest_price_version(db, model_id)
 
     # Check the discovery cache for this model. Parse provider from model_id
     # ("provider:model_name") for a targeted lookup instead of scanning all
@@ -407,10 +440,10 @@ async def _find_model(
         fallback = ModelObject(id=model_id, created=0, owned_by=owner_from_key(model_id))
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
-            apply_model_limits(config, await load_catalog_metadata(config), fallback)
+            apply_model_metadata(config, await load_catalog_metadata(config), fallback)
             return mark_deployment_managed(
                 config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
-            ), aliases
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model '{model_id}' not found",
@@ -428,52 +461,11 @@ async def _find_model(
             pricing_source="configured" if pricing else "none",
         )
         apply_default_pricing(obj)
-        apply_model_limits(config, await load_catalog_metadata(config), obj)
-        return mark_deployment_managed(
-            config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
-        ), aliases
+        apply_model_metadata(config, await load_catalog_metadata(config), obj)
+        return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
     obj = model_from_pricing(pricing)
-    apply_model_limits(config, await load_catalog_metadata(config), obj)
-    return mark_deployment_managed(
-        config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
-    ), aliases
-
-
-def _model_from_platform(entry: object) -> ModelObject:
-    """One ``models`` entry from the control plane, or ``ControlPlaneUnavailableError`` when unreadable."""
-    if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"]:
-        raise ControlPlaneUnavailableError(UNAVAILABLE_DETAIL)
-    created = entry.get("created")
-    owned_by = entry.get("owned_by")
-    return ModelObject(
-        id=entry["id"],
-        created=created if isinstance(created, int) and not isinstance(created, bool) else 0,
-        owned_by=owned_by if isinstance(owned_by, str) and owned_by else owner_from_key(entry["id"]),
-        context_window=token_limit(entry.get("context_window")),
-        max_output_tokens=token_limit(entry.get("max_output_tokens")),
-    )
-
-
-@hybrid_router.get("/models", include_in_schema=False)
-async def list_models_hybrid(
-    request: Request,
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> ModelListResponse:
-    """List the models the caller's key may use, as the control plane reports them.
-
-    The control plane decides entitlement (managed versus BYO models and the
-    key's ``allowed_models``); the gateway relays the answer and adds nothing.
-    """
-    payload = await resolve(
-        config,
-        user_token=extract_credential_token(request),
-        endpoint=ResolveEndpoint.MODELS,
-        body={},
-    )
-    entries = payload.get("models") if isinstance(payload, dict) else None
-    if not isinstance(entries, list):
-        raise ControlPlaneUnavailableError(UNAVAILABLE_DETAIL)
-    return ModelListResponse(data=sorted((_model_from_platform(e) for e in entries), key=lambda m: m.id))
+    apply_model_metadata(config, await load_catalog_metadata(config), obj)
+    return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)

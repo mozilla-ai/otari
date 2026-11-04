@@ -9,7 +9,7 @@ import pytest
 from any_llm import LLMProvider
 from any_llm.exceptions import MissingApiKeyError
 
-from gateway.api.routes._platform import get_shared_rejection
+from gateway.api.routes._attempts import get_shared_rejection
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PRICING_REQUIRED, PROVIDER_NOT_CONFIGURED
 from gateway.ports.model_provider_port import NO_ORGANIZATION
@@ -85,13 +85,12 @@ async def test_the_environment_variable_never_serves_a_declared_entry_naming_no_
 
 
 @pytest.mark.asyncio
-async def test_the_refusal_names_how_to_declare_the_provider() -> None:
+async def test_the_refusal_names_what_a_caller_can_configure() -> None:
     missing = await missing_provider_credential(_CONFIG, _cohere({}), hosted=None, organization_id=_ORG)
     assert missing is not None
-    assert "providers:" in missing.detail
-    assert "${COHERE_API_KEY}" in missing.detail
-    assert "Hosted providers page" in missing.detail
-    assert "organization provider key" in missing.detail
+    assert "hosted provider" in missing.detail
+    assert "its own provider key" in missing.detail
+    assert "providers:" not in missing.detail
 
 
 @pytest.mark.asyncio

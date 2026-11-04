@@ -48,6 +48,7 @@ import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
+import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import {
   useBudgets,
   useMemberCeilingWriter,
@@ -326,7 +327,8 @@ function InviteMemberForm({
           ? workspaceIds.map(
               (workspace_id): WorkspaceAssignment => ({
                 workspace_id,
-                role: "member",
+                // A viewer of the organization is a viewer of its workspaces.
+                role: role === "viewer" ? "viewer" : "member",
               }),
             )
           : null,
@@ -562,7 +564,11 @@ function MemberEditor({
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     spendRow?.allowed_models ?? undefined,
   )
+  const [allowedTools, setAllowedTools] = useState<string[] | undefined>(
+    spendRow?.allowed_tools ?? undefined,
+  )
   const [scopeValid, setScopeValid] = useState(true)
+  const [toolScopeValid, setToolScopeValid] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<unknown>(undefined)
 
@@ -606,14 +612,16 @@ function MemberEditor({
       return next
     })
 
-  const canSave = !saving && scopeValid
+  const canSave = !saving && scopeValid && toolScopeValid
   // The workspace rows are a Map, which `JSON.stringify` flattens to `{}`, so
   // the guard is handed their entries. Both halves seed on mount and neither
   // changes on its own, so nothing here arms without a keystroke.
   const { isDirty } = useDirtySnapshot({
     rows: [...rows],
     allowedModels,
+    allowedTools,
     scopeValid,
+    toolScopeValid,
   })
 
   const save = async () => {
@@ -625,7 +633,10 @@ function MemberEditor({
         await updateUser.mutateAsync({
           id: member.attribution_user_id,
           // `null` is how the wire spells "not restricted".
-          body: { allowed_models: allowedModels ?? null },
+          body: {
+            allowed_models: allowedModels ?? null,
+            allowed_tools: allowedTools ?? null,
+          },
         })
       }
 
@@ -720,7 +731,7 @@ function MemberEditor({
       submitLabel="Save"
       onSubmit={() => void save()}
       isPending={saving}
-      isSubmitDisabled={!scopeValid}
+      isSubmitDisabled={!scopeValid || !toolScopeValid}
       isDirty={isDirty}
       error={error}
     >
@@ -731,15 +742,27 @@ function MemberEditor({
           member cell is gated to avoid: a withheld read must not read as an
           absent gateway identity. */}
       {!isOperator ? null : spendRow ? (
-        <ModelScopeControl
-          title="Model access (default for this member's keys)"
-          description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
-          initial={spendRow.allowed_models ?? undefined}
-          onChange={(value, isValid) => {
-            setAllowedModels(value)
-            setScopeValid(isValid)
-          }}
-        />
+        <>
+          <ModelScopeControl
+            title="Model access (default for this member's keys)"
+            description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
+            initial={spendRow.allowed_models ?? undefined}
+            onChange={(value, isValid) => {
+              setAllowedModels(value)
+              setScopeValid(isValid)
+            }}
+          />
+          <ToolScopeControl
+            title="Search tool access (default for this member's keys)"
+            description="The search tools this member's keys may run on /v1/search by default. Left on its default, a key follows its own model access, or the member's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
+            inheritLabel="Default"
+            initial={spendRow.allowed_tools ?? undefined}
+            onChange={(value, isValid) => {
+              setAllowedTools(value)
+              setToolScopeValid(isValid)
+            }}
+          />
+        </>
       ) : (
         <span className="text-xs text-muted">
           No spend row yet, so there is no model access to set. One is minted

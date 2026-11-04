@@ -111,9 +111,7 @@ def test_first_request_provisions_the_default_organization(
     assert context["organization"]["slug"] == "default"
     assert context["role"] == "owner"
     assert context["status"] == "active"
-    # A standalone deployment is its own gateway, so its own provider keys are
-    # always available to it.
-    assert context["byo_provider_keys_allowed"] is True
+    assert "byo_provider_keys_allowed" not in context
 
 
 @pytest.mark.parametrize("configured", [True, False])

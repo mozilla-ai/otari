@@ -58,8 +58,7 @@ import { useWorkspaces } from "@/shared/api/workspaces"
 // be mandated onto one before it exists.
 //
 // Not the workspace rail's `/tools/guardrails`, which sets the deployment's own
-// guardrails service. Rows here are keyed on the organization, which is why a
-// hosted deployment publishes this page too.
+// guardrails service. Rows here are keyed on the organization.
 
 type OpenKind = "definition" | "mandate" | "test" | "mandate-test"
 type Open = { kind: "" } | { kind: OpenKind; editingId: string }

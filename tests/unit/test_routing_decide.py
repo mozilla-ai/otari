@@ -9,6 +9,7 @@ exist, or asking at all when the caller said not to.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable, Iterator
 
 import pytest
@@ -18,13 +19,12 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import PolicySpec
 from gateway.services.routing.backends import (
-    NoOpRouterBackend,
-    RouterBackend,
     RoutingContext,
     RoutingDecision,
     clear_router_backend_cache,
     get_router_backend,
 )
+from gateway.services.routing.compiler import compile_policy
 from gateway.services.routing.decide import RoutingSignal, decide_ordering
 
 
@@ -57,7 +57,7 @@ def config() -> GatewayConfig:
     )
 
 
-def _spec(*candidates: str, default: str = "openai:gpt-5", backend: str = "knn") -> PolicySpec:
+def _spec(*candidates: str, default: str = "openai:gpt-5", backend: str = "priority") -> PolicySpec:
     return PolicySpec.model_validate(
         {
             "select": [
@@ -69,7 +69,7 @@ def _spec(*candidates: str, default: str = "openai:gpt-5", backend: str = "knn")
 
 
 def _signal(**kw: object) -> RoutingSignal:
-    return RoutingSignal(task_signal="hello", trace_signal="hello", trace_anchor="hello", **kw)  # type: ignore[arg-type]
+    return RoutingSignal(**kw)  # type: ignore[arg-type]
 
 
 # -- schema ----------------------------------------------------------------
@@ -79,13 +79,13 @@ def test_a_router_entry_requires_candidates() -> None:
     # Without a pool there is nothing to route among, and an operator who wrote it
     # believes they configured routing.
     with pytest.raises(ValidationError, match="needs `candidates`"):
-        PolicySpec.model_validate({"select": [{"router": "knn"}, {"default": "openai:gpt-5"}]})
+        PolicySpec.model_validate({"select": [{"router": "priority"}, {"default": "openai:gpt-5"}]})
 
 
 def test_a_router_entry_needs_at_least_two_candidates() -> None:
     with pytest.raises(ValidationError, match="at least 2 `candidates`"):
         PolicySpec.model_validate(
-            {"select": [{"router": "knn", "candidates": ["openai:gpt-5"]}, {"default": "openai:gpt-5"}]}
+            {"select": [{"router": "priority", "candidates": ["openai:gpt-5"]}, {"default": "openai:gpt-5"}]}
         )
 
 
@@ -99,7 +99,7 @@ def test_duplicate_candidates_are_refused() -> None:
         PolicySpec.model_validate(
             {
                 "select": [
-                    {"router": "knn", "candidates": ["openai:gpt-5", "openai:gpt-5"]},
+                    {"router": "priority", "candidates": ["openai:gpt-5", "openai:gpt-5"]},
                     {"default": "openai:gpt-5"},
                 ]
             }
@@ -124,7 +124,7 @@ def test_the_candidate_cap_counts_the_whole_routed_pool() -> None:
             {
                 "select": [
                     {
-                        "router": "knn",
+                        "router": "priority",
                         "candidates": [
                             "openai:a",
                             "openai:b",
@@ -142,7 +142,7 @@ def test_the_candidate_cap_counts_the_whole_routed_pool() -> None:
 def test_a_router_policy_is_dynamic_and_its_candidates_are_validated_selectors() -> None:
     spec = _spec("openai:gpt-5-mini", "anthropic:claude-haiku-4-5")
     assert spec.is_dynamic is True
-    assert spec.router_backend == "knn"
+    assert spec.router_backend == "priority"
     # static_selectors feeds startup and write-time checks (resolvable, not an
     # alias or another policy), so the candidates have to appear in it.
     assert "anthropic:claude-haiku-4-5" in spec.static_selectors()
@@ -151,25 +151,11 @@ def test_a_router_policy_is_dynamic_and_its_candidates_are_validated_selectors()
 # -- backend resolution ----------------------------------------------------
 
 
-def test_noop_backend_declines() -> None:
-    backend = get_router_backend(GatewayConfig(), "noop")
-    assert isinstance(backend, NoOpRouterBackend)
-    assert isinstance(backend, RouterBackend)
-
-
-@pytest.mark.asyncio
-async def test_noop_decline_is_empty() -> None:
-    decision = await NoOpRouterBackend().rank(
-        RoutingContext(user_id="u", default_model="openai:gpt-5", candidate_pool=["openai:gpt-5-mini"])
-    )
-    assert decision.ordered_models == []
-
-
 def test_an_unknown_backend_resolves_to_none_rather_than_raising() -> None:
     # A build without the named backend must serve the policy's default target, not
     # fail every request through it.
     clear_router_backend_cache()
-    assert get_router_backend(GatewayConfig(), "cheapest") is None
+    assert get_router_backend("cheapest") is None
 
 
 @pytest.mark.asyncio
@@ -204,23 +190,54 @@ async def test_an_unknown_backend_warns_once_per_policy(
 async def test_a_decline_is_not_warned_about(
     config: GatewayConfig, recorder: _Recorder, router_warnings: Callable[[], list[str]]
 ) -> None:
-    # A cold pool or an opted-out caller is normal operation, and warning on it
-    # would log a line for every request a cold router serves, which is all of them
-    # until someone teaches it.
+    # An opted-out caller is normal operation, and warning on it would log a line
+    # for every request that opts out.
     await decide_ordering(
         config, _spec(), policy_name="smart", user_id="u", allowlist=None, signal=_signal(opted_out=True)
     )
     assert router_warnings() == []
 
 
-def test_the_knn_backend_instance_is_reused_for_one_config() -> None:
-    # It holds the trace-sticky decision cache, so a fresh instance per request
-    # would silently break stickiness.
-    clear_router_backend_cache()
-    config = GatewayConfig()
-    assert get_router_backend(config, "knn") is get_router_backend(config, "knn")
-    clear_router_backend_cache()
-    assert get_router_backend(config, "knn") is not None
+@pytest.mark.asyncio
+@pytest.mark.parametrize("router", ["knn", "noop"])
+async def test_a_config_policy_naming_a_retired_router_serves_its_default(
+    config: GatewayConfig, router_warnings: Callable[[], list[str]], router: str
+) -> None:
+    """A ``config.yml`` policy is not migrated, so a retired router is an unknown one: no ordering, one warning."""
+    retired = _spec(backend=router)
+    assert get_router_backend(router) is None
+
+    ordering = await decide_ordering(
+        config, retired, policy_name="smart", user_id="u", allowlist=None, signal=_signal()
+    )
+
+    assert ordering is None
+    plan = compile_policy(config, "smart", retired, router_ordering=ordering)
+    assert plan.selection_reason == "default"
+    assert [attempt.model for attempt in plan.attempts] == ["gpt-5"]
+    warnings = router_warnings()
+    assert len(warnings) == 1
+    assert f"'{router}'" in warnings[0]
+    assert router not in warnings[0].split("Available backends:")[1]
+
+
+@pytest.mark.asyncio
+async def test_same_named_policies_in_two_workspaces_each_warn_once(
+    config: GatewayConfig, router_warnings: Callable[[], list[str]]
+) -> None:
+    unknown = _spec(backend="cheapest")
+    for workspace_id in (uuid.uuid4(), uuid.uuid4()):
+        for _ in range(2):
+            await decide_ordering(
+                config,
+                unknown,
+                policy_name="smart",
+                user_id="u",
+                allowlist=None,
+                signal=_signal(),
+                workspace_id=workspace_id,
+            )
+    assert len(router_warnings()) == 2
 
 
 # -- the decision layer ----------------------------------------------------
@@ -240,7 +257,7 @@ class _Recorder:
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     backend = _Recorder()
-    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: backend)
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda name: backend)
     return backend
 
 
@@ -267,7 +284,7 @@ async def test_the_caller_opt_out_declines_without_asking(config: GatewayConfig,
     assert ordering is not None
     assert ordering.selectors == []
     assert "Otari-Router: off" in ordering.rationale
-    # Not asked at all: an opt-out must not spend an embedding call.
+    # Not asked at all.
     assert recorder.seen is None
 
 
@@ -325,17 +342,16 @@ async def test_a_backend_that_raises_declines_rather_than_failing_the_request(
 ) -> None:
     """A router is an optimization, so it can never be why a request fails.
 
-    Backends decline on the failures they can name, but ranking also reads the
-    database, so the guard lives here: one place that covers every backend and every
-    failure rather than the ones each backend thought of. Declining costs the caller
-    the cheaper model, not the request.
+    The guard lives here: one place that covers every backend and every failure
+    rather than the ones each backend thought of. Declining serves the default
+    target, not an error.
     """
 
     class _Broken:
         async def rank(self, ctx: RoutingContext) -> RoutingDecision:
-            raise RuntimeError("the examples table is on fire")
+            raise RuntimeError("the backend is on fire")
 
-    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: _Broken())
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda name: _Broken())
 
     ordering = await decide_ordering(
         config, _spec(), policy_name="smart", user_id="u", allowlist=None, signal=_signal()
@@ -350,12 +366,7 @@ async def test_a_backend_that_raises_declines_rather_than_failing_the_request(
 async def test_a_backend_that_hangs_declines_at_the_deadline(
     config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ranking that has not answered in time is not worth the caller's latency.
-
-    The work behind it is an outbound embedding call plus a read of the stored
-    examples, neither with a deadline of its own, so a hung embedding provider would
-    otherwise hold the request open for as long as its own client allows.
-    """
+    """A ranking that has not answered in time is not worth the caller's latency."""
     import asyncio
 
     class _Hangs:
@@ -363,7 +374,7 @@ async def test_a_backend_that_hangs_declines_at_the_deadline(
             await asyncio.sleep(60)
             raise AssertionError("should have been cancelled")
 
-    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: _Hangs())
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda name: _Hangs())
     monkeypatch.setattr("gateway.services.routing.decide.ROUTER_DEADLINE_SECONDS", 0.05)
 
     ordering = await decide_ordering(
@@ -376,17 +387,16 @@ async def test_a_backend_that_hangs_declines_at_the_deadline(
 
 
 @pytest.mark.asyncio
-async def test_the_request_headers_reach_the_backend(config: GatewayConfig, recorder: _Recorder) -> None:
+async def test_the_request_identity_reaches_the_backend(config: GatewayConfig, recorder: _Recorder) -> None:
     await decide_ordering(
         config,
         _spec(),
         policy_name="smart",
         user_id="user-7",
         allowlist=None,
-        signal=_signal(conversation_id="conv-1", task_id="summarize", has_tools=True, is_continuation=True),
+        signal=_signal(conversation_id="conv-1"),
     )
     seen = recorder.seen
     assert seen is not None
-    assert (seen.user_id, seen.trace_key, seen.task_id) == ("user-7", "conv-1", "summarize")
-    assert (seen.has_tools, seen.is_trace_continuation) == (True, True)
+    assert seen.user_id == "user-7"
     assert seen.default_model == "openai:gpt-5"

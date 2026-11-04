@@ -25,7 +25,7 @@ describe("accountLockoutReason", () => {
   })
 
   it("names the bootstrap reason first when it is both", () => {
-    // Which it is on every standalone deployment today, where the one operator
+    // Which it is on most deployments, where the one operator
     // identity is the marked one. The self reason ends in a remedy ("another
     // operator has to make this change") that nobody can carry out on this row,
     // because the server refuses this change from every operator; the bootstrap
@@ -47,7 +47,7 @@ describe("accountLabel", () => {
     expect(accountLabel(deploymentUser({ full_name: null }))).toBe(
       "ada@example.com",
     )
-    // A local operator identity has neither, which is the ordinary standalone
+    // A local operator identity has neither, which is the ordinary
     // first-boot row rather than an edge case.
     const bare = deploymentUser({ full_name: null, email: null })
     expect(accountLabel(bare)).toBe(bare.id)

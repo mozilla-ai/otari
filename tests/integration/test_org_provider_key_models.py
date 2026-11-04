@@ -65,7 +65,6 @@ from gateway.services.tenancy.org_provider_key_service import (
     reset_org_provider_cache,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 pytestmark = pytest.mark.asyncio
 
@@ -115,7 +114,7 @@ def _service(db: AsyncSession, *, require_pricing: bool = True) -> OrgProviderMo
     return OrgProviderModelService(
         uow,
         config=config,
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        organizations=OrganizationService(db, membership_listener=None),
         provider_keys=OrgProviderKeyService(db),
         org_pricing=OrganizationPricingService(db, config, model_provider=None),
         models=OrgProviderKeyModelRepository(uow),

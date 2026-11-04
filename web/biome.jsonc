@@ -4,8 +4,8 @@
   // Biome does three jobs here: it formats, it runs the recommended rules, and it
   // checks the layer boundary `src/` is laid out around (see AGENTS.md, "Layout").
   //
-  // Formatter and rule set are otari-ai/frontend's, deliberately. Their control-plane
-  // UI moves into this repo at M5, so one of the two trees had to adopt the other's
+  // Formatter and rule set are otari-ai/frontend's, deliberately. Their pages
+  // move into this repo at M5, so one of the two trees had to adopt the other's
   // style, and reformatting ~120 files here is cheaper than reformatting 500+ mixed
   // ones later, inside the port PRs where a whole-file diff would bury the changes
   // that can actually break something.

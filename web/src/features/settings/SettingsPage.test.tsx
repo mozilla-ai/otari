@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type {
   ConfigField,
-  DeploymentBootstrap,
+  CountryDatabaseStatus,
   GatewaySettings,
   HostedProvider,
   MailSettings,
@@ -181,7 +181,6 @@ const CONFIG: ConfigField[] = [
 ]
 
 const SETTINGS: GatewaySettings = {
-  mode: "standalone",
   version: "1.2.3",
   model_discovery: true,
   default_pricing: false,
@@ -201,6 +200,11 @@ const MAIL_SETTINGS: MailSettings = {
   missing: ["smtp_host", "mail_from_email", "public_base_url"],
 }
 
+const NO_COUNTRY_DATABASE: CountryDatabaseStatus = {
+  stored: null,
+  client_country_database_set: false,
+}
+
 function storedProvider(name: string, decryptable = true): HostedProvider {
   return {
     name,
@@ -215,16 +219,13 @@ function storedProvider(name: string, decryptable = true): HostedProvider {
   }
 }
 
-function renderWithClient(
-  ui: ReactElement,
-  deployment: Partial<DeploymentBootstrap> = {},
-) {
+function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={bootstrap(deployment)}>
+      <DeploymentProvider value={bootstrap()}>
         <AuthProvider>{ui}</AuthProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
@@ -275,6 +276,9 @@ function mockApi(
       if (url.includes(`${API_ROOT}/settings/mail`)) {
         return jsonResponse(MAIL_SETTINGS)
       }
+      if (url.includes(`${API_ROOT}/settings/country-database`)) {
+        return jsonResponse(NO_COUNTRY_DATABASE)
+      }
       if (url.includes(`${API_ROOT}/settings/master-key/rotate`)) {
         return jsonResponse({ master_key: "otari-mk-new" })
       }
@@ -324,6 +328,9 @@ function mockApiMovingTo(before: GatewaySettings, after: GatewaySettings) {
       if (url.includes(`${API_ROOT}/settings/mail`)) {
         return jsonResponse(MAIL_SETTINGS)
       }
+      if (url.includes(`${API_ROOT}/settings/country-database`)) {
+        return jsonResponse(NO_COUNTRY_DATABASE)
+      }
       if (url.includes(`${API_ROOT}/settings`)) {
         if ((init?.method ?? "GET").toUpperCase() === "PATCH") current = after
         return jsonResponse(current)
@@ -341,22 +348,13 @@ describe("SettingsPage", () => {
     window.localStorage.clear()
   })
 
-  it("offers the rate limit rules on a standalone gateway", async () => {
+  it("offers the rate limit rules", async () => {
     mockApi()
 
     renderWithClient(<SettingsPage />)
 
     await screen.findByText(/Version 1.2.3/)
     expect(screen.getByText("Rate limit rules")).toBeInTheDocument()
-  })
-
-  it("does not offer the rate limit rules on a hosted control plane", async () => {
-    mockApi()
-
-    renderWithClient(<SettingsPage />, { deployment_type: "hosted" })
-
-    await screen.findByText(/Version 1.2.3/)
-    expect(screen.queryByText("Rate limit rules")).not.toBeInTheDocument()
   })
 
   it("reflects the current settings on its switches", async () => {

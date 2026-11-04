@@ -5,7 +5,7 @@ A surface error that carries none is mapped to a status by the API layer.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
-from gateway.core.error_codes import END_USER_BUDGET_NOT_ALLOWED
+from gateway.core.error_codes import END_USER_BUDGET_NOT_ALLOWED, END_USER_LIMIT_REACHED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyForbiddenError,
@@ -71,16 +71,16 @@ class OrganizationBudgetInUseError(TenancyConflictError):
 
 
 class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
-    """Something outside this organization's own surface still names the budget.
+    """A user is still on the budget, so the delete is refused without naming them.
 
-    ``users.budget_id``, which is not a tenant's to see, so the refusal does not
-    name the rows holding it.
+    ``users.budget_id``: an end user of one of the organization's service keys,
+    or a gateway user an operator assigned, which is not a tenant's to see.
     """
 
     def __init__(self, budget_id: object):
         super().__init__(
-            f"Budget {budget_id} is still in use outside this organization and cannot be deleted. "
-            "Ask a deployment operator to release it."
+            f"Budget {budget_id} still caps users and cannot be deleted. Move your service keys' end users "
+            "to another budget first; if none are on it, ask a deployment operator to release it."
         )
 
 
@@ -121,6 +121,17 @@ class DeploymentBudgetIsEndUserDefaultError(TenancyConflictError):
 
     Deleting it would leave every end user those keys create from then on uncapped.
     """
+
+    def __init__(self, keys: list[str]):
+        shown = ", ".join(keys[:5]) + (f" and {len(keys) - 5} more" if len(keys) > 5 else "")
+        super().__init__(
+            f"This budget is the default end-user budget of {shown}. Change that default on the key "
+            "(Keys > Edit > Service key) before deleting it."
+        )
+
+
+class OrganizationBudgetIsEndUserDefaultError(TenancyConflictError):
+    """An organization service key starts its end users on the budget, so the delete is refused by key name."""
 
     def __init__(self, keys: list[str]):
         shown = ", ".join(keys[:5]) + (f" and {len(keys) - 5} more" if len(keys) > 5 else "")
@@ -237,6 +248,15 @@ class EndUserBudgetNotAllowedError(TenancyForbiddenError):
 
     def __init__(self, budget_id: str):
         super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
+
+
+class EndUserLimitReachedError(TenancyForbiddenError):
+    """Only a new or revived end user is refused; ones the key already has keep being served."""
+
+    error_code = END_USER_LIMIT_REACHED
+
+    def __init__(self) -> None:
+        super().__init__("This key already has as many end users as it may have")
 
 
 class EndUserDefaultNotListedError(TenancyValidationError):

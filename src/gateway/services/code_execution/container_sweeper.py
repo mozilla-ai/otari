@@ -5,7 +5,7 @@ timeout when the request released it; a resume past either clock is already
 refused and drops the row it read. This is the third path, for the rows nobody
 resumes again: without it a busy deployment accumulates one dead row per
 conversation forever. Runs as one of the lifespan workers ``main.py`` starts,
-standalone only, and only when reuse is on.
+only when reuse is on.
 """
 
 from __future__ import annotations

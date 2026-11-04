@@ -79,7 +79,7 @@
  * architecture charter settles as the canonical design
  * foundation for the converged dashboard. Keep the token names,
  * their values, and the reasoning comments recognizably the
- * same as that file: the control-plane pages come here at M5 and
+ * same as that file: otari.ai's own pages come here at M5 and
  * have to land on this palette without a reconciliation pass.
  *
  * Components consume these via Tailwind utilities (bg-background,
@@ -95,7 +95,7 @@
  * What deliberately did NOT come across: the marketing type roles
  * (text-hero, text-marketing-*), the pre-login gradient, the
  * activation-modal and border-beam tokens, and the HubSpot form
- * patch. Those dress otari.ai's public site and its hosted signup,
+ * patch. Those dress otari.ai's public site and its signup,
  * neither of which exists here; a token with no consumer is a
  * token nobody maintains. They stay in otari-ai.
  * ============================================================= */
@@ -1000,6 +1000,19 @@
  * ============================================================= */
 :root {
   --disabled-opacity: 0.4;
+}
+
+/* =============================================================
+ * Room under the page for something fixed in the bottom-right corner.
+ *
+ * The shell's content area adds this to its bottom padding, so the last thing
+ * on a page (a table's pager, most often) can scroll clear of a control that
+ * floats over the corner. Nothing in this dashboard floats there for long, so
+ * it is zero here; a superset that pins a support launcher or a call to action
+ * to the corner sets it on the root for as long as that control is mounted.
+ * ============================================================= */
+:root {
+  --shell-corner-clearance: 0px;
 }
 
 /* =============================================================
@@ -1917,24 +1930,22 @@ main {
    17px at md where a primary puts it at 12 and 16. The padding gives the pixel
    back. Both sizes, because the rule is about the border rather than about
    which sizes happen to be in use today. Icon-only is excluded: it has no
-   label to inset and HeroUI zeroes its padding to keep it square. */
-.button--ghost.button--sm:not(.button--icon-only),
+   label to inset and HeroUI drops its padding to keep it square.
+
+   The rail is excluded too: its band controls set their own lane (`px-6`),
+   which this unlayered rule would outrank. `:where` keeps the specificity
+   unchanged. Do not hand the lane back with `revert-layer` instead: Safari 26
+   resolves a reverted `var()` logical shorthand to no padding (WebKit bug
+   310435). */
+.button--ghost.button--sm:not(.button--icon-only):where(:not(.otari-rail *)),
 .button--danger.button--sm:not(.button--icon-only) {
   padding-inline: 0.6875rem;
 }
-.button--ghost:not(.button--sm):not(.button--icon-only),
+.button--ghost:not(.button--sm):not(.button--icon-only):where(
+  :not(.otari-rail *)
+),
 .button--danger:not(.button--sm):not(.button--icon-only) {
   padding-inline: 0.9375rem;
-}
-
-/* The rail is the exception, and it has to be one: its two band controls set
-   their own lane so their mark and their label line up with the nav rows'
-   icon lane, which is a call-site decision this rule would otherwise outrank
-   (an unlayered rule beats `@layer utilities`, so `px-6` cannot win on its
-   own). `revert-layer` hands the value back to the utility rather than
-   restating the number here, so the lane stays declared in exactly one place. */
-.otari-rail .button--ghost:not(.button--icon-only) {
-  padding-inline: revert-layer;
 }
 
 /* =============================================================
@@ -2367,8 +2378,7 @@ main {
  * in by adding its own hook to these selectors rather than by this reaching
  * pages whose design does not exist yet.
  * ============================================================= */
-.otari-breakdown .otari-table.table-root,
-.otari-overview-activity .otari-table.table-root {
+.otari-breakdown .otari-table.table-root {
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
@@ -2380,17 +2390,14 @@ main {
    lines below at equal specificity, where the later source position won and put
    the doubled border back. Keeping all three together is what stops the next
    edit from reintroducing it: there is one place to look. */
-.otari-breakdown .otari-table .table__header,
-.otari-overview-activity .otari-table .table__header {
+.otari-breakdown .otari-table .table__header {
   border-top: 0;
 }
-/* Only the breakdown tables freeze a lane, and the Overview preview is ruled
-   *out* rather than pending: it is a few rows of narrow lanes that fit the
-   page, and Time leading is right for a chronology preview even though the
-   identity is Model. Where a table does scroll and its identity is not the
-   first lane, the frozen region runs from the first lane through the row header
-   inclusive; if that exceeds about a third of the table's width, the column
-   order is wrong and the order is the fix, so the pin doubles as a detector. */
+/* Only the breakdown tables freeze a lane. Where a table does scroll and its
+   identity is not the first lane, the frozen region runs from the first lane
+   through the row header inclusive; if that exceeds about a third of the
+   table's width, the column order is wrong and the order is the fix, so the pin
+   doubles as a detector. */
 .otari-breakdown .table__column:first-child,
 .otari-breakdown .table__row .table__cell:first-child {
   position: sticky;
@@ -2496,55 +2503,40 @@ main {
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
-/* The Overview's recent requests are this log a few rows long, built from the
-   same columns, so the two tables share these rules. It sits beside the
-   workspace rail and holds a smaller floor. */
-.otari-activity-table .table__content,
-.otari-overview-activity .table__content {
+.otari-activity-table .table__content {
   table-layout: fixed;
   width: 100%;
 }
 .otari-activity-table .table__content {
   min-width: 60rem;
 }
-.otari-overview-activity .table__content {
-  min-width: 40rem;
-}
-.otari-activity-table .table__row .table__cell,
-.otari-overview-activity .table__row .table__cell {
+.otari-activity-table .table__row .table__cell {
   height: 1.75rem;
   padding-block: 0;
 }
 /* Tighter than the base 1rem, which across ten lanes is 320px of padding. */
 .otari-activity-table .table__column,
-.otari-activity-table .table__cell[data-column],
-.otari-overview-activity .table__column,
-.otari-overview-activity .table__cell[data-column] {
+.otari-activity-table .table__cell[data-column] {
   padding-inline: 0.75rem;
   white-space: nowrap;
 }
-.otari-activity-table .table__column[data-key="time"],
-.otari-overview-activity .table__column[data-key="time"] {
+.otari-activity-table .table__column[data-key="time"] {
   width: 5.25rem;
 }
 .otari-activity-table .table__column[data-key="user"] {
   width: 8rem;
 }
-.otari-activity-table .table__column[data-key="input_tokens"],
-.otari-overview-activity .table__column[data-key="input_tokens"] {
+.otari-activity-table .table__column[data-key="input_tokens"] {
   width: 6rem;
 }
-.otari-activity-table .table__column[data-key="output_tokens"],
-.otari-overview-activity .table__column[data-key="output_tokens"] {
+.otari-activity-table .table__column[data-key="output_tokens"] {
   width: 5.5rem;
 }
 .otari-activity-table .table__column[data-key="cost"],
-.otari-activity-table .table__column[data-key="latency"],
-.otari-overview-activity .table__column[data-key="cost"] {
+.otari-activity-table .table__column[data-key="latency"] {
   width: 5.75rem;
 }
-.otari-activity-table .table__column[data-key="status"],
-.otari-overview-activity .table__column[data-key="status"] {
+.otari-activity-table .table__column[data-key="status"] {
   width: 6.5rem;
 }
 
@@ -2648,6 +2640,14 @@ main {
 .otari-sessions-table .table__row.is-peeked .table__cell {
   background-color: var(--color-surface-subtle);
 }
+/* The request open in the panel. A translucent wash on the cells, so a failed or
+   absorbed row keeps its tint and a pinned cell keeps its own background. */
+.otari-activity-table .table__row.is-peeked .table__cell {
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--color-text) 6%, transparent),
+    color-mix(in oklab, var(--color-text) 6%, transparent)
+  );
+}
 /* The session panel's rows and resize handles sit flush with a scrolling
    pane, which would clip the base ring's outward 2px, so theirs is drawn
    inside. */
@@ -2658,6 +2658,52 @@ main {
 /* The timeline bar of the span open in the panel. */
 .otari-trace-mark--selected {
   outline: 1px solid var(--color-text);
+}
+/* A tree row a live session adds while the panel is open: its contents, connectors
+   included, fade and rise into place while a wash fades from the row, so the eye
+   finds what just happened. The wash is a layer under the row's contents whose
+   opacity fades, so it stays on the compositor, and it outlasts the entrance
+   because it is what the eye follows. It starts lighter than the selected row's
+   fill so an arrival never reads as a selection. `backwards` holds both at their
+   start through the stagger delay. */
+.otari-trace-arrive {
+  position: relative;
+  isolation: isolate;
+}
+.otari-trace-arrive::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: color-mix(
+    in oklab,
+    var(--color-primary-subtle) 60%,
+    transparent
+  );
+  opacity: 0;
+  animation: otari-trace-wash 600ms ease-out var(--arrive-delay, 0ms) backwards;
+}
+.otari-trace-arrive > * {
+  animation: otari-trace-rise 250ms var(--ease-out-fluid)
+    var(--arrive-delay, 0ms) backwards;
+}
+@keyframes otari-trace-wash {
+  from {
+    opacity: 1;
+  }
+}
+@keyframes otari-trace-rise {
+  from {
+    opacity: 0;
+    translate: 0 0.25rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .otari-trace-arrive::before,
+  .otari-trace-arrive > * {
+    animation: none;
+  }
 }
 .otari-mcp-table .table__row .table__cell {
   height: 3.25rem;
@@ -2675,9 +2721,16 @@ main {
   width: 8.75rem;
   min-width: 8.75rem;
 }
+/* Wide enough for the longest label, "TOKEN UNREADABLE", on one line inside the
+   button that opens its detail. */
+.otari-mcp-table .table__column[data-key="health"] {
+  width: 12rem;
+  min-width: 12rem;
+}
+/* Three 24px actions 16px apart, plus the cell's padding. */
 .otari-mcp-table .table__column[data-key="actions"] {
-  width: 6rem;
-  min-width: 6rem;
+  width: 8.5rem;
+  min-width: 8.5rem;
 }
 .otari-budgets-table .table__row .table__cell {
   height: 3.625rem;
@@ -2771,6 +2824,22 @@ main {
 .otari-accounts-table[data-scrolled="true"]
   .table__cell[data-column="account"] {
   border-right: 1px solid var(--color-control-border);
+}
+/* The operator's email blocklist, under the accounts table and in its terms. */
+.otari-blocked-emails-table .table__row .table__cell {
+  height: 3.625rem;
+  padding-block: 0;
+}
+.otari-blocked-emails-table .table__column[data-key="added"] {
+  width: 8.75rem;
+  min-width: 8.75rem;
+}
+.otari-blocked-emails-table .table__column[data-key="actions"] {
+  width: 10rem;
+  min-width: 10rem;
+}
+.otari-blocked-emails-table .table__column[data-key="entry"] {
+  min-width: 18.75rem;
 }
 .otari-workspaces-table .table__row .table__cell {
   height: 3.625rem;

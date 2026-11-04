@@ -6,6 +6,7 @@ import { secretCaption } from "./secretCaption"
 
 const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   allowed_models: null,
+  allowed_tools: null,
   capture_agent_telemetry: null,
   created_at: "2026-09-10T00:00:00Z",
   exclude_from_budget: false,
@@ -19,8 +20,10 @@ const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   metadata: {},
   reject_user_mismatch: null,
   is_service_key: false,
+  is_organization_service_key: false,
   end_user_budget_id: null,
   end_user_budget_ids: [],
+  max_end_users: null,
   user_id: "alice",
   ...over,
 })

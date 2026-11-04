@@ -182,7 +182,10 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
                   <span className="truncate text-body">
                     {obs.name} ({obs.id.slice(0, 8)})
                   </span>
-                  <LevelChip level={obs.level} />
+                  <LevelChip
+                    level={obs.level}
+                    returnedError={obs.returnedError}
+                  />
                   {childCount > 0 ? (
                     <span className="shrink-0 text-caption text-subtle">
                       {childCount} {childCount === 1 ? "item" : "items"}

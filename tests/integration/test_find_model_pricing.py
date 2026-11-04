@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.db import ModelPricing
+from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.services.pricing_service import RequestPrices, configure_default_pricing, find_model_pricing
 
 
@@ -190,7 +191,9 @@ async def test_find_pricing_falls_back_to_models_dev_defaults(async_db: AsyncSes
     assert pricing.output_price_per_million > 0
 
     # The default is a lookup result, not a stored row: nothing is persisted.
-    count = (await async_db.execute(select(func.count()).select_from(ModelPricing))).scalar_one()
+    count = (
+        await async_db.execute(select(func.count()).select_from(ModelPricing).where(ModelPricing.kind == "model"))
+    ).scalar_one()
     assert count == 0
 
 
@@ -420,7 +423,7 @@ async def test_a_memoized_rate_survives_a_rollback(async_db: AsyncSession) -> No
         )
     )
     await async_db.commit()
-    prices = RequestPrices(None)
+    prices = RequestPrices(None, OrganizationModelPricingRepository(async_db))
 
     resolved = await prices.resolve(async_db, "openai", "memo-model")
     await async_db.rollback()

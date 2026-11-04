@@ -53,9 +53,6 @@ fi
 MASTER_KEY="$(cat "$STATE/master-key")"
 export OTARI_SECRET_KEY="$(cat "$STATE/secret-key")"
 export OTARI_PROVIDER_ACCOUNT_PEPPER="$(cat "$STATE/provider-account-pepper")"
-# A stale platform token in the shell would boot this as a hybrid gateway with
-# no management API at all; the smoke is the standalone edition.
-unset OTARI_AI_TOKEN
 
 LAN_IP="$( (ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}') || true)"
 PUBLIC_BASE_URL="http://${LAN_IP:-localhost}:$PORT"

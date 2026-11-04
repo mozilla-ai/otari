@@ -24,6 +24,7 @@ from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
+from gateway.api.deps import get_api_key_service
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
@@ -47,6 +48,7 @@ from gateway.exceptions.organizations_exceptions import (
     SignupRegistrationUnresolvedError,
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
+    WorkspaceNotFoundError,
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
@@ -56,6 +58,7 @@ from gateway.models.tenancy import (
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
     InviteOrganizationMemberRequest,
     Organization,
+    OrganizationMember,
     User,
     WorkspaceActivationState,
     WorkspaceAssignmentRequest,
@@ -63,8 +66,8 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspacePublic,
 )
-from gateway.repositories.api_keys import ApiKeyRepositories
-from gateway.repositories.budgets import BudgetRepositories
+from gateway.models.users import User as BillingUser
+from gateway.repositories.budgets import BudgetRepositories, EndUserRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -80,7 +83,6 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetPublic,
     WorkspaceMemberBudgetPolicyCreate,
 )
-from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
 from gateway.services.password_service import (
     hash_password_async,
@@ -101,9 +103,9 @@ from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
 )
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import (
+    NO_BLOCKED_ADDRESSES,
     NO_MAIL_LIMIT,
     NO_TERMS,
     MembershipWrites,
@@ -322,6 +324,7 @@ async def test_concurrent_member_adds_create_one_identity(
         ).create_active_organization_member_for_user(
             user=user,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -344,6 +347,7 @@ async def test_concurrent_workspace_member_adds_conflict(
     added = await service.create_active_organization_member_for_user(
         user=owner_row,
         request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     workspace_service = WorkspaceService(async_db, **membership_writes(async_db))
     workspace = await workspace_service.create_workspace(
@@ -367,6 +371,43 @@ async def test_concurrent_workspace_member_adds_conflict(
     conflicts = [outcome for outcome in outcomes if isinstance(outcome, WorkspaceMemberAlreadyExistsError)]
     assert len(joined) == 1
     assert len(conflicts) == _RACERS - 1
+
+
+async def test_a_member_added_to_a_workspace_deleted_mid_join_gets_not_found(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The membership insert is refused by the workspace foreign key, which is not a duplicate."""
+    organization, owner = await _seed_owner(async_db)
+    service = WorkspaceService(async_db, **membership_writes(async_db))
+    target = await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Target"))
+    await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Survivor"))
+    joiner = await create_member(async_db, organization, role="member", full_name="Joiner")
+    await async_db.commit()
+
+    async with sessions() as session:
+        actor = await UserRepository(session).get(owner.id)
+        assert actor is not None
+        adder = WorkspaceService(session, **membership_writes(session))
+        take_lock = adder.workspaces.lock
+
+        # Pins the interleaving: the delete commits after the adder's pre-checks and before its insert.
+        async def delete_then_lock(workspace_id: uuid.UUID) -> None:
+            async with sessions() as other:
+                deleter = await UserRepository(other).get(owner.id)
+                assert deleter is not None
+                await WorkspaceService(other, **membership_writes(other)).delete_workspace(
+                    user=deleter, workspace_id=workspace_id
+                )
+            await take_lock(workspace_id)
+
+        monkeypatch.setattr(adder.workspaces, "lock", delete_then_lock)
+        with pytest.raises(WorkspaceNotFoundError):
+            await adder.add_member(user=actor, workspace_id=target.id, user_id=joiner.id)
+
+    joined = await async_db.execute(select(col(WorkspaceMember.id)).where(col(WorkspaceMember.user_id) == joiner.id))
+    assert joined.all() == []
 
 
 async def test_provisioning_refuses_to_shadow_an_organization_it_did_not_create(
@@ -523,9 +564,20 @@ class _PausingListener:
     async def member_removed(self, member: WorkspaceMember) -> None:
         await self._inner.member_removed(member)
 
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        await self._inner.member_role_changed(member)
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        await self._inner.organization_member_changed(membership, workspace_ids)
+
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         await self._inner.workspace_deleted(workspace_id, member_ids)
         await self._let_the_writer_run()
+
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        await self._inner.member_lost_workspaces(user_id, workspace_ids)
 
 
 def _pausing(session: AsyncSession, let_the_writer_run: Callable[[], Awaitable[None]]) -> MembershipWrites:
@@ -534,7 +586,6 @@ def _pausing(session: AsyncSession, let_the_writer_run: Callable[[], Awaitable[N
     return {
         "uow": writes["uow"],
         "membership_listener": _PausingListener(writes["membership_listener"], let_the_writer_run),
-        "workspace_listener": writes["workspace_listener"],
     }
 
 
@@ -621,14 +672,12 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
 
 def _budget_service(db: AsyncSession, organizations: OrganizationService | None = None) -> BudgetService:
     uow = UnitOfWork(db)
-    organizations = organizations or OrganizationService(
-        db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-    )
+    organizations = organizations or OrganizationService(db, membership_listener=None)
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
+        get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
     )
 
@@ -776,7 +825,7 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
         return await create_scoped_budget(
             CreateScopedBudgetRequest(scope_type=scope_type, scope_id=scope_id, budget_id=budget_id),
             session,
-            OrganizationService(session, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+            OrganizationService(session, membership_listener=None),
         )
 
     race = await _race_a_workspace_delete(
@@ -819,9 +868,7 @@ async def test_a_workspace_delete_sweeps_a_ceiling_that_won_the_lock(
         async with sessions() as session:
             actor = await UserRepository(session).get(owner.id)
             assert actor is not None
-            organizations = OrganizationService(
-                session, membership_listener=None, workspace_listener=NullWorkspaceListener()
-            )
+            organizations = OrganizationService(session, membership_listener=None)
             creator = _budget_service(session, organizations)
             take_lock = organizations.lock_workspace
 
@@ -887,6 +934,7 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
     ).create_active_organization_member_for_user(
         user=owner_row,
         request=ActiveOrganizationMemberCreateRequest(email="grace@example.com"),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert added.organization_member_id is not None
     assert added.user_id is not None
@@ -906,6 +954,7 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
             request=InviteOrganizationMemberRequest(email="grace@example.com"),
             config=config,
             mail_limit=NO_MAIL_LIMIT,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -947,6 +996,7 @@ async def test_organizations_inviting_one_new_address_at_once_all_succeed(
                     request=InviteOrganizationMemberRequest(email="nova@example.com"),
                     config=GatewayConfig(),
                     mail_limit=NO_MAIL_LIMIT,
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -990,13 +1040,16 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
         ),
         config=config,
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
 
     async def attempt(session: AsyncSession) -> object:
         return await OrganizationService(session, **membership_writes(session)).accept_invitation(
-            token, claims=NO_TERMS
+            token,
+            claims=NO_TERMS,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -1045,6 +1098,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         # No mail for the invite itself, so the link comes back to share.
         config=GatewayConfig(),
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1053,7 +1107,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         async with sessions() as session:
             try:
                 return await claim_writes(session)["organizations"].accept_invitation(
-                    token, claims=NO_TERMS, password="accepted-password"
+                    token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES, password="accepted-password"
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1067,6 +1121,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
                     background_tasks=BackgroundTasks(),
                     email="iris@example.com",
                     password=f"signup-password-{index}",
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1117,6 +1172,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
         request=InviteOrganizationMemberRequest(email="iris@example.com"),
         config=GatewayConfig(),
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1141,6 +1197,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
                     background_tasks=BackgroundTasks(),
                     email="iris@example.com",
                     password="signup-password",
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1150,7 +1207,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
         async with sessions() as session:
             try:
                 return await claim_writes(session)["organizations"].accept_invitation(
-                    token, claims=NO_TERMS, password="accepted-password"
+                    token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES, password="accepted-password"
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1184,6 +1241,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
         request=InviteOrganizationMemberRequest(email="juno@example.com"),
         config=GatewayConfig(),
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.invitation_id is not None
     membership = await OrganizationMemberRepository(async_db).get(invited.organization_member_id)
@@ -1200,7 +1258,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
             ).revoke_organization_member_invitation_for_user(user=user, invitation_id=invited.invitation_id)
 
     async with sessions() as checking:
-        reader = OrganizationService(checking, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        reader = OrganizationService(checking, membership_listener=None)
         assert await reader.has_live_membership(invitee_id)
         revocation = asyncio.create_task(revoke())
         done, _ = await asyncio.wait({revocation}, timeout=_WRITER_WINDOW)
@@ -1209,7 +1267,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
     await revocation
 
     async with sessions() as after:
-        reader = OrganizationService(after, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        reader = OrganizationService(after, membership_listener=None)
         assert not await reader.has_live_membership(invitee_id)
 
 
@@ -1238,6 +1296,7 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
             background_tasks=BackgroundTasks(),
             email="nova@example.com",
             password="signup-password",
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
             **claim_writes(session),
         )
 
@@ -1333,6 +1392,7 @@ async def test_concurrent_open_signup_claims_of_an_unwanted_identity_found_one_o
             background_tasks=BackgroundTasks(),
             email="nova@example.com",
             password="signup-password",
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
             **claim_writes(session),
         )
 
@@ -1433,6 +1493,7 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
         request=InviteOrganizationMemberRequest(email="ivy@example.com"),
         config=GatewayConfig(),
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1440,7 +1501,9 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
 
     async def accept(session: AsyncSession) -> object:
         return await OrganizationService(session, **membership_writes(session)).accept_invitation(
-            token, claims=NO_TERMS
+            token,
+            claims=NO_TERMS,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     async def revoke(session: AsyncSession) -> object:
@@ -1516,6 +1579,7 @@ async def test_concurrent_verifications_of_one_token_verify_exactly_once(
             token=token,
             password="vera-password",
             open_signup=True,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -1567,6 +1631,7 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
                     organizations=claim_writes(session)["organizations"],
                     token=token,
                     new_password=f"racer-password-{index}",
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                 )
                 return index
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1658,3 +1723,139 @@ async def test_concurrent_first_issuance_leaves_one_setup_key(
     # one row would fail rather than look like an improvement.
     live = [issue for issue in issued if hash_key(issue.key) == key_hash]  # type: ignore[attr-defined]
     assert len(live) == 1
+
+
+@pytest.mark.parametrize("entrypoint", ["resolve", "put"])
+async def test_racers_naming_one_new_end_user_under_a_full_cap_all_get_it(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint: str,
+) -> None:
+    """With one place left, every racer for the same new id gets the end user the first one created.
+
+    Each racer has found no end user before any takes the owner's lock, so the
+    ones that wait behind the first would count it and refuse a 403 for their
+    own end user unless they look it up again under the lock.
+    """
+    owner_id = f"mlpa-{uuid.uuid4().hex[:8]}"
+    async_db.add(BillingUser(user_id=owner_id))
+    budget_id = await create_budget(async_db, name=f"eu-{owner_id}")
+    await async_db.commit()
+
+    real_lock = EndUserRepository.lock_owner
+    all_looked_up = asyncio.Barrier(_RACERS)
+
+    async def lock_after_all_look_up(self: EndUserRepository, owner_user_id: str) -> None:
+        async with asyncio.timeout(_CHECKPOINT_TIMEOUT):
+            await all_looked_up.wait()
+        await real_lock(self, owner_user_id)
+
+    monkeypatch.setattr(EndUserRepository, "lock_owner", lock_after_all_look_up)
+
+    async def attempt(session: AsyncSession) -> object:
+        api_key = APIKey(
+            user_id=owner_id,
+            is_service_key=True,
+            end_user_budget_ids=[budget_id],
+            end_user_budget_id=budget_id,
+            max_end_users=1,
+        )
+        service = budget_service(session)
+        if entrypoint == "resolve":
+            return (await service.resolve_end_user(api_key=api_key, external_id="fxa1")).user_id
+        return (await service.put_end_user(api_key=api_key, external_id="fxa1", budget_id=budget_id))[0].user_id
+
+    outcomes = await _race(sessions, attempt)
+
+    assert not [outcome for outcome in outcomes if isinstance(outcome, Exception)], outcomes
+    assert len(set(outcomes)) == 1
+    async_db.expire_all()
+    end_users = (await async_db.execute(select(BillingUser).where(BillingUser.parent_user_id == owner_id))).scalars()
+    assert [user.user_id for user in end_users] == outcomes[:1]
+
+
+class _PausingOnMembershipChange(_PausingListener):
+    """Holds a membership change open, after the listener has acted, until the racing key write settles."""
+
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        await self._inner.member_role_changed(member)
+        await self._let_the_writer_run()
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        await self._inner.organization_member_changed(membership, workspace_ids)
+        await self._let_the_writer_run()
+
+    async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
+        await self._inner.workspace_deleted(workspace_id, member_ids)
+
+
+@pytest.mark.parametrize("change", ["organization_removal", "organization_demotion", "workspace_demotion"])
+async def test_a_key_write_during_a_membership_change_waits_for_it_and_is_refused(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    change: str,
+) -> None:
+    """A key write that runs while its author is removed or made a viewer must see the change.
+
+    The change switches off the keys it finds, so a write admitted on the old
+    membership and committed after that switch-off would leave a key on.
+    """
+    organization, owner = await _seed_owner(async_db)
+    workspace = await WorkspaceRepository(async_db).create_workspace(
+        name="Shared", organization_id=organization.id, created_by_user_id=owner.id
+    )
+    member = await create_member(async_db, organization, role="member", full_name="Member")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=member.id, role="member")
+    membership = await OrganizationMemberRepository(async_db).get_active_by_organization_and_user(
+        organization.id, member.id
+    )
+    assert membership is not None
+    await async_db.commit()
+
+    changing = asyncio.Event()
+
+    async def write() -> object:
+        await changing.wait()
+        async with sessions() as session:
+            writer = await UserRepository(session).get(member.id)
+            assert writer is not None
+            try:
+                await OrganizationService(session, membership_listener=None).hold_workspace_write_access(
+                    user=writer, organization_id=organization.id, workspace_id=workspace.id, revoking=False
+                )
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+            return None
+
+    writing = asyncio.create_task(write())
+
+    async def let_the_write_run() -> None:
+        changing.set()
+        await asyncio.wait({writing}, timeout=_WRITER_WINDOW)
+
+    async with sessions() as session:
+        actor = await UserRepository(session).get(owner.id)
+        assert actor is not None
+        writes = membership_writes(session)
+        listener = _PausingOnMembershipChange(writes["membership_listener"], let_the_write_run)
+        if change == "workspace_demotion":
+            await WorkspaceService(session, uow=writes["uow"], membership_listener=listener).update_member_role(
+                user=actor, workspace_id=workspace.id, user_id=member.id, role="viewer"
+            )
+        else:
+            organizations = OrganizationService(session, uow=writes["uow"], membership_listener=listener)
+            if change == "organization_removal":
+                await organizations.remove_active_organization_member_for_user(
+                    user=actor, organization_member_id=membership.id
+                )
+            else:
+                await organizations.update_active_organization_member_for_user(
+                    user=actor,
+                    organization_member_id=membership.id,
+                    request=ActiveOrganizationMemberUpdateRequest(role="viewer"),
+                )
+
+    assert isinstance(await writing, NotAuthorizedError)

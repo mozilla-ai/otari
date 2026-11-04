@@ -1,11 +1,10 @@
-"""The container vocabulary a request speaks, and which of it a managed credential admits."""
+"""The container vocabulary a request speaks, and which of it names a container on the provider's account."""
 
 from __future__ import annotations
 
 import pytest
 
-from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialError
-from gateway.services.code_execution import CONTAINER_AUTO, check_container_on_credential, requested_container
+from gateway.services.code_execution import CONTAINER_AUTO, names_provider_container, requested_container
 
 
 def test_what_a_container_field_asks_for_is_read_in_both_vocabularies() -> None:
@@ -33,19 +32,31 @@ def test_what_a_container_field_asks_for_is_read_in_both_vocabularies() -> None:
     assert requested_container(7) is None
 
 
-@pytest.mark.parametrize("container", ["otari_cntr_1", "container_abc", {"id": "cntr_1"}, {}, ""])
-def test_a_container_id_is_refused_on_a_managed_credential(container: object) -> None:
-    with pytest.raises(ContainerOnManagedCredentialError) as refused:
-        check_container_on_credential(container, managed_credential=True)
+@pytest.mark.parametrize(
+    "call_kwargs",
+    [
+        {"container": "container_abc"},
+        {"tools": [{"type": "code_interpreter", "container": "cntr_abc"}]},
+        {"tools": [{"type": "code_interpreter", "container": {"id": "cntr_abc"}}]},
+    ],
+    ids=["anthropic-id", "openai-id", "openai-object-id"],
+)
+def test_a_providers_container_id_is_named(call_kwargs: dict[str, object]) -> None:
+    assert names_provider_container(call_kwargs) is True
 
-    assert refused.value.status_code == 400
 
-
-@pytest.mark.parametrize("container", ["auto", " AUTO ", {"type": "auto"}])
-def test_auto_passes_on_a_managed_credential(container: object) -> None:
-    check_container_on_credential(container, managed_credential=True)
-
-
-@pytest.mark.parametrize("container", ["otari_cntr_1", "container_abc", {"id": "cntr_1"}, "auto"])
-def test_any_container_passes_on_the_callers_own_credential(container: object) -> None:
-    check_container_on_credential(container, managed_credential=False)
+@pytest.mark.parametrize(
+    "call_kwargs",
+    [
+        {},
+        {"container": None},
+        {"container": "auto"},
+        {"container": "otari_cntr_1"},
+        {"tools": [{"type": "code_interpreter", "container": {"type": "auto"}}]},
+        {"tools": [{"type": "code_interpreter", "container": "otari_cntr_1"}]},
+        {"tools": [{"type": "function", "container": "cntr_abc"}]},
+    ],
+    ids=["none", "null", "auto", "gateway-id", "openai-auto", "openai-gateway-id", "not-code-interpreter"],
+)
+def test_nothing_else_names_a_providers_container(call_kwargs: dict[str, object]) -> None:
+    assert names_provider_container(call_kwargs) is False

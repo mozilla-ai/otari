@@ -14,7 +14,7 @@ function json(body: unknown, status = 200) {
   })
 }
 
-// An organization admin on a hosted deployment: not the deployment operator, so
+// An organization admin who is not the deployment operator, so
 // the operator-only discovery and provider-config reads refuse, and GET /models
 // is the read that answers with the organization's own providers and the
 // deployment's managed models (otari-ai#2392). `operator` flips the caller to

@@ -5,14 +5,15 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
+from collections.abc import Collection
 from typing import Any, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import get_api_key_service
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget
 from gateway.models.tenancy import Organization, User, Workspace
-from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -21,30 +22,26 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
 from gateway.services.organizations import InvitationMailLimit
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 
 
 class MembershipWrites(TypedDict):
-    """What a service that changes membership is built with: a Unit of Work and the listeners writing through it."""
+    """What a service that changes membership is built with: a Unit of Work and the listener writing through it."""
 
     uow: UnitOfWork
     membership_listener: MembershipListener
-    workspace_listener: WorkspaceListener
 
 
 def membership_writes(db: AsyncSession) -> MembershipWrites:
-    """Build a Unit of Work over ``db`` and the listeners on it, as a standalone deployment's request path does."""
+    """Build a Unit of Work over ``db`` and the listener on it, as a standalone deployment's request path does."""
     uow = UnitOfWork(db)
     return {
         "uow": uow,
         "membership_listener": BudgetMembershipListener(BudgetRepositories.on(uow)),
-        "workspace_listener": NullWorkspaceListener(),
     }
 
 
@@ -53,6 +50,16 @@ NO_TERMS = InvitationClaimSettings(terms_url=None)
 
 # No invitation mail limit, for a test that is not about it.
 NO_MAIL_LIMIT = InvitationMailLimit(None, per_organization=None, per_address=None)
+
+
+class _NoBlockedAddresses:
+    """A blocklist that blocks nothing, for a test that is not about it."""
+
+    async def blocked_among(self, emails: Collection[str]) -> set[str]:
+        return set()
+
+
+NO_BLOCKED_ADDRESSES = _NoBlockedAddresses()
 
 
 def claim_writes(db: AsyncSession) -> dict[str, Any]:
@@ -64,12 +71,12 @@ def claim_writes(db: AsyncSession) -> dict[str, Any]:
 def budget_service(db: AsyncSession) -> BudgetService:
     """Build the budget service over ``db``, as ``get_budget_service`` does."""
     uow = UnitOfWork(db)
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    organizations = OrganizationService(db, membership_listener=None)
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
         organizations,
-        ApiKeyService(uow, ApiKeyRepositories.on(uow)),
+        get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
     )
 

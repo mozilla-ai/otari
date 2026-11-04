@@ -6,8 +6,6 @@
  * declaration of it.
  */
 
-import type { DeploymentBootstrap } from "@/client"
-
 import type { TELEMETRY_EVENTS } from "./events"
 
 /** One of the names `events.ts` declares, and nothing else. */
@@ -55,8 +53,6 @@ export interface TelemetryIdentity {
    * not a person to describe.
    */
   actorId: string
-  /** Which kind of session this deployment issues, from `GET /v1/bootstrap`. */
-  sessionType: DeploymentBootstrap["session_type"]
   organizationId: string
   organizationName: string
   /** The actor's role in that organization ("owner", "admin", "member"). */

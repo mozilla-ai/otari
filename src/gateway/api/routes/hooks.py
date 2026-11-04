@@ -21,11 +21,11 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import extract_credential_token, get_config, get_db_if_needed, verify_api_key_or_master_key
+from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from otari_agent.domain.check import PolicyCheckError, run_policy_check
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES
@@ -40,31 +40,14 @@ from otari_agent.domain.types import CheckVerdict, EvidenceScope, JudgeVerdict, 
 # handler runs.
 async def verify_hook_caller(
     request: Request,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> None:
-    """Authenticate a Hook Server caller in whichever mode this gateway runs.
+    """Authenticate a Hook Server caller.
 
-    Standalone and hosted validate an API key or the master key against the
-    local database, exactly as ``POST /api/v1/usage/external-events`` does.
-
-    Hybrid has no local tenancy to validate against, so it only requires a
-    credential header to be present, the same thing the stateless MCP route
-    does there. That is weaker on purpose and it is all this endpoint needs: it
-    reads no tenant data, writes nothing, bills nothing, and evaluates only
-    the policy and evidence the caller sent in the same request. What a
-    request can cost is bounded by ``otari_agent.domain.check``'s own work
-    budgets, not by who sent it.
+    Validates an API key or the master key against the local database, exactly
+    as ``POST /api/v1/usage/external-events`` does.
     """
-    if config.is_hybrid_mode:
-        extract_credential_token(request)
-        return
-
-    if db is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        )
     await verify_api_key_or_master_key(request, db, config)
 
 

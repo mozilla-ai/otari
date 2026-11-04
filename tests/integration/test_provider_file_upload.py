@@ -346,7 +346,7 @@ def test_a_refusal_releases_the_reservation_and_answers_in_the_anthropic_envelop
         response = client.post(f"{API_ROOT}/messages", json=body, headers=budgeted_key_header)
 
     assert response.status_code == 400, response.text
-    envelope = response.json()["detail"]
+    envelope = response.json()
     assert envelope["type"] == "error"
     assert envelope["error"]["message"] == "This deployment does not upload attached files to a provider"
     provider.assert_not_awaited()

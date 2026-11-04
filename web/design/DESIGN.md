@@ -97,7 +97,7 @@ for a component, not for those.
 | `content/Markdown` | `Markdown` |
 | `content/CodeBlock` | `CodeBlock`. Two arrangements: a language row, or bare with a floating copy |
 | `ProductMark` | `ProductMark`. At the top level: it belongs to no topic |
-| `@/shared/components/access/EntitlementGate` · `/UnavailableHere` · `/MissingGatewayAddressNotice` | one each |
+| `@/shared/components/access/EntitlementGate` | `EntitlementGate` |
 | `@/shared/helpers/format` | `formatUsd`, `formatUsdHeadline`, `formatNumber`, `formatTokens`, `formatPct`, `formatDate`, `formatDateTime`, `formatRelative`, `deltaFraction` |
 
 **Never hand-roll a formatter.** `toLocaleString()` at a call site is how two pages
@@ -125,7 +125,7 @@ Which is why two directories stayed behind in `shared/components/`:
 
 | Stayed | Why it is not a primitive |
 | --- | --- |
-| `access/EntitlementGate` · `/UnavailableHere` · `/MissingGatewayAddressNotice` | "Unavailable here" is a fact about which deployment answered the page. A surface and a capability are this product's axes, and a design system does not know deployments exist. |
+| `access/EntitlementGate` | Whether a deployment is entitled to a capability is a fact about which deployment answered the page. A capability is this product's axis, and a design system does not know deployments exist. |
 | `deprecated/*` | It is on its way out. Importing four components into a fresh library on the day it is created is not a migration, it is a starting position nobody would choose. |
 
 Everything else moved, including two things that look like they should not have:

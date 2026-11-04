@@ -16,14 +16,16 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Self
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
+from gateway.core.settings.inference import country_codes
 from gateway.models.money import as_float
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
-from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderEndpoint
+from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
+from gateway.types.price_unit import PriceUnit
 
 
 class OrgProviderKeyCreateRequest(SQLModel):
@@ -217,7 +219,7 @@ class OrgProviderKeyModelPublic(SQLModel):
     cache_write_price_per_million: float | None = None
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
-    unit: str = "tokens"
+    unit: PriceUnit = "tokens"
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
@@ -363,7 +365,9 @@ class HostedProviderCreateRequest(SQLModel):
     every other one is served as if it were not configured.
     ``serves_unlisted_models`` serves a model the roster does not list, as a
     ``config.yml`` instance does, and switches on every model it offers
-    whether or not something prices it.
+    whether or not something prices it. ``supported_countries`` keeps the
+    provider to requests from those ISO country codes, checked as well as
+    ``provider_supported_countries``; null serves every country.
     """
 
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
@@ -376,6 +380,12 @@ class HostedProviderCreateRequest(SQLModel):
     enabled: bool = True
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
+    supported_countries: list[str] | None = Field(default=None, max_length=300)
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
 
 
 class HostedProviderUpdateRequest(SQLModel):
@@ -389,7 +399,8 @@ class HostedProviderUpdateRequest(SQLModel):
     without one. ``client_args`` omitted is left alone; an explicit
     null clears it, and an entry echoed back as the mask keeps the stored value.
     ``restricted_to_organization_id`` reads the same way: omitted keeps the
-    restriction, null lifts it.
+    restriction, null lifts it, and so does ``supported_countries``, where an
+    empty list closes the provider to every country.
     """
 
     # A toggle alone, so a reader who edits the example never re-sends a key.
@@ -401,6 +412,12 @@ class HostedProviderUpdateRequest(SQLModel):
     enabled: bool | None = None
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool | None = None
+    supported_countries: list[str] | None = Field(default=None, max_length=300)
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
 
 
 class HostedProviderPublic(SQLModel):
@@ -422,7 +439,8 @@ class HostedProviderPublic(SQLModel):
     and ``decryptable`` false for one whose key or extras no configured
     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
     ``serves_unlisted_models`` is true for one that serves a model its roster
-    does not list.
+    does not list. ``supported_countries`` is null for one that serves every
+    country.
     """
 
     id: uuid.UUID | None = None
@@ -437,6 +455,7 @@ class HostedProviderPublic(SQLModel):
     enabled: bool
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
+    supported_countries: list[str] | None = None
     shadows_config: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -471,6 +490,7 @@ class HostedProviderPublic(SQLModel):
             enabled=row.enabled,
             restricted_to_organization_id=row.restricted_to_organization_id,
             serves_unlisted_models=row.serves_unlisted_models,
+            supported_countries=row.supported_countries,
             shadows_config=shadows_config,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -488,6 +508,7 @@ class HostedProviderPublic(SQLModel):
         client_args: dict[str, Any] | None,
         enabled: bool,
         restricted_to_organization_id: uuid.UUID | None,
+        supported_countries: list[str] | None = None,
     ) -> HostedProviderPublic:
         """Read one configuration entry for the API, masked as a row is.
 
@@ -503,6 +524,7 @@ class HostedProviderPublic(SQLModel):
             client_args=redact_secret_like_values(client_args),
             enabled=enabled,
             restricted_to_organization_id=restricted_to_organization_id,
+            supported_countries=supported_countries,
         )
 
 
@@ -657,7 +679,7 @@ class HostedModelCreateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    unit: Literal["tokens", "requests", "images"] | None = None
+    unit: PriceUnit | None = None
 
     @model_validator(mode="after")
     def _prices_come_as_a_pair(self) -> Self:
@@ -684,7 +706,7 @@ class HostedModelUpdateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    unit: Literal["tokens", "requests", "images"] | None = None
+    unit: PriceUnit | None = None
     enabled: bool | None = None
 
     @model_validator(mode="after")
@@ -725,7 +747,9 @@ class HostedModelPublic(SQLModel):
     supplies it, and None when nothing prices the model yet. ``unit`` says what
     the rates are per, so a per-request rate is not read as a per-token one.
     ``enabled`` is the serving switch; a model offered without a discoverable
-    price starts off.
+    price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
+    while it waits for a rate, ``operator`` when an operator switched it off,
+    ``unavailable`` when its provider refused to serve it.
     """
 
     id: uuid.UUID
@@ -738,6 +762,7 @@ class HostedModelPublic(SQLModel):
     unit: str | None = None
     price_source: PriceSource | None = None
     enabled: bool
+    disabled_reason: HostedModelDisabledReason | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -755,6 +780,7 @@ class HostedModelPublic(SQLModel):
             unit=rates.unit if rates else None,
             price_source=rates.source if rates else None,
             enabled=row.enabled,
+            disabled_reason=row.disabled_reason,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -831,6 +857,77 @@ class HostedCatalogRefreshPublic(SQLModel):
     removed_override_rows: int
     kept: list[HostedCatalogKeptGroupPublic]
     orphaned_rosters: list[str] = Field(default_factory=list)
+
+
+class HostedCatalogPriceChangePublic(SQLModel):
+    """One model whose models.dev price a catalog update adds, changes or removes."""
+
+    model_key: str
+    change: Literal["added", "changed", "removed"]
+
+
+class HostedCatalogPriceUpdatePublic(SQLModel):
+    """The models.dev price changes a catalog update would apply.
+
+    ``changes`` is a sample and the counts are the totals. ``digest`` names the
+    fetched prices, so applying them applies what was reviewed. ``needs_review``
+    is why the scheduled update would hold them for a person under ``auto``.
+    """
+
+    fetched_at: datetime
+    added_count: int
+    changed_count: int
+    removed_count: int
+    changes: list[HostedCatalogPriceChangePublic]
+    changes_truncated: bool
+    digest: str
+    needs_review: bool
+    review_reason: str | None = None
+
+
+class HostedCatalogUpdatePreviewRequest(SQLModel):
+    """What to preview: the update alone, or with the cleanup."""
+
+    cleanup: bool = Field(
+        default=False,
+        description="Also preview removing the prices of models no hosted provider serves.",
+    )
+
+
+class HostedCatalogUpdateRequest(SQLModel):
+    """What to apply, as the preview showed it."""
+
+    digest: str | None = Field(
+        default=None,
+        description=(
+            "The `digest` of the previewed prices, to apply them; 409 when the pending prices differ. "
+            "Without it, no price changes."
+        ),
+    )
+    cleanup: bool = Field(
+        default=False,
+        description="Also remove the prices of models no hosted provider serves, with their history.",
+    )
+
+
+class HostedCatalogUpdatePreviewPublic(SQLModel):
+    """What a catalog update would do: its price changes, then what each provider newly lists.
+
+    ``prices`` is ``None`` when models.dev changed nothing, or when it could not
+    be fetched, which ``price_error`` then says. ``catalog`` carries the cleanup
+    the preview was asked for, and no removals otherwise.
+    """
+
+    prices: HostedCatalogPriceUpdatePublic | None
+    price_error: str | None = None
+    catalog: HostedCatalogRefreshPublic
+
+
+class HostedCatalogUpdatePublic(SQLModel):
+    """What a catalog update did."""
+
+    prices_applied: bool
+    catalog: HostedCatalogRefreshPublic
 
 
 class HostedAvailableModelsPublic(SQLModel):

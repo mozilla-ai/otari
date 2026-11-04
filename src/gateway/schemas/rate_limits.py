@@ -25,11 +25,18 @@ class RateLimitRuleUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid", json_schema_extra={"example": {"rpm": 1200}})
 
-    per: Literal["deployment", "key", "user", "model"] | None = Field(
+    per: Literal["deployment", "key", "user", "model", "budget"] | None = Field(
         default=None, description="What one count is shared by."
     )
     models: list[str] | None = Field(
         default=None, description="The instance:model names a per: model rule limits; null for any other rule."
+    )
+    budgets: list[str] | None = Field(
+        default=None,
+        description="The budget IDs a per: budget rule counts; null for every budget, and on any other rule.",
+    )
+    mode: Literal["enforce", "report"] | None = Field(
+        default=None, description="'enforce' refuses a request over the rule; 'report' serves it and names the rule."
     )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
     tpm: int | None = Field(default=None, ge=1, description="Tokens per minute.")

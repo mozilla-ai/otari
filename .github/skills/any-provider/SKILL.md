@@ -25,8 +25,11 @@ context and calls the adapter.
 2. **Write the adapter.** Build the request from the shared parameters and the native options,
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
-   - Send with `self._http.request`, which uses the host's client and the provider's timeout and
-     turns a transport failure into a `ProviderError` without its text.
+   - Send with `self._http.request`, which uses the host's client and the provider's timeout,
+     names the library in the request's `User-Agent` (`any-search/<version>` or
+     `any-fetch/<version>`) and turns a transport failure into a `ProviderError` without its
+     text. An adapter sets no `User-Agent` of its own, even where the provider's SDK names
+     itself: that header is the one exception to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
@@ -45,6 +48,8 @@ context and calls the adapter.
    - A date without a zone is UTC.
    - The cost is the provider's reported figure only, as a `Decimal`, with `cost_source` set.
    - `api_base` replaces the endpoint for every provider; strip its trailing slash.
+   - Bump the package's `__version__` (`<import name>/__init__.py`): it names the library in
+     every request's `User-Agent`, so a provider can tie a change in its traffic to a release.
 3. **Record fixtures and test.** Record one fixture per case (below) with
    `uv run python <package>/scripts/record_fixture.py`. Keep them small: ask for few results and
    little text. Check the key is not in them. Then add:
@@ -63,6 +68,10 @@ context and calls the adapter.
 5. **In the gateway**, nothing in code, since the catalog routes and the settings validation read
    the libraries' metadata. Add the provider's pricing note to `docs/tools.md`, under "Search
    providers" or "Fetch providers", and a compose or `.env.example` line where a key is expected.
+   Then smoke-test it on a local gateway: a direct search and an in-loop search or fetch on an
+   instance, the price each bills (the instance's `price_per_call`) and a refused key. When the
+   provider's name is also an any-llm provider's, configure that provider's models too, and
+   check that the tool's price and access stay apart from the models'.
 6. **Update the learnings** below with what the provider taught, and this procedure if a step
    changed.
 
@@ -71,7 +80,7 @@ The four cases a fixture can record:
 | Case | What it is |
 |---|---|
 | `normal` | A successful answer with content. |
-| `empty` | A successful answer with nothing in it: no hits, or a page with no text. |
+| `empty` | A successful answer with nothing in it: no hits, or a page with no text. A fetch provider that never answers a page with no text, failing the call instead, has none. |
 | `error` | A failed call, with an HTTP status. A key the provider refuses is the easiest to record, unless it refuses keys inside a 200; then try a malformed parameter. |
 | `in_body_error` | An error inside a 200. Leave it out when the provider has none. |
 
@@ -86,7 +95,9 @@ The four cases a fixture can record:
   native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
   `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
 - A hit needs a URL. Drop an item without one only when the provider's documentation allows such
-  an item; otherwise it is `unexpected_response`. `title` and `snippet` are strings, never `None`.
+  an item; otherwise it is `unexpected_response`. When the provider is seen to send a string that
+  is not an http(s) URL with a host, such as Serply's Google redirect tokens, drop that item too
+  and fill the count from the items after it. `title` and `snippet` are strings, never `None`.
   `snippet` is the provider's short text; `text` is page text, when it came back.
 - List the fields the adapter checks in the module's docstring and the README's section on the
   provider.
@@ -106,7 +117,7 @@ The four cases a fixture can record:
   answer with neither a page nor a reason raises `unexpected_response`; it is not an empty page.
 - A provider with no error inside a 200 either fails the call for a page it could not fetch or
   returns the text of the site's own error page. Find out which live, with a page that does not
-  exist, and say so in the docstring, the README and `EXPECTED`'s `page_errors`.
+  exist, and say so in the docstring, the README and `EXPECTED`'s `missing_page`.
 - List the fields the adapter checks in the module's docstring and the README's section on the
   provider.
 - `builtin` is not added here: the host registers it (`AnyFetch.register_builtin`).
@@ -189,7 +200,7 @@ The first search provider with the key in the URL and errors inside a 200.
   PDF and an article live; a field whose format the provider does not hold stays in `raw`, since
   checking it would fail every such call.
 - Not every fetch provider has an error inside a 200. Tabstack returns a 404 page's text with a
-  200 and does not say what status the site answered, hence `page_errors` in the live tests.
+  200 and does not say what status the site answered, hence `missing_page` in the live tests.
 - A provider can be slower than the default 15-second timeout: Tabstack documents up to 15 s at
   its default effort and 15 to 60 s at `max`, and a zero-byte file took 29 s. Say so in the
   option's description, the README and the pricing note, which tells an operator to set the
@@ -199,3 +210,73 @@ The first search provider with the key in the URL and errors inside a 200.
   pricing note in `docs/tools.md` then says what it charges, and no more.
 - Fixture recipes: `https://example.com/` for a normal page small enough to keep whole, and the
   key variable set to a made-up key for the error.
+
+### 2026-10-18, DeepSeek (both libraries)
+
+The first provider whose name and key are also an any-llm provider's, and the first fetch
+provider with no empty page.
+
+- A search or fetch provider can share its name with a model provider. DeepSeek's tools were
+  priced and allow-listed as `deepseek:<tool-name>`, in the key space of its models'
+  `deepseek:<model>`, and gateway code that judged a key by its prefix took one for the other:
+  the hosted catalog sweep kept unoffered model prices as tool rates, `deepseek:*` granted paid
+  searches, and the startup warning called the key the search tool read ignored. So tool prices
+  now have a kind of their own, keyed by the instance's name (`price_per_call` on its entry), and
+  search tools an access list of their own (`allowed_tools`), and a provider's tools and models no
+  longer share a key. What is left to the next author: instance names are unique across
+  `search_tools` and `fetch_tools`, so a provider that searches and fetches needs two
+  (`deepseek`, `deepseek-fetch`), and step 5's smoke test configures the provider's models beside
+  its tools and checks that a model's price or allow-list entry reaches neither.
+- An error body's fields can differ in how much they say. DeepSeek's OpenAI-shaped body sends
+  `code` `invalid_request_error` for every failure, a refused key included, while `type` tells
+  them apart (`authentication_error`, `not_found_error`). Record more than one failure before
+  choosing which field becomes the tag.
+- An error message can carry part of the key: DeepSeek's 401 quotes its last four characters
+  after asterisks. The recorders redact that masked form as well as the key; the adapter still
+  never reads the message.
+- A fetch provider can fail the call for every page it cannot use and never answer an empty
+  page. DeepSeek answers a 404 `not_found_error` for a missing page, a site's 500, a private
+  address, a PDF, a zero-byte file and HTML with an empty body, with nothing saying which. That
+  cannot be read as an empty page, since a missing page looks the same, so the provider leaves
+  `empty` out of the conformance scenarios (`NO_EMPTY_PAGE`), and `EXPECTED` says
+  `missing_page="fails"`. Probe those cases live before deciding: a page with only a title came
+  back with the title as its text.
+- A provider can have no recency parameter but a query operator: DeepSeek's `after:YYYY-MM-DD`,
+  which counts toward its 128-character query limit, so a long query with a `time_range` is
+  refused. Check the operator live, its boundary included: DeepSeek's `after:D` takes in day D
+  from midnight UTC+8, which a probe shows as the earliest hit dated D-1 16:00 UTC, so a start
+  day computed in UTC covers at least the span.
+- A search provider can return URLs with tracking parameters or fragments
+  (`?spm=a2c6h`, `#1`); the adapter passes them as they are.
+- Fixture recipes: an empty search with `site:` set to a domain that does not exist; a refused
+  key as any `sk-` string of the right length.
+
+### 2026-11-03, Serply (any-search)
+
+The first search provider with the query in the URL and the key in a header, and the first that
+returns a scraped results page.
+
+- Set `query_in_url` without `key_in_url` when only the query travels in the URL; the real-socket
+  log test still applies, since httpx logs the URL with the query in it.
+- A native option can be a request header: Serply's `X-Proxy-Location` and `X-User-Agent` keep
+  the provider's header names and go out as headers, and the key is set after them, so no option
+  replaces it.
+- A provider can pass parameters through that its documentation does not list: Serply forwards
+  Google's own `tbs` and `tbm`, which is how `time_range` is mapped. Check each one live before
+  offering it, and say in the docstring when it was checked: `tbm=nws` works, `tbm=isch` returned
+  no `results`.
+- A result can carry a value of the right type that is not what the field promises: Serply
+  sometimes returns an opaque Google token in `link` in place of a URL. Drop such an item rather
+  than failing the whole search, and fill the count from the items after it.
+- A provider can choose the region a search runs from unless an option pins it. Without `gl`,
+  Serply answered a news query with Swedish relative times, and the same English web result came
+  dated `May 27, 2026` on one call and `27.05.2026` on another. Say in the option's description
+  and in the pricing note which option an operator should set on the instance.
+- A results page shows its dates as text in the language of the region that served it: Serply's
+  come in `metadata.published_time` (`Oct 7, 2026`, `17 hours ago`) or `metadata.attributes`
+  (`27.05.2026`, `vor 23 Stunden`). Such a field stays in `raw`, as Tabstack's PDF dates do: a
+  parser for the one form a fixture shows dates some hits and silently drops the rest. Probe with
+  several queries rather than one repeated, since Serply answered a repeated query identically.
+- A documentation's default can be wrong: Serply documents `desktop` as its `X-User-Agent`
+  default, but its answers reported `mobile`. Describe an option by what it does, not by a default
+  you have not seen.

@@ -35,9 +35,24 @@ INHERITED_HEADERS = {
     "X-RateLimit-Remaining": "Rate-limit convention clients already parse.",
     "X-RateLimit-Reset": "Rate-limit convention clients already parse.",
     "X-Subscription-Token": "The Brave Search API's own header.",
-    "X-Gateway-Token": "Platform wire contract; the platform must accept a new name first.",
-    "X-User-Token": "Platform wire contract; the platform must accept a new name first.",
     "x-should-retry": "The OpenAI and Anthropic SDKs' retry override, read under this name only.",
+    **{
+        f"x-stainless-{suffix}": "Sent by the OpenAI and Anthropic JS SDKs; allowed through CORS for browser apps."
+        for suffix in (
+            "arch",
+            "custom-poll-interval",
+            "helper",
+            "helper-method",
+            "lang",
+            "os",
+            "package-version",
+            "poll-helper",
+            "retry-count",
+            "runtime",
+            "runtime-version",
+            "timeout",
+        )
+    },
 }
 
 # Literals of the same shape that name no header at all.

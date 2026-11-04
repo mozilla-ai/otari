@@ -127,6 +127,16 @@ class ProviderUploadFailedError(ProviderAttachmentError):
         super().__init__("An attached file could not be made available to the provider's code execution")
 
 
+class InlineAttachmentsTooLargeError(TenancyValidationError):
+    """A request's attachments pass what its provider accepts inline, and could not be moved to its file storage."""
+
+    def __init__(self, max_bytes: int) -> None:
+        super().__init__(
+            f"Invalid request: the attachments exceed the {max_bytes} bytes Gemini accepts inline in one request, "
+            "and they could not be moved to Gemini's file storage. Send fewer or smaller attachments."
+        )
+
+
 class ProviderCopyNotRecordedError(Exception):
     """The database refused a provider copy's row, most often because another request recorded one first."""
 

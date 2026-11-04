@@ -18,11 +18,9 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.engine.interfaces import ReflectedColumn
-from sqlalchemy.orm import Session
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
-from gateway.models.pricing import ModelPricing
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "c7e9a1b3d5f7"
@@ -75,6 +73,15 @@ def _insert_legacy_row(engine: Engine, model_key: str) -> None:
         )
 
 
+def _unit_and_origin(engine: Engine, model_key: str) -> tuple[str, str | None]:
+    """The stored ``unit`` and ``origin`` of ``model_key``'s row."""
+    with engine.connect() as connection:
+        unit, origin = connection.execute(
+            text("SELECT unit, origin FROM model_pricing WHERE model_key = :key"), {"key": model_key}
+        ).one()
+    return unit, origin
+
+
 def test_the_columns_land_on_both_tables_with_the_model_s_shape(sqlite_before: tuple[Config, Engine]) -> None:
     config, engine = sqlite_before
 
@@ -86,8 +93,10 @@ def test_the_columns_land_on_both_tables_with_the_model_s_shape(sqlite_before: t
         assert columns["unit"]["nullable"] is False, table
         assert str(columns["origin"]["type"]) == "VARCHAR(16)", table
         assert columns["origin"]["nullable"] is True, table
-        # The model has since dropped the 1h rate column; this revision predates that.
-        expected = set(SQLModel.metadata.tables[table].columns.keys()) | {"cache_write_1h_price_per_million"}
+        # The model has since dropped the 1h rate column and added ``kind``; this revision predates both.
+        expected = (set(SQLModel.metadata.tables[table].columns.keys()) - {"kind"}) | {
+            "cache_write_1h_price_per_million"
+        }
         assert set(columns) == expected, table
 
 
@@ -100,39 +109,29 @@ def test_existing_rows_read_as_tokens_with_no_origin_except_a_tool_row(
 
     command.upgrade(config, _REVISION)
 
-    with Session(engine) as session:
-        model = session.get(ModelPricing, ("openai:gpt-4o", _EFFECTIVE_AT))
-        tool = session.get(ModelPricing, ("otari:web_search", _EFFECTIVE_AT))
-    assert model is not None and tool is not None
-    assert model.unit == "tokens"
+    model = _unit_and_origin(engine, "openai:gpt-4o")
+    tool = _unit_and_origin(engine, "otari:web_search")
     # The reserved prefix is the one spelling that says "per request" for certain.
-    assert tool.unit == "requests"
     # Nobody knows which path wrote a pre-existing row, and the migration does not pretend to.
-    assert model.origin is None
-    assert tool.origin is None
+    assert (model, tool) == (("tokens", None), ("requests", None))
 
 
 def test_a_new_row_defaults_to_tokens_and_records_its_writer(sqlite_before: tuple[Config, Engine]) -> None:
     config, engine = sqlite_before
     command.upgrade(config, _REVISION)
 
-    with Session(engine) as session:
-        session.add(
-            ModelPricing(
-                model_key="anthropic:claude-sonnet-4-6",
-                effective_at=_EFFECTIVE_AT,
-                input_price_per_million=Decimal("3"),
-                output_price_per_million=Decimal("15"),
-                pricing_tiers=[],
-                origin="api",
-            )
+    # Raw SQL: the mapped class carries columns later revisions added.
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO model_pricing (model_key, effective_at, input_price_per_million, "
+                "output_price_per_million, pricing_tiers, origin, created_at, updated_at) "
+                "VALUES ('anthropic:claude-sonnet-4-6', :at, 3, 15, '[]', 'api', :at, :at)"
+            ),
+            {"at": _EFFECTIVE_AT_SQLITE},
         )
-        session.commit()
-        row = session.get(ModelPricing, ("anthropic:claude-sonnet-4-6", _EFFECTIVE_AT))
 
-    assert row is not None
-    assert row.unit == "tokens"
-    assert row.origin == "api"
+    assert _unit_and_origin(engine, "anthropic:claude-sonnet-4-6") == ("tokens", "api")
 
 
 def test_the_revision_round_trips(sqlite_before: tuple[Config, Engine]) -> None:
@@ -151,7 +150,4 @@ def test_the_revision_round_trips(sqlite_before: tuple[Config, Engine]) -> None:
     assert Decimal(str(rate)) == Decimal("10000")
 
     command.upgrade(config, _REVISION)
-    with Session(engine) as session:
-        row = session.get(ModelPricing, ("otari:web_search", _EFFECTIVE_AT))
-    assert row is not None
-    assert row.unit == "requests"
+    assert _unit_and_origin(engine, "otari:web_search")[0] == "requests"

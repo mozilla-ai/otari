@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   formatDuration,
   formatRelativeTime,
+  formatShare,
   formatTraceTimestamp,
 } from "@/features/traces/format"
 
@@ -39,6 +40,24 @@ describe("formatDuration", () => {
     expect(formatDuration(3_600_000)).toBe("1h 00m")
     expect(formatDuration(3_599_600)).toBe("1h 00m")
     expect(formatDuration((1325 * 60 + 40) * 1000)).toBe("22h 06m")
+  })
+
+  it("counts days and hours from a day up, so a session left open reads in days", () => {
+    expect(formatDuration(24 * 3_600_000)).toBe("1d 00h")
+    expect(formatDuration(23 * 3_600_000 + 59 * 60_000 + 40_000)).toBe("1d 00h")
+    expect(formatDuration(520_604_000)).toBe("6d 01h")
+  })
+})
+
+describe("formatShare", () => {
+  it("reads a share in whole percent", () => {
+    expect(formatShare(0.594)).toBe("59%")
+    expect(formatShare(1)).toBe("100%")
+    expect(formatShare(0)).toBe("0%")
+  })
+
+  it("keeps a part too small to round to 1% visible", () => {
+    expect(formatShare(0.004)).toBe("<1%")
   })
 })
 

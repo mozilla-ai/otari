@@ -344,7 +344,7 @@ show_what_llm_receives() {
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
-from gateway.services.web_search_backend import WebSearchBackend
+from gateway.services.web_retrieval_backend import WebSearchBackend
 
 backend = WebSearchBackend(base_url='http://searxng:8080')
 print(inject_purpose_hints(
@@ -369,7 +369,7 @@ print(inject_purpose_hints(
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
-from gateway.services.web_search_backend import WebSearchBackend
+from gateway.services.web_retrieval_backend import WebSearchBackend
 
 backend = WebSearchBackend(
     base_url='http://searxng:8080',

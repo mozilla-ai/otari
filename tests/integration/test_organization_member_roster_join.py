@@ -34,7 +34,6 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 
 async def _organization(db: AsyncSession, *, slug: str) -> Organization:
@@ -66,7 +65,7 @@ async def _workspace(db: AsyncSession, organization: Organization, *, name: str,
 
 
 def _service(db: AsyncSession) -> OrganizationService:
-    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    return OrganizationService(db, membership_listener=None)
 
 
 async def _roster(db: AsyncSession, caller: User) -> ActiveOrganizationMembersPublic:
@@ -365,3 +364,5 @@ def test_an_operator_is_given_the_spend_figures(
     # operator has spent, and the point is that the field is not withheld.
     assert all("attribution" in row for row in rows)
     assert any(row["attribution"] is not None for row in rows)
+    # Both access defaults ride along, so the member editor can seed its pickers.
+    assert all({"allowed_models", "allowed_tools"} <= row["attribution"].keys() for row in rows if row["attribution"])

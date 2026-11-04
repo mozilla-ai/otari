@@ -6,7 +6,6 @@ import {
   FiCode,
   FiCpu,
   FiDollarSign,
-  FiGitBranch,
   FiGlobe,
   FiGrid,
   FiHome,
@@ -16,6 +15,7 @@ import {
   FiRepeat,
   FiServer,
   FiShield,
+  FiShuffle,
   FiSliders,
   FiTool,
   FiUserCheck,
@@ -41,12 +41,12 @@ import type {
  *
  * Sections render in this order. The index leads, alone and unlabeled, because
  * it is the rail's destination rather than a member of a category: it is where
- * the sidebar puts you back, not one of the places you go from it. The three
- * below it are the design's: "Observe" is where you look (the request log and
- * the usage rollups over it), "Build" is what the gateway serves (models, the
+ * the sidebar puts you back, not one of the places you go from it, and it is
+ * also where you look (usage, requests and sessions are its tabs). The two
+ * below it are the design's: "Build" is what the gateway serves (models, the
  * policies that route over them, and the tools it can call; the roles matrix's
  * name for the section, otari-ai#1942), and "Access" is who may call it (keys
- * and the workspace's roster).
+ * and the workspace's roster). "Observe" stays declared, empty, for overlays.
  *
  * Each entry declares its own gating, and the two axes are independent:
  * `surface` (does this deployment host it) and `capability` (is it entitled).
@@ -65,47 +65,27 @@ const BASE_NAV_SECTIONS = [
       // Ungated on every axis: the index is the deployment's own front page and
       // reads whatever it is allowed to. The one row a caller with no
       // organization keeps, since it is where they are told how to get in.
+      //
+      // Its tabs (usage, requests and agent sessions over one window and one
+      // set of filters) gate themselves inside the page, on `usage` and
+      // `traces`, and none is `operatorOnly` (otari#837): for a caller who does
+      // not operate the deployment they read `/organizations/me/usage`.
       {
         to: "/",
         label: "Overview",
         icon: FiHome,
         reachableWithoutOrganization: true,
+        views: ["/requests", "/sessions"],
       },
     ],
   },
   {
+    // No base rows: the views it held are the Overview's tabs. Kept for the
+    // rows an overlay contributes by this id; empty, it renders nothing
+    // (`visibleNavSections`).
     id: "observe",
     label: "Observe",
-    items: [
-      // Both read usage, which is why they name the surface rather than
-      // themselves: a deployment that does not host usage loses both.
-      //
-      // Neither declares `operatorOnly` any more, and that is the point of
-      // otari#837 rather than an oversight. They used to, because everything
-      // behind them was `/usage` and a member was refused all of it; now the
-      // pages read `/organizations/me/usage` for a caller who does not
-      // operate the deployment, so both destinations serve every signed-in
-      // identity something true. Tagging them would hide a page that works.
-      {
-        to: "/activity",
-        label: "Activity",
-        surface: "usage",
-        icon: FiActivity,
-      },
-      // Agent sessions, read from the trace API rather than the usage log.
-      {
-        to: "/sessions",
-        label: "Sessions",
-        surface: "traces",
-        icon: FiGitBranch,
-      },
-      {
-        to: "/usage",
-        label: "Usage",
-        surface: "usage",
-        icon: FiBarChart2,
-      },
-    ],
+    items: [],
   },
   {
     // The id stays "gateway" while the label reads "Build": overlay
@@ -227,30 +207,21 @@ const BASE_NAV_SECTIONS = [
  *
  * Reached from the sidebar footer and left by the "Back to" link at its top,
  * so the two contexts never render together. Gated on the caller managing the
- * organization, which in a standalone deployment is always true: there is one
- * session, the local operator, and it owns the organization the gateway
- * provisioned for itself. The gate is written anyway because it is the thing
- * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
+ * organization, which today is always true: there is one session, the local
+ * operator, and it owns the organization the gateway provisioned for itself.
+ * The gate is written anyway because it is the thing that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
- * Every row is gated on a surface both topologies publish (`STANDALONE_SURFACES` and `HOSTED_SURFACES` in
+ * Every row is gated on a surface the bootstrap publishes (`SURFACES` in
  * `src/gateway/api/routes/bootstrap.py`), and a group whose every row a
- * deployment gates off drops entirely, heading included. Gateway holds nothing
- * in this build and drops; it stays declared for an overlay's Gateways.
+ * deployment gates off drops entirely, heading included.
  *
- * The organization's guardrails are published by both because their rows are
- * keyed on the organization. They are in General, under Providers.
+ * The organization's guardrails are in General, under Providers.
  *
- * The organization's own provider credentials are published by both because
- * the page behind them is where an organization's models are offered, priced
- * and switched.
- *
- * The design draws two more, Billing and Gateways, and neither is declared here
- * at all, because neither is this build's to declare: Billing is
- * ARCHITECTURE.md's canonical overlay-only capability, and the attached-gateway
- * surface behind Gateways is hosted depth (otari-ai#1779), so an overlay owns
- * both rows together with the pages under them and contributes them through
- * `overlayNavItems.ts`. Declaring either here would be worse than redundant: a
- * base route file at a path the overlay also serves is not shadowed by the
+ * The design draws one more, Billing, and it is not declared here at all,
+ * because it is not this build's to declare: Billing is ARCHITECTURE.md's
+ * canonical overlay-only capability, so an overlay owns the row together with
+ * the page under it and contributes it through `overlayNavItems.ts`. Declaring
+ * it here would be worse than redundant: a base route file at a path the overlay also serves is not shadowed by the
  * overlay's, it collides with it. The generator refuses the pair ("Conflicting
  * configuration paths were found") instead of choosing between them, so the
  * composed tree is never written: the Vite plugin logs that error and keeps
@@ -275,8 +246,7 @@ const ORGANIZATION_NAV_SECTIONS = [
       // The organization as a whole, which the workspace rail's Usage page
       // cannot ask for: its scope is the sidebar's selected workspace, and the
       // switcher offers only the caller's own memberships (otari-ai#1963).
-      // Both topologies publish it, so on standalone it sits beside that page.
-      // No `operatorOnly`
+      // It sits beside that page. No `operatorOnly`
       // and no role gate here: the organization rail already opens only to a
       // caller who manages the organization, and the server scopes a member
       // who lands here by URL to their own workspaces, the same rows `/usage`
@@ -339,26 +309,30 @@ const ORGANIZATION_NAV_SECTIONS = [
     ],
   },
   {
-    id: "org-gateway",
-    label: "Gateway",
-    // Empty in this build, so the rail drops it, heading included. Declared
-    // anyway because it is an overlay seam: an overlay contributes Gateways into
-    // this section by its id (`overlayNavItems.ts`), and a section that is not
-    // declared has nothing for that row to join.
-    items: [],
-  },
-  {
     id: "org-general",
     label: "General",
     items: [
-      // Where an organization's models are offered, priced and switched, a
-      // tenant's question on either topology. The deployment's own keys are
-      // Hosted providers, on the deployment rail.
+      // The organization's own provider keys: Inference is where its models
+      // are offered, priced and switched, and Web search holds its search and
+      // fetch keys. The deployment's own keys are Hosted providers and Web
+      // search, on the deployment rail.
       {
         to: "/organization/provider-keys",
         label: "Providers",
         surface: "organization_providers",
         icon: FiBox,
+        children: [
+          {
+            to: "/organization/provider-keys",
+            label: "Inference",
+            icon: FiBox,
+          },
+          {
+            to: "/organization/web-search-keys",
+            label: "Web search",
+            icon: FiGlobe,
+          },
+        ],
       },
       // The organization's own guardrails and where each one runs. Not the
       // workspace rail's `/tools/guardrails`, which sets the deployment's own
@@ -394,7 +368,7 @@ const ORGANIZATION_NAV_SECTIONS = [
  * separate it from, and a heading inside a context already named Deployment
  * would read as "Deployment, Deployment, Settings".
  *
- * Both rows keep the refusal they declare, which is the axis the server
+ * Every row keeps the refusal it declares, which is the axis the server
  * enforces and not a property of which rail draws them.
  */
 const DEPLOYMENT_SECTIONS = [
@@ -424,6 +398,32 @@ const DEPLOYMENT_SECTIONS = [
         surface: "hosted_providers",
         operatorOnly: "unlisted",
         icon: FiCpu,
+      },
+      // The decision models that pick a subagent's model, and what a
+      // recommendation costs. Unlisted like Hosted providers: its API refuses
+      // a non-operator with the same 404.
+      {
+        to: "/admin/recommender",
+        label: "Subagent router",
+        surface: "agent_recommenders",
+        operatorOnly: "unlisted",
+        icon: FiShuffle,
+      },
+      // The search and fetch tools the deployment runs for every workspace, and
+      // their prices.
+      {
+        to: "/admin/web-search",
+        label: "Web search",
+        surface: "tools",
+        operatorOnly: "refused",
+        icon: FiGlobe,
+      },
+      {
+        to: "/admin/code-execution",
+        label: "Code execution pricing",
+        surface: "pricing",
+        operatorOnly: "refused",
+        icon: FiCode,
       },
       {
         to: "/health-checks",
@@ -554,9 +554,9 @@ export const NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * and it belongs on this rail, so an overlay that could only contribute to the
  * workspace one would have to edit this file to register it, which is what
  * cardinal rule 6 rules out. Both rails need the row seam as well as the section
- * one, and this rail is why: Billing lands inside "Cost & billing" and Gateways
- * inside "Gateway", among rows the base declares, so appending a section could
- * only put a second heading of the same name below the first. This build appends
+ * one, and this rail is why: Billing lands inside "Cost & billing", among rows
+ * the base declares, so appending a section could only put a second heading of
+ * the same name below the first. This build appends
  * nothing.
  *
  * Label overrides and row contributions come from the same lists the workspace
@@ -579,7 +579,7 @@ export const ORG_NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * The composed deployment sidebar.
  *
  * Composed through the same three seams as the other two rails, because the
- * distinction this rail draws is one an overlay can land on: a hosted edition
+ * distinction this rail draws is one an overlay can land on: otari.ai
  * administers the process every tenant is served by, and those destinations
  * belong here rather than beside a tenant's own settings. Reached through the
  * row seam, since the rail declares one headingless section and a contributed
@@ -730,6 +730,11 @@ export function navItemForPath(pathname: string): NavItem | undefined {
   // is never treated as unregistered (and therefore ungated).
   const child = NAV_CHILD_PARENTS.get(pathname)
   if (child) return child
+  // Another view of one destination (the Overview's tabs) is that destination.
+  const view = NAV_ITEMS.find((item) =>
+    item.views?.some((path) => path === pathname),
+  )
+  if (view) return view
   // Longest prefix, not first: `/organization/members/x` is under both
   // `/organization` and `/organization/members`, and the deeper entry is the
   // one that describes it. Ordering the scan rather than the registry, because

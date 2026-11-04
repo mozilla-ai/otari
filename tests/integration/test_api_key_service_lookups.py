@@ -3,10 +3,10 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import get_api_key_service
 from gateway.core.unit_of_work import OutsideUnitOfWorkError, UnitOfWork
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import Workspace
-from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.services.api_keys import ApiKeyService
 
@@ -27,7 +27,7 @@ async def _two_workspaces_with_keys(db: AsyncSession) -> tuple[Workspace, Worksp
 
 
 def _service(uow: UnitOfWork) -> ApiKeyService:
-    return ApiKeyService(uow, ApiKeyRepositories.on(uow))
+    return get_api_key_service(uow)
 
 
 async def test_get_workspace_id_for_key_names_the_owning_workspace(async_db: AsyncSession) -> None:

@@ -1,9 +1,13 @@
 """Errors the routing domain raises about a model recommendation.
 
-Plain exceptions rather than the tenancy family: the route renders each as a
-generic detail of its own, the way the tools domain's refusals are rendered,
-so nothing an upstream said reaches the caller.
+Two families. The recommendation errors are plain exceptions: the route
+renders each as a generic detail of its own, the way the tools domain's
+refusals are rendered, so nothing an upstream said reaches the caller. The
+stored-recommender errors are in the tenancy family, so the one handler in
+``gateway.main`` renders them with their status and the admin routes stay thin.
 """
+
+from gateway.exceptions._base import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
 
 
 class CandidatesNotAllowedError(Exception):
@@ -31,8 +35,23 @@ class UnreadableRecommendationError(ValueError):
     """The recommender answered, but named no candidate."""
 
 
-class PolicyOnHybridGatewayError(Exception):
-    """A request named one of this gateway's routing policies, which a hybrid gateway does not apply.
+class InvalidAgentRecommenderError(TenancyValidationError):
+    """A stored recommender could not work as configured. The message names what is wrong."""
 
-    The message says what to name instead.
-    """
+
+class AgentRecommenderUnsafeApiBaseError(TenancyValidationError):
+    """The API base is an address the gateway refuses to dial."""
+
+
+class AgentRecommenderNotFoundError(TenancyNotFoundError):
+    """No stored recommender has this id."""
+
+    def __init__(self) -> None:
+        super().__init__("No subagent router has this id")
+
+
+class AgentRecommenderSwitchConflictError(TenancyConflictError):
+    """Another recommender was switched on at the same moment."""
+
+    def __init__(self) -> None:
+        super().__init__("Another subagent router was switched on at the same moment. Reload and try again.")

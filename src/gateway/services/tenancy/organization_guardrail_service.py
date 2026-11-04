@@ -26,20 +26,20 @@ was not reachable before.
 
 **Composition with the layer below is org-controlled only.** There is no
 workspace opt-in and no workspace opt-out: a veto would widen what succeeds
-beyond what the organization permitted, which is the one thing #678 forbids. The
-hosted plane's ``organization_guardrail_key_access`` row, with its three states
+beyond what the organization permitted, which is the one thing #678 forbids.
+otari-ai's ``organization_guardrail_key_access`` row, with its three states
 two of which mean off, therefore reduces here to plain membership.
 
 **Deliberate divergences from otari-ai's ``OrganizationGuardrailKeyService``:**
 
-- ``profile`` is unique per organization, where the hosted plane keys on a
+- ``profile`` is unique per organization, where otari-ai keys on a
   ``nickname`` so one profile may be configured twice. This request path merges
   guardrails by profile and always has, so a second row of one profile could
   never run; refusing it at the write beats losing it at admission.
 - No ``key_source``. Platform-managed and platform-generated guardrail sources
   are commercial depth (otari-ai#1699); bring-your-own is the whole of the
   open-core shape, so the credential column is either set or it is not.
-- An ``enabled`` flag on the row, which the hosted model has no equivalent of:
+- An ``enabled`` flag on the row, which otari-ai's model has no equivalent of:
   an organization can stop a guardrail without losing the credential and the
   workspace list it took to set up.
 - ``extra_kwargs_for_creation`` is dropped. This repository's guardrails service
@@ -91,7 +91,6 @@ from gateway.services.secret_box import (
     encrypt_secret,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 # What one organization may mandate. Every guardrail in scope for a workspace is
@@ -448,8 +447,8 @@ async def resolve_organization_guardrails(
 ) -> list[ResolvedOrganizationGuardrail]:
     """The organization's guardrails that are in effect for one workspace.
 
-    One indexed read, on every request that reaches a completion endpoint in
-    standalone mode, which is inherent rather than incidental: a mandate nobody
+    One indexed read, on every request that reaches a completion endpoint,
+    which is inherent rather than incidental: a mandate nobody
     looked for is not a mandate. It is deliberately not cached and not overlaid
     onto the config object, per the seam #678 settled: an organization that turns
     a guardrail on expects the next request to run it, not the next process.
@@ -579,9 +578,7 @@ class OrganizationGuardrailService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     async def _manageable_organization_id(self, user: User) -> uuid.UUID:
         """The caller's organization, having checked they may manage its guardrails.

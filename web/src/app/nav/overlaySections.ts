@@ -10,7 +10,7 @@ import type { NavSection } from "./types"
  * source file (ARCHITECTURE.md, "cardinal rules for contributors", rule 6).
  *
  * Same shape and same name as `otari-ai/frontend/src/app/nav/overlaySections.ts`,
- * so the two registries compose when the control-plane UI converges at M5.
+ * so the two registries compose when otari.ai's pages converge at M5.
  */
 export const OVERLAY_NAV_SECTIONS: readonly NavSection[] = []
 
@@ -24,9 +24,8 @@ export const OVERLAY_NAV_SECTIONS: readonly NavSection[] = []
  *
  * A whole section is the coarser of the two contribution seams, and suits a
  * destination an overlay owns outright. A destination with base neighbors goes
- * through `overlayNavItems.ts` instead: Billing sits inside "Cost & billing" and
- * Gateways inside "Gateway", so contributing either as a section of its own
- * would put a second heading of that name on the rail (otari#737).
+ * through `overlayNavItems.ts` instead: Billing sits inside "Cost & billing",
+ * so contributing it as a section of its own would put a second heading of that name on the rail (otari#737).
  */
 export const OVERLAY_ORG_NAV_SECTIONS: readonly NavSection[] = []
 
@@ -36,8 +35,8 @@ export const OVERLAY_ORG_NAV_SECTIONS: readonly NavSection[] = []
  * The third rail needs its own seam for the reason the second one does, one
  * scope further out: an overlay can own a destination that is neither a
  * workspace's nor a tenant's but the deployment's, and administering the
- * process that serves every tenant is exactly the kind of surface a hosted
- * edition adds and a self-hosted one has no use for.
+ * process that serves every tenant is exactly the kind of surface otari.ai
+ * adds and this build does not.
  *
  * Empty here, and the rail it composes into declares a single headingless
  * section, so a contribution that belongs beside `/settings` and

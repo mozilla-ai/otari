@@ -20,6 +20,10 @@ import type {
 } from "@/client"
 import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
 import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
+import {
   MAILED_LINK_STATUS,
   NO_RETRY,
   ORGANIZATION_MEMBERS,
@@ -115,6 +119,17 @@ export function useProfile(enabled = true) {
     retry: retryUnlessNotFound(useQueryClient()),
     enabled,
   })
+}
+
+/**
+ * The signed-in identity, as the gateway sees the session: the organization
+ * context's `caller`, which every page already reads, or the profile for a
+ * caller with no organization, which costs that caller alone a second request.
+ */
+export function useSessionCaller(): CallerIdentity | undefined {
+  const organization = useOrganizationContext()
+  const profile = useProfile(isNoOrganizationError(organization.error))
+  return organization.data?.caller ?? profile.data
 }
 
 /**

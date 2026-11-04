@@ -5,13 +5,14 @@ own job: auth, provider selection, the key allow-list, budget reservation and
 settlement, the usage row, and how an upstream failure reaches the caller.
 """
 
+import time
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.services.inference import DecisionProviderError
 
 DECISIONS_USAGE_LABEL = "/v1/decisions"
@@ -299,3 +300,28 @@ def test_decisions_require_pricing_refuses_an_unpriced_model(
     assert resp.status_code == 402
     assert resp.json()["code"] == "pricing_required"
     mock.assert_not_awaited()
+
+
+def test_a_decision_is_answered_and_recorded_under_its_request_id(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    with _mock_decision():
+        resp = client.post(f"{API_ROOT}/decisions", json=PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 200, resp.text
+    request_id = resp.headers[REQUEST_ID_HEADER]
+
+    deadline = time.monotonic() + 3.0
+    while (
+        settled := client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=api_key_header)
+    ).status_code == 404 and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "success"
+    assert settled.json()["total_tokens"] == 1010
+
+
+def test_a_refused_decision_carries_its_request_id(client: TestClient, api_key_header: dict[str, str]) -> None:
+    with _mock_decision():
+        resp = client.post(f"{API_ROOT}/decisions", json={**PAYLOAD, "model": "nope:jev"}, headers=api_key_header)
+    assert resp.status_code == 400
+    assert resp.headers[REQUEST_ID_HEADER]

@@ -32,6 +32,10 @@ MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 OPEN_MODEL = "openai:gpt-4o"
 OFF_MODEL = "openai:gpt-4o-mini"
 RESTRICTED_MODEL = "deepseek:restricted-secret-model"
+# The flat listing names each model by its catalog id rather than by selector.
+OPEN_ID = "openai/gpt-4o"
+OFF_ID = "openai/gpt-4o-mini"
+RESTRICTED_ID = "restricted-secret-model"
 
 
 @pytest.fixture(autouse=True)
@@ -267,8 +271,8 @@ def test_an_organization_key_stops_listing_a_hosted_provider_the_operator_took_a
 ) -> None:
     """Its rates stay on the price list, and dispatch refuses its models, so the catalog says so too."""
     beta_key = _api_key(client, world, "beta_owner")
-    assert OPEN_MODEL in _models(client, beta_key)
-    assert OFF_MODEL not in _models(client, beta_key)
+    assert OPEN_ID in _models(client, beta_key)
+    assert OFF_ID not in _models(client, beta_key)
 
     if how == "switched_off":
         _ok(client.patch(f"{API_ROOT}/hosted-providers/openai", json={"enabled": False}, headers=MASTER))
@@ -276,12 +280,12 @@ def test_an_organization_key_stops_listing_a_hosted_provider_the_operator_took_a
         _ok(client.delete(f"{API_ROOT}/hosted-providers/openai", headers=MASTER))
 
     listed = _models(client, beta_key)
-    assert OPEN_MODEL not in listed
-    assert OFF_MODEL not in listed
+    assert OPEN_ID not in listed
+    assert OFF_ID not in listed
     assert client.get(f"{API_ROOT}/models/{OPEN_MODEL}", headers=beta_key).status_code == status.HTTP_404_NOT_FOUND
     # The member's session agrees, and the deployment's own view keeps its price list.
-    assert OPEN_MODEL not in {m["id"] for m in _ok(_as(client, world, "beta_member", "/models"))["data"]}
-    assert OPEN_MODEL in _models(client, MASTER)
+    assert OPEN_ID not in {m["id"] for m in _ok(_as(client, world, "beta_member", "/models"))["data"]}
+    assert OPEN_ID in _models(client, MASTER)
 
 
 def test_an_organization_key_still_lists_a_model_it_reaches_on_its_own_key(
@@ -307,7 +311,7 @@ def test_an_organization_key_still_lists_a_model_it_reaches_on_its_own_key(
         session.close()
     _ok(client.patch(f"{API_ROOT}/hosted-providers/openai", json={"enabled": False}, headers=MASTER))
 
-    assert OPEN_MODEL in _models(client, _api_key(client, world, "beta_owner"))
+    assert OPEN_ID in _models(client, _api_key(client, world, "beta_owner"))
 
 
 _ALPHA = ("alpha_owner", "alpha_member")
@@ -323,10 +327,13 @@ def test_each_member_of_each_organization_is_shown_what_its_organization_reaches
     grouped = _catalog_selectors(_as(client, world, who, "/catalog/models"))
     single = _as(client, world, who, f"/models/{RESTRICTED_MODEL}").status_code
 
-    for shown in (listed, grouped):
-        assert OPEN_MODEL in shown
-        assert OFF_MODEL not in shown, "switched off for everyone"
-        assert (RESTRICTED_MODEL in shown) is (who in _ALPHA)
+    for shown, (open_model, off_model, restricted) in (
+        (listed, (OPEN_ID, OFF_ID, RESTRICTED_ID)),
+        (grouped, (OPEN_MODEL, OFF_MODEL, RESTRICTED_MODEL)),
+    ):
+        assert open_model in shown
+        assert off_model not in shown, "switched off for everyone"
+        assert (restricted in shown) is (who in _ALPHA)
     assert single == (status.HTTP_200_OK if who in _ALPHA else status.HTTP_404_NOT_FOUND)
 
 
@@ -338,7 +345,10 @@ def test_each_organizations_api_key_is_shown_what_its_organization_reaches(
     listed = _models(client, headers)
     grouped = _catalog_selectors(client.get(f"{API_ROOT}/catalog/models", headers=headers))
 
-    for shown in (listed, grouped):
-        assert OPEN_MODEL in shown
-        assert OFF_MODEL not in shown
-        assert (RESTRICTED_MODEL in shown) is (owner == "alpha_owner")
+    for shown, (open_model, off_model, restricted) in (
+        (listed, (OPEN_ID, OFF_ID, RESTRICTED_ID)),
+        (grouped, (OPEN_MODEL, OFF_MODEL, RESTRICTED_MODEL)),
+    ):
+        assert open_model in shown
+        assert off_model not in shown
+        assert (restricted in shown) is (owner == "alpha_owner")

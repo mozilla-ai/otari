@@ -1,12 +1,10 @@
-"""The standalone half of the caller-orchestrated MCP endpoints.
+"""The caller-orchestrated MCP endpoints against stored servers.
 
-The hybrid half is unit-tested in ``tests/unit/test_mcp_execute_endpoint.py``
-and ``tests/unit/test_mcp_tools_endpoint.py``, where the platform resolver is
-the only seam. Here the resolution is real: a key authenticates, its workspace
-is derived from the key row, and the stored server, its encrypted credential and
-its allowlist come out of the database. What that buys, and what only this half
-can show, is that the request-scoped database session is handed back before any
-outbound work and that a master key cannot reach a tenant's stored server.
+The resolution is real: a key authenticates, its workspace is derived from the
+key row, and the stored server, its encrypted credential and its allowlist come
+out of the database. What that buys, and what a unit test cannot show, is
+that the request-scoped database session is handed back before any outbound
+work and that a master key cannot reach a tenant's stored server.
 
 URLs are public IP literals, so ``validate_mcp_url`` never reaches a resolver
 and the suite does not need egress.
@@ -21,7 +19,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from mcp.types import CallToolResult, ListToolsResult, TextContent
+from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent
 from mcp.types import Tool as MCPTool
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -58,11 +56,11 @@ def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 class _FakeSession:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.tools = [MCPTool(name="create_issue", description="Create an issue", inputSchema={"type": "object"})]
+        self.tools = [MCPTool(name="create_issue", description="Create an issue", input_schema={"type": "object"})]
         self.pages = 0
         self.on_call: Any = None
 
-    async def list_tools(self, cursor: str | None = None) -> ListToolsResult:
+    async def list_tools(self, *, params: PaginatedRequestParams | None = None) -> ListToolsResult:
         self.pages += 1
         return ListToolsResult(tools=self.tools)
 
@@ -268,9 +266,9 @@ def test_discovery_registers_under_its_own_endpoint_while_it_runs(
     seen: list[list[str]] = []
     original = session.list_tools
 
-    async def watched(cursor: str | None = None) -> ListToolsResult:
+    async def watched(*, params: PaginatedRequestParams | None = None) -> ListToolsResult:
         seen.append([entry.endpoint for entry in registry.snapshot()])
-        return await original(cursor)
+        return await original(params=params)
 
     monkeypatch.setattr(session, "list_tools", watched)
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
@@ -486,7 +484,7 @@ def test_the_stored_allowlist_narrows_discovery_and_execution_alike(
     session: _FakeSession,
 ) -> None:
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), allowed_tools=["create_issue"])
-    session.tools.append(MCPTool(name="delete_repo", description="danger", inputSchema={"type": "object"}))
+    session.tools.append(MCPTool(name="delete_repo", description="danger", input_schema={"type": "object"}))
 
     tools = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header)
     refused = client.post(

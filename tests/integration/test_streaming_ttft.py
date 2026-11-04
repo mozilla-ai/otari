@@ -1,10 +1,9 @@
 """Regression test for time-to-first-token recording on the streaming path.
 
-mozilla-ai/otari#431: the gateway already makes a first-chunk-timeout routing
-decision on TTFT (``_platform.py``'s hybrid-mode fallback) but never recorded
-the value it decided on. This pins the capture: a streaming request whose first
-chunk is deliberately delayed records a ``ttft_ms`` that reflects that delay and
-is never greater than the request's total ``latency_ms``.
+mozilla-ai/otari#431: the gateway never recorded time to first token. This
+pins the capture: a streaming request whose first chunk is deliberately delayed
+records a ``ttft_ms`` that reflects that delay and is never greater than the
+request's total ``latency_ms``.
 """
 
 import asyncio

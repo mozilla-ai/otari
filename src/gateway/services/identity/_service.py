@@ -1,20 +1,30 @@
 import secrets
+import unicodedata
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+import idna
+
+from gateway.core.email_domains import blocklist_entry, blocklist_keys
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    BlockedEmailEntryNotFoundError,
+    BootstrapOperatorProtectedError,
     DeploymentUserNotFoundError,
+    DeploymentUserSelfChangeError,
+    InvalidBlockedEmailEntryError,
     OAuthAccountLinkedElsewhereError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
     PasswordLinkUnavailableError,
+    SignInBlockedError,
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import EmailAssertion, MailedLinkStatus, ProviderIdentity
+from gateway.models.identity import BlockedEmail, EmailAssertion, MailedLinkStatus, ProviderIdentity
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
@@ -63,6 +73,14 @@ class SignIn:
 
 
 @dataclass(frozen=True)
+class EmailBlock:
+    """A new blocklist entry, and how many existing accounts it matched."""
+
+    entry: BlockedEmail
+    blocked_account_count: int
+
+
+@dataclass(frozen=True)
 class PasswordLink:
     """A link that sets an account's password, and how it reaches the person.
 
@@ -96,6 +114,7 @@ class IdentityService:
     ) -> None:
         """``terms_url`` is the terms the deployment publishes, or ``None`` where it publishes none."""
         self._uow = uow
+        self._blocked_emails = repositories.blocked_emails
         self._links = repositories.links
         self._passkeys = repositories.passkeys
         self._sessions = repositories.sessions
@@ -129,6 +148,8 @@ class IdentityService:
             OAuthIdentityLinkConflictError: If a concurrent sign-in linked the identity to another account first.
             TermsNotAcceptedError: If the sign-in would create or first claim an account without the published
                 terms. Nothing the sign-in staged is kept, including an organization the policy provisioned.
+            SignInBlockedError: If the deployment's email blocklist matches the account's address, with the
+                same rollback.
             TenancyError: If the identity provider policy refuses the identity.
 
         """
@@ -146,6 +167,11 @@ class IdentityService:
         """Sign in an account that has proven who it is, and start its dashboard session.
 
         What the sign-in listener stages and the session commit together.
+
+        Raises:
+            SignInBlockedError: If the deployment's email blocklist matches the account's address. Nothing the
+                caller staged in the same block is kept, an account a first provider sign-in created included.
+
         """
         async with self._uow:
             await self._sign_in_listener.account_signed_in(account)
@@ -155,11 +181,23 @@ class IdentityService:
         """Start a dashboard session for ``account`` without running the sign-in listener.
 
         The session counts as the account's latest sign-in, and acts in the organization the account can act in.
+
+        Raises:
+            SignInBlockedError: If the deployment's email blocklist matches the account's address. The check holds
+                the blocklist lock until the session commits, so a block cannot commit between the two.
+
         """
         async with self._uow:
+            # The shared lock before any row lock, so a block holding it exclusive cannot deadlock against this.
+            await self._blocked_emails.lock_shared()
             active_organization_id = await self._organizations.active_organization_id_for_sign_in(account)
             now = datetime.now(UTC)
+            # A write before the check, so on SQLite, where the lock is a no-op, this transaction holds the one
+            # write lock when it reads the blocklist.
             await self._sessions.prune_expired(now)
+            if account.email is not None and await self.blocked_among([account.email]):
+                logger.info("Refused a sign-in to account %s, whose address is blocked", account.id)
+                raise SignInBlockedError
             await self._users.record_sign_in(account.id, at=now)
             token = f"{_SESSION_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
             expires_at = now + timedelta(hours=self._session_ttl_hours)
@@ -174,6 +212,92 @@ class IdentityService:
             session_expires_at=expires_at,
         )
 
+    async def blocked_among(self, emails: Collection[str]) -> set[str]:
+        """Return the members of ``emails`` the deployment's email blocklist matches.
+
+        Holds the blocklist lock shared until the enclosing block commits, so called inside a caller's block, no
+        block can commit between this answer and that caller's writes.
+        """
+        keys = {email: blocklist_keys(email) for email in emails}
+        wanted = {key for email_keys in keys.values() for key in email_keys}
+        if not wanted:
+            return set()
+        async with self._uow:
+            await self._blocked_emails.lock_shared()
+            found = await self._blocked_emails.patterns_among(wanted)
+        return {email for email, email_keys in keys.items() if found.intersection(email_keys)}
+
+    async def list_blocked_emails(self, *, skip: int, limit: int) -> tuple[list[BlockedEmail], int]:
+        """Return a page of the email blocklist, newest entry first, and how many entries there are."""
+        async with self._uow:
+            return await self._blocked_emails.list_page(skip=skip, limit=limit)
+
+    async def block_email(self, *, actor: User, value: str, reason: str | None) -> EmailBlock:
+        """Block an address, or a domain and its subdomains, and end the sessions of every account it matches.
+
+        Raises:
+            InvalidBlockedEmailEntryError: If ``value`` is neither an address nor a domain.
+            DeploymentUserSelfChangeError: If the entry matches ``actor``'s own address.
+            BootstrapOperatorProtectedError: If it matches the bootstrap operator's, whose session master-key sign-in
+                mints.
+            BlockedEmailEntryExistsError: If the entry is already blocked.
+
+        """
+        pattern = blocklist_entry(value)
+        if pattern is None:
+            raise InvalidBlockedEmailEntryError(value)
+        async with self._uow:
+            # Before matching, so an account a sign-in in flight creates is either matched here or refused there.
+            await self._blocked_emails.lock_exclusive()
+            matched = await self._accounts_matching(pattern)
+            if actor.id in matched:
+                raise DeploymentUserSelfChangeError("You cannot block your own email address")
+            bootstrap_id = await self._organizations.bootstrap_operator_id()
+            if bootstrap_id is not None and bootstrap_id in matched:
+                raise BootstrapOperatorProtectedError("The deployment's bootstrap operator's address cannot be blocked")
+            entry = await self._blocked_emails.add(
+                pattern=pattern, reason=(reason or "").strip() or None, created_by_user_id=actor.id
+            )
+            await self._sessions.delete_for_users(matched)
+        logger.warning(
+            "Email blocklist entry added by operator: actor=%s entry=%s matched_accounts=%s",
+            actor.id,
+            entry.id,
+            len(matched),
+        )
+        return EmailBlock(entry=entry, blocked_account_count=len(matched))
+
+    async def unblock_email(self, *, actor: User, entry_id: uuid.UUID) -> None:
+        """Remove a blocklist entry, so the accounts it matched may sign in again.
+
+        Raises:
+            BlockedEmailEntryNotFoundError: If there is no such entry.
+
+        """
+        async with self._uow:
+            entry = await self._blocked_emails.get(entry_id)
+            if entry is None:
+                raise BlockedEmailEntryNotFoundError(entry_id)
+            await self._blocked_emails.remove(entry)
+        logger.warning("Email blocklist entry removed by operator: actor=%s entry=%s", actor.id, entry_id)
+
+    async def _accounts_matching(self, pattern: str) -> set[uuid.UUID]:
+        """The ids of every account whose address the entry ``pattern`` blocks.
+
+        Queried by every spelling of the domain a stored address may carry, then matched exactly by ``blocklist_keys``.
+        """
+        is_domain = "@" not in pattern
+        domain = pattern if is_domain else pattern.rsplit("@", 1)[1]
+        spellings = {domain}
+        try:
+            decoded = idna.decode(domain)
+        except (idna.IDNAError, UnicodeError):
+            decoded = domain
+        # A stored address may carry its domain composed or decomposed; ``blocklist_keys`` reads both alike.
+        spellings |= {unicodedata.normalize("NFC", decoded), unicodedata.normalize("NFD", decoded)}
+        candidates = await self._users.list_with_email_at(spellings, include_subdomains=is_domain)
+        return {user_id for user_id, email in candidates if pattern in blocklist_keys(email)}
+
     async def issue_password_link(self, account_id: uuid.UUID) -> PasswordLink:
         """Give an account a single-use link that sets its password, for someone who operates the deployment.
 
@@ -184,9 +308,9 @@ class IdentityService:
 
         Raises:
             DeploymentUserNotFoundError: If there is no such account.
-            PasswordLinkUnavailableError: If the account is deactivated, has no address, is verified and has no
-                password, or is unverified and ``unverified_identity_is_claimable`` refuses it, which only
-                happens where ``open_signup`` is off.
+            PasswordLinkUnavailableError: If the account is deactivated, has no address, its address is blocked, is
+                verified and has no password, or is unverified and ``unverified_identity_is_claimable`` refuses it,
+                which only happens where ``open_signup`` is off.
 
         """
         mailed = self._mailer.can_send_links
@@ -223,6 +347,8 @@ class IdentityService:
             raise PasswordLinkUnavailableError("This account is deactivated. Reactivate it first.")
         if account.email is None:
             raise PasswordLinkUnavailableError("This account has no email address to sign in with.")
+        if await self.blocked_among([account.email]):
+            raise PasswordLinkUnavailableError("This account's address is blocked. Unblock it first.")
         if account.hashed_password is None and account.email_verified_at is not None:
             raise PasswordLinkUnavailableError(
                 "This account has no password and signs in with a provider or a passkey. "

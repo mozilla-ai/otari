@@ -93,7 +93,7 @@ export const IdentityUnavailable: Story = {
     api: {
       [`${API_ROOT}/organizations/me`]: {
         $status: 503,
-        $body: { detail: "The control plane is unreachable." },
+        $body: { detail: "Service unavailable." },
       },
     },
   },

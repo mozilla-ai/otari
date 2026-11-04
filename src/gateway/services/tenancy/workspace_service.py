@@ -49,7 +49,6 @@ from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRep
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 
 
 class WorkspaceService:
@@ -61,17 +60,13 @@ class WorkspaceService:
         *,
         uow: UnitOfWork,
         membership_listener: MembershipListener,
-        workspace_listener: WorkspaceListener,
     ):
         """Build the service on a session and a Unit of Work over it, which the listener writes through."""
         self.db = db
         self._uow = uow
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
-        self._workspace_listener = workspace_listener
+        self.organizations = OrganizationService(db, membership_listener=None)
         self._membership_listener = membership_listener
 
     # ------------------------------------------------------------------
@@ -186,7 +181,6 @@ class WorkspaceService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
-                await self._workspace_listener.workspace_created(workspace.id)
                 member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
                 # No-op today: a workspace this fresh has no defaults of its own yet.
                 # Called anyway so every WorkspaceMember-creating path materializes
@@ -241,6 +235,15 @@ class WorkspaceService:
             count=count,
         )
 
+    async def require_management_access(self, *, user: User, workspace_id: uuid.UUID) -> None:
+        """Refuse unless ``user`` manages this workspace of their active organization.
+
+        Raises the workspace's not-found error for a workspace outside it, and the
+        management error for a member who does not manage it.
+        """
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        await self._require_workspace_management_access(user=user, workspace=workspace)
+
     async def update_workspace(
         self,
         *,
@@ -248,11 +251,13 @@ class WorkspaceService:
         workspace_id: uuid.UUID,
         workspace_update: WorkspaceUpdate,
     ) -> WorkspacePublic:
-        """Rename a workspace or change its description."""
+        """Rename a workspace, change its description, or turn keeping its trace content on or off."""
         workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
+        if update_data.get("trace_content_enabled", False) is None:
+            del update_data["trace_content_enabled"]
         if "name" in update_data:
             new_name = self._validated_name(update_data["name"])
             update_data["name"] = new_name
@@ -374,14 +379,12 @@ class WorkspaceService:
         # member gets neither.
         await self.workspaces.lock(workspace.id)
 
-        # As in create_workspace: the pre-check races the insert, and the unique
-        # constraint is what actually decides.
-        try:
-            async with self._uow:
-                member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
-                await self._membership_listener.member_joined(member)
-        except IntegrityError:
-            raise WorkspaceMemberAlreadyExistsError(user_id) from None
+        # As in create_workspace: the pre-check races the insert, and the database
+        # is what actually decides. ``add`` reports a concurrent add as a duplicate
+        # and a concurrent delete as a missing workspace.
+        async with self._uow:
+            member = await self.members.add(workspace_id=workspace.id, user_id=user_id, role=role)
+            await self._membership_listener.member_joined(member)
         return WorkspaceMemberPublic.model_validate(member)
 
     async def update_member_role(
@@ -401,8 +404,11 @@ class WorkspaceService:
         if member is None:
             raise WorkspaceMemberNotFoundError(workspace_id, user_id)
 
-        updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
-        await self.db.commit()
+        async with self._uow:
+            # As in remove_member: a key minted while a demotion runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
+            updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
+            await self._membership_listener.member_role_changed(updated)
         return WorkspaceMemberPublic.model_validate(updated)
 
     async def remove_member(self, *, user: User, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -415,6 +421,9 @@ class WorkspaceService:
             return
 
         async with self._uow:
+            # The key write routes take the same lock before checking membership,
+            # so a key minted or re-enabled while this runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
             await self._membership_listener.member_removed(member)
             await self.members.delete(member)
 

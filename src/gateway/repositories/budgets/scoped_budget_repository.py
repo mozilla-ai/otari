@@ -32,7 +32,11 @@ _ZERO = Decimal(0)
 
 @dataclass(frozen=True)
 class ApplicableCeiling:
-    """A ceiling on one of a request's scopes, with its provider, its budget's caps and when its window ends."""
+    """A ceiling on one of a request's scopes, with its provider, its budget's caps and when its window ends.
+
+    ``current_spend`` and ``reserved_spend`` are as read, for a routing policy's
+    budget conditions; enforcement re-reads them inside its conditional UPDATE.
+    """
 
     scoped_budget_id: str
     scope_type: ScopeType
@@ -42,6 +46,9 @@ class ApplicableCeiling:
     period_end: datetime | None
     token_limit: int | None
     request_limit: int | None
+    max_budget: Decimal | None
+    current_spend: Decimal
+    reserved_spend: Decimal
 
 
 @dataclass(frozen=True)
@@ -153,7 +160,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
             .where(ScopedBudget.budget_id.in_(budget_ids))
             .group_by(ScopedBudget.budget_id)
         )
-        return dict(result.tuples().all())
+        return dict(result.all())
 
     async def count_in_scopes(self, scopes: ScopeIdSets) -> int:
         """Count the ceilings on these scopes."""
@@ -213,7 +220,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 .where(ScopedBudget.id == scoped_budget_id)
             )
         ).first()
-        return None if row is None else CeilingUsage(*row)
+        return None if row is None else CeilingUsage(**row._asdict())
 
     async def has_ceiling(self, scope_type: ScopeType, scope_id: str, provider_key_id: str | None) -> bool:
         """Report whether a ceiling caps this scope for this provider, where None means every provider."""
@@ -327,6 +334,9 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 ScopedBudget.period_end,
                 Budget.token_limit,
                 Budget.request_limit,
+                Budget.max_budget,
+                ScopedBudget.current_spend,
+                ScopedBudget.reserved_spend,
             )
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
             .where(_in_scopes(scopes))
@@ -342,6 +352,9 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 period_end=period_end,
                 token_limit=token_limit,
                 request_limit=request_limit,
+                max_budget=max_budget,
+                current_spend=current_spend,
+                reserved_spend=reserved_spend,
             )
             for (
                 scoped_budget_id,
@@ -352,7 +365,10 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 period_end,
                 token_limit,
                 request_limit,
-            ) in result.tuples().all()
+                max_budget,
+                current_spend,
+                reserved_spend,
+            ) in result.all()
         ]
 
     async def list_in_scopes(
@@ -380,7 +396,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         result = await self.db.execute(
             statement.order_by(ScopedBudget.created_at, ScopedBudget.id).offset(skip).limit(limit)
         )
-        return list(result.tuples().all())
+        return list(result.all())
 
     async def get_in_scopes(self, scoped_budget_id: str, scopes: ScopeIdSets) -> ScopedBudget | None:
         """Return the ceiling with this ID when it is on one of these scopes, otherwise None."""

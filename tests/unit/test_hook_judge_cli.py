@@ -10,6 +10,7 @@ import json
 import shutil
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -21,6 +22,7 @@ import otari_agent.hook as hook_cli
 from otari_agent.domain.check import PolicyCheckResult
 from otari_agent.domain.policy import parse_policy
 from otari_agent.domain.types import Enforcement, GateResult, JudgeVerdict, Outcome, PolicySpec
+from otari_agent.report import ModelUsage
 
 pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
 
@@ -393,6 +395,7 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
         model: str | None,
         deadline: float,
         dry_run: bool = False,
+        usage: list[ModelUsage] | None = None,
     ) -> tuple[str, str]:
         barrier.wait()
         return "pass", f"checked {rubric}"
@@ -567,3 +570,105 @@ def test_a_judge_gate_that_could_not_run_is_not_reported_to_the_model(
     payload = json.loads(result.stdout)
     assert "hookSpecificOutput" not in payload
     assert "prompt is too long" in payload["systemMessage"]
+
+
+def test_claude_p_answers_inside_its_json_envelope_with_what_it_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    envelope = {
+        "type": "result",
+        "result": '```json\n{"outcome": "fail", "reasoning": "an em dash"}\n```',
+        "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 9,
+                "outputTokens": 111,
+                "cacheReadInputTokens": 20,
+                "cacheCreationInputTokens": 6_684,
+            }
+        },
+    }
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(envelope), stderr=""),
+    )
+    usage: list[ModelUsage] = []
+
+    verdict = hook_cli._hook_call_claude_p(
+        "/usr/bin/claude", "claude-haiku-4-5-20251001", "prompt", deadline=time.monotonic() + 30, usage=usage
+    )
+
+    assert verdict == ("fail", "an em dash")
+    assert usage == [
+        ModelUsage(
+            provider="anthropic",
+            model="claude-haiku-4-5-20251001",
+            input_tokens=9,
+            output_tokens=111,
+            cache_read_tokens=20,
+            cache_write_tokens=6_684,
+        )
+    ]
+
+
+def test_claude_p_output_that_is_no_envelope_is_read_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        ),
+    )
+    usage: list[ModelUsage] = []
+
+    verdict = hook_cli._hook_call_claude_p(
+        "/usr/bin/claude", "m", "prompt", deadline=time.monotonic() + 30, usage=usage
+    )
+
+    assert verdict == ("pass", "ok")
+    assert usage == []
+
+
+def test_a_failed_claude_p_envelope_with_no_answer_keeps_its_output_as_the_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    envelope = json.dumps({"type": "result", "is_error": True, "subtype": "error_during_execution"})
+    monkeypatch.setattr(
+        subprocess, "run", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, stdout=envelope, stderr="")
+    )
+
+    outcome, reasoning = hook_cli._hook_call_claude_p("/usr/bin/claude", "m", "prompt", deadline=time.monotonic() + 30)
+
+    assert outcome == "error"
+    assert "error_during_execution" in reasoning
+
+
+def test_a_retried_judge_reports_one_total_per_model(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    gates_yaml = (
+        "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
+        "  - id: g\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
+        "    rubric: r\n    message: m\n"
+    )
+    monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda repo_root, diff_range: "diff")
+
+    def fake_run_judge(*args: Any, usage: list[ModelUsage] | None = None, **kwargs: Any) -> tuple[str, str]:
+        assert usage is not None
+        usage.append(ModelUsage("anthropic", "claude-haiku-4-5-20251001", 100, 0))
+        usage.append(ModelUsage("anthropic", "claude-sonnet-4-5", 300, 20))
+        usage.append(ModelUsage("anthropic", "claude-haiku-4-5-20251001", 50, 10, cache_write_tokens=5))
+        return "pass", "ok"
+
+    monkeypatch.setattr(hook_cli, "_hook_run_judge", fake_run_judge)
+    runs: dict[str, Any] = {}
+
+    hook_cli._hook_collect_judge_verdicts(
+        parse_policy(gates_yaml, source="test.yml"),
+        hook_cli._JudgedChange(repo, []),
+        hook_cli._JudgeSettings(max_gates=5),
+        runs,
+    )
+
+    [run] = runs.values()
+    assert run.started_ns <= run.ended_ns
+    assert run.usage == (
+        ModelUsage("anthropic", "claude-sonnet-4-5", 300, 20),
+        ModelUsage("anthropic", "claude-haiku-4-5-20251001", 150, 10, cache_write_tokens=5),
+    )

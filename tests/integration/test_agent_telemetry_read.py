@@ -14,10 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
-from gateway.api.deps import reset_config
-from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import reset_db
-from gateway.main import create_app
+from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import AgentTelemetry, UsageLog
 from gateway.models.users import User
@@ -437,17 +434,3 @@ def test_series_rejects_a_window_with_too_many_buckets(client: TestClient, maste
 def test_read_endpoints_require_the_master_key(client: TestClient, path: str) -> None:
     response = client.get(path, params={"group_by": "user_id"})
     assert response.status_code in (401, 403)
-
-
-@pytest.mark.parametrize("path", [SUMMARY_PATH, COUNT_PATH, SERIES_PATH])
-def test_read_endpoints_are_absent_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    config = GatewayConfig(mode="hybrid", platform={"base_url": "http://localhost:8100/api/v1"})
-    app = create_app(config)
-
-    with TestClient(app) as hybrid_client:
-        response = hybrid_client.get(path, params={"group_by": "user_id"})
-
-    assert response.status_code == 404
-    reset_config()
-    reset_db()

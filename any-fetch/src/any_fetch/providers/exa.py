@@ -28,7 +28,6 @@ https://exa.ai/docs/admin/pricing.
 """
 
 import math
-import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -36,7 +35,7 @@ from typing import Any, Literal
 import httpx
 
 from any_fetch._api import AnyFetch
-from any_fetch._errors import ProviderError, UnsupportedParameterError
+from any_fetch._errors import ProviderError, UnsupportedParameterError, safe_tag
 from any_fetch._types import FetchedPage, FetchError, OptionSpec, ProviderMetadata
 
 DEFAULT_MAX_CHARS = 10_000
@@ -50,10 +49,6 @@ EMPTY_CONTENT = "CRAWL_EMPTY_CONTENT"
 
 # Native options copied into the request as they are; ``text`` has rules of its own, below.
 _PASSED_THROUGH = ("highlights", "summary", "extras", "maxAgeHours", "livecrawlTimeout", "snapshotAsOf")
-
-# An error tag is kept only when it looks like one, so no text from the body
-# reaches an exception.
-_TAG = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 class ExaProvider(AnyFetch):
@@ -163,15 +158,10 @@ def _body(response: httpx.Response) -> dict[str, Any]:
         body = None
     if response.status_code >= 400:
         tag = body.get("tag") if isinstance(body, dict) else None
-        raise ProviderError(ExaProvider.METADATA.name, response.status_code, _tag(tag) or "http_error")
+        raise ProviderError(ExaProvider.METADATA.name, response.status_code, safe_tag(tag) or "http_error")
     if not isinstance(body, dict):
         raise ProviderError(ExaProvider.METADATA.name, response.status_code, "invalid_response")
     return body
-
-
-def _tag(value: Any) -> str | None:
-    """Exa's error tag when it looks like a code, else ``None``, so no body text reaches an error."""
-    return value if isinstance(value, str) and _TAG.fullmatch(value) else None
 
 
 def _unexpected(response: httpx.Response) -> ProviderError:
@@ -214,7 +204,7 @@ def _page_error(status: dict[str, Any], response: httpx.Response) -> FetchError 
         raise _unexpected(response)
     if tag == EMPTY_CONTENT:
         return None
-    return FetchError(tag=_tag(tag) or "fetch_error", status=code)
+    return FetchError(tag=safe_tag(tag) or "fetch_error", status=code)
 
 
 def _page(results: list[Any], response: httpx.Response) -> tuple[str, str, str, datetime | None]:

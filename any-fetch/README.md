@@ -33,6 +33,12 @@ AnyFetch.get_provider_metadata("fake")
   timeout, and never closes it or changes its settings. Without one, the provider opens a client
   with httpx's defaults and closes it in `aclose()`, which `async with` calls.
 
+Every request a provider sends carries `User-Agent: any-fetch/<version>`, the library's own
+version (`any_fetch.__version__`, which a change to the library bumps in the same PR), so a
+provider, or a proxy that allowlists outbound traffic, can tell the library's requests apart. A
+`client` that sets a `User-Agent` of its own keeps it: httpx's default is replaced, and a client
+that carries none is filled in. `builtin` is the host's own fetcher, and sends what the host sends.
+
 `fetch` takes one shared parameter, which every provider maps onto its own: `max_chars`. Every
 other keyword is a native option, passed to the provider under its own name. An option the
 provider's metadata does not list raises `UnsupportedParameterError` rather than being dropped.
@@ -108,6 +114,28 @@ response, and both together print the page with `raw` kept. `--describe PROVIDER
 provider's metadata and each native option with its type, allowed values, default and
 description, then exits without fetching. `builtin` needs a host, so it fails from the command
 line, though `--describe builtin` works.
+
+## DeepSeek
+
+`deepseek` calls DeepSeek's [Fetch API](https://api-docs.deepseek.com/api/fetch),
+`POST /v1/tools/fetch`, with the key in a bearer header, read from `DEEPSEEK_API_KEY` when not
+passed. It fetches one page per call and returns its title and its text as markdown. It takes the
+URL and nothing else, so there are no native options. DeepSeek has no length cap, so `max_chars`
+cuts the text it returns and sets `text_truncated`, and without `max_chars` the whole page comes
+back. `final_url` is the URL asked for, since DeepSeek follows a redirect without saying where it
+ended, so `reports_final_url` is false: a caller cannot check where a redirect DeepSeek followed
+led. `content_type` is empty. DeepSeek reports no cost and no date.
+
+A failed call raises `ProviderError` with DeepSeek's HTTP status, tagged with the `error.type` of
+its OpenAI-shaped body, or its `error.code` when there is no type; the message is never read. A
+page DeepSeek cannot turn into markdown fails the call with a 404 tagged `not_found_error`, and the
+answer does not say why. That was seen for a page that does not exist, a site's 500, a private
+address, a PDF, a zero-byte file and HTML with an empty body, so DeepSeek never returns an empty
+page, and a missing page never comes back as the site's own error page.
+
+Every field read from a successful answer is checked: a `title` or a `content` that is missing or
+not a string raises `ProviderError` with the tag `unexpected_response`. DeepSeek documents both as
+always present. Fields the adapter does not read are ignored.
 
 ## Exa
 

@@ -19,8 +19,8 @@ than a simplification:
   for it. Nothing to backfill, and nothing that can disagree with the Activity
   page.
 - **Nothing is per-viewer.** The platform keys its state on the user, because
-  activation there is a person's first request on a hosted account. A
-  standalone deployment's guide is about the workspace, so the state is one row
+  activation there is a person's first request on a hosted account. This
+  guide is about the workspace, so the state is one row
   per workspace and dismissing it says "this workspace is set up" for everyone
   who can manage it.
 - **No profile survey, and no analytics.** The platform's success screen
@@ -39,10 +39,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import ColumnElement, and_, select
+from sqlalchemy import ColumnElement, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,7 +61,6 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 # What the guide calls the key it mints, as the Keys page shows it. One name for
 # every deployment, so an operator who finds it there can tell where it came
@@ -130,33 +129,19 @@ def activation_error_category(status_code: int | None) -> ActivationErrorCategor
     return "internal"
 
 
-def _integration_traffic(endpoint: Any, api_key_id: Any) -> ColumnElement[bool]:
+def _integration_traffic() -> ColumnElement[bool]:
     """Match usage rows made from outside the product.
 
     The guide closes when a workspace first calls this gateway *from somebody's own
     code*; a message typed into our own Playground is the product being
     demonstrated, not integrated, so closing on one would congratulate somebody for
-    something they have not done yet and then never offer the guide again.
-
-    Two columns, because the Playground answers to two shapes. Where this
-    deployment runs the completion itself, the row carries
-    ``PLAYGROUND_USAGE_ENDPOINT``. Where a hosted control plane forwards to its
-    data-plane gateway (``services/playground_dispatch``), the row is written from
-    the gateway's usage report and labeled like every other report, so the label
-    cannot carry the surface; the credential does, because the one the control
-    plane forwards under is minted by this deployment for exactly this purpose and
-    is marked as such.
+    something they have not done yet and then never offer the guide again. A
+    Playground row carries ``PLAYGROUND_USAGE_ENDPOINT``.
 
     ``UsageSignalPort`` reports the same test for each row it is told about
     (``_integration_traffic`` in ``services/log_writer``), so change the two together.
     """
-    return and_(
-        endpoint != PLAYGROUND_USAGE_ENDPOINT,
-        # A row with no key at all (the standalone Playground writes one, and so
-        # does any session-authorized request) matches nothing here and is left to
-        # the endpoint half above, which is the half that knows about it.
-        ~select(APIKey.id).where(APIKey.id == api_key_id, APIKey.internal_secret.is_not(None)).exists(),
-    )
+    return UsageLog.endpoint != PLAYGROUND_USAGE_ENDPOINT
 
 
 class ActivationAttemptPublic(BaseModel):
@@ -228,9 +213,7 @@ class WorkspaceActivationService:
         self.db = db
         self.config = config
         self.key_format = key_format
-        self.organizations = OrganizationService(
-            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
-        )
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     # ------------------------------------------------------------------
     # Reads
@@ -496,7 +479,7 @@ class WorkspaceActivationService:
             .where(
                 UsageLog.workspace_id == workspace_id,
                 UsageLog.source == SERVED_HERE_SLUG,
-                _integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
+                _integration_traffic(),
                 UsageLog.status == "success",
             )
             # Tie-broken on the id so two rows sharing a timestamp still name one
@@ -520,7 +503,7 @@ class WorkspaceActivationService:
             .where(
                 UsageLog.workspace_id == workspace_id,
                 UsageLog.source == SERVED_HERE_SLUG,
-                _integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
+                _integration_traffic(),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
             )
             .order_by(UsageLog.timestamp.desc(), UsageLog.id.desc())

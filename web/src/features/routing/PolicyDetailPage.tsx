@@ -6,7 +6,6 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { useUrlValue } from "@/shared/helpers/urlState"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { FallbackChainGroup } from "./FallbackChainGroup"
 import { GuardrailsGroup } from "./GuardrailsGroup"
@@ -30,7 +29,6 @@ import { useRoutingRows } from "./useRoutingRows"
 export function PolicyDetailPage({ name }: { name: string }) {
   const userId = useUrlValue("user")
   const navigate = useNavigate()
-  const { deployment_type } = useDeployment()
   const {
     rows,
     isLoading,
@@ -100,14 +98,6 @@ export function PolicyDetailPage({ name }: { name: string }) {
       </PageIntro>
 
       <ErrorBanner error={error} />
-
-      {deployment_type === "standalone" ? null : (
-        <InfoBanner>
-          Policies are a standalone feature: they apply only on a gateway that
-          serves requests itself. A hybrid gateway receives its attempt plan
-          from the connected control plane.
-        </InfoBanner>
-      )}
 
       {isConfig ? (
         <InfoBanner>

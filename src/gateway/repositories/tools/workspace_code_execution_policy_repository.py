@@ -62,11 +62,6 @@ class WorkspaceCodeExecutionPolicyRepository(BaseRepository[WorkspaceCodeExecuti
         await self.db.refresh(policy)
         return policy
 
-    async def create_enabled(self, workspace_id: uuid.UUID) -> None:
-        """Stage a policy that turns code execution on for a workspace."""
-        self.db.add(WorkspaceCodeExecutionPolicy(workspace_id=workspace_id, enabled=True))
-        await self.db.flush()
-
     async def delete_for(self, workspace_id: uuid.UUID) -> None:
         """Stage the removal of the workspace's policy, if it has one."""
         policy = await self.db.get(WorkspaceCodeExecutionPolicy, workspace_id)

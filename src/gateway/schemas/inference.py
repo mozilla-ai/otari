@@ -1,4 +1,4 @@
-"""Request and response models of the inference domain's decisions, rerank and embeddings endpoints.
+"""Request and response models of the inference domain's endpoints, and the Messages error envelope.
 
 The decisions shape is TypeSafe's ``/v1/systemone``, which OpenRouter's alpha Decisions
 API also takes, so either provider's SDK can point at the gateway. Questions and
@@ -6,6 +6,7 @@ answers allow extra fields, so a field a provider adds later reaches the caller
 instead of being dropped here.
 """
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -151,14 +152,12 @@ class InlineCost(BaseModel):
         exclude_if=_is_none,
         description="What the request cost, as a six-decimal USD string; absent when it was not priced",
     )
-    # A string rather than ``PriceSource``: a hybrid gateway carries the control
-    # plane's own name for the rate, as a completion's usage does.
+    # A string rather than ``PriceSource``, as a completion's usage carries it.
     pricing_source: str | None = Field(
         default=None,
         exclude_if=_is_none,
         description=(
-            "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone "
-            "gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced"
+            "Which rate priced the request: `organization`, `deployment` or `defaults`; absent when it was not priced"
         ),
     )
 
@@ -239,4 +238,40 @@ class EmbeddingResponse(BaseModel):
     model: str
     usage: EmbeddingUsage | None = Field(
         default=None, exclude_if=_is_none, description="Absent when the provider reported no usage"
+    )
+
+
+class AnthropicError(BaseModel):
+    """What went wrong, in Anthropic's terms."""
+
+    type: str = Field(description="Anthropic's error type, such as `invalid_request_error` or `rate_limit_error`.")
+    message: str
+
+
+class AnthropicErrorResponse(BaseModel):
+    """Anthropic's error envelope, which every error on a Messages route is answered in."""
+
+    type: Literal["error"] = "error"
+    error: AnthropicError
+    code: str | None = Field(default=None, description="The refusal's `Otari-Error-Code`, where it has one.")
+
+
+class StoredCountryDatabasePublic(BaseModel):
+    """The country file stored in the database, which every replica reads."""
+
+    database_type: str = Field(
+        description="The type the file's metadata names, such as `GeoLite2-Country` or `DBIP-Country-Lite`."
+    )
+    built_at: datetime = Field(description="When the file was built, from its metadata.")
+    size_bytes: int
+    sha256: str = Field(description="The file's SHA-256, in hex.")
+    uploaded_at: datetime
+
+
+class CountryDatabaseStatus(BaseModel):
+    """The country file a request's address is looked up in."""
+
+    stored: StoredCountryDatabasePublic | None = Field(description="The stored file, or null when none is stored.")
+    client_country_database_set: bool = Field(
+        description="Whether `client_country_database` names a file. That file is read, and a stored one is not."
     )

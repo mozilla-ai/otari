@@ -190,3 +190,56 @@ def test_a_rule_moved_off_per_model_drops_its_models(client: TestClient) -> None
     assert response.status_code == 200
     assert response.json()["models"] is None
     assert client.patch(f"{_RULES}/cap", json={"per": "model"}, headers=_MASTER).status_code == 422
+
+
+def test_a_report_rule_serves_the_request_and_names_itself(client: TestClient) -> None:
+    headers = _key(client, "reported")
+    assert (
+        client.post(
+            _RULES, json={"name": "watch", "per": "key", "rpm": 1, "mode": "report"}, headers=_MASTER
+        ).status_code
+        == 201
+    )
+    body = {"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}
+
+    with patch("gateway.api.routes.chat.acompletion", new=_completion):
+        first = client.post(f"{API_ROOT}/chat/completions", json=body, headers=headers)
+        second = client.post(f"{API_ROOT}/chat/completions", json=body, headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert "Otari-Rate-Limit-Exceeded" not in first.headers
+    assert second.headers["Otari-Rate-Limit-Exceeded"] == "watch"
+
+
+def test_a_per_budget_rule_is_one_count_for_the_users_on_the_budget(client: TestClient) -> None:
+    budget = client.put(
+        f"{API_ROOT}/budgets/feature", json={"max_budget": 100, "budget_duration_sec": 86400}, headers=_MASTER
+    )
+    assert budget.status_code in (200, 201), budget.text
+    keys = []
+    for user_id in ("on-feature-1", "on-feature-2"):
+        created = client.post(f"{API_ROOT}/users", json={"user_id": user_id, "budget_id": "feature"}, headers=_MASTER)
+        assert created.status_code == 200, created.text
+        key = client.post(f"{API_ROOT}/keys", json={"key_name": user_id, "user_id": user_id}, headers=_MASTER)
+        keys.append({API_KEY_HEADER: f"Bearer {key.json()['key']}"})
+    rule = {"name": "feature-rpm", "per": "budget", "budgets": ["feature"], "rpm": 1}
+    assert client.post(_RULES, json=rule, headers=_MASTER).status_code == 201
+
+    assert _chats(client, keys[0], 1) == [200]
+    assert _chats(client, keys[1], 1) == [429]
+    # A user on no budget the rule names is not counted by it.
+    assert _chats(client, _key(client, "elsewhere"), 2) == [200, 200]
+
+
+def test_a_rule_moved_off_per_budget_drops_its_budgets(client: TestClient) -> None:
+    body = {"name": "feature", "per": "budget", "budgets": ["b"], "rpm": 5, "mode": "report"}
+    created = client.post(_RULES, json=body, headers=_MASTER)
+    assert created.status_code == 201
+    assert created.json()["budgets"] == ["b"]
+    assert created.json()["mode"] == "report"
+
+    moved = client.patch(f"{_RULES}/feature", json={"per": "key"}, headers=_MASTER)
+
+    assert moved.status_code == 200
+    assert moved.json()["budgets"] is None
+    assert moved.json()["mode"] == "report"

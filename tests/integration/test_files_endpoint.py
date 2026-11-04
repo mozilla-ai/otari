@@ -5,8 +5,7 @@ that references it by ``file_id``, and assert the gateway extracted the file to
 text and that text reached the provider — proving a text-only local model can
 "read" an uploaded file.
 
-The markitdown extraction boundary is monkeypatched for determinism so the test
-needs no optional extraction deps; everything else (HTTP, DB, blob store,
+The extraction boundary is monkeypatched for determinism; everything else (HTTP, DB, blob store,
 file_id resolution, capability resolution, message rewriting) is real.
 """
 
@@ -420,7 +419,7 @@ def test_vision_describe_side_call_is_billed(
     )
     client.post(f"{API_ROOT}/users", json={"user_id": "vision-user"}, headers=master_key_header)
 
-    async def fake_describe(config: Any, data_url: str) -> tuple[str | None, CompletionUsage | None]:
+    async def fake_describe(config: Any, data_url: str, **_: Any) -> tuple[str | None, CompletionUsage | None]:
         return "a chart of revenue", CompletionUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
 
     monkeypatch.setattr("gateway.services.content_normalizer.describe_image", fake_describe)
@@ -988,7 +987,7 @@ def test_vision_describe_side_call_row_carries_the_request_tags(
     monkeypatch.setattr(test_config, "vision_describe_model", "openai:gpt-4o-mini")
     client.post(f"{API_ROOT}/users", json={"user_id": "vision-tags-user"}, headers=master_key_header)
 
-    async def fake_describe(config: Any, data_url: str) -> tuple[str | None, CompletionUsage | None]:
+    async def fake_describe(config: Any, data_url: str, **_: Any) -> tuple[str | None, CompletionUsage | None]:
         return "a chart of revenue", CompletionUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
 
     monkeypatch.setattr("gateway.services.content_normalizer.describe_image", fake_describe)

@@ -62,9 +62,17 @@ async def _workspace(db: AsyncSession, organization: Organization, *, name: str,
 
 
 def _service(
-    db: AsyncSession, *, web_search_configured: bool = True, default_enabled: bool = True
+    db: AsyncSession, *, web_search_configured: bool = True, default_enabled: bool = True, has_search_key: bool = False
 ) -> WorkspaceWebSearchService:
-    return WorkspaceWebSearchService(db, web_search_configured=web_search_configured, default_enabled=default_enabled)
+    async def searches_on_its_own_key(_workspace_id: uuid.UUID) -> bool:
+        return has_search_key
+
+    return WorkspaceWebSearchService(
+        db,
+        web_search_configured=web_search_configured,
+        default_enabled=default_enabled,
+        has_search_key=searches_on_its_own_key,
+    )
 
 
 async def test_a_workspace_with_no_row_reads_as_unconfigured_and_narrows_nothing(
@@ -218,6 +226,28 @@ async def test_web_search_configured_reports_whether_the_deployment_can_search_a
 
     assert enabled_with_no_backend.enabled is True
     assert enabled_with_no_backend.web_search_configured is False
+
+
+async def test_a_workspace_searching_on_its_organizations_key_can_search_where_the_deployment_cannot(
+    async_db: AsyncSession,
+) -> None:
+    """The organization's key serves the workspace's search requests, so the page counts it."""
+    org = await _organization(async_db, slug="ws-own-key")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    service = _service(async_db, web_search_configured=False, has_search_key=True)
+
+    unconfigured = await service.get_config(user=owner, workspace_id=workspace.id)
+    stored = await service.set_config(
+        user=owner, workspace_id=workspace.id, request=WorkspaceWebSearchConfigUpdate(enabled=True)
+    )
+    cleared = await service.clear_config(user=owner, workspace_id=workspace.id)
+
+    assert (unconfigured.web_search_configured, stored.web_search_configured, cleared.web_search_configured) == (
+        True,
+        True,
+        True,
+    )
 
 
 async def test_a_plain_member_may_neither_read_nor_write(async_db: AsyncSession) -> None:

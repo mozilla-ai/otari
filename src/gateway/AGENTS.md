@@ -5,8 +5,8 @@ never replace or remove the import.
 
 Before changing the backend, read
 [backend-standards](../../.github/skills/backend-standards/SKILL.md). The root
-[AGENTS.md](../../AGENTS.md) owns runtime modes, validation, and generated
-artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
+[AGENTS.md](../../AGENTS.md) owns the lint, test, and generated-artifact
+rules. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 [The modular monolith](../../ARCHITECTURE.md#the-modular-monolith) names the
 target shape and its import rules,
 [Layering](../../.github/skills/backend-standards/SKILL.md#layering) gives the
@@ -32,8 +32,7 @@ overlay. Dependencies request protocols from the container and never name an
 adapter.
 
 A port that writes within a request shares that request's `AsyncSession` and
-does not commit. A hybrid-capable port may receive no session; a control-plane-only
-port should use the ordinary database dependency instead.
+does not commit.
 
 ## Request lifecycle
 
@@ -41,7 +40,7 @@ Completion requests follow this order:
 
 1. Extract and verify the API key or master key in `api/deps.py`.
 2. Resolve the billed user, workspace, and organization.
-3. Compile local routing or resolve a hybrid attempt plan.
+3. Compile routing into an attempt plan.
 4. Resolve pricing and reserve applicable budgets.
 5. Apply organization, policy, and request guardrails.
 6. Resolve MCP and gateway-run tool policy.
@@ -51,9 +50,10 @@ Completion requests follow this order:
    `services/log_writer.py`), a Null Object unless an overlay binds one.
 
 Chat, Messages, and Responses share the pipeline in
-`api/routes/_pipeline.py`; hybrid attempt reporting lives in `_platform.py`,
-and streaming settlement in `streaming.py`. Pass-through endpoints use
-`run_passthrough`. Direct search has its own dispatch scaffold.
+`api/routes/_pipeline.py`; the attempt walk and its shared refusals live in
+`_attempts.py`, and streaming settlement in `streaming.py`. Pass-through endpoints use
+`run_passthrough`. Direct search and direct code execution each have their own
+dispatch scaffold.
 
 A new provider-calling scaffold must register with `track_request` so
 `/api/v1/usage/in-flight` sees it. Removal belongs to `InFlightMiddleware`,
@@ -89,14 +89,15 @@ dashboard session. It does not prove that the session may act deployment-wide.
   own rather than overriding the gate in place.
 - Tenant routes authenticate, resolve `CurrentIdentity`, and authorize the
   organization or workspace in `services/tenancy/authorization.py`.
-- Data-plane routes use `verify_api_key_or_master_key`, which never accepts a
+- Inference routes use `verify_api_key_or_master_key`, which never accepts a
   dashboard cookie. The Playground's own completion endpoint
   (`routes/playground.py`) is the one surface that runs a completion from a
   session, and it is a separate route rather than a relaxation of that one: it
-  resolves the caller's attribution user and proves their workspace membership
-  itself, then hands the pipeline a `SessionPrincipal`
-  (`types/session_principal.py`). Adding a second such route means doing all
-  three, not reusing the type.
+  resolves the caller's attribution user, proves their workspace membership
+  and refuses a viewer itself
+  (`OrganizationService.require_workspace_contributor_access`), then hands the
+  pipeline a `SessionPrincipal` (`types/session_principal.py`). Adding a second
+  such route means doing all of that, not reusing the type.
 - Non-billable catalog reads use `verify_catalog_reader`.
 - A service key manages its own end users (`routes/end_users.py`) through
   `verify_service_key`, which takes neither the master key nor a cookie, and
@@ -108,7 +109,8 @@ that needs a deployment-wide route gets a separately scoped endpoint, as
 organization usage does for reads and `/api/v1/organizations/me/keys`
 (`organization_keys.py`) does for writes; do not loosen the original route. A
 member's key surface derives its owner as well as its scope, so it takes no
-`user_id` and mints nothing budget-exempt.
+`user_id`, mints nothing budget-exempt, and refuses a viewer's key writes
+through the same contributor check.
 
 The API key determines the billed workspace. Client `user`, workspace, or
 organization fields cannot move billing or credential resolution.
@@ -123,8 +125,7 @@ total is rounded once, half-up, to the micro-dollar.
 Which meter a rate prices is the pricing domain's rule, `price_usage` in
 `services/pricing/`: the rate's `unit` chooses it. A pass-through endpoint
 reports what its result was billed on (`PassthroughBilling` in
-`services/inference/`) and never prices it itself, so standalone settlement and
-the control plane price one request the same way.
+`services/inference/`) and never prices it itself.
 
 Money columns use the decimal types in `models/money.py`. Widen incoming
 floats with `to_usd` at service boundaries; never cast a decimal to float
@@ -200,10 +201,7 @@ answer (a `CandidateVariant`) and renders their refusals; a refusal skips only
 those candidates (`CandidateCannotServe`) and refuses the request only where
 none is left, and each walker dispatches a candidate with
 `ToolContext.for_candidate`. A request that also declares the explicit code
-type decides every candidate alike. A hybrid attempt is never skipped, so hybrid
-decides a request one of whose attempts would be refused as a whole (web tools by every attempt, code by
-the head); its walkers take each attempt's request
-fields and tools, and the web policy is read once per request
+type decides every candidate alike. The web policy is read once per request
 (`_RequestWebPolicy`). The workspace's code execution policy is read
 once, in the request preamble, and reused at admission; the same decision says
 where a referenced upload goes, staged for the gateway's sandbox or copied, for
@@ -218,26 +216,33 @@ web search and web fetch as two of them when a search instance serves the reques
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.
-A workspace with no row gets `code_execution_on_without_policy()` and
-`web_search_on_without_policy()` (`core/config.py`); the request path, the
+A workspace with no row gets `code_execution_workspace_default` and
+`web_search_workspace_default` (on unless an operator turns them off); the request path, the
 Playground menu and the policy endpoints' `default_enabled` all read them.
-An organization's own web search key changes which account a workspace's
-searches bill to, not whether search is available (`services/tools/_web_search_keys.py`).
+An organization's own search or fetch key changes which account a workspace's
+calls bill to (`services/tools/_web_search_keys.py`). Its `api_base` is a
+tenant's, so it is held to public addresses and dialed through the
+owned-endpoint client (`web_provider_client_for`), whatever
+`provider_allow_private_hosts` says. A search key also serves the
+workspace's explicit `otari_web_search` declarations where the deployment has no
+search of its own; provider-native declarations, the Playground and `GET /api/v1/tools`
+for a master key or a session follow the deployment's own search alone, while an
+API key's `GET /api/v1/tools` counts its workspace's key and switches.
 MCP servers are workspace resources rather than a refinement of a deployment
 server list.
 
 Organization guardrails add restrictions and have no workspace veto.
 `prepare_gateway_tools` resolves workspace policy from the API key's context,
-never a request header. Hybrid mode gets workspace policy from the control
-plane.
+never a request header.
 
 A new path into an existing capability must honor the same veto. Direct search,
 for example, enforces the workspace search disable switch.
 
 ## Provider and search credential stores
 
-`search_tool_store_service.py` overlays encrypted stored rows on a preserved
-config baseline and refreshes them across workers. Stored values win over config
+`SearchToolService` (`services/tools/`) overlays encrypted stored rows on a
+preserved config baseline and refreshes them across workers; each worker's
+overlay is module state in `_search_tool_overlay.py`. Stored values win over config
 values of the same name; config entries remain read-only through the management
 API. A provider credential the deployment stores is a hosted provider (below);
 the `provider_credentials` rows the Deployment providers page used to store are
@@ -283,7 +288,8 @@ and returns the link. A flow with no fallback is hidden or refuses before doing
 work.
 
 The console transport deliberately logs token-bearing message bodies for local
-testing. Do not widen this exception. Templates live under `templates/email/`
+testing, and marks its record with `CARRIES_CREDENTIAL` so the log filter that
+masks credentials leaves the links intact. Do not widen this exception. Templates live under `templates/email/`
 and use the shared renderer and header sanitization.
 
 ## Activation guide
@@ -389,4 +395,8 @@ the route's rework is tracked in #1699. See
 
 Use `gateway.log_config` with lazy `%s` formatting. Log opaque IDs, model,
 provider, status, and counts when needed. Never log credentials or user content,
-apart from the explicit local console-mail transport.
+apart from the explicit local console-mail transport. The gateway's handler, uvicorn's
+(`uvicorn_log_config`) and the last-resort handler a library logger falls to
+mask credential shapes (`secret_shapes.py`) in every record as a second line of
+defense, mostly for provider errors that echo the request; it is not a license
+to log one.

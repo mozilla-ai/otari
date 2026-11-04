@@ -4,6 +4,316 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.37.0](https://github.com/mozilla-ai/otari/releases/tag/v0.37.0) - 2026-11-04
+
+
+
+### Bug Fixes
+
+- **dashboard:** Stop a filter below the fold scrolling the shell away in [#2817](https://github.com/mozilla-ai/otari/pull/2817) by [@peteski22](https://github.com/peteski22) ([`c96d0fa`](https://github.com/mozilla-ai/otari/commit/c96d0fac6453e81629bb915baf4c922656cff37e))
+- **provider-endpoints:** Point a private api_base at hosted providers in [#2830](https://github.com/mozilla-ai/otari/pull/2830) by [@daavoo](https://github.com/daavoo) ([`9030c46`](https://github.com/mozilla-ai/otari/commit/9030c46d474b7ff01dbdfae454be33ab7ebc02ed))
+
+
+### Features
+
+- **pricing:** Name every price unit in one module by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`dcfc6a3`](https://github.com/mozilla-ai/otari/commit/dcfc6a308b74d20c7971b98321283050aa30187d))
+- **catalog:** Note a v2 price unit the reader does not know by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`a948107`](https://github.com/mozilla-ai/otari/commit/a94810723e625910cd18e3862fd5da31de6bf380))
+- **pricing:** Accept every price unit on the pricing routes in [#2812](https://github.com/mozilla-ai/otari/pull/2812) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`8c2b6f9`](https://github.com/mozilla-ai/otari/commit/8c2b6f92fdf71901036d81500380bbcaa02e198e))
+- **pricing:** Give each stored search and fetch tool with no price the otari: price in force in [#2808](https://github.com/mozilla-ai/otari/pull/2808) by [@aittalam](https://github.com/aittalam) ([`91483b2`](https://github.com/mozilla-ai/otari/commit/91483b2f472c5869bda27a8a4b236b9ebc4b4965))
+- **any-search:** Add the Serply adapter in [#2341](https://github.com/mozilla-ai/otari/pull/2341) by [@googio](https://github.com/googio) ([`39a2ae8`](https://github.com/mozilla-ai/otari/commit/39a2ae847c51eb2ae668bf7f8755a03d5eb7d7c8))
+- **BREAKING:** **pricing:** Price each search and fetch tool by its own price alone in [#2809](https://github.com/mozilla-ai/otari/pull/2809) by [@aittalam](https://github.com/aittalam) ([`f9be6d4`](https://github.com/mozilla-ai/otari/commit/f9be6d4ec0a943bb1578bfe82ce2e7edf1500c55))
+- **any-search,any-fetch:** Send a User-Agent naming the library from every provider in [#2825](https://github.com/mozilla-ai/otari/pull/2825) by [@aittalam](https://github.com/aittalam) ([`bcc2f97`](https://github.com/mozilla-ai/otari/commit/bcc2f9717a5fc0d8ad1a0c782d6d112a194557aa))
+- **dashboard:** Show each search and fetch tool at its own price in [#2810](https://github.com/mozilla-ai/otari/pull/2810) by [@aittalam](https://github.com/aittalam) ([`7842259`](https://github.com/mozilla-ai/otari/commit/7842259ec1fc14fdb01205e6b78e5f77bead0ca4))
+- **any-search,any-fetch:** Give each library a version of its own in [#2827](https://github.com/mozilla-ai/otari/pull/2827) by [@aittalam](https://github.com/aittalam) ([`022679a`](https://github.com/mozilla-ai/otari/commit/022679a88b8f05570b5dd99f677f37452e3e2aa5))
+
+
+### Maintenance
+
+- **BREAKING:** **routing:** Remove the learned kNN and noop routers in [#2829](https://github.com/mozilla-ai/otari/pull/2829) by [@daavoo](https://github.com/daavoo) ([`9308f41`](https://github.com/mozilla-ai/otari/commit/9308f413da24505a5757ac8039af86380d680222))
+
+
+### Performance
+
+- **pricing:** Cache stored rates per process for 30 seconds in [#2804](https://github.com/mozilla-ai/otari/pull/2804) by [@daavoo](https://github.com/daavoo) ([`a733d88`](https://github.com/mozilla-ai/otari/commit/a733d887246df588286076fd31427abfdb5afb22))
+
+
+
+### New Contributors
+
+- [@googio](https://github.com/googio) made their first contribution in [#2341](https://github.com/mozilla-ai/otari/pull/2341)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.36.0...v0.37.0
+## [0.36.0](https://github.com/mozilla-ai/otari/releases/tag/v0.36.0) - 2026-11-03
+
+
+
+### Bug Fixes
+
+- **guardrails:** Say why a verdict has no result in the otari-guardrails header by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`40d44a1`](https://github.com/mozilla-ai/otari/commit/40d44a1cdfc24a292cd1fd85fb0e3302bb6b8822))
+- **guardrails:** Let any api key read the guardrail profile list in [#2763](https://github.com/mozilla-ai/otari/pull/2763) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`27bbe27`](https://github.com/mozilla-ai/otari/commit/27bbe2741b6f48d1344a08343a7f11fcd0eb80d4))
+- **url-safety:** Validate a URL's shape before its address in [#2764](https://github.com/mozilla-ai/otari/pull/2764) by [@peteski22](https://github.com/peteski22) ([`c395ade`](https://github.com/mozilla-ai/otari/commit/c395adedecb77411028fd75a8254e583bac45cdb))
+- **catalog:** Keep the last good models.dev catalog when a fetch fails by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`6f3bd57`](https://github.com/mozilla-ai/otari/commit/6f3bd577c4883a4798b27d4fc5cb83b7bdf25518))
+- **guardrails:** Warn on a when_changed glob that matches no file in [#2648](https://github.com/mozilla-ai/otari/pull/2648) by [@praann07](https://github.com/praann07) ([`a9f8966`](https://github.com/mozilla-ai/otari/commit/a9f896688ec6149dc54361dd883f37394d88407f))
+- **catalog:** Find vertex claude models where models.dev v2 lists them by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`4493f53`](https://github.com/mozilla-ai/otari/commit/4493f53323f76d52dbf9632da06eaa4ae74de350))
+- **models:** Say what kind each model is, and switch off models providers refuse in [#2754](https://github.com/mozilla-ai/otari/pull/2754) by [@daavoo](https://github.com/daavoo) ([`2b8a3e0`](https://github.com/mozilla-ai/otari/commit/2b8a3e075899efe14f552c9e2b63486cfa6b0fb9))
+- **web:** Give the sign-in error its own line on narrow screens in [#2780](https://github.com/mozilla-ai/otari/pull/2780) by [@jigjigjig](https://github.com/jigjigjig) ([`ad0c1cd`](https://github.com/mozilla-ai/otari/commit/ad0c1cd794b6f2d24b970b8f8b0ce46e09134ead))
+- **dashboard:** Let request snippets name the API's own host in [#2779](https://github.com/mozilla-ai/otari/pull/2779) by [@daavoo](https://github.com/daavoo) ([`fb49f6b`](https://github.com/mozilla-ai/otari/commit/fb49f6b526440de33d01d79a2dbf3b4c1a24994b))
+- **tools:** List a tool the key's workspace does not allow as unavailable in [#2772](https://github.com/mozilla-ai/otari/pull/2772) by [@daavoo](https://github.com/daavoo) ([`68785f6`](https://github.com/mozilla-ai/otari/commit/68785f657eab93587cee67c0ceb727e7e403ceb5))
+- **files:** Read OpenAI container files through any-llm in [#2805](https://github.com/mozilla-ai/otari/pull/2805) by [@daavoo](https://github.com/daavoo) ([`c279c62`](https://github.com/mozilla-ai/otari/commit/c279c6268cc1e4d58140d021a8aef5c023f3f55a))
+
+
+### Features
+
+- **dashboard:** Simplify the Overview's controls in [#2744](https://github.com/mozilla-ai/otari/pull/2744) by [@daavoo](https://github.com/daavoo) ([`e4a16cc`](https://github.com/mozilla-ai/otari/commit/e4a16cc8978a3e66863e219f6d8790d1610d945b))
+- **chat:** Report code execution and MCP calls in otari_tool_calls in [#2752](https://github.com/mozilla-ai/otari/pull/2752) by [@daavoo](https://github.com/daavoo) ([`03d2d0f`](https://github.com/mozilla-ai/otari/commit/03d2d0f8ed6a28e5a734c49050ba582cbf95fdd1))
+- **routing:** Show the catalog order with prices and who named a provider on Automatic fallback in [#2743](https://github.com/mozilla-ai/otari/pull/2743) by [@daavoo](https://github.com/daavoo) ([`8e74c53`](https://github.com/mozilla-ai/otari/commit/8e74c536a9894b569a526913573640356fa77c78))
+- **dashboard:** Adopt the Otari by Mozilla AI logo in [#2753](https://github.com/mozilla-ai/otari/pull/2753) by [@jigjigjig](https://github.com/jigjigjig) ([`146c6fa`](https://github.com/mozilla-ai/otari/commit/146c6fa53572909d4c9c794ad1d492c5eb54bec4))
+- **web:** Stop showing the list price beside a model's rates in [#2714](https://github.com/mozilla-ai/otari/pull/2714) by [@tbille](https://github.com/tbille) ([`a944deb`](https://github.com/mozilla-ai/otari/commit/a944deb6560d8d24670375b1de800ff7e4627f5e))
+- **routing:** Improve automatic selection and sticky sessions in [#2572](https://github.com/mozilla-ai/otari/pull/2572) by [@hasangzl](https://github.com/hasangzl) ([`2bdf162`](https://github.com/mozilla-ai/otari/commit/2bdf1620ae545d1bcf84a40c4fd93bce45ddc6d2))
+- **tools:** Let a workspace pin who runs provider web search and fetch in [#2756](https://github.com/mozilla-ai/otari/pull/2756) by [@daavoo](https://github.com/daavoo) ([`1142145`](https://github.com/mozilla-ai/otari/commit/11421456f5f261dd82200d5fa86e63e75300319b))
+- **catalog:** Name what the models.dev reader could not read by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`b74eb5f`](https://github.com/mozilla-ai/otari/commit/b74eb5fc197bdeca194bd5da1129b15a2646e7d2))
+- **catalog:** Refuse a models.dev download the gateway cannot read in [#2768](https://github.com/mozilla-ai/otari/pull/2768) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`257380d`](https://github.com/mozilla-ai/otari/commit/257380da15a8782ef5ae4c5c71a201fc6e9a4137))
+- **web:** Add an overlay seam under a refused password sign-in in [#2770](https://github.com/mozilla-ai/otari/pull/2770) by [@jigjigjig](https://github.com/jigjigjig) ([`b55872e`](https://github.com/mozilla-ai/otari/commit/b55872e05c4317b9e0b29b6d042e7c199ef1965a))
+- **catalog:** Read the models.dev v2 document into the typed catalog by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`d438fc1`](https://github.com/mozilla-ai/otari/commit/d438fc1e63df4a6b5bd164995479dbe307e742ad))
+- **catalog:** Fetch the models.dev v2 catalog and fall back to v1 by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`fa37536`](https://github.com/mozilla-ai/otari/commit/fa375364ffb5b082a8a6e46feb20423722ce5bec))
+- **pricing:** Cut the bundled price snapshot from models.dev v2 in [#2771](https://github.com/mozilla-ai/otari/pull/2771) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`1e5767a`](https://github.com/mozilla-ai/otari/commit/1e5767a4d469e1ec1d31a035bd52826330e96d7e))
+- **routing:** Let an API key teach and read its own routing memory in [#2766](https://github.com/mozilla-ai/otari/pull/2766) by [@hasangzl](https://github.com/hasangzl) ([`f764f1e`](https://github.com/mozilla-ai/otari/commit/f764f1e90b8bf984f59ebacecedeb795889414da))
+- **tools:** Let a workspace fall back to the deployment's tool when its organization has no default in [#2783](https://github.com/mozilla-ai/otari/pull/2783) by [@aittalam](https://github.com/aittalam) ([`d5fd041`](https://github.com/mozilla-ai/otari/commit/d5fd041e0762fb99da03d11ce3c0fa6dc061686a))
+- **dashboard:** Add the organization's web search providers page in [#2784](https://github.com/mozilla-ai/otari/pull/2784) by [@aittalam](https://github.com/aittalam) ([`a7a225f`](https://github.com/mozilla-ai/otari/commit/a7a225fe02df93fb3bd36df9a14f806e2933d5c8))
+- **dashboard:** Add and edit an organization's web search keys in [#2785](https://github.com/mozilla-ai/otari/pull/2785) by [@aittalam](https://github.com/aittalam) ([`503487c`](https://github.com/mozilla-ai/otari/commit/503487cb657c42733e8f927dcb5fecf7ec399c6d))
+- **dashboard:** Choose a workspace's web search keys on Tools > Web search in [#2786](https://github.com/mozilla-ai/otari/pull/2786) by [@aittalam](https://github.com/aittalam) ([`9705337`](https://github.com/mozilla-ai/otari/commit/97053379171a73f903b3fd65f1c5dfec415ee579))
+- **catalog:** Store the typed models.dev catalog as json and read it back by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`6ea560e`](https://github.com/mozilla-ai/otari/commit/6ea560ea0e303367db8807b1c895d39381523211))
+- **pricing:** Bundle the whole models.dev catalog, not its price fields by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`b6d1012`](https://github.com/mozilla-ai/otari/commit/b6d101296fa76a2b96749271615a02d230059341))
+- **catalog:** Serve the bundled model facts until models.dev is fetched by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`0110592`](https://github.com/mozilla-ai/otari/commit/0110592fc218405074cc0e4461d27fa9a685d4cc))
+- **catalog:** Store the downloaded models.dev catalog for every worker in [#2787](https://github.com/mozilla-ai/otari/pull/2787) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`3db4f8a`](https://github.com/mozilla-ai/otari/commit/3db4f8a0b098a89fa34618c52f2ddbe7ce445dac))
+- **catalog:** Read a models.dev v1 model as having no type by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`65aa763`](https://github.com/mozilla-ai/otari/commit/65aa7639c02228372adc8f0a02ba378a82bfe0f7))
+- **catalog:** Read the model kind from the models.dev v2 type by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`e637661`](https://github.com/mozilla-ai/otari/commit/e6376617bad9e3856ea008e40b0d11a62e568a43))
+- **catalog:** Name each catalog model's kind and filter by it by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`22ad6c8`](https://github.com/mozilla-ai/otari/commit/22ad6c842fdac9ce81ca21cb9e4db30396d44c91))
+- **health-checks:** Ask a model's kind before checking it as chat in [#2800](https://github.com/mozilla-ai/otari/pull/2800) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`69f0872`](https://github.com/mozilla-ai/otari/commit/69f0872570e17ff25d80ecf87edbeec30a3f74df))
+- **end-users:** Return each end-user budget's name and limits in [#2806](https://github.com/mozilla-ai/otari/pull/2806) by [@daavoo](https://github.com/daavoo) ([`89eea2c`](https://github.com/mozilla-ai/otari/commit/89eea2cd8f4f7c5955f5fa6d976a27f16fb1e3bd))
+- **tools:** Add POST /api/v1/code/execute to run code without a model in [#2803](https://github.com/mozilla-ai/otari/pull/2803) by [@daavoo](https://github.com/daavoo) ([`2e5ba3b`](https://github.com/mozilla-ai/otari/commit/2e5ba3b50508573389079e35371a876a9b0babbc))
+- **catalog:** Map each models.dev protocol to the otari route that serves it by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`62dafe9`](https://github.com/mozilla-ai/otari/commit/62dafe93a61cb8ab4f4bbcb9b13fe2bc842c5eef))
+- **catalog:** Name the otari routes that serve each catalog model by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`5b94c99`](https://github.com/mozilla-ai/otari/commit/5b94c994a508cb250137f0b7d3b02745bf191f9a))
+- **catalog:** Name the otari routes that serve each catalog offering in [#2802](https://github.com/mozilla-ai/otari/pull/2802) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`1d0895b`](https://github.com/mozilla-ai/otari/commit/1d0895b4cf0199ef1e699c49b0b8a499b09558a9))
+- **dashboard:** Let a Hugging Face provider key bill an organization in [#2687](https://github.com/mozilla-ai/otari/pull/2687) by [@Sharlie89](https://github.com/Sharlie89) ([`ca0231e`](https://github.com/mozilla-ai/otari/commit/ca0231e6e1694c6cee8bf7467779183b48739981))
+- **admin:** Let an operator block email addresses and domains in [#2807](https://github.com/mozilla-ai/otari/pull/2807) by [@tbille](https://github.com/tbille) ([`a495a20`](https://github.com/mozilla-ai/otari/commit/a495a2072aac4ad8727c9ada65c7bd96c1faf5f2))
+
+
+### Performance
+
+- Resolve request dependencies on the event loop in [#2757](https://github.com/mozilla-ai/otari/pull/2757) by [@daavoo](https://github.com/daavoo) ([`4adf460`](https://github.com/mozilla-ai/otari/commit/4adf4608dedf3160a4ee67678ae69a8880b1f053))
+
+
+
+### New Contributors
+
+- [@praann07](https://github.com/praann07) made their first contribution in [#2648](https://github.com/mozilla-ai/otari/pull/2648)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.35.0...v0.36.0
+## [0.35.0](https://github.com/mozilla-ai/otari/releases/tag/v0.35.0) - 2026-10-31
+
+
+
+### Bug Fixes
+
+- **models:** Omit unknown fields from the model responses in [#2674](https://github.com/mozilla-ai/otari/pull/2674) by [@peteski22](https://github.com/peteski22) ([`28448d5`](https://github.com/mozilla-ai/otari/commit/28448d575f99488c2e95ccf089110ebf7d722fb7))
+- **routing:** Hold the tool-loop stream for its first chunk too in [#2686](https://github.com/mozilla-ai/otari/pull/2686) by [@Sharlie89](https://github.com/Sharlie89) ([`51442c4`](https://github.com/mozilla-ai/otari/commit/51442c4979405b7705c55c0948896e05b7eb2ed5))
+- **routing:** Read spend ceilings in budget conditions in [#2715](https://github.com/mozilla-ai/otari/pull/2715) by [@daavoo](https://github.com/daavoo) ([`495aa81`](https://github.com/mozilla-ai/otari/commit/495aa811cc246ae6c2cdc42327a7256ce44e6c13))
+- **budgets:** Hold each gateway-run tool call before it runs in [#2718](https://github.com/mozilla-ai/otari/pull/2718) by [@daavoo](https://github.com/daavoo) ([`cbce849`](https://github.com/mozilla-ai/otari/commit/cbce8491d5d526bf8d223cfa3683b037ed52bd97))
+- **dashboard:** Open a request by its Otari-Request-ID in [#2734](https://github.com/mozilla-ai/otari/pull/2734) by [@daavoo](https://github.com/daavoo) ([`127e0d2`](https://github.com/mozilla-ai/otari/commit/127e0d259e21da355730ee5465a61c1c0edae189))
+- **routing:** Hold an MCP-only tool-loop stream for its first chunk too in [#2732](https://github.com/mozilla-ai/otari/pull/2732) by [@daavoo](https://github.com/daavoo) ([`4361df5`](https://github.com/mozilla-ai/otari/commit/4361df5ef557718775f71c210bf519767a58ce23))
+
+
+### Features
+
+- **routing:** Store subagent routers with their token prices in [#2679](https://github.com/mozilla-ai/otari/pull/2679) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`c458118`](https://github.com/mozilla-ai/otari/commit/c4581187ca440bfdb66b05f94c2b0b94d8b8d9b1))
+- **routing:** Recommend with the stored subagent router in [#2680](https://github.com/mozilla-ai/otari/pull/2680) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`61d08d2`](https://github.com/mozilla-ai/otari/commit/61d08d266007d24e001e3f08d31e113ce1cb53d2))
+- **api:** Manage subagent routers at /routing/recommenders by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`4f1c197`](https://github.com/mozilla-ai/otari/commit/4f1c1978c33862415a83c1196a22a758c2879311))
+- **web:** Add the subagent router page by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`28d139a`](https://github.com/mozilla-ai/otari/commit/28d139a91be0580305d61e9bd30c65862a5b61fc))
+- **routing:** Allow a subagent router with both prices at zero by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`193e40e`](https://github.com/mozilla-ai/otari/commit/193e40e07d31f03d833bb156092e5b0d53956a78))
+- **web:** Allow a free subagent router in the router form by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`19ebefe`](https://github.com/mozilla-ai/otari/commit/19ebefee5212135b2d70863f191b90dc573c7690))
+- **web:** Stop offering the config.yml model on the subagent router page by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`f6f8858`](https://github.com/mozilla-ai/otari/commit/f6f8858e8810d281c67db575c06c5cca13e940f7))
+- **BREAKING:** **routing:** Set the subagent router only in the dashboard by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`08e836e`](https://github.com/mozilla-ai/otari/commit/08e836ee533d993242af47f20a5aa97c1d9911ca))
+- **feedback:** Let a person share their email so the team can reply in [#2716](https://github.com/mozilla-ai/otari/pull/2716) by [@jigjigjig](https://github.com/jigjigjig) ([`8b4bb06`](https://github.com/mozilla-ai/otari/commit/8b4bb06d4fcedac1644a5182228052e547724527))
+- **keys:** Let an organization create its own service keys in [#2735](https://github.com/mozilla-ai/otari/pull/2735) by [@daavoo](https://github.com/daavoo) ([`51dd9de`](https://github.com/mozilla-ai/otari/commit/51dd9de80877ad02abde76c70d96d6ada61af6da))
+
+
+
+### New Contributors
+
+- [@mukeshkbj](https://github.com/mukeshkbj) made their first contribution in [#2720](https://github.com/mozilla-ai/otari/pull/2720)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.34.0...v0.35.0
+## [0.34.0](https://github.com/mozilla-ai/otari/releases/tag/v0.34.0) - 2026-10-29
+
+
+
+### Bug Fixes
+
+- **tools:** Apply the stored search tools at startup only once their read has committed in [#2672](https://github.com/mozilla-ai/otari/pull/2672) by [@aittalam](https://github.com/aittalam) ([`db39c11`](https://github.com/mozilla-ai/otari/commit/db39c11f0d1300fa6a98bf0372645103999eafae))
+- **routing:** Name only the chosen model in a recommendation's reason in [#2678](https://github.com/mozilla-ai/otari/pull/2678) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`1270e49`](https://github.com/mozilla-ai/otari/commit/1270e49a3c238f8fe2ea46867de2a10c920f35eb))
+
+
+### Features
+
+- **BREAKING:** **traces:** Keep session content private, sealed with OTARI_SECRET_KEY or AWS KMS in [#2614](https://github.com/mozilla-ai/otari/pull/2614) by [@agpituk](https://github.com/agpituk) ([`a67d37c`](https://github.com/mozilla-ai/otari/commit/a67d37c1af09ed1db128cdc60924a63ee11caaeb))
+- **traces:** Filter sessions by model in [#2615](https://github.com/mozilla-ai/otari/pull/2615) by [@agpituk](https://github.com/agpituk) ([`3ed479f`](https://github.com/mozilla-ai/otari/commit/3ed479f33050446055f50b07e6a4bd59c9e8c815))
+- **web:** Fold Usage, Activity and Sessions into the Overview in [#2616](https://github.com/mozilla-ai/otari/pull/2616) by [@agpituk](https://github.com/agpituk) ([`154b9ac`](https://github.com/mozilla-ai/otari/commit/154b9ac11ef6a25817d6e815e28dd0af4af4549f))
+- **BREAKING:** **models:** List each model once in GET /api/v1/models and let Otari pick the provider in [#2645](https://github.com/mozilla-ai/otari/pull/2645) by [@tbille](https://github.com/tbille) ([`ac4bb58`](https://github.com/mozilla-ai/otari/commit/ac4bb589c05d928ad9c0746b5edcf9d2081a364d))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.33.0...v0.34.0
+## [0.33.0](https://github.com/mozilla-ai/otari/releases/tag/v0.33.0) - 2026-10-27
+
+
+
+### Bug Fixes
+
+- **BREAKING:** **tools:** Hold an organization's search and fetch endpoint to public addresses in [#2590](https://github.com/mozilla-ai/otari/pull/2590) by [@daavoo](https://github.com/daavoo) ([`8cceb42`](https://github.com/mozilla-ai/otari/commit/8cceb42cbfe18a13e350a35aa2ed713da93fc138))
+- **release:** Create the tag when it does not exist yet in [#2594](https://github.com/mozilla-ai/otari/pull/2594) by [@tbille](https://github.com/tbille) ([`5174b37`](https://github.com/mozilla-ai/otari/commit/5174b374aded504273caaf5183248005ec3652cc))
+- **inference:** Scope a caller's end-user tag to their own identifier in [#2592](https://github.com/mozilla-ai/otari/pull/2592) by [@daavoo](https://github.com/daavoo) ([`1e1ed6f`](https://github.com/mozilla-ai/otari/commit/1e1ed6f2fe3e2f23b2385f617bdc10641718061f))
+- **auth:** Ignore workspace and service account ids in the token exchange in [#2600](https://github.com/mozilla-ai/otari/pull/2600) by [@daavoo](https://github.com/daavoo) ([`fc32f67`](https://github.com/mozilla-ai/otari/commit/fc32f670caa7350d7d2a9c0120253e1f49855fb6))
+- **web:** Keep the caret in place when editing a search mid-text in [#2599](https://github.com/mozilla-ai/otari/pull/2599) by [@jigjigjig](https://github.com/jigjigjig) ([`6f5d6ed`](https://github.com/mozilla-ai/otari/commit/6f5d6ed12ae6d35ee2ca6069886cbb208287c57d))
+- **web:** Let the model selector in the Use this model drawer be copied in [#2596](https://github.com/mozilla-ai/otari/pull/2596) by [@jigjigjig](https://github.com/jigjigjig) ([`0522228`](https://github.com/mozilla-ai/otari/commit/05222284a94472ba24bd80b607a1a24698821e8d))
+- **web:** Keep the model catalog's search and filters when going back in [#2597](https://github.com/mozilla-ai/otari/pull/2597) by [@jigjigjig](https://github.com/jigjigjig) ([`cc6c503`](https://github.com/mozilla-ai/otari/commit/cc6c50308a3fac1bf028f1b0fee1435ecbc20bdd))
+- **web:** Keep the sidebar's band padding in Safari in [#2598](https://github.com/mozilla-ai/otari/pull/2598) by [@jigjigjig](https://github.com/jigjigjig) ([`3949b0e`](https://github.com/mozilla-ai/otari/commit/3949b0ed60320a6ca9d164a7786ffc3de13f33b9))
+- **logging:** Mask key- tokens, mixed-case prefixless keys, and uvicorn's own log lines in [#2608](https://github.com/mozilla-ai/otari/pull/2608) by [@daavoo](https://github.com/daavoo) ([`f1b9ad3`](https://github.com/mozilla-ai/otari/commit/f1b9ad307a4377d8c2a343010c20b7c83aa254db))
+- **billing:** Charge gateway tools by whose account runs them in [#2602](https://github.com/mozilla-ai/otari/pull/2602) by [@daavoo](https://github.com/daavoo) ([`910de2b`](https://github.com/mozilla-ai/otari/commit/910de2b6b3bcb68627611f810c1a27dfff469492))
+- **providers:** Reject reserved names for hosted providers in [#2620](https://github.com/mozilla-ai/otari/pull/2620) by [@tbille](https://github.com/tbille) ([`8280637`](https://github.com/mozilla-ai/otari/commit/8280637bfe575aa140b11f71303a40f966f8980b))
+- **config:** Say an empty OTARI_SECRET_KEY reads as unset and name gen-secret-key in [#2621](https://github.com/mozilla-ai/otari/pull/2621) by [@tbille](https://github.com/tbille) ([`149cb51`](https://github.com/mozilla-ai/otari/commit/149cb51773dbb8a82033f60201cd97248e359b05))
+- **pricing:** Log a warning when require_pricing refuses a request in [#2623](https://github.com/mozilla-ai/otari/pull/2623) by [@tbille](https://github.com/tbille) ([`d45913b`](https://github.com/mozilla-ai/otari/commit/d45913be27dbeb1492a6c9c66849a6809eb9e008))
+- **logging:** Stop masking an access log line that ends in api_token in [#2626](https://github.com/mozilla-ai/otari/pull/2626) by [@tbille](https://github.com/tbille) ([`cd73677`](https://github.com/mozilla-ai/otari/commit/cd73677cf8a2e352602a59d8db4919ab1b6c73f0))
+- **config:** Warn about unknown config keys and undiscovered declared models in [#2622](https://github.com/mozilla-ai/otari/pull/2622) by [@tbille](https://github.com/tbille) ([`481678b`](https://github.com/mozilla-ai/otari/commit/481678b8ed1f8043a56fc04b1cb7763ecf5f0d6d))
+- **responses:** Type the raw event dicts an upstream Otari streams in [#2624](https://github.com/mozilla-ai/otari/pull/2624) by [@tbille](https://github.com/tbille) ([`71ddc48`](https://github.com/mozilla-ai/otari/commit/71ddc48f8a1b10d54c821f0ef55b7e4f74dd173f))
+- **files:** Start without a provider account pepper, with provider copies off in [#2627](https://github.com/mozilla-ai/otari/pull/2627) by [@tbille](https://github.com/tbille) ([`dfaee5b`](https://github.com/mozilla-ai/otari/commit/dfaee5b7f9ad64eb70dce432d90715e0d77afb7b))
+- **deps:** Override the packaging cap pinning virtualenv in [#2613](https://github.com/mozilla-ai/otari/pull/2613) by [@peteski22](https://github.com/peteski22) ([`18ec9a4`](https://github.com/mozilla-ai/otari/commit/18ec9a49ece2a17d6193ec2c64c258482bbbde83))
+- **pricing:** Bill a 1-hour cache write on chat completions at its own rate in [#2636](https://github.com/mozilla-ai/otari/pull/2636) by [@daavoo](https://github.com/daavoo) ([`118aa1f`](https://github.com/mozilla-ai/otari/commit/118aa1f63b25dce15fa432b3493066c95dd0dcc6))
+- **keys:** Require the stored credential again to move a key to another api_base in [#2637](https://github.com/mozilla-ai/otari/pull/2637) by [@daavoo](https://github.com/daavoo) ([`b28d6b1`](https://github.com/mozilla-ai/otari/commit/b28d6b19f98734090048a29ead1ffdf1b6620eeb))
+- **hooks:** Cap the guardrail versions a workspace keeps in [#2643](https://github.com/mozilla-ai/otari/pull/2643) by [@daavoo](https://github.com/daavoo) ([`4c3e8a7`](https://github.com/mozilla-ai/otari/commit/4c3e8a72821de8428dc8b110768e65d4e0085d88))
+- **routing:** Fall back across a catalog id's hosted offerings by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`6929c0e`](https://github.com/mozilla-ai/otari/commit/6929c0ebb06b358b56c42ac0a2535acb729d7726))
+- **keys:** Make viewers read-only on keys and the Playground in [#2650](https://github.com/mozilla-ai/otari/pull/2650) by [@daavoo](https://github.com/daavoo) ([`8c6b34b`](https://github.com/mozilla-ai/otari/commit/8c6b34b9199ecddbbf14c0d900e5241d9fd5408c))
+- **keys:** Serialize key writes with every membership change that switches keys off in [#2659](https://github.com/mozilla-ai/otari/pull/2659) by [@daavoo](https://github.com/daavoo) ([`95a8118`](https://github.com/mozilla-ai/otari/commit/95a8118405703701b387c4e88e4f33762cce5dcf))
+
+
+### Features
+
+- **metrics:** Report each upstream attempt and every coded refusal in [#2420](https://github.com/mozilla-ai/otari/pull/2420) by [@daavoo](https://github.com/daavoo) ([`b729f72`](https://github.com/mozilla-ai/otari/commit/b729f727ae48fb299ed21983a539c4938246fb9f))
+- **gemini:** Gemini parity for gateway-routed agents in [#1587](https://github.com/mozilla-ai/otari/pull/1587) by [@daavoo](https://github.com/daavoo) ([`433e379`](https://github.com/mozilla-ai/otari/commit/433e379c1b79409d6c0cebceedd673df4bc87d41))
+- **traces:** Make a coding agent's session readable enough to debug in [#2478](https://github.com/mozilla-ai/otari/pull/2478) by [@agpituk](https://github.com/agpituk) ([`d6432bc`](https://github.com/mozilla-ai/otari/commit/d6432bc2bd6c13955fc5b7cbdb706d7139806cd4))
+- **traces:** Chart the sessions active over time, in buckets a session can fill in [#2479](https://github.com/mozilla-ai/otari/pull/2479) by [@agpituk](https://github.com/agpituk) ([`f42772c`](https://github.com/mozilla-ai/otari/commit/f42772cbd5797f84c0e7385a8acc0d15bbf8ac33))
+- **traces:** Price a coding agent's session, its turns and its tool calls in [#2481](https://github.com/mozilla-ai/otari/pull/2481) by [@agpituk](https://github.com/agpituk) ([`90ee9f2`](https://github.com/mozilla-ai/otari/commit/90ee9f2d28c1af4290ad94017ea55c3c32151b80))
+- **rate-limits:** Count a rule per budget, and report a limit without enforcing it in [#2421](https://github.com/mozilla-ai/otari/pull/2421) by [@daavoo](https://github.com/daavoo) ([`796344e`](https://github.com/mozilla-ai/otari/commit/796344e2b6b9abbe9833da44371b6a70fb6bddf5))
+- **chat:** Let a provider instance accept named extra request fields in [#2459](https://github.com/mozilla-ai/otari/pull/2459) by [@daavoo](https://github.com/daavoo) ([`daf77ae`](https://github.com/mozilla-ai/otari/commit/daf77aebc4c1599514060db4a9823b066b7adf2d))
+- **BREAKING:** **hosted-providers:** One catalog update for prices and model lists in [#2528](https://github.com/mozilla-ai/otari/pull/2528) by [@daavoo](https://github.com/daavoo) ([`830b420`](https://github.com/mozilla-ai/otari/commit/830b42000eae9798b5594d26a7ccc145b1062222))
+- **inference:** Look up the country a request comes from by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`3a2af83`](https://github.com/mozilla-ai/otari/commit/3a2af83cd760c93634d3b3dd72c8094c89d0411a))
+- **routing:** Skip providers a request's country may not reach by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`71ec162`](https://github.com/mozilla-ai/otari/commit/71ec1627d1a90c62965507d8fde9bb1f189853d5))
+- **files:** Keep the image describe call within the country gate by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`aeaa663`](https://github.com/mozilla-ai/otari/commit/aeaa663bc48f14803cf9b492ce07f72001c9a5c7))
+- **inference:** Apply the country gate to the other provider routes by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`3e20661`](https://github.com/mozilla-ai/otari/commit/3e206616fe0f3a992399b8acf200e1672f231058))
+- **providers:** Store the countries a hosted provider serves by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`0eb5bb3`](https://github.com/mozilla-ai/otari/commit/0eb5bb3e4c75a6ff77e77df0baff475d61b243e5))
+- **providers:** Refuse a request a hosted provider's countries leave out by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`602feef`](https://github.com/mozilla-ai/otari/commit/602feef7009e6f1fa512798308a7eb6de2b78722))
+- **batches:** Hold a batch's later calls to the countries its provider serves by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`93cb050`](https://github.com/mozilla-ai/otari/commit/93cb0500372588bab2663a129a241d3a6c34ebf3))
+- **web:** Set the countries a hosted provider serves by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`cffcc48`](https://github.com/mozilla-ai/otari/commit/cffcc488dbedb68adb2110e8dff3cdca3d4b859a))
+- **web:** Load a hosted provider's countries from a JSON file by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`39e8569`](https://github.com/mozilla-ai/otari/commit/39e8569a128edcd16e2aeb7c3183ccf7492376ef))
+- **inference:** Upload the country file to the database by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`0b8d780`](https://github.com/mozilla-ai/otari/commit/0b8d780ecc7d0455221d2a06a3e669e13f8c97b2))
+- **inference:** Look the client up in the stored country file by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`f9ae2f7`](https://github.com/mozilla-ai/otari/commit/f9ae2f700ae3d39f574e9bf30f4a85a63b3feec0))
+- **web:** Upload the country file from the settings page by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`6b117d0`](https://github.com/mozilla-ai/otari/commit/6b117d0a025c9e8af20acca5d3ad03f94201671b))
+- **dashboard:** Manage search and fetch tools on the Web search page in [#2638](https://github.com/mozilla-ai/otari/pull/2638) by [@aittalam](https://github.com/aittalam) ([`875c898`](https://github.com/mozilla-ai/otari/commit/875c89803bb23619b51cf4e1558a081fd6bbd6fd))
+- **traces:** Show what fills a model request's context window in [#2618](https://github.com/mozilla-ai/otari/pull/2618) by [@jigjigjig](https://github.com/jigjigjig) ([`519713b`](https://github.com/mozilla-ai/otari/commit/519713bb2fc2c3624bb97771b3c56539fdca7e45))
+- **web:** Animate the turns a live session adds into its trace tree in [#2652](https://github.com/mozilla-ai/otari/pull/2652) by [@jigjigjig](https://github.com/jigjigjig) ([`5dc1bca`](https://github.com/mozilla-ai/otari/commit/5dc1bcaf9530219dc8c8645925e1930cc0be9a8b))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.32.0...v0.33.0
+## [0.32.0](https://github.com/mozilla-ai/otari/releases/tag/v0.32.0) - 2026-10-23
+
+
+
+### Bug Fixes
+
+- **dashboard:** Aim request snippets at the deployment the dashboard reaches in [#2542](https://github.com/mozilla-ai/otari/pull/2542) by [@tbille](https://github.com/tbille) ([`c62bfde`](https://github.com/mozilla-ai/otari/commit/c62bfde88a5514b2b5e976b846b1ab8ad2fb91af))
+- **web:** Keep the no-organization answer across a context refetch in [#2546](https://github.com/mozilla-ai/otari/pull/2546) by [@tbille](https://github.com/tbille) ([`19e5670`](https://github.com/mozilla-ai/otari/commit/19e567065f07312d940e6c407e733f3fa4b1dc3b))
+- **chat:** Omit null fields from chat completion responses in [#2537](https://github.com/mozilla-ai/otari/pull/2537) by [@jigjigjig](https://github.com/jigjigjig) ([`cb9e5f4`](https://github.com/mozilla-ai/otari/commit/cb9e5f424d5eb98cda2a2808ce94912d55c8e6a5))
+- **files:** Keep S3 storage failures inside the OSError contract in [#2321](https://github.com/mozilla-ai/otari/pull/2321) by [@champ18ion](https://github.com/champ18ion) ([`cbe18bc`](https://github.com/mozilla-ai/otari/commit/cbe18bcc18b3db722d738b53cda8f648143d452a))
+- **tenancy:** Tell add_member's integrity violations apart in [#1965](https://github.com/mozilla-ai/otari/pull/1965) by [@BruceWayne733](https://github.com/BruceWayne733) ([`35a0099`](https://github.com/mozilla-ai/otari/commit/35a009961762c6ae657d659b3da75ec74eaf25ad))
+- Allow the OpenAI and Anthropic JS SDK headers through CORS in [#2559](https://github.com/mozilla-ai/otari/pull/2559) by [@daavoo](https://github.com/daavoo) ([`d4698f5`](https://github.com/mozilla-ai/otari/commit/d4698f55d5b8cbcfcbd86d0aafb987cc07f77c84))
+- **catalog:** List a hosted provider's switched-on models even when unpriced in [#2558](https://github.com/mozilla-ai/otari/pull/2558) by [@tbille](https://github.com/tbille) ([`4fc42a4`](https://github.com/mozilla-ai/otari/commit/4fc42a431c90defbde18bb86ede4935f37ee987b))
+- **docker:** Require pip 26.2.2 in the runtime image in [#2566](https://github.com/mozilla-ai/otari/pull/2566) by [@daavoo](https://github.com/daavoo) ([`7dec495`](https://github.com/mozilla-ai/otari/commit/7dec495bd75dfd43ad6a3e02df8b79f6736ea1b2))
+- **migrations:** Chain trace guardrail definitions after safety_identifier instead of branching in [#2570](https://github.com/mozilla-ai/otari/pull/2570) by [@daavoo](https://github.com/daavoo) ([`c76a706`](https://github.com/mozilla-ai/otari/commit/c76a706c9a053ac28df30a093b5d4e22a16311ed))
+- **passthrough:** Redact provider errors before storing them on the usage row in [#2574](https://github.com/mozilla-ai/otari/pull/2574) by [@daavoo](https://github.com/daavoo) ([`fa7d040`](https://github.com/mozilla-ai/otari/commit/fa7d0402d365312f8541c804801e58eb14471f27))
+- **logging:** Mask credentials in every gateway log line in [#2575](https://github.com/mozilla-ai/otari/pull/2575) by [@daavoo](https://github.com/daavoo) ([`43426f1`](https://github.com/mozilla-ai/otari/commit/43426f1af8e5a32500fb894fc35cc8c55adf26da))
+
+
+### Features
+
+- **BREAKING:** **tools:** Organization search and fetch keys on library providers in [#2540](https://github.com/mozilla-ai/otari/pull/2540) by [@aittalam](https://github.com/aittalam) ([`3c04483`](https://github.com/mozilla-ai/otari/commit/3c044838d9901fd284a0c735106673620f180d62))
+- **BREAKING:** Bye b-hybrid in [#2447](https://github.com/mozilla-ai/otari/pull/2447) by [@daavoo](https://github.com/daavoo) ([`5061e38`](https://github.com/mozilla-ai/otari/commit/5061e3835bd57f0a5b8e0f7b42da1ac8d0b40a53))
+- **dashboard:** Price web search and code execution on deployment pages in [#2544](https://github.com/mozilla-ai/otari/pull/2544) by [@tbille](https://github.com/tbille) ([`95437c4`](https://github.com/mozilla-ai/otari/commit/95437c47da4a01ad4169ee42944656ebdc3f64cc))
+- **BREAKING:** **search:** Give search tools an access list of their own, allowed_tools in [#2461](https://github.com/mozilla-ai/otari/pull/2461) by [@aittalam](https://github.com/aittalam) ([`6d65026`](https://github.com/mozilla-ai/otari/commit/6d650265ec2b6644cda4ea7ed529be4d53b8badc))
+- **any-search,any-fetch:** Add the DeepSeek search and fetch adapters in [#2425](https://github.com/mozilla-ai/otari/pull/2425) by [@daavoo](https://github.com/daavoo) ([`b8e4f4e`](https://github.com/mozilla-ai/otari/commit/b8e4f4e1273a2b3763d34aac2aa6a6014187c6de))
+- **inference:** Use the caller's safety_identifier as the end-user tag in [#2552](https://github.com/mozilla-ai/otari/pull/2552) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`e83e685`](https://github.com/mozilla-ai/otari/commit/e83e68586200b2459a58055bd8ec89053aaa7470))
+- **inference:** Send OpenAI chat completions a safety_identifier in [#2553](https://github.com/mozilla-ai/otari/pull/2553) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`6bedb7d`](https://github.com/mozilla-ai/otari/commit/6bedb7d08ca8d99bf47d804f52ac67fb44c7b49f))
+- **BREAKING:** **inference:** Remove the provider_user_identifier_enabled switch in [#2554](https://github.com/mozilla-ai/otari/pull/2554) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`d2bc9f4`](https://github.com/mozilla-ai/otari/commit/d2bc9f45a53e54c39bd47f8879dc248a2c9331cb))
+- **files:** Carry the end-user identifier into the image describe call in [#2555](https://github.com/mozilla-ai/otari/pull/2555) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`9af4ddc`](https://github.com/mozilla-ai/otari/commit/9af4ddcd3dfc5de7ab834240143bfae7df5b5db9))
+- **dashboard:** Link the community Discord from the dashboard in [#2565](https://github.com/mozilla-ai/otari/pull/2565) by [@tbille](https://github.com/tbille) ([`62dcc8d`](https://github.com/mozilla-ai/otari/commit/62dcc8d180d52ba797d54fe8fface9b17b152a96))
+- **traces:** Read Claude Code's own spans into a session's turns and tools in [#2480](https://github.com/mozilla-ai/otari/pull/2480) by [@agpituk](https://github.com/agpituk) ([`8acc5ad`](https://github.com/mozilla-ai/otari/commit/8acc5adda022c711f815396d65a9156ebea75efe))
+- **usage:** Add a safety_identifier column to usage rows by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`bc94da9`](https://github.com/mozilla-ai/otari/commit/bc94da917649da56b5ffdf316f58d7f77ad65171))
+- **usage:** Store the end-user identifier on each usage row by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`58e0111`](https://github.com/mozilla-ai/otari/commit/58e011104a127edd76b51c577106e422eca7044c))
+- **hook:** Put each guardrail check an agent's hook makes on its Otari session in [#2477](https://github.com/mozilla-ai/otari/pull/2477) by [@agpituk](https://github.com/agpituk) ([`c55f51e`](https://github.com/mozilla-ai/otari/commit/c55f51ee570cbad68e7f0d4cdd43c3d9d300a050))
+- **models:** List each model's name, tool support and modalities in [#2560](https://github.com/mozilla-ai/otari/pull/2560) by [@daavoo](https://github.com/daavoo) ([`fad8c39`](https://github.com/mozilla-ai/otari/commit/fad8c39b252727d5da75ac5359196834e7842173))
+- **auth:** Let members give their own keys federation rules in [#2567](https://github.com/mozilla-ai/otari/pull/2567) by [@daavoo](https://github.com/daavoo) ([`3694aee`](https://github.com/mozilla-ai/otari/commit/3694aee37402a24de5be62b6c4eaec1cd4734c8c))
+- **api:** Split a response's duration into Otari's time and the provider's in Server-Timing in [#2417](https://github.com/mozilla-ai/otari/pull/2417) by [@daavoo](https://github.com/daavoo) ([`53af6ca`](https://github.com/mozilla-ai/otari/commit/53af6ca5a3460124a0ba7cf0bb04a04b1816aa2f))
+- **tools:** Store the E2B sandbox key so rotating it needs no redeploy in [#2573](https://github.com/mozilla-ai/otari/pull/2573) by [@daavoo](https://github.com/daavoo) ([`bd0ede2`](https://github.com/mozilla-ai/otari/commit/bd0ede27f96e363e513eddaa3ba3767a07b6f155))
+- **pricing:** Price a call in plain USD with price_per_request in [#2418](https://github.com/mozilla-ai/otari/pull/2418) by [@daavoo](https://github.com/daavoo) ([`8bb22e7`](https://github.com/mozilla-ai/otari/commit/8bb22e7a50ab688363c749a645771cde0f8e75b9))
+
+
+
+### New Contributors
+
+- [@BruceWayne733](https://github.com/BruceWayne733) made their first contribution in [#1965](https://github.com/mozilla-ai/otari/pull/1965)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.31.1...v0.32.0
+## [0.31.1](https://github.com/mozilla-ai/otari/releases/tag/v0.31.1) - 2026-10-21
+
+
+
+### Bug Fixes
+
+- **passthrough:** Send the request id and record it on the usage rows, as completions do in [#2539](https://github.com/mozilla-ai/otari/pull/2539) by [@daavoo](https://github.com/daavoo) ([`2d13731`](https://github.com/mozilla-ai/otari/commit/2d1373162de028af71f4fb67b2bcbd905159cc3a))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.31.0...v0.31.1
+## [0.31.0](https://github.com/mozilla-ai/otari/releases/tag/v0.31.0) - 2026-10-21
+
+
+
+### Bug Fixes
+
+- **oauth:** Hold the flow cookie to an ASCII allowlist in [#2501](https://github.com/mozilla-ai/otari/pull/2501) by [@peteski22](https://github.com/peteski22) ([`543261d`](https://github.com/mozilla-ai/otari/commit/543261d11f186355ea66a63d8cd73063b53b08d6))
+- **dashboard:** Open docs.otari.ai from Documentation links, and drop the bundled guide in [#2485](https://github.com/mozilla-ai/otari/pull/2485) by [@daavoo](https://github.com/daavoo) ([`5bf7a42`](https://github.com/mozilla-ai/otari/commit/5bf7a42d5c5f3c95bdaae9bbf6d8491f114d6196))
+- **providers:** Pass a timeout on non-streaming provider calls in [#2065](https://github.com/mozilla-ai/otari/pull/2065) by [@hasangzl](https://github.com/hasangzl) ([`74e1b04`](https://github.com/mozilla-ai/otari/commit/74e1b04c1d7c8cf3c0eecde93f9f339e37ae164e))
+- **dashboard:** Plain tool captions and a pinned mark for mostly pinned models in [#2399](https://github.com/mozilla-ai/otari/pull/2399) by [@hasangzl](https://github.com/hasangzl) ([`e89e391`](https://github.com/mozilla-ai/otari/commit/e89e3918161215996128cb20a17a887e72be513e))
+- **dashboard:** Pick up a new build automatically in [#2393](https://github.com/mozilla-ai/otari/pull/2393) by [@hasangzl](https://github.com/hasangzl) ([`e6226a5`](https://github.com/mozilla-ai/otari/commit/e6226a5cdd42945a29c36e6327afa5394241734e))
+- **tests:** Define the derivation fixtures as classes so mypy passes in [#2504](https://github.com/mozilla-ai/otari/pull/2504) by [@peteski22](https://github.com/peteski22) ([`365ca9c`](https://github.com/mozilla-ai/otari/commit/365ca9ca8257db58adf9df059bb3c4db86b4d1dd))
+- **migrations:** Chain max_end_users after pricing kind so Alembic has one head in [#2513](https://github.com/mozilla-ai/otari/pull/2513) by [@daavoo](https://github.com/daavoo) ([`c45c3d1`](https://github.com/mozilla-ai/otari/commit/c45c3d12dae28cf81d88f8cd85b53f020892b207))
+- **hosted-providers:** Serve an unpriced model once a refresh prices it in [#2470](https://github.com/mozilla-ai/otari/pull/2470) by [@daavoo](https://github.com/daavoo) ([`7f03bd2`](https://github.com/mozilla-ai/otari/commit/7f03bd29cdbf9919517d63c5b9e68e286adcf88a))
+- **migrations:** Rejoin the max_end_users and pricing kind heads in [#2514](https://github.com/mozilla-ai/otari/pull/2514) by [@daavoo](https://github.com/daavoo) ([`61ca2e7`](https://github.com/mozilla-ai/otari/commit/61ca2e7736cb5a0518d293f68216df5a0ab3f90f))
+- **migrations:** Chain the hosted-models switch after max_end_users instead of joining heads in [#2517](https://github.com/mozilla-ai/otari/pull/2517) by [@daavoo](https://github.com/daavoo) ([`2ce539d`](https://github.com/mozilla-ai/otari/commit/2ce539d9836e030ff912f938756ab7a901074a08))
+- **BREAKING:** **messages:** Answer every Messages error in Anthropic's envelope in [#2505](https://github.com/mozilla-ai/otari/pull/2505) by [@hasangzl](https://github.com/hasangzl) ([`b5a3e56`](https://github.com/mozilla-ai/otari/commit/b5a3e56aabc668863a397dc95807a10b8bef0e83))
+- **dashboard:** Trim pricing provenance from the model catalog pages in [#2518](https://github.com/mozilla-ai/otari/pull/2518) by [@tbille](https://github.com/tbille) ([`5ce3fde`](https://github.com/mozilla-ai/otari/commit/5ce3fde7983cbfa83f2280b14fecaae6f4868fc3))
+- **dashboard:** Let a page scroll clear of a control fixed to the corner in [#2526](https://github.com/mozilla-ai/otari/pull/2526) by [@tbille](https://github.com/tbille) ([`6a8205d`](https://github.com/mozilla-ai/otari/commit/6a8205d55ca0875c1cd4915a3fff8a4f15a97234))
+- **health-checks:** Redact probe errors with the shared upstream redactor in [#2524](https://github.com/mozilla-ai/otari/pull/2524) by [@claude[bot]](https://github.com/claude[bot]) ([`0f8fac1`](https://github.com/mozilla-ai/otari/commit/0f8fac1921ef64d9f0fe4d787ca7604ff31bdc0b))
+
+
+### Features
+
+- **traces:** Search sessions by any part of their id, name, agent or user in [#2472](https://github.com/mozilla-ai/otari/pull/2472) by [@jigjigjig](https://github.com/jigjigjig) ([`f78c17e`](https://github.com/mozilla-ai/otari/commit/f78c17e9e926ba0b1b1e1ff7adbe48fdc6dce914))
+- **mcp:** Check stored MCP servers on save and show their health in [#2396](https://github.com/mozilla-ai/otari/pull/2396) by [@hasangzl](https://github.com/hasangzl) ([`c1147cc`](https://github.com/mozilla-ai/otari/commit/c1147cc4714bc8b964606609d4d144e951cb0431))
+- **api:** Answer /v1/* with a 404 pointing to /api/v1 in [#2063](https://github.com/mozilla-ai/otari/pull/2063) by [@hasangzl](https://github.com/hasangzl) ([`024cba8`](https://github.com/mozilla-ai/otari/commit/024cba8eada7de6037257ae886d110fbb265066a))
+- **pricing:** Give search and fetch tool prices a kind of their own in [#2460](https://github.com/mozilla-ai/otari/pull/2460) by [@aittalam](https://github.com/aittalam) ([`6de55f8`](https://github.com/mozilla-ai/otari/commit/6de55f802956cf560cff96b2b236627af6ec892a))
+- **end-users:** Cap how many end users a service key may have in [#2416](https://github.com/mozilla-ai/otari/pull/2416) by [@daavoo](https://github.com/daavoo) ([`51e265a`](https://github.com/mozilla-ai/otari/commit/51e265af741df34726354522c3e930593bdab4b5))
+- **tools:** Gate in-loop web tools on the price that settles them in [#2512](https://github.com/mozilla-ai/otari/pull/2512) by [@aittalam](https://github.com/aittalam) ([`ac172ab`](https://github.com/mozilla-ai/otari/commit/ac172ab7b198818053906d683de48086a5a19c61))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.30.1...v0.31.0
 ## [0.30.1](https://github.com/mozilla-ai/otari/releases/tag/v0.30.1) - 2026-10-20
 
 

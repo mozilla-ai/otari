@@ -323,10 +323,51 @@ def test_a_service_key_counts_its_end_users_on_each_of_its_budgets(
     counted = client.get(END_USER_BUDGETS, headers=mlpa)
 
     assert counted.status_code == 200, counted.text
-    assert counted.json() == [
+    assert [
+        {k: budget[k] for k in ("budget_id", "is_default", "end_user_count", "blocked_end_user_count")}
+        for budget in counted.json()
+    ] == [
         {"budget_id": "eu-ai", "is_default": True, "end_user_count": 2, "blocked_end_user_count": 1},
         {"budget_id": "eu-memories", "is_default": False, "end_user_count": 1, "blocked_end_user_count": 0},
     ]
+
+
+def test_end_user_budgets_carry_the_limits_end_users_are_held_to(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _budgets(client, master_key_header)
+    guest = client.put(
+        f"{API_ROOT}/budgets/eu-memories",
+        json={"name": "guest", "max_budget": 0.02, "reset_alignment": "calendar_month", "budget_duration_sec": None},
+        headers=master_key_header,
+    )
+    assert guest.status_code == 200, guest.text
+    mlpa = _service_key(client, master_key_header, "mlpa")
+
+    listed = client.get(END_USER_BUDGETS, headers=mlpa)
+
+    assert listed.status_code == 200, listed.text
+    by_id = {budget["budget_id"]: budget for budget in listed.json()}
+    assert by_id["eu-ai"] | {"end_user_count": 0} == {
+        "budget_id": "eu-ai",
+        "name": None,
+        "max_budget": None,
+        "token_limit": None,
+        "request_limit": 5,
+        "rpm_limit": None,
+        "tpm_limit": None,
+        "budget_duration_sec": 86400,
+        "reset_alignment": None,
+        "is_default": True,
+        "end_user_count": 0,
+        "blocked_end_user_count": 0,
+    }
+    assert by_id["eu-memories"]["name"] == "guest"
+    assert by_id["eu-memories"]["max_budget"] == 0.02
+    assert by_id["eu-memories"]["reset_alignment"] == "calendar_month"
+    assert by_id["eu-memories"]["budget_duration_sec"] is None
+    # Only the budgets on the key's list, never another of the deployment's.
+    assert "eu-other" not in by_id
 
 
 def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
@@ -357,6 +398,152 @@ def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
     read = client.get(url, headers=mlpa)
     assert read.json()["blocked"] is True
     assert read.json()["budget_id"] == "eu-ai"
+
+
+def test_a_key_with_a_cap_refuses_one_end_user_more(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _budgets(client, master_key_header)
+    mlpa = _key(
+        client,
+        master_key_header,
+        "mlpa",
+        is_service_key=True,
+        end_user_budget_ids=["eu-ai"],
+        end_user_budget_id="eu-ai",
+        max_end_users=2,
+    )
+
+    first = _chat(client, mlpa, "a")
+    second = client.put(f"{END_USERS}/b", json={"budget_id": "eu-ai"}, headers=mlpa)
+    by_request = _chat(client, mlpa, "c")
+    by_put = client.put(f"{END_USERS}/c", json={"budget_id": "eu-ai"}, headers=mlpa)
+    existing = _chat(client, mlpa, "a")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 201, second.text
+    assert by_request.status_code == 403
+    assert by_request.headers["Otari-Error-Code"] == "end_user_limit_reached"
+    assert by_put.status_code == 403
+    assert by_put.json()["code"] == "end_user_limit_reached"
+    # An end user the key already has keeps working when the cap is full.
+    assert existing.status_code == 200, existing.text
+
+    # A deleted end user frees its place, and reviving it takes one again.
+    gone = db_session.query(User).filter(User.external_id == "b").one()
+    gone.deleted_at = datetime.now(UTC)
+    db_session.commit()
+    assert _chat(client, mlpa, "c").status_code == 200
+    assert _chat(client, mlpa, "b").status_code == 403
+
+
+def test_two_keys_of_one_owner_count_their_own_budgets(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A guest key and a signed-in key of one owner keep separate caps, each over the budgets it assigns."""
+    _budgets(client, master_key_header)
+    signed_in = _key(
+        client,
+        master_key_header,
+        "mlpa",
+        is_service_key=True,
+        end_user_budget_ids=["eu-ai"],
+        end_user_budget_id="eu-ai",
+        max_end_users=1,
+    )
+    guests = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "mlpa-guest",
+            "user_id": "mlpa",
+            "is_service_key": True,
+            "end_user_budget_ids": ["eu-memories"],
+            "end_user_budget_id": "eu-memories",
+            "max_end_users": 1,
+        },
+        headers=master_key_header,
+    ).json()
+    guest = {API_KEY_HEADER: f"Bearer {guests['key']}"}
+
+    assert _chat(client, signed_in, "fxa1:ai").status_code == 200
+    assert _chat(client, guest, "guest1:ai-guest").status_code == 200
+    assert _chat(client, signed_in, "fxa2:ai").status_code == 403
+    assert _chat(client, guest, "guest2:ai-guest").status_code == 403
+
+
+def test_moving_an_end_user_onto_a_capped_keys_budget_takes_a_place(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """An end user another key of the owner started counts once it is moved onto this key's budgets."""
+    _budgets(client, master_key_header)
+    other = _key(
+        client,
+        master_key_header,
+        "mlpa",
+        is_service_key=True,
+        end_user_budget_ids=["eu-ai"],
+        end_user_budget_id="eu-ai",
+    )
+    capped = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "mlpa-guest",
+            "user_id": "mlpa",
+            "is_service_key": True,
+            "end_user_budget_ids": ["eu-memories", "eu-other"],
+            "end_user_budget_id": "eu-memories",
+            "max_end_users": 1,
+        },
+        headers=master_key_header,
+    ).json()
+    guest = {API_KEY_HEADER: f"Bearer {capped['key']}"}
+    for external_id in ("a", "b"):
+        assert client.put(f"{END_USERS}/{external_id}", json={"budget_id": "eu-ai"}, headers=other).status_code == 201
+
+    moved = client.put(f"{END_USERS}/a", json={"budget_id": "eu-memories"}, headers=guest)
+    by_put = client.put(f"{END_USERS}/b", json={"budget_id": "eu-memories"}, headers=guest)
+    by_patch = client.patch(f"{END_USERS}/b", json={"budget_id": "eu-memories"}, headers=guest)
+    within = client.patch(f"{END_USERS}/a", json={"budget_id": "eu-other"}, headers=guest)
+
+    assert moved.status_code == 200, moved.text
+    assert by_put.status_code == 403
+    assert by_put.json()["code"] == "end_user_limit_reached"
+    assert by_patch.status_code == 403
+    assert by_patch.json()["code"] == "end_user_limit_reached"
+    # A move between the key's own budgets takes no new place.
+    assert within.status_code == 200, within.text
+
+
+def test_a_key_with_no_default_counts_end_users_on_no_budget(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A request naming no budget starts an end user on none, and that still takes a place."""
+    _budgets(client, master_key_header)
+    mlpa = _key(client, master_key_header, "mlpa", is_service_key=True, end_user_budget_ids=["eu-ai"], max_end_users=1)
+
+    first = _chat(client, mlpa, "a")
+    second = _chat(client, mlpa, "b")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 403
+    assert second.headers["Otari-Error-Code"] == "end_user_limit_reached"
+
+
+def test_the_cap_is_read_and_changed_through_the_keys_api(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _budgets(client, master_key_header)
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "mlpa", "user_id": "mlpa", "is_service_key": True, "max_end_users": 10},
+        headers=master_key_header,
+    ).json()
+    raised = client.patch(f"{API_ROOT}/keys/{created['id']}", json={"max_end_users": 20}, headers=master_key_header)
+    cleared = client.patch(f"{API_ROOT}/keys/{created['id']}", json={"max_end_users": None}, headers=master_key_header)
+    negative = client.patch(f"{API_ROOT}/keys/{created['id']}", json={"max_end_users": -1}, headers=master_key_header)
+
+    assert created["max_end_users"] == 10
+    assert raised.json()["max_end_users"] == 20
+    assert cleared.json()["max_end_users"] is None
+    assert negative.status_code == 422
 
 
 def test_a_service_key_deletes_its_end_user_and_a_request_revives_it(

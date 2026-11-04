@@ -12,48 +12,26 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Callable, Generator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 from unittest.mock import patch
 
-import httpx
 import pytest
 from any_llm.providers.bedrock.bedrock import BedrockProvider
 from any_llm.types.messages import MessageStreamEvent
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from conftest import InstallControlPlane
-from gateway.api.deps import reset_config
-from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import reset_db
+from gateway.core.config import API_ROOT
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX
 
-from .conftest import MODEL_NAME, app_for
+from .conftest import MODEL_NAME
 from .test_messages_streaming_usage import _configure_pricing, _seed_budgeted_user
 
 _INCOMPLETE_MESSAGE = "The upstream provider ended the stream before completing the message."
-_ATTEMPT_ID = "3f1b6a1e-0000-4000-8000-0000000000b1"
 _CODE_USE_ID = f"{SERVER_TOOL_USE_ID_PREFIX}0123456789abcdef"
-
-
-@pytest.fixture
-def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
-    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    app = app_for(
-        GatewayConfig(
-            mode="hybrid",
-            platform={"base_url": "http://platform.test/api/v1"},
-            # These resolve payloads name no tenant. The end-user identifier has its own tests.
-            provider_user_identifier_enabled=False,
-        )
-    )
-    with TestClient(app) as client:
-        yield client
-    reset_config()
-    reset_db()
 
 
 class _FakeSandboxBackend:
@@ -109,46 +87,26 @@ _CODE_EXECUTION_ROUND: list[dict[str, Any]] = [
 ]
 
 
-def _install_hybrid_bedrock(
-    monkeypatch: pytest.MonkeyPatch,
-    control_plane_transport: InstallControlPlane,
-    rounds: list[list[dict[str, Any]]],
-) -> tuple[_FakeBedrockClient, list[dict[str, Any]]]:
+_BEDROCK_MODEL = "bedrock:us.moonshotai.kimi-k3"
+
+
+def _install_bedrock(monkeypatch: pytest.MonkeyPatch, rounds: list[list[dict[str, Any]]]) -> _FakeBedrockClient:
     """Route the request to Bedrock's Kimi with the gateway's sandbox, through the real any-llm bridge."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
-    usage_reports: list[dict[str, Any]] = []
-
-    async def fake_post_platform(
-        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
-    ) -> httpx.Response:
-        if url.endswith("/gateway/provider-keys/resolve"):
-            attempt = {
-                "attempt_id": _ATTEMPT_ID,
-                "position": 0,
-                "provider": "bedrock",
-                "model": "us.moonshotai.kimi-k3",
-                "api_key": "bedrock-api-key-test",
-                "api_base": None,
-                "managed": True,
-            }
-            return httpx.Response(200, json={"request_id": "req-kimi", "fallback_enabled": True, "attempts": [attempt]})
-        if url.endswith("/gateway/code-execution/resolve"):
-            return httpx.Response(200, json={"enabled": True})
-        usage_reports.append(body)
-        return httpx.Response(204)
-
+    # The shared config declares bedrock keyless, so the bearer token comes from the environment.
+    monkeypatch.setenv("AWS_BEARER_TOKEN_BEDROCK", "bedrock-api-key-test")
     bedrock = _FakeBedrockClient(rounds)
-    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
     monkeypatch.setattr(BedrockProvider, "_client_for_timeout", lambda _self, _timeout: bedrock)
-    return bedrock, usage_reports
+    return bedrock
 
 
-def _follow_up_after_code_execution() -> dict[str, Any]:
+def _follow_up_after_code_execution(user_id: str) -> dict[str, Any]:
     """The incident's request: the turn after one that ran code and then called the caller's own tool."""
     return {
-        "model": "kimi-k3",
+        "model": _BEDROCK_MODEL,
+        "metadata": {"user_id": user_id},
         "max_tokens": 256,
         "stream": True,
         "tools": [
@@ -204,17 +162,18 @@ def _assert_ends_in_incomplete_error(events: list[tuple[str, dict[str, Any]]]) -
 
 
 def test_a_bridged_provider_that_streams_nothing_ends_in_an_error_event(
-    platform_client: TestClient,
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
-    control_plane_transport: InstallControlPlane,
 ) -> None:
     """The incident: Bedrock returned an event stream with no events, so the bridge emitted none."""
-    bedrock, usage_reports = _install_hybrid_bedrock(monkeypatch, control_plane_transport, [[]])
+    user_id = "bridged-empty-stream"
+    _seed_budgeted_user(client, master_key_header, user_id)
+    bedrock = _install_bedrock(monkeypatch, [[]])
 
-    response = platform_client.post(
-        f"{API_ROOT}/messages",
-        json=_follow_up_after_code_execution(),
-        headers={"Authorization": "Bearer user_test_token"},
+    response = client.post(
+        f"{API_ROOT}/messages", json=_follow_up_after_code_execution(user_id), headers=master_key_header
     )
 
     assert response.status_code == 200, response.text
@@ -222,8 +181,9 @@ def test_a_bridged_provider_that_streams_nothing_ends_in_an_error_event(
     assert [name for name, _ in events if name != "ping"] == ["error"]
     _assert_ends_in_incomplete_error(events)
 
-    reports = [(report["correlation_id"], report["status"]) for report in usage_reports]
-    assert reports == [(_ATTEMPT_ID, "error")], "the attempt settles as failed, never as a success"
+    row = _poll_usage_row(db_session_factory, user_id)
+    assert row is not None, "the failed stream must leave a usage row"
+    assert row.status == "error", "the attempt settles as failed, never as a success"
 
     # The history reached Bedrock whole: the gateway's code-execution pair folded
     # into text the bridge can carry, beside the caller's own tool call.
@@ -234,17 +194,18 @@ def test_a_bridged_provider_that_streams_nothing_ends_in_an_error_event(
 
 
 def test_a_tool_loop_round_that_streams_nothing_ends_the_started_message_in_an_error_event(
-    platform_client: TestClient,
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
-    control_plane_transport: InstallControlPlane,
 ) -> None:
     """``message_start`` went out with the first round; the round after the gateway ran code came back empty."""
-    bedrock, usage_reports = _install_hybrid_bedrock(monkeypatch, control_plane_transport, [_CODE_EXECUTION_ROUND, []])
+    user_id = "tool-loop-empty-round"
+    _seed_budgeted_user(client, master_key_header, user_id)
+    bedrock = _install_bedrock(monkeypatch, [_CODE_EXECUTION_ROUND, []])
 
-    response = platform_client.post(
-        f"{API_ROOT}/messages",
-        json=_follow_up_after_code_execution(),
-        headers={"Authorization": "Bearer user_test_token"},
+    response = client.post(
+        f"{API_ROOT}/messages", json=_follow_up_after_code_execution(user_id), headers=master_key_header
     )
 
     assert response.status_code == 200, response.text
@@ -252,7 +213,9 @@ def test_a_tool_loop_round_that_streams_nothing_ends_the_started_message_in_an_e
     assert events[0][0] == "message_start"
     _assert_ends_in_incomplete_error(events)
     assert len(bedrock.requests) == 2, "the gateway ran the code and asked for the next round"
-    assert [report["status"] for report in usage_reports] == ["error"]
+    row = _poll_usage_row(db_session_factory, user_id)
+    assert row is not None, "the failed stream must leave a usage row"
+    assert row.status == "error"
 
 
 async def _empty_stream(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
@@ -276,7 +239,7 @@ def _poll_usage_row(make_session: Callable[[], Session], user_id: str, *, timeou
         time.sleep(0.1)
 
 
-def test_a_standalone_stream_with_no_events_fails_and_releases_its_reservation(
+def test_a_stream_with_no_events_fails_and_releases_its_reservation(
     client: TestClient,
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],

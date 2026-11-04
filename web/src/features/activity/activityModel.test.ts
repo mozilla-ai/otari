@@ -8,6 +8,7 @@ import {
   describeAttempt,
   describeAttemptOutcome,
   findGroupsMissingEarlierAttempts,
+  findRequestOutcome,
   formatElapsed,
   formatLatencyCell,
   formatTokenLane,
@@ -327,6 +328,37 @@ describe("findGroupsMissingEarlierAttempts", () => {
   })
 })
 
+describe("findRequestOutcome", () => {
+  it("picks the attempt that served over the ones it fell over from", () => {
+    const rows = [
+      attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
+      attempt({ id: "b", status: "success", attempt_position: 2 }),
+    ]
+    expect(findRequestOutcome(rows, "grp-1")?.id).toBe("b")
+  })
+
+  it("picks the terminal failure when no candidate served", () => {
+    const rows = [
+      attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
+      attempt({ id: "b", status: "error", attempt_position: 2 }),
+    ]
+    expect(findRequestOutcome(rows, "grp-1")?.id).toBe("b")
+  })
+
+  it("falls back to the latest attempt while the request has no outcome row", () => {
+    const rows = [
+      attempt({ id: "b", status: "absorbed", attempt_position: 2 }),
+      attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
+    ]
+    expect(findRequestOutcome(rows, "grp-1")?.id).toBe("b")
+  })
+
+  it("ignores rows of another request and finds nothing for an unknown id", () => {
+    const rows = [attempt({ id: "a", request_group_id: "grp-2" })]
+    expect(findRequestOutcome(rows, "grp-1")).toBeUndefined()
+  })
+})
+
 describe("indexGroupOutcomes", () => {
   it("indexes the served target of a group by its outcome row", () => {
     const rows = [
@@ -615,9 +647,9 @@ describe("the row formatters", () => {
     expect(formatLatencyCell(842)).toBe("842 ms")
   })
 
-  it("roll a long total time up into minutes and hours, never below zero", () => {
+  it("roll a long total time up into minutes, hours and days, never below zero", () => {
     expect(formatLatencyCell(11_000_000)).toBe("3h 03m")
-    expect(formatLatencyCell(259_200_000)).toBe("72h 00m")
+    expect(formatLatencyCell(259_200_000)).toBe("3d 00h")
     expect(formatLatencyCell(-5)).toBe("0 ms")
   })
 

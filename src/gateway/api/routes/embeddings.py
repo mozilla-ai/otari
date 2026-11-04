@@ -5,23 +5,25 @@ from typing import Annotated, Any
 
 from any_llm import aembedding
 from any_llm.types.completion import CreateEmbeddingResponse
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     get_config,
-    get_db_if_needed,
+    get_db,
     get_log_writer,
-    verify_api_key_or_master_key_if_needed,
+    verify_api_key_or_master_key,
 )
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import WRONG_MODEL_TYPE, error_headers
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.schemas.inference import EmbeddingResponse
 from gateway.services.budgets import estimate_cost
+from gateway.services.catalog import not_embedding_detail
 from gateway.services.inference import EMBEDDINGS_BILLING, InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
@@ -57,8 +59,8 @@ async def create_embedding(
     raw_request: Request,
     response: Response,
     request: EmbeddingRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> EmbeddingResponse:
@@ -78,6 +80,12 @@ async def create_embedding(
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
+
+    def refuse_model(resolved: ResolvedProvider) -> HTTPException | None:
+        wrong_type = not_embedding_detail(resolved.instance, resolved.model, request.model)
+        if wrong_type is None:
+            return None
+        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=wrong_type, headers=error_headers(WRONG_MODEL_TYPE))
 
     async def call_provider(resolved: ResolvedProvider) -> CreateEmbeddingResponse:
         embedding_kwargs: dict[str, Any] = {
@@ -108,15 +116,13 @@ async def create_embedding(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        refuse_model=refuse_model,
         request_params=request.model_fields_set,
         estimate=estimate,
         enforce_require_pricing=True,
         billing=EMBEDDINGS_BILLING,
-        inline_cost=True,
     )
-    body = InferenceService.embeddings_response(
-        outcome.result, pricing=outcome.pricing, cost=outcome.cost, inline_cost=outcome.inline_cost
-    )
-    if outcome.inline_cost is not None or (outcome.cost is not None and outcome.pricing is not None):
+    body = InferenceService.embeddings_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
+    if outcome.cost is not None and outcome.pricing is not None:
         record_inline_cost_settlement("attached" if body.usage is not None else "unattached")
     return body

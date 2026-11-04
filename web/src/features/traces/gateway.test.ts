@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import { traceDetail, traceSpan } from "@/tests/traceFixtures"
 
-import { gatewayEvents, guardrailVerdict } from "./gateway"
+import { gateVerdict, gatewayEvents, guardrailVerdict } from "./gateway"
 
 const at = (seconds: number) =>
   new Date(Date.parse("2026-10-07T12:00:00Z") + seconds * 1000).toISOString()
@@ -183,5 +183,29 @@ describe("gatewayEvents", () => {
     )
 
     expect(events).toEqual([])
+  })
+})
+
+describe("gateVerdict", () => {
+  const gate = (outcome: string, blocked: boolean) =>
+    traceSpan({
+      kind: "guardrail",
+      origin: "otlp",
+      attributes: {
+        "otari.gate.outcome": outcome,
+        "otari.gate.blocked": blocked,
+      },
+    })
+
+  it("reads a reported gate's own verdict", () => {
+    expect(gateVerdict(gate("pass", false))).toBe("passed")
+    expect(gateVerdict(gate("fail", true))).toBe("blocked")
+    expect(gateVerdict(gate("fail", false))).toBe("flagged")
+    expect(gateVerdict(gate("unknown", true))).toBe("refused")
+    expect(gateVerdict(gate("error", false))).toBe("unchecked")
+  })
+
+  it("is null for the gateway's own guardrails", () => {
+    expect(gateVerdict(traceSpan({ kind: "guardrail" }))).toBeNull()
   })
 })

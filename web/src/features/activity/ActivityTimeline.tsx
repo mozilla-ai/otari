@@ -3,7 +3,6 @@ import type { ReactNode } from "react"
 import { useRef, useState } from "react"
 import { FiMinus, FiPlus } from "react-icons/fi"
 
-import type { UsageBucket } from "@/client"
 import { IconButton } from "@/design-system/actions/IconButton"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import {
@@ -15,8 +14,10 @@ import {
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { formatNumber } from "@/shared/helpers/format"
 import {
+  BUCKET_LABEL,
   bucketDurationMs,
   bucketIndexRange,
+  type ChartBucket,
   formatWindowLabel,
   type RangePreset,
   rangeFromBuckets,
@@ -41,19 +42,22 @@ export interface TimelinePoint {
   errors?: number
 }
 
-interface ActivityTimelineProps {
-  presets: RangePreset[]
+interface ActivityTimelineProps<B extends ChartBucket> {
+  presets: RangePreset<B>[]
   // The preset defining the current extent (highlighted). Stays highlighted even
   // while a sub-window is selected, since it still describes how far back we span.
   extentKey: string
-  onPreset: (preset: RangePreset) => void
+  onPreset: (preset: RangePreset<B>) => void
+  // The presets are picked elsewhere (the Overview's filter bar), so the row
+  // drops them; they still bound how far the chart zooms out.
+  hidePresets?: boolean
   // A selected sub-window, resolved to absolute instants (end exclusive).
   onSelectRange: (startIso: string, endIso: string) => void
   // The selection was widened back to the whole extent: fall back to the rolling
   // preset window rather than a bounded snapshot.
   onSelectFull: () => void
   series: TimelinePoint[]
-  bucket: UsageBucket
+  bucket: ChartBucket
   // The active window (server-echoed): positions the dimming and drives the caption.
   windowStart?: string
   windowEnd?: string
@@ -64,20 +68,23 @@ interface ActivityTimelineProps {
   unitLabel?: string
 }
 
-function formatTick(iso: string, bucket: UsageBucket): string {
+function formatTick(iso: string, bucket: ChartBucket): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return bucket === "hour"
-    ? d.toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "UTC",
-      })
-    : d.toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      })
+  if (bucket === "day") {
+    return d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    })
+  }
+  // A week of 6-hour buckets repeats every time of day, so each tick says which day too.
+  return d.toLocaleString(undefined, {
+    ...(bucket === "6h" ? { month: "short", day: "numeric" } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  })
 }
 
 const SUCCESS_SERIES: SeriesDef = {
@@ -96,10 +103,11 @@ const PLAIN_SERIES: SeriesDef = {
   color: "var(--color-primary)",
 }
 
-export function ActivityTimeline({
+export function ActivityTimeline<B extends ChartBucket>({
   presets,
   extentKey,
   onPreset,
+  hidePresets = false,
   onSelectRange,
   onSelectFull,
   series,
@@ -110,7 +118,7 @@ export function ActivityTimeline({
   ariaLabel = "Request volume over the selected window",
   action,
   unitLabel = "Requests",
-}: ActivityTimelineProps) {
+}: ActivityTimelineProps<B>) {
   const starts = series.map((point) => point.bucketStart)
   const n = series.length
   const label = formatWindowLabel(windowStart, windowEnd)
@@ -273,17 +281,19 @@ export function ActivityTimeline({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <TabRow>
-          {presets.map((preset) => (
-            <Tab
-              key={preset.key}
-              isActive={extentKey === preset.key}
-              onPress={() => onPreset(preset)}
-            >
-              {preset.label}
-            </Tab>
-          ))}
-        </TabRow>
+        {hidePresets ? null : (
+          <TabRow>
+            {presets.map((preset) => (
+              <Tab
+                key={preset.key}
+                isActive={extentKey === preset.key}
+                onPress={() => onPreset(preset)}
+              >
+                {preset.label}
+              </Tab>
+            ))}
+          </TabRow>
+        )}
         <div className="ml-auto flex items-center gap-3">
           <span className="text-caption">Showing {label} · UTC</span>
           {action}
@@ -295,13 +305,13 @@ export function ActivityTimeline({
         <div className="flex items-center justify-between gap-2 px-1 pb-1">
           <span className="flex items-center gap-3">
             <span className="text-overline">
-              {unitLabel} / {bucket === "hour" ? "hour" : "day"}
+              {unitLabel} / {BUCKET_LABEL[bucket]}
             </span>
             <ChartLegend series={chartSeries} />
           </span>
           <div className="flex items-center gap-1.5">
             <span className="hidden text-xs text-muted sm:inline">
-              Drag to filter a range
+              Click a bar or drag to filter
             </span>
             {/* `md:min-h-8 md:min-w-8` on both: 44px where a finger does the
                 zooming, back to the toolbar's own 32px density from `md` up. */}
@@ -363,6 +373,7 @@ export function ActivityTimeline({
               // beside it than it has room to justify.
               showYAxis
               yTickCount={3}
+              integerY
               onSelectRange={commit}
               window={isZoomed || panSel ? sel : undefined}
             />

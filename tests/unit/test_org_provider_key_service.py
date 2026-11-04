@@ -4,7 +4,6 @@ Pure precedence logic and the cache accessors are tested with in-memory
 fixtures, no database.
 """
 
-import time
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -104,7 +103,6 @@ def test_cached_org_provider_kwargs_returns_none_until_loaded() -> None:
 
 def test_cached_org_provider_kwargs_is_scoped_by_workspace_and_provider() -> None:
     store._org_cache[(WORKSPACE_ID, "openai")] = {"api_key": "sk-org"}
-    store._org_cached_at = time.monotonic()
 
     assert cached_org_provider_kwargs(WORKSPACE_ID, "openai") == {"api_key": "sk-org"}
     assert cached_org_provider_kwargs(OTHER_WORKSPACE_ID, "openai") is None
@@ -113,7 +111,6 @@ def test_cached_org_provider_kwargs_is_scoped_by_workspace_and_provider() -> Non
 
 def test_reset_clears_the_cache() -> None:
     store._org_cache[(WORKSPACE_ID, "openai")] = {"api_key": "sk-org"}
-    store._org_cached_at = time.monotonic()
     assert cached_org_provider_kwargs(WORKSPACE_ID, "openai") == {"api_key": "sk-org"}, "the entry is set before reset"
 
     reset_org_provider_cache()
@@ -172,7 +169,7 @@ def test_row_to_entry_raises_when_key_cannot_be_decrypted(monkeypatch: pytest.Mo
 def test_from_row_redacts_credential_shaped_client_arg_keys() -> None:
     """Bedrock's classic IAM shape genuinely needs `aws_access_key_id` /
     `aws_secret_access_key` inside `client_args` (see
-    `services/bedrock_gateway_auth.py`), so the field cannot be rejected
+    any-llm never forwards `api_key` into its boto3 client), so the field cannot be rejected
     outright; it still must never come back over the API, the same treatment
     `encrypted_api_key` itself already gets. A non-matching field (`region_name`)
     passes through unchanged."""

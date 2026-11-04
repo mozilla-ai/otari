@@ -8,8 +8,8 @@ from typing import Any
 
 import click
 
-from otari_agent import __version__
-from otari_agent.hook import guardrails, hook
+from otari_agent import LOADED_NS, __version__
+from otari_agent.hook import guardrails, hook, time_checks_from
 from otari_agent.usage_import import import_group
 
 # What gateway.cli.register attaches, named here so a light install can say why
@@ -80,6 +80,7 @@ cli.add_command(import_group)
 
 def main() -> None:
     """Entry point for the `otari` console script."""
+    time_checks_from(LOADED_NS)
     cli()
 
 

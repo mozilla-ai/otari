@@ -14,6 +14,7 @@ import {
   formatRelative,
   formatReleaseDate,
   formatScore,
+  formatSpend,
   formatTokens,
   formatTokensCompact,
   formatUnitRate,
@@ -36,6 +37,18 @@ describe("formatUsd", () => {
     expect(formatUsd(1240.5)).toBe("$1,240.50")
     // No sub-cent precision here (unlike formatCost): tiles stay readable.
     expect(formatUsd(0.004)).toBe("$0.00")
+  })
+})
+
+describe("formatSpend", () => {
+  it("reads in cents from a cent up", () => {
+    expect(formatSpend(5.600345)).toBe("$5.60")
+    expect(formatSpend(0.01)).toBe("$0.01")
+  })
+
+  it("keeps a cost under a cent from reading $0.00", () => {
+    expect(formatSpend(0.001566)).toBe("$0.0016")
+    expect(formatSpend(0)).toBe("$0.00")
   })
 })
 

@@ -10,7 +10,7 @@ import { SpendCeilingsCard } from "./SpendCeilingsCard"
 // an operator sees. The roles matrix (otari-ai#1943) puts this row at Edit for an
 // admin and Hidden for a member, and before this it was operator-only end to
 // end: `/budgets` gates every handler on `require_deployment_operator` and
-// `/scoped-budgets` gates its whole router, so a hosted organization could
+// `/scoped-budgets` gates its whole router, so an organization's own admins could
 // manage neither its own caps nor where they applied.
 //
 // Two sections, because the schema has two objects and they answer different

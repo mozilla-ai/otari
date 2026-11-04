@@ -1,13 +1,13 @@
 # pydantic-ai-otari
 
 Run [Pydantic AI](https://ai.pydantic.dev) agents through
-[Otari](https://github.com/mozilla-ai/otari), the open-source LLM gateway, and get
+[Otari](https://github.com/mozilla-ai/otari), the open-source AI gateway, and get
 its budgets, usage tracking, fallback routing and guardrails on every model call.
 
 ```bash
 pip install pydantic-ai-otari
 export OTARI_API_KEY=<your-otari-key>                # from otari.ai, or from your own gateway
-export OTARI_BASE_URL=http://localhost:8000/api/v1   # only for a self-hosted gateway: its URL plus /api/v1
+export OTARI_BASE_URL=http://localhost:8000/api/v1   # for a self-hosted gateway (its URL plus /api/v1) or otari.ai's EU region
 ```
 
 ```python
@@ -23,7 +23,8 @@ print(agent.run_sync("Say hello in one sentence.").output)
   model's capabilities in Pydantic AI, so a Claude model is treated as one.
 - `OtariProvider(base_url=..., api_key=...)` configures the gateway in code;
   pass it as `OtariModel(..., provider=...)`. Without `OTARI_BASE_URL`, requests
-  go to otari.ai's gateway, `https://api.otari.ai/api/v1`.
+  go to otari.ai's gateway, `https://api.otari.ai/api/v1`. Accounts in otari.ai's
+  EU region set `OTARI_BASE_URL=https://eu.api.otari.ai/api/v1`.
 - `OPENAI_API_KEY` is never used as a fallback, so an OpenAI key is not sent to
   the gateway by mistake.
 

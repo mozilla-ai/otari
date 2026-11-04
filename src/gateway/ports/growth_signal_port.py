@@ -95,7 +95,7 @@ class GrowthSignalPort(Protocol):
           ``POST /v1/routing/policies`` and ``POST /v1/budgets``, which are
           deployment-wide and gated on ``require_deployment_operator``. The
           milestone would then name whoever holds deployment-wide authority: on
-          a hosted deployment the operator running it rather than any of the
+          a multi-tenant deployment the operator running it rather than any of the
           tenants whose activation a vendor is watching, and under a header
           master key nobody at all, since that credential resolves to the
           bootstrap operator, which deliberately holds no address

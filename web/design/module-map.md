@@ -77,7 +77,7 @@ shared/components/
 ├── data/         ← design/data.md
 ├── navigation/   ← design/navigation.md
 ├── indicators/   coined here: the status marks from design/colors.md
-├── access/       coined here: deployment and entitlement states, no topic
+├── access/       coined here: entitlement states, no topic
 ├── deprecated/   the review-blocked set, made mechanical
 └── ProductMark.tsx
 ```
@@ -101,10 +101,8 @@ adds vocabulary rather than borrowing it:
 
 - `indicators/` holds the small status marks (`Dot`, `Badge`, `DismissChip`).
   `colors.md` describes the status roles they wear but documents no component.
-- `access/` holds what renders in place of a page the deployment does not serve or
-  the caller is not entitled to (`EntitlementGate`, `UnavailableHere`,
-  `MissingGatewayAddressNotice`). This is the surface and entitlement axes reaching
-  the UI, described in web/AGENTS.md and ARCHITECTURE.md rather than in a design
+- `access/` holds what renders in place of a page the deployment is not entitled
+  to (`EntitlementGate`). This is the entitlement axis reaching the UI, described in web/AGENTS.md and ARCHITECTURE.md rather than in a design
   topic, because it is a deployment fact and not a visual one.
 
 If either name is unwanted, the fallback is `indicators/` into `metrics/` and
@@ -159,7 +157,6 @@ among the band components. `Tab` ships with `TabRow` and `RowActionRow` with
 | `FilterSelect` | `navigation/FilterSelect.tsx` |
 | `FilterMultiComboBox` | `navigation/FilterMultiComboBox.tsx` |
 | `Badge` | `indicators/Badge.tsx` |
-| `UnavailableHere` | `access/UnavailableHere.tsx` |
 | `StatCard`, `StatStatus` | `deprecated/StatCard.tsx` |
 
 `errorMessage` and `INPUT_CLASS` take `.ts`, not `.tsx`: naming-conventions.md
@@ -180,7 +177,6 @@ spells a pure module `camelCase.ts`, and neither returns JSX.
 | `ConfirmDialog.tsx` | `feedback/ConfirmDialog.tsx` |
 | `FilterChips.tsx` | `navigation/FilterChips.tsx` |
 | `EntitlementGate.tsx` | `access/EntitlementGate.tsx` |
-| `MissingGatewayAddressNotice.tsx` | `access/MissingGatewayAddressNotice.tsx` |
 | `ui/RowActions.tsx` | `deprecated/RowActions.tsx` |
 | `ui/SettingsSection.tsx` | `deprecated/SettingsSection.tsx` |
 | `ProductMark.tsx` | unchanged |
@@ -363,7 +359,7 @@ and is the remaining check.
 - **Split `tabs.test.tsx`** if its header docstring is ever separable per
   component.
 - **Move the remaining poll cadences out of `queryKeys.ts`.** `BUILD_POLL_MS`,
-  `HEALTH_POLL_MS`, `MAINTENANCE_MODE_POLL_MS`, `PROVIDER_HEALTH_REFRESH_MS` and
+  `MAINTENANCE_MODE_POLL_MS`, `PROVIDER_HEALTH_REFRESH_MS` and
   `NO_RETRY` are query *options*, not keys, and each is read by exactly one domain
   module. They stayed because the constant block moved whole, with its comments,
   and cutting it into 43 individually-bounded pieces was the one place where the

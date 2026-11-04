@@ -7,16 +7,26 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
+from gateway.core.settings.tools import ALL_SEARCH_TOOLS
 from gateway.services.model_access import (
     effective_allowlist,
+    effective_tool_allowlist,
     is_allowlist_subset,
     is_model_allowed,
+    is_tool_allowed,
+    is_tool_allowlist_subset,
     key_model_refusal,
+    legacy_tool_grants,
     org_model_refusal,
+    tool_not_allowed_detail,
+    tools_within_user,
     validate_allowed_models,
+    validate_allowed_tools,
 )
 from gateway.services.tenancy import org_provider_key_service as org_store
 from gateway.services.tenancy.org_provider_key_service import KeyOffer
+
+NO_TOOLS: frozenset[str] = frozenset()
 
 
 class _Key:
@@ -79,29 +89,29 @@ def test_effective_allowlist_inherits_user_default() -> None:
 
 def test_is_allowlist_subset_inherit_and_unrestricted() -> None:
     # A child that inherits (None) never broadens -> always a subset.
-    assert is_allowlist_subset(None, ["openai:gpt-4o"]) is True
+    assert is_allowlist_subset(None, ["openai:gpt-4o"], tool_keys=NO_TOOLS) is True
     # An unrestricted parent (None) covers any child.
-    assert is_allowlist_subset(["openai:*"], None) is True
+    assert is_allowlist_subset(["openai:*"], None, tool_keys=NO_TOOLS) is True
     # Deny-all child fits any parent; deny-all parent rejects a granting child.
-    assert is_allowlist_subset([], ["openai:*"]) is True
-    assert is_allowlist_subset(["openai:gpt-4o"], []) is False
+    assert is_allowlist_subset([], ["openai:*"], tool_keys=NO_TOOLS) is True
+    assert is_allowlist_subset(["openai:gpt-4o"], [], tool_keys=NO_TOOLS) is False
 
 
 def test_is_allowlist_subset_concrete_and_wildcards() -> None:
     # Concrete child within a parent wildcard.
-    assert is_allowlist_subset(["openai:gpt-4o"], ["openai:*"]) is True
+    assert is_allowlist_subset(["openai:gpt-4o"], ["openai:*"], tool_keys=NO_TOOLS) is True
     # Different instance is never covered.
-    assert is_allowlist_subset(["anthropic:claude-3"], ["openai:*"]) is False
+    assert is_allowlist_subset(["anthropic:claude-3"], ["openai:*"], tool_keys=NO_TOOLS) is False
     # A wildcard child needs a parent at least as broad.
-    assert is_allowlist_subset(["openai:*"], ["openai:*"]) is True
-    assert is_allowlist_subset(["openai:*"], ["openai:gpt-4*"]) is False
+    assert is_allowlist_subset(["openai:*"], ["openai:*"], tool_keys=NO_TOOLS) is True
+    assert is_allowlist_subset(["openai:*"], ["openai:gpt-4*"], tool_keys=NO_TOOLS) is False
     # A child glob that extends the parent glob is covered; a shorter one is not.
-    assert is_allowlist_subset(["openai:gpt-4*"], ["openai:gpt-*"]) is True
-    assert is_allowlist_subset(["openai:gpt-*"], ["openai:gpt-4*"]) is False
+    assert is_allowlist_subset(["openai:gpt-4*"], ["openai:gpt-*"], tool_keys=NO_TOOLS) is True
+    assert is_allowlist_subset(["openai:gpt-*"], ["openai:gpt-4*"], tool_keys=NO_TOOLS) is False
     # A concrete parent cannot cover a wildcard child.
-    assert is_allowlist_subset(["openai:gpt-4*"], ["openai:gpt-4o"]) is False
+    assert is_allowlist_subset(["openai:gpt-4*"], ["openai:gpt-4o"], tool_keys=NO_TOOLS) is False
     # Every child entry must be covered.
-    assert is_allowlist_subset(["openai:gpt-4o", "anthropic:claude-3"], ["openai:*"]) is False
+    assert is_allowlist_subset(["openai:gpt-4o", "anthropic:claude-3"], ["openai:*"], tool_keys=NO_TOOLS) is False
 
 
 def test_validate_passthrough_and_dedup() -> None:
@@ -127,6 +137,117 @@ def test_validate_passthrough_and_dedup() -> None:
 def test_validate_rejects_bad_entries(bad: str) -> None:
     with pytest.raises(ValueError):
         validate_allowed_models(GatewayConfig(), [bad])
+
+
+# --- search tool access ------------------------------------------------------
+
+# DeepSeek searches and serves models under one prefix: the shape that put tools beside models.
+_TOOLS = GatewayConfig(
+    search_tools={"deepseek": {"provider": "deepseek", "api_key": "k"}, "exa-search": {"provider": "exa"}}
+)
+
+
+def test_a_model_list_grants_a_tool_only_by_naming_its_key_whole() -> None:
+    assert legacy_tool_grants(_TOOLS, None) is None
+    assert legacy_tool_grants(_TOOLS, []) == []
+    assert legacy_tool_grants(_TOOLS, ["deepseek:deepseek", "openai:gpt-4o"]) == ["deepseek"]
+    assert legacy_tool_grants(_TOOLS, ["deepseek:*", "exa:exa-*"]) == []
+
+
+def test_the_key_list_wins_then_the_users_then_the_model_lists() -> None:
+    def effective(**lists: list[str] | None) -> list[str] | None:
+        given = {"key_tools": None, "key_models": None, "user_tools": None, "user_models": None, **lists}
+        return effective_tool_allowlist(_TOOLS, **given)
+
+    assert effective() is None
+    assert effective(key_tools=["exa-search"], user_tools=["*"]) == ["exa-search"]
+    # [] is a real answer, never collapsed into inheriting.
+    assert effective(key_tools=[], user_tools=["*"]) == []
+    assert effective(user_tools=["*"], key_models=["openai:gpt-4o"]) == ["*"]
+    # Neither list set: the key's model list, else its user's, read the deprecated way.
+    assert effective(key_models=["deepseek:deepseek"]) == ["deepseek"]
+    assert effective(user_models=["exa:exa-search"]) == ["exa-search"]
+    # A key's grant is bounded by its user's: a user's wildcard admits a key's exact entry and grants no tool.
+    assert effective(key_models=["deepseek:deepseek"], user_models=["exa:exa-search"]) == []
+    assert effective(key_models=["deepseek:deepseek"], user_models=["deepseek:*"]) == []
+    assert effective(key_models=["deepseek:deepseek", "exa:exa-search"], user_models=["exa:exa-search"]) == [
+        "exa-search"
+    ]
+    # A key restricted to models stays refused every tool until one is granted.
+    assert effective(key_models=["deepseek:*"]) == []
+
+
+def test_a_tool_is_allowed_by_its_name_or_the_star() -> None:
+    assert is_tool_allowed(None, "deepseek") is True
+    assert is_tool_allowed([], "deepseek") is False
+    assert is_tool_allowed([ALL_SEARCH_TOOLS], "deepseek") is True
+    assert is_tool_allowed(["exa-search"], "deepseek") is False
+
+
+def test_a_key_narrows_its_users_tools_and_the_star_covers_only_the_star() -> None:
+    assert is_tool_allowlist_subset(None, []) is True
+    assert is_tool_allowlist_subset(["*"], None) is True
+    assert is_tool_allowlist_subset(["deepseek"], ["*"]) is True
+    assert is_tool_allowlist_subset(["*"], ["deepseek", "exa-search"]) is False
+    assert is_tool_allowlist_subset(["deepseek"], ["exa-search"]) is False
+    assert is_tool_allowlist_subset([], []) is True
+
+
+def test_a_users_tools_bound_a_key_by_its_tool_list_else_its_model_list() -> None:
+    assert tools_within_user(_TOOLS, ["deepseek"], user_tools=["*"], user_models=[]) is True
+    assert tools_within_user(_TOOLS, ["deepseek"], user_tools=["exa-search"], user_models=None) is False
+    # With no tool list, the user's model list grants only the tools it names exactly.
+    assert tools_within_user(_TOOLS, ["deepseek"], user_tools=None, user_models=["deepseek:deepseek"]) is True
+    assert tools_within_user(_TOOLS, ["deepseek"], user_tools=None, user_models=["deepseek:*"]) is False
+    assert tools_within_user(_TOOLS, ["*"], user_tools=None, user_models=None) is True
+
+
+def test_a_model_wildcard_does_not_cover_a_key_naming_a_tool_the_deprecated_way() -> None:
+    legacy = _TOOLS.legacy_search_tool_keys()
+    assert is_allowlist_subset(["deepseek:deepseek"], ["deepseek:*"], tool_keys=legacy) is False
+    assert is_allowlist_subset(["deepseek:deepseek"], ["deepseek:deepseek"], tool_keys=legacy) is True
+    assert is_allowlist_subset(["deepseek:deepseek-chat"], ["deepseek:*"], tool_keys=legacy) is True
+
+
+def test_a_tool_list_names_configured_tools_or_the_star() -> None:
+    assert validate_allowed_tools(_TOOLS, None) is None
+    assert validate_allowed_tools(_TOOLS, []) == []
+    assert validate_allowed_tools(_TOOLS, [" deepseek ", "deepseek", "*"]) == ["deepseek", "*"]
+    for bad in (["deepseek:deepseek"], ["nope"], [""]):
+        with pytest.raises(ValueError):
+            validate_allowed_tools(_TOOLS, bad)
+    with pytest.raises(ValueError):
+        validate_allowed_tools(_TOOLS, "deepseek")  # type: ignore[arg-type]
+
+
+def test_the_refusal_says_a_model_wildcard_grants_models_only_when_one_matched() -> None:
+    plain = tool_not_allowed_detail("deepseek", "deepseek:deepseek")
+    assert "Name it in allowed_tools" in plain and "wildcard" not in plain
+    legacy = tool_not_allowed_detail("deepseek", "deepseek:deepseek", [["deepseek:*"]])
+    assert "A wildcard in allowed_models allows models only" in legacy
+    # The user's wildcard is the one that matched when the key names the tool exactly.
+    bounded = [["deepseek:deepseek"], ["deepseek:*"]]
+    assert "allows models only" in tool_not_allowed_detail("deepseek", "deepseek:deepseek", bounded)
+    # An exact entry on the user is no wildcard: the key's own list is what leaves the tool out.
+    narrowed = [["openai:gpt-4o"], ["openai:*", "deepseek:deepseek"]]
+    assert "wildcard" not in tool_not_allowed_detail("deepseek", "deepseek:deepseek", narrowed)
+
+
+def test_a_model_list_names_a_search_tool_only_by_its_exact_key() -> None:
+    """``exa`` names search tools and no model, so a wildcard or another name under it grants nothing."""
+    assert validate_allowed_models(_TOOLS, ["exa:exa-search", "deepseek:*"]) == ["exa:exa-search", "deepseek:*"]
+    for bad in ("exa:*", "exa:exa-*", "exa:nope"):
+        with pytest.raises(ValueError, match="name tools in allowed_tools"):
+            validate_allowed_models(_TOOLS, [bad])
+
+
+def test_a_tool_named_against_the_rules_has_no_deprecated_grant() -> None:
+    """A search entry named ``*`` still loads, with a warning; ``exa:*`` must not read as every tool."""
+    config = GatewayConfig(search_tools={"*": {"provider": "exa"}, "exa-search": {"provider": "exa"}})
+    assert config.legacy_search_tool_keys() == {"exa:exa-search"}
+    assert legacy_tool_grants(config, ["exa:*", "exa:exa-search"]) == ["exa-search"]
+    with pytest.raises(ValueError, match="name tools in allowed_tools"):
+        validate_allowed_models(config, ["exa:*"])
 
 
 # --- organization-key refusals ---------------------------------------------

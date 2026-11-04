@@ -31,8 +31,16 @@ The release runs in two halves so the changelog is reviewable before the tag:
    [Breaking changes](#breaking-changes).
 2. **Merge it.** Review the changelog diff and squash-merge the PR.
    **Otari Release (tag + publish)** (`otari-tag-release.yml`) then tags the
-   squash commit `v0.4.0` and publishes the GitHub Release with the git-cliff
-   notes. Creating the Release is what creates the tag.
+   squash commit `v0.4.0`, opens a draft GitHub Release with the git-cliff
+   notes, attaches the Homebrew assets (`otari-homebrew-build.yml`: the
+   `otari-agent` sdist, its pinned requirements and `Formula/otari.rb`), and
+   publishes it. Releases are immutable once published, so a Release's assets
+   and tag cannot change afterwards, which is why the assets are attached
+   while it is a draft. If a run fails before publishing, re-run it: it reuses
+   the tag and the draft. A re-run keeps the workflow file of the failed run,
+   so when the failure was in the workflow itself, fix it on `main` and then
+   dispatch Otari Release (tag + publish) from `main` with the release PR's
+   number: `gh workflow run otari-tag-release.yml --ref main -f pr=<number>`.
 
 The same workflow then sends an `otari-release-published` repository dispatch
 to `mozilla-ai/otari-ai`. The event carries the tag and the merge commit SHA.
@@ -52,13 +60,13 @@ Five workflows react to the published Release:
 - **`otari-sdk-codegen.yml`** regenerates each SDK's typed core, stamps the
   release version into the core, and opens a regeneration PR on each SDK repo.
 - **`otari-homebrew.yml`** ships the agent-side CLI (`cli/`, distribution
-  `otari-agent`) to `mozilla-ai/homebrew-tap`. It builds its sdist, whose
-  version setuptools-scm takes from the tag being released, renders
-  `Formula/otari.rb` from
-  `packaging/homebrew/otari.rb.tmpl` and the lock (`scripts/homebrew_formula.py`),
-  uploads the sdist, the pinned requirements and the formula to the Release,
-  installs and `brew test`s the formula on a macOS runner, then commits it to
-  the tap, so `brew install mozilla-ai/tap/otari` follows every release.
+  `otari-agent`) to `mozilla-ai/homebrew-tap`. The formula it ships was
+  attached to the Release before publishing: `otari-homebrew-build.yml` builds
+  the sdist, whose version setuptools-scm takes from the tag being released,
+  and renders `Formula/otari.rb` from `packaging/homebrew/otari.rb.tmpl` and
+  the lock (`scripts/homebrew_formula.py`). This workflow installs and
+  `brew test`s that formula on a macOS runner, then commits it to the tap, so
+  `brew install mozilla-ai/tap/otari` follows every release.
 - **`otari-release-labels.yml`** labels every PR merged since the previous
   release with the release tag (for example `v0.4.0`), creating the label, so
   each PR shows the release it shipped in. A final release counts from the
@@ -143,31 +151,53 @@ below 1.0 (`0.6.3` becomes `0.7.0`), and the major version from 1.0 on. The
 release tag. When the version is too small, it puts a warning at the top of the
 release PR body. It does not stop the release.
 
-### Prerequisites (repository secrets)
+### Prerequisites (environment secrets)
 
-- `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, used by `otari-docker.yml` to push
-  the image.
+Every publishing credential is an environment secret, never a repository or
+organization secret. A repository or organization secret is readable by any
+workflow on any branch, so anyone who can push a branch, or holds a token that
+can, could publish with it. An environment's deployment policy limits it to
+`main` and, where a Release triggers the workflow, `v*` tags:
+
+| Environment | Secrets | Allowed refs |
+| --- | --- | --- |
+| `docker-hub` | none (OIDC, see below) | `main`, `v*` tags |
+| `homebrew-tap` | `RELEASE_APP_PRIVATE_KEY` | `main`, `v*` tags |
+| `sdk-codegen` | `CODEGEN_APP_ID`, `CODEGEN_APP_KEY` | `main`, `v*` tags |
+| `release` | `RELEASE_APP_PRIVATE_KEY` | `main` |
+| `platform-dispatch` | `PLATFORM_DISPATCH_APP_PRIVATE_KEY` | `main` |
+
+An organization secret with the same name would still be readable from any
+branch, so this repository must not be among the repositories an organization
+secret of that name is granted to.
+
+- No Docker Hub credential. `otari-docker.yml` logs in to the `mzdotai`
+  organization through a Docker Hub OIDC connection (Docker Home, Identity &
+  auth, OIDC connections) whose subject claim is
+  `repo:mozilla-ai/otari:environment:docker-hub`, so only a job in that
+  environment can push. The connection's ID is the `docker-hub` environment
+  variable `DOCKERHUB_OIDC_CONNECTIONID`; it is not a secret. The repository's
+  description on Docker Hub is edited by hand, because updating it takes a
+  personal token with delete scope.
 - `CODEGEN_APP_ID` and `CODEGEN_APP_KEY`, the Client ID and private key of the
   codegen GitHub App. `otari-sdk-codegen.yml` uses them to open regeneration PRs
   on the SDK repos, and `sdk-regen-staleness.yml` uses them to read those PRs.
-- `HOMEBREW_TAP_GITHUB_TOKEN`, used by `otari-homebrew.yml` to push
-  `Formula/otari.rb` to `mozilla-ai/homebrew-tap`. It is the org secret mcpd
-  and cq publish with, granted per repository, so an org admin has to add this
-  repository to it. Until then the workflow's build and macOS jobs still run
-  and the rendered formula sits on the Release as `otari.rb`; only the push to
-  the tap fails.
-- `PLATFORM_DISPATCH_APP_PRIVATE_KEY`, used by `otari-docker.yml` and
-  `otari-tag-release.yml` to send events to `mozilla-ai/otari-ai`. It belongs
-  to the `otari-notification` GitHub App, which must be installed on
-  `mozilla-ai/otari-ai` with `contents: write`, the permission a repository
-  dispatch needs. `otari-docker.yml` identifies the App with the secret
-  `PLATFORM_DISPATCH_APP_ID`. `otari-tag-release.yml` identifies it with
-  `PLATFORM_DISPATCH_APP_CLIENT_ID` (a repository variable, not a secret).
+- `PLATFORM_DISPATCH_APP_PRIVATE_KEY`, used by `otari-tag-release.yml` to send
+  events to `mozilla-ai/otari-ai`. It belongs to the `otari-notification`
+  GitHub App, which must be installed on `mozilla-ai/otari-ai` with
+  `contents: write`, the permission a repository dispatch needs. The workflow
+  identifies the App with `PLATFORM_DISPATCH_APP_CLIENT_ID` (a repository
+  variable, not a secret).
 - `RELEASE_APP_CLIENT_ID` (a repository variable, not a secret) and
-  `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml` and
-  `otari-tag-release.yml`. They identify the `otari-bot` GitHub App, org-owned
-  and installed on this repo alone, holding exactly `contents: write` +
-  `pull requests: write`. Each run mints its own installation token with
+  `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml`,
+  `otari-tag-release.yml` and `otari-homebrew.yml`, which is why the key is in
+  both the `release` and `homebrew-tap` environments. They identify the
+  `otari-bot` GitHub App, org-owned and installed on this repo and on
+  `mozilla-ai/homebrew-tap`, holding exactly `contents: write` +
+  `pull requests: write`. `otari-homebrew.yml` narrows its token to the tap's
+  contents to push `Formula/otari.rb`; without the installation the build and
+  macOS jobs still run and the rendered formula sits on the Release as
+  `otari.rb`, and only the push to the tap fails. Each run mints its own installation token with
   `actions/create-github-app-token`, narrowed further to the permissions that
   job uses and revoked when the job ends, so the release PR is authored by
   `otari-bot[bot]` rather than by whichever maintainer owned a personal access
@@ -193,10 +223,26 @@ described above. A maintainer reviews and merges each, after which that SDK's ow
 release-please flow opens a release PR, and merging it cuts and publishes that
 SDK's release.
 
+The flow, end to end:
+
+1. A published release, or a push to `main` that changes
+   `docs/public/openapi.json`, `scripts/sdk_codegen/**`, `openapitools.json` or
+   the workflow itself, regenerates the typed core and opens PRs in the SDK repos
+   (`.github/workflows/otari-sdk-codegen.yml`; see
+   [`scripts/sdk_codegen/README.md`](scripts/sdk_codegen/README.md#automation)).
+2. A maintainer reviews and merges the regeneration PR.
+3. `release-please` opens or updates the SDK's release PR.
+4. Merging the release PR tags the release and publishes the SDK. For Go, the
+   tag itself is the consumable release via `go get`.
+
+`.github/workflows/sdk-regen-staleness.yml` keeps a tracking issue open on this
+repository while a regeneration PR has failing checks or has stayed open past
+its freshness window, which signals an SDK lagging the spec.
+
 For the full model (the spec-version compatibility scheme, the two-merge
 lifecycle, and the per-SDK registries and secrets) see
-[`docs/sdk-compatibility.md`](docs/sdk-compatibility.md) and each SDK repo's
-`RELEASE.md`.
+[`scripts/sdk_codegen/README.md`](scripts/sdk_codegen/README.md) and each SDK
+repo's `RELEASE.md`.
 
 ## Integration package releases
 
@@ -218,7 +264,9 @@ the repository's latest, and the release-triggered workflows (Docker image, SDK
 regeneration) do not run. Otari's `vX.Y.Z` tags and these `<package>-vX.Y.Z` tags
 share the repository, so everything that reads Otari's version from Git matches
 `v[0-9]*` only: `cliff.toml`, `otari-release.yml`, and the `describe_command` of
-the workspace members' setuptools-scm.
+the agent CLI's setuptools-scm (`cli/pyproject.toml`). `any-search` and
+`any-fetch` do not read Git: each holds its version as `__version__` in its
+package.
 
 Publishing uses PyPI trusted publishing, so no token is stored. Each project on
 PyPI trusts owner `mozilla-ai`, repository `otari`, workflow

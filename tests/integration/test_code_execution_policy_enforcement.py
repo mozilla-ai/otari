@@ -137,7 +137,7 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
 
     assert response.status_code == 403
     # Anthropic-shaped body, the same mapping every other refusal on this route gets.
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["error"]["message"] == "code execution is not enabled for this workspace"
     assert seen.max_iterations is None, "the tool loop must never have run"
 
@@ -418,10 +418,11 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
         raise SQLAlchemyError("connection lost mid-admission")
 
     monkeypatch.setattr(WorkspaceCodeExecutionPolicies, "resolve", failing_resolve)
-    # TestClient re-raises a server exception rather than rendering a 500, so the
-    # failure arrives here; what matters is the state it left behind.
-    with pytest.raises(SQLAlchemyError):
-        _post(funded)
+    # The Messages route answers an unexpected failure as Anthropic's 500; what matters
+    # is the state it left behind.
+    failed = _post(funded)
+    assert failed.status_code == 500, failed.text
+    assert failed.json()["error"]["type"] == "api_error"
 
     session = db_session_factory()
     try:
@@ -431,43 +432,6 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
     finally:
         session.close()
     assert float(reserved) == 0.0, "the admission failure left the estimate debited"
-
-
-def test_an_unresolvable_workspace_refuses_rather_than_running_the_sandbox(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The veto's defensive arm fails closed.
-
-    Unreachable today: a standalone request with no session is refused before
-    this, and `resolve_workspace_id` always answers, falling back to the default
-    workspace. It is pinned anyway because the arm guards a veto, so falling
-    through would hand code execution to a workspace whose row refuses it, with
-    nothing to notice. The MCP server adapter's `resolve_many` refuses at the same condition.
-    """
-    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
-
-    async def no_workspace(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr("gateway.api.routes._pipeline.resolve_workspace_id", no_workspace)
-    # The organization-guardrail resolve (otari#654) fails closed on the same
-    # condition and runs first, so without this the request would be refused
-    # before the arm under test. Neutralized rather than asserted around,
-    # because this case is about the sandbox veto; the guardrail gate has its
-    # own coverage in `test_organization_guardrail_enforcement.py`.
-    monkeypatch.setattr(
-        "gateway.api.routes._pipeline._resolve_organization_guardrails",
-        AsyncMock(return_value=[]),
-    )
-
-    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
-
-    assert response.status_code == 500
-    detail = response.json()["detail"]
-    assert detail["error"]["message"] == "Code execution policy could not be resolved for this request"
-    assert seen.max_iterations is None, "the tool loop must never have run"
 
 
 # ---------------------------------------------------------------------------
@@ -715,7 +679,7 @@ def test_no_policy_is_refused_like_a_disabled_one_where_code_execution_is_opt_in
     refused, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
 
     assert refused.status_code == 403
-    assert refused.json()["detail"]["error"]["message"] == "code execution is not enabled for this workspace"
+    assert refused.json()["error"]["message"] == "code execution is not enabled for this workspace"
     assert seen.max_iterations is None
 
     _set_policy(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=True)

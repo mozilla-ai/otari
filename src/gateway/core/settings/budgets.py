@@ -52,9 +52,12 @@ class BudgetSettings(BaseModel):
         default=True,
         description=(
             "When True (default), a non-master key whose request names a 'user' other than its own "
-            "is rejected with 403. When False, the client-supplied 'user' is accepted and ignored "
-            "(it is not sent to the provider) and spend is always bound to the key's own user; "
-            "use this if clients send arbitrary 'user' values for abuse tracking. This setting "
+            "is rejected with 403. When False, that name is accepted and spend is still bound to "
+            "the key's own user. The name never reaches a provider as the client wrote it: where a "
+            "route sends an end-user identifier it is one input to a digest, and elsewhere it is "
+            "dropped. Use False if clients send arbitrary 'user' values for abuse tracking. A "
+            "service key is not governed by this setting at all, because a name other than its own "
+            "user names one of its end users instead. This setting "
             "is the deployment-wide default: an individual key can override it in either "
             "direction with its own reject_user_mismatch (null inherits this setting). The "
             "master key may always bill an arbitrary user regardless of this setting."
@@ -76,7 +79,7 @@ class BudgetSettings(BaseModel):
         description=(
             "How often to sweep for leaked budget reservations across all users. 0 disables the "
             "sweep, leaving the opportunistic per-user reclaim that runs when a user next "
-            "reserves. Standalone mode only."
+            "reserves."
         ),
     )
     budget_reservation_sweep_batch: Annotated[int, OMITTED] = Field(
@@ -91,7 +94,7 @@ class BudgetSettings(BaseModel):
             "How long a settled, released or reclaimed budget reservation is kept before the "
             "sweep deletes it. The row exists to make an in-flight hold reclaimable; what a "
             "request cost is recorded durably in usage_logs, so this is an audit window rather "
-            "than an accounting record. 0 keeps every row forever. Standalone mode only."
+            "than an accounting record. 0 keeps every row forever."
         ),
     )
     stream_missing_usage_policy: Annotated[str, Shown(SettingsGroup.METERING)] = Field(
@@ -120,7 +123,7 @@ class BudgetSettings(BaseModel):
         description=(
             "Budgets this deployment declares, keyed by budget id. Each start creates a missing one and writes the "
             "declared values over an existing one, so config.yml wins over a change made through the API. A budget "
-            "removed from here is kept as it is. Standalone mode only."
+            "removed from here is kept as it is."
         ),
     )
 

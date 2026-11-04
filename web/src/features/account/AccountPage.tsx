@@ -17,7 +17,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
  * connected sign-in providers (otari#651) are still to come.
  */
 export function AccountPage() {
-  const { session_type, passkeys_enabled } = useDeployment()
+  const { passkeys_enabled } = useDeployment()
 
   return (
     <div className="flex flex-col">
@@ -26,27 +26,12 @@ export function AccountPage() {
         here is yours alone; the gateway&rsquo;s own configuration is on the
         Settings page.
       </PageIntro>
-      {session_type === "local_operator" ? (
-        <>
-          <ProfileCard />
-          <PasswordCard />
-          {/* Absent where the deployment turned passkeys off: the card would
-              ask routes that are not there. A deployment that merely has not
-              set them up still shows it, saying so. */}
-          {passkeys_enabled ? <PasskeysCard /> : null}
-        </>
-      ) : (
-        // A hosted session is minted by otari.ai and its credential is managed
-        // there, so a password form here would write to the wrong control
-        // plane. Said rather than left blank: an empty page reads as a page
-        // that failed to load. The enum's third value, "none", cannot reach
-        // this branch: only a hybrid gateway reports it, and `App` answers one
-        // with the landing page instead of the router.
-        <p className="max-w-prose text-sm text-muted">
-          This deployment's sign-in is managed by the control plane that issued
-          your session, so there is nothing to change here.
-        </p>
-      )}
+      <ProfileCard />
+      <PasswordCard />
+      {/* Absent where the deployment turned passkeys off: the card would ask
+          routes that are not there. A deployment that merely has not set them
+          up still shows it, saying so. */}
+      {passkeys_enabled ? <PasskeysCard /> : null}
     </div>
   )
 }

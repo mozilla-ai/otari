@@ -93,7 +93,7 @@ def test_intercepted_declaration_runs_the_gateway_search(
             "gateway.services.mcp_loop.acompletion",
             new=AsyncMock(side_effect=[_completion(tool_call=True), _completion(tool_call=False)]),
         ),
-        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
         patch.dict(
             "os.environ",
             {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
@@ -158,7 +158,7 @@ def test_declaration_is_forwarded_when_interception_is_off(
 
     with (
         patch("gateway.api.routes.chat.acompletion", new=fake_acompletion),
-        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
     ):
         response = client.post(
@@ -194,7 +194,7 @@ def test_a_caller_function_named_web_search_is_never_intercepted(
     }
     with (
         patch("gateway.api.routes.chat.acompletion", new=fake_acompletion),
-        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
         patch.dict(
             "os.environ",
             {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
@@ -235,7 +235,7 @@ def test_max_uses_bounds_the_searches_on_the_openai_shaped_endpoint(
 
     with (
         patch("gateway.services.mcp_loop.acompletion", new=fake_acompletion),
-        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
         patch.dict(
             "os.environ",
             {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
@@ -274,7 +274,7 @@ def test_max_uses_zero_refuses_the_first_search_rather_than_uncapping_it(
 
     with (
         patch("gateway.services.mcp_loop.acompletion", new=fake_acompletion),
-        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
         patch.dict(
             "os.environ",
             {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
@@ -304,7 +304,7 @@ def test_invalid_max_uses_is_rejected_instead_of_becoming_uncapped(
     search = AsyncMock(return_value="never called")
 
     with (
-        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
         patch.dict(
             "os.environ",
             {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
@@ -343,7 +343,7 @@ def test_auto_claims_a_search_keyword_no_provider_runs_without_interception(
             "gateway.services.mcp_loop.acompletion",
             new=AsyncMock(side_effect=[_completion(tool_call=True), _completion(tool_call=False)]),
         ),
-        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
     ):
         response = client.post(

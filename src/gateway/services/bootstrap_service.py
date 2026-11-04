@@ -52,6 +52,9 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession, key_f
         raise
 
     log_secret(
-        "No API keys found. Created bootstrap key for first run. Save this key now:",
+        (
+            "No API keys found, so created a 'bootstrap' API key to make the first request with; "
+            "set bootstrap_api_key to false (OTARI_BOOTSTRAP_API_KEY=false) to skip it. Save this key now:"
+        ),
         api_key,
     )

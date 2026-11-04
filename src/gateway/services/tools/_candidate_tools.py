@@ -31,8 +31,6 @@ class ProviderToolDeclaration:
     ``preference`` is ``None`` where nothing asked, which forwards the declaration to every candidate.
     ``backend_configured`` is whether this deployment can run the tool, without which Otari claims nothing.
     ``uniform`` decides every candidate alike: Otari runs it for all of them where any one needs it.
-    ``follow_head`` decides every candidate as the head is decided: Otari runs it for all of them
-    where the head needs it, and for none otherwise.
     """
 
     tool: BuiltinTool
@@ -40,7 +38,6 @@ class ProviderToolDeclaration:
     preference: CodeExecutor | None
     backend_configured: bool
     uniform: bool = False
-    follow_head: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,14 +109,6 @@ def decide_candidate_tools(
         if declaration.uniform and any(row[index] is _Decision.CLAIMED for row in decisions):
             for row in decisions:
                 row[index] = _Decision.CLAIMED
-        elif declaration.follow_head and decisions:
-            head_claimed = decisions[0][index] is _Decision.CLAIMED
-            for (provider, model), row in zip(candidates, decisions, strict=True):
-                row[index] = (
-                    _Decision.CLAIMED
-                    if head_claimed
-                    else _forwarded(declaration, provider=provider, model=model, dialect=dialect)
-                )
     return [
         CandidateTools(
             claimed=frozenset(

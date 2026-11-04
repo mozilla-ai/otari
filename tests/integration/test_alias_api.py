@@ -305,8 +305,6 @@ def test_stored_alias_inherits_its_targets_price(client: TestClient) -> None:
     assert entry["pricing"] == {
         "input_price_per_million": 1.0,
         "output_price_per_million": 5.0,
-        "cache_read_price_per_million": None,
-        "cache_write_price_per_million": None,
         "pricing_tiers": [],
         "unit": "tokens",
     }

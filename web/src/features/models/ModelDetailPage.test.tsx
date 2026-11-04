@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -203,12 +210,15 @@ describe("ModelDetailPage", () => {
     expect(screen.getByText("Z.ai's flagship.")).toBeInTheDocument()
     // Derived limits carry their rule: the largest any offering serves.
     expect(screen.getByText("up to 200K")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "← All models" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
       "href",
       "/models",
     )
 
     const offerings = screen.getByRole("grid", { name: "Offerings of GLM-5.3" })
+    expect(
+      within(offerings).getByRole("columnheader", { name: "Price from" }),
+    ).toBeInTheDocument()
     const rows = within(offerings).getAllByRole("row").slice(1)
     expect(rows).toHaveLength(2)
     // Cheapest first: Fireworks' sub-cent rate keeps its digits (otari#700).
@@ -354,6 +364,43 @@ describe("ModelDetailPage", () => {
     await waitFor(() => expect(drawer).not.toBeInTheDocument())
   })
 
+  it("lets the selector in the drawer's header be copied and highlighted", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+    const user = userEvent.setup()
+    // A spy on userEvent's own clipboard stub, so `restoreAllMocks` undoes it.
+    const writeText = vi.spyOn(navigator.clipboard, "writeText")
+
+    await user.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
+    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
+
+    await user.click(
+      within(drawer).getByRole("button", { name: "Copy model selector" }),
+    )
+    expect(writeText).toHaveBeenCalledWith("z-ai/glm-5.3")
+
+    // Everything outside the drawer's body is its drag handle. A drag across
+    // the selector has to stay a text selection rather than pull the drawer
+    // shut. jsdom has no pointer capture, which the drag takes as it starts.
+    const setPointerCapture = vi.fn()
+    Object.assign(drawer, { setPointerCapture, releasePointerCapture: vi.fn() })
+    const selector = within(drawer).getByText("z-ai/glm-5.3")
+    fireEvent.pointerDown(selector, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(selector, { clientX: 200, pointerId: 1 })
+    expect(setPointerCapture).not.toHaveBeenCalled()
+    expect(drawer.style.transform).toBe("")
+    fireEvent.pointerUp(selector, { clientX: 200, pointerId: 1 })
+
+    // The rest of the header still drags, so the drawer keeps its swipe to
+    // dismiss.
+    const heading = within(drawer).getByRole("heading", { name: /^Use / })
+    fireEvent.pointerDown(heading, { button: 0, clientX: 100, pointerId: 2 })
+    fireEvent.pointerMove(heading, { clientX: 140, pointerId: 2 })
+    expect(setPointerCapture).toHaveBeenCalledWith(2)
+  })
+
   it("names each offering's model ID among the drawer's providers", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
@@ -421,7 +468,7 @@ describe("ModelDetailPage", () => {
   })
 
   it("gives a deployment operator its organization's own rate link", async () => {
-    // On a standalone deployment the operator *is* the single organization's
+    // On a single-tenant deployment the operator *is* the organization's
     // owner, so a gate that excluded them would leave the one caller who can set
     // a rate without the link to set it.
     mockApi()
@@ -496,28 +543,6 @@ describe("ModelDetailPage", () => {
     }
   })
 
-  it("marks a metered rate that differs from the provider's list price", async () => {
-    mockApi()
-    GLM_DETAIL.offerings[0] = offering({
-      metadata_input_price_per_million: 1,
-      metadata_output_price_per_million: 2.01,
-    })
-    try {
-      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
-
-      await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
-      // Input is metered at half the list price and says so; output is within
-      // rounding of it and does not.
-      expect(screen.getByText("list $1.00")).toBeInTheDocument()
-      expect(screen.queryByText("list $2.01")).toBeNull()
-      expect(
-        screen.getByText(/differs from the price the provider publishes/),
-      ).toBeInTheDocument()
-    } finally {
-      GLM_DETAIL.offerings[0] = offering({})
-    }
-  })
-
   it("keeps the page read-only for a member", async () => {
     // A member, stated as one: the fixture's default role is owner, and an owner
     // now gets the rate link whether or not they operate the deployment, so a
@@ -574,5 +599,63 @@ describe("ModelDetailPage", () => {
         /Default pricing is off, so an offering with no stored rate/,
       ),
     ).toBeInTheDocument()
+  })
+
+  it("renders a metered rate alone when it differs from the provider's list price", async () => {
+    // Without a metadata price on each offering the rates agree with models.dev
+    // by construction and the absences below would hold for any page, so both
+    // are set far from the metered rate.
+    mockApi()
+    GLM_DETAIL.offerings[0] = offering({
+      price_source: "organization",
+      metadata_input_price_per_million: 1,
+      metadata_output_price_per_million: 4,
+    })
+    GLM_DETAIL.offerings[1] = offering({
+      selector: "fireworks:accounts/fireworks/models/glm-5p3",
+      short_selector: "fireworks:z-ai/glm-5.3",
+      provider: "fireworks",
+      provider_type: "fireworks",
+      pricing: {
+        input_price_per_million: 0.075,
+        output_price_per_million: 2.5,
+        cache_read_price_per_million: null,
+        cache_write_price_per_million: null,
+        pricing_tiers: [],
+        unit: "tokens",
+      },
+      price_source: "defaults",
+      price_reference: "fireworks:glm-5p3",
+      metadata_input_price_per_million: 0.2,
+      metadata_output_price_per_million: 3,
+    })
+
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const grid = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const rows = within(grid).getAllByRole("row").slice(1)
+    expect(rows).toHaveLength(2)
+    expect(
+      within(rows[0] as HTMLElement).getByRole("gridcell", {
+        name: /\$0\.075/,
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(rows[1] as HTMLElement).getByRole("gridcell", { name: /\$0\.50/ }),
+    ).toBeInTheDocument()
+
+    expect(within(grid).queryByText(/list \$/i)).toBeNull()
+    expect(within(grid).queryByText(/^list$/i)).toBeNull()
+    expect(
+      screen.queryByText(/differs from the price the provider publishes/i),
+    ).toBeNull()
+
+    expect(
+      within(grid).getByRole("columnheader", { name: "Price from" }),
+    ).toBeInTheDocument()
+    expect(within(grid).getByText("DEFAULT")).toBeInTheDocument()
+    expect(within(grid).getByText("YOUR RATE")).toBeInTheDocument()
   })
 })

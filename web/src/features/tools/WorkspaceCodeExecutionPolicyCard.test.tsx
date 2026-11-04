@@ -59,17 +59,14 @@ async function putBody(calls: { method: string; body: unknown }[]) {
   return calls.filter((call) => call.method === "PUT").at(-1)?.body
 }
 
-function renderCard(leading?: ReactNode, isHosted = false) {
+function renderCard(leading?: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
-        <WorkspaceCodeExecutionPolicyCard
-          leading={leading}
-          isHosted={isHosted}
-        />
+        <WorkspaceCodeExecutionPolicyCard leading={leading} />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
   )
@@ -81,13 +78,42 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     window.localStorage.clear()
   })
 
-  it("reads a workspace with no policy as allowed, with nothing else to set", async () => {
+  it("reads a workspace with no policy as allowed and unpinned", async () => {
     mockApi()
     await renderLoaded()
 
     expect(screen.getByRole("switch", { name: SWITCH })).toBeChecked()
+    expect(
+      screen.getByRole("button", { name: /Who runs provider code tools/ }),
+    ).toHaveTextContent("Not set")
     expect(screen.queryByRole("textbox")).toBeNull()
     expect(screen.queryByRole("button", { name: /Advanced/ })).toBeNull()
+  })
+
+  it("pins who runs a provider's own code tool, keeping API-set limits", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        max_iterations: 3,
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(
+      screen.getByRole("button", { name: /Who runs provider code tools/ }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: "Always Otari" }),
+    )
+
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      executor: "otari",
+      max_iterations: 3,
+    })
   })
 
   it("shows a blocked policy switched off", async () => {
@@ -319,70 +345,6 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
         max_iterations: 3,
       })
       expect(calls.some((call) => call.method === "DELETE")).toBe(false)
-    })
-  })
-
-  describe("on a hosted control plane", () => {
-    // There the sandbox is the platform's, so this process's
-    // `sandbox_configured` decides nothing.
-    async function renderHosted() {
-      renderCard(undefined, true)
-      await waitFor(() =>
-        expect(screen.getByRole("switch", { name: SWITCH })).toBeEnabled(),
-      )
-    }
-
-    it("never locks the switch over a sandbox it does not own", async () => {
-      mockApi({
-        policy: workspaceCodeExecutionPolicy({
-          workspace_id: ALPHA,
-          sandbox_configured: false,
-        }),
-      })
-      await renderHosted()
-
-      expect(screen.queryByText(/no sandbox configured/i)).toBeNull()
-    })
-
-    it("does not call a pinned image withdrawn against the control plane's own list", async () => {
-      mockApi({
-        policy: workspaceCodeExecutionPolicy({
-          workspace_id: ALPHA,
-          configured: true,
-          enabled: true,
-          allowed_images: [],
-          image: "ghcr.io/acme/sandbox:2",
-        }),
-      })
-      await renderHosted()
-
-      expect(screen.queryByText(/no longer offers/i)).toBeNull()
-    })
-
-    it("shows a member the platform's answer for their workspace", async () => {
-      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
-        String(input).includes("/playground/tools")
-          ? Response.json({
-              code_execution: {
-                configured: true,
-                enabled: false,
-                reason: "Not turned on for this workspace.",
-              },
-            })
-          : Response.json(
-              organizationContext({
-                role: "member",
-                workspace_memberships: [
-                  { workspace_id: ALPHA, name: "Alpha", role: "member" },
-                ],
-              }),
-            ),
-      )
-      renderCard(<div>tool row</div>, true)
-
-      expect(await screen.findByText("Allowed in Alpha")).toBeInTheDocument()
-      expect(screen.getByText("No")).toBeInTheDocument()
-      expect(screen.queryByRole("switch")).toBeNull()
     })
   })
 

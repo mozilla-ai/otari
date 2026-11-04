@@ -106,6 +106,43 @@ async def test_apply_guardrails_monitor_annotates(monkeypatch: pytest.MonkeyPatc
     assert header[0]["valid"] is False
     # The freeform explanation must not leak into the header.
     assert "explanation" not in header[0]
+    assert header[0]["status"] == "evaluated"
+    assert "reason" not in header[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "status", "reason"),
+    [
+        (GuardrailResult(profile="pi", mode="monitor", valid=None, explanation="no label"), "inconclusive", None),
+        (
+            GuardrailResult(profile="pi", mode="monitor", valid=None, unavailable="not_configured"),
+            "unavailable",
+            "not_configured",
+        ),
+        (
+            GuardrailResult(profile="pi", mode="block", valid=None, unavailable="evaluation_failed"),
+            "unavailable",
+            "evaluation_failed",
+        ),
+    ],
+)
+async def test_a_null_verdict_says_why_in_the_header(
+    monkeypatch: pytest.MonkeyPatch, result: GuardrailResult, status: str, reason: str | None
+) -> None:
+    """Otari#2690: ``valid: null`` alone cannot tell "did not run" from "ran, no verdict"."""
+
+    async def _runner(*_a: object, **_k: object) -> GuardrailVerdict:
+        return GuardrailVerdict(results=[result])
+
+    monkeypatch.setattr("gateway.api.routes._helpers.run_input_guardrails", _runner)
+    response = Response()
+    await apply_input_guardrails([GuardrailConfig(profile="pi", mode="monitor")], "x", response=response)
+    header = json.loads(response.headers[GUARDRAILS_RESULT_HEADER])
+    assert header[0]["valid"] is None
+    assert header[0]["status"] == status
+    assert header[0].get("reason") == reason
+    assert "explanation" not in header[0]
 
 
 @pytest.mark.asyncio

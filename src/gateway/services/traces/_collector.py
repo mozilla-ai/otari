@@ -10,6 +10,7 @@ because its trace could not be recorded.
 
 import functools
 import hashlib
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from gateway.log_config import logger
+from gateway.services.traces._context import ContextWeights
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._turns import TurnFacts
 from gateway.types.traces import SpanRecord, TraceWrite, is_endpoint, is_identifier
@@ -54,6 +56,24 @@ class LlmCall:
 def identifier_or_none(value: object) -> str | None:
     """A client-supplied value as it may be stored, or None when it is not an identifier-shaped string."""
     return value if isinstance(value, str) and is_identifier(value) else None
+
+
+# Longer than any call id a provider issues; past it the value is not one.
+_MAX_CALL_ID_LENGTH = 512
+CALL_ID_DIGEST = re.compile(r"tc-[0-9a-f]{32}")
+
+
+def call_id_digest(workspace_id: uuid.UUID, value: object) -> str | None:
+    """A tool call's id as it is stored: a digest of what the client sent, never the id itself.
+
+    A call id is whatever the client chose, so it may be anything, a credential
+    included. Every span that names one call (the tool, and each gate a hook checked
+    it with) carries the same digest, so they still match; with the workspace in it,
+    two tenants' ids never do.
+    """
+    if not isinstance(value, str) or not value or len(value) > _MAX_CALL_ID_LENGTH:
+        return None
+    return "tc-" + hashlib.sha256(f"{workspace_id}\x00{value}".encode()).hexdigest()[:32]
 
 
 def client_tool_span_id(call_id: str, position: int) -> str:
@@ -112,6 +132,7 @@ class RequestTrace:
     session: SessionRef | None = None
     harness: str | None = None
     turn: TurnFacts | None = None
+    context: ContextWeights | None = None
     subagent: bool = False
     spans: list[SpanRecord] = field(default_factory=list)
     dropped: int = 0
@@ -146,6 +167,9 @@ class RequestTrace:
             attributes["otari.routing.attempt_position"] = call.attempt_position
         if call.status_code is not None:
             attributes["http.response.status_code"] = call.status_code
+        # Every attempt sent the same request, so each carries the same weights.
+        if self.context is not None:
+            attributes.update(self.context.attributes())
         self._add(
             SpanRecord(
                 span_id=call.attempt_id[:64],
@@ -298,6 +322,8 @@ class RequestTrace:
             harness=self.harness,
             name=self.session.name if self.session else None,
             spans=(step, *self._client_tool_spans(), *self.spans),
+            # When the request came in, so one that outlasts an erasure of its user is not stored.
+            captured_at=self.started_at,
         )
 
     def _client_tool_spans(self) -> list[SpanRecord]:
@@ -323,12 +349,13 @@ class RequestTrace:
                     origin="gateway",
                     name=f"execute_tool:{name}" if name and is_identifier(f"execute_tool:{name}") else "execute_tool",
                     operation="execute_tool",
-                    outcome="error" if call.is_error else "ok",
-                    error_class="tool_error" if call.is_error else None,
+                    # The agent reads an error result like any other, so it is no session error.
+                    outcome="ok",
+                    attributes={"otari.tool.succeeded": False} if call.is_error else {},
                     end_time=self.started_at,
                     tool_name=name,
                     tool_type="client",
-                    tool_call_id=identifier_or_none(call.call_id),
+                    tool_call_id=call_id_digest(self.workspace_id, call.call_id),
                     request_id=self.request_id,
                 )
             )
