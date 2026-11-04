@@ -958,7 +958,8 @@ class OrgProviderKeyService:
 
         Every key rather than any: which key serves a workspace depends on its
         defaults and overrides, so one undeclared key means a request may go
-        out on an account that keeps data. Usability costs a decryption, so a
+        out on an account that keeps data. A key with no credential serves
+        nothing and does not count. Checking one costs a decryption, so a
         provider with no declared key is never checked, and the checks stop
         at the first answer.
         """
@@ -969,8 +970,8 @@ class OrgProviderKeyService:
             provider
             for provider, keys in by_provider.items()
             if any(key.zero_data_retention for key in keys)
-            and not any(key_is_usable(key) for key in keys if not key.zero_data_retention)
-            and any(key_is_usable(key) for key in keys if key.zero_data_retention)
+            and not any(has_credential(key) for key in keys if not key.zero_data_retention)
+            and any(has_credential(key) for key in keys if key.zero_data_retention)
         )
 
 
