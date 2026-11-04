@@ -69,3 +69,15 @@ async def test_an_incomplete_row_is_still_billed_its_estimated_tokens() -> None:
 
     assert abandoned.cost == Decimal(3)
     assert row.prompt_tokens == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_an_incomplete_row_counts_as_a_failed_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[bool] = []
+    monkeypatch.setattr(pipeline, "record_attempt", lambda *_, failed, **__: attempts.append(failed))
+    per_token = ModelPricing(model_key="p:m", input_price_per_million=Decimal(3), output_price_per_million=Decimal(6))
+
+    await _record(per_token, incomplete=False)
+    await _record(per_token, incomplete=True)
+
+    assert attempts == [False, True]
