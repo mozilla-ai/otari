@@ -81,9 +81,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ToolPorts,
+    asks_to_keep_trace_content,
     get_automatic_router,
     get_budget_service,
     get_request_prices,
+    routed_trace_content,
     verify_api_key_or_master_key,
 )
 from gateway.api.request_id import set_request_id
@@ -396,6 +398,7 @@ from gateway.services.traces import (
     context_of,
     harness_of,
     is_subagent,
+    read_turn_content,
     resolve_session,
 )
 from gateway.services.upstream_redaction import redact_upstream_message
@@ -2773,6 +2776,9 @@ async def resolve_request_context(
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
 
+    ``turn`` is also where the content of a request that keeps it is read from
+    (``Otari-Trace-Content``): the prompt and the answered tool calls.
+
     ``safety_identifier`` is the caller's tag for the end user, which wins over
     ``user_id_from_request`` as the tag in the provider's end-user identifier.
     Unlike ``user``, it names nobody billed, so nothing checks it: a tag only
@@ -3131,6 +3137,16 @@ async def resolve_request_context(
     budget_exempt = (api_key is not None and api_key.exclude_from_budget) or (
         resolved_provider is not None and resolved_provider.owned_endpoint is not None
     )
+    # Before the rate limit and the reservation, so a read that fails or never finishes holds nothing to give back,
+    # and before normalization, so the content is what the client sent and not an attachment rendered as text.
+    capture = (
+        await routed_trace_content(raw_request, uow, db, config, workspace_id, user_id)
+        if turn is not None and asks_to_keep_trace_content(raw_request) and config.trace_capture_enabled
+        else None
+    )
+    content = (
+        read_turn_content(turn, tool_output=capture.tool_output) if turn is not None and capture is not None else None
+    )
     # Before the reservation, so a request the rules refuse holds no budget to refund.
     rate_limit_grant = await admit_rate_limit_rules(
         raw_request,
@@ -3469,6 +3485,9 @@ async def resolve_request_context(
             harness=harness_of(raw_request.headers),
             turn=turn,
             context=context_of(context),
+            content=content,
+            content_generation=capture.generation if capture is not None else None,
+            keep_tool_output=capture is not None and capture.tool_output,
             subagent=is_subagent(raw_request.headers),
             request_id=request_id,
             workspace_id=workspace_id,

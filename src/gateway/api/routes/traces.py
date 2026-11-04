@@ -255,9 +255,11 @@ async def get_trace_content_policy(
 ) -> TraceContentPolicyPublic:
     """What this deployment keeps of agent sessions, and who besides a session's owner can open it."""
     content: SpanContent | None = getattr(request.app.state, "trace_content", None)
+    # A deployment with no key to seal with keeps no content, whatever its settings say.
+    available = config.trace_content_enabled and content is not None and content.sealing
     return TraceContentPolicyPublic(
-        # A deployment with no key to seal with keeps no content, whatever its settings say.
-        content_available=config.trace_content_enabled and content is not None and content.sealing,
+        content_available=available,
+        tool_output=available and config.trace_content_tool_output,
         platform_break_glass=config.trace_platform_break_glass_enabled,
         retention_days=config.trace_retention_days,
         session_max_age_days=config.trace_session_max_age_days,

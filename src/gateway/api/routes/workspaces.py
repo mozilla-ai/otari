@@ -6,7 +6,6 @@ from another tenant answers 404 rather than reaching the service's logic.
 """
 
 import uuid
-from collections.abc import Awaitable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -83,21 +82,13 @@ async def update_workspace(
     workspace_id: uuid.UUID,
     body: WorkspaceUpdate,
 ) -> WorkspacePublic:
-    """Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+    """Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.
 
-    Turning content off keeps nothing new from the next export on; what is already
+    Turning either off keeps nothing new of it from the next export on; what is already
     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
     """
-
-    def update() -> Awaitable[WorkspacePublic]:
-        return service.update_workspace(user=current_identity, workspace_id=workspace_id, workspace_update=body)
-
-    if body.trace_content_enabled is not False:
-        return await update()
-    return await traces.turn_content_off(
-        workspace_id,
-        authorize=lambda: service.require_management_access(user=current_identity, workspace_id=workspace_id),
-        switch=update,
+    return await service.update_workspace(
+        user=current_identity, workspace_id=workspace_id, workspace_update=body, stop_content=traces.stop_content
     )
 
 

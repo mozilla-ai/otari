@@ -69,6 +69,7 @@ from gateway.services.tools._web_tool_failure import (
     WebToolFailure,
     failed_text,
 )
+from gateway.services.traces import ToolSpans
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy, WebURLValidationError, canonicalize_web_url
 
@@ -141,7 +142,7 @@ class WebSearchBackend:
         # None outside an app, where each provider opens its own per call.
         self._web_provider_client = web_provider_client
         self._tally = tally
-        self._trace = trace
+        self._spans = ToolSpans(trace, "otari_web_search", WEB_SEARCH_TOOL_NAME)
         self._stack = AsyncExitStack()
         # The built-in fetcher's client for enrichment, opened only where it enriches.
         self._retrieval_client: httpx.AsyncClient | None = None
@@ -222,7 +223,7 @@ class WebSearchBackend:
                 span.set_status(trace.StatusCode.ERROR, INTERNAL_ERROR_TAG)
                 if self._tally is not None:
                     self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
-                self._record_span(started, ok=False)
+                self._spans.record(started, ok=False, arguments=arguments)
                 raise
             if self._last_failure is not None:
                 span.set_status(trace.StatusCode.ERROR, self._last_failure.tag)
@@ -239,14 +240,8 @@ class WebSearchBackend:
                 cost=searched.cost,
                 deployment_paid=not self._search.on_credential,
             )
-        self._record_span(started, ok=not is_tool_error(searched.text))
+        self._spans.record(started, ok=not is_tool_error(searched.text), arguments=arguments, result=searched.text)
         return searched.text
-
-    def _record_span(self, started: datetime, *, ok: bool) -> None:
-        if self._trace is not None:
-            self._trace.record_tool_call(
-                tool_name=WEB_SEARCH_TOOL_NAME, tool_type="otari_web_search", started=started, ok=ok
-            )
 
     async def _call(self, arguments: dict[str, Any]) -> _Searched:
         query = arguments.get("query")

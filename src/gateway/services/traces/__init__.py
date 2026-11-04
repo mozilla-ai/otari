@@ -5,7 +5,7 @@ its response is sent; ``TraceService`` stores them in this deployment's database
 """
 
 from gateway.services.traces._capture import RequestTraces
-from gateway.services.traces._collector import LlmCall, RequestTrace, identifier_or_none
+from gateway.services.traces._collector import LlmCall, RequestTrace, ToolSpans, identifier_or_none
 from gateway.services.traces._content import SpanContent
 from gateway.services.traces._context import ContextWeights, context_of, read_context
 from gateway.services.traces._identity import SessionRef, harness_of, is_subagent, resolve_session
@@ -24,6 +24,7 @@ from gateway.services.traces._otlp import (
 )
 from gateway.services.traces._retention import run_trace_retention
 from gateway.services.traces._service import TraceService
+from gateway.services.traces._turn_content import TurnContent, read_turn_content
 from gateway.services.traces._turns import AnsweredCall, TurnFacts, read_turn
 from gateway.services.traces._writer import TraceWriter
 
@@ -41,9 +42,11 @@ __all__ = [
     "RequestTraces",
     "SpanContent",
     "SessionRef",
+    "ToolSpans",
     "TraceMembershipListener",
     "TraceService",
     "TraceWriter",
+    "TurnContent",
     "TurnFacts",
     "harness_of",
     "identifier_or_none",
@@ -53,6 +56,7 @@ __all__ = [
     "project_otlp_spans",
     "read_context",
     "read_turn",
+    "read_turn_content",
     "record_otlp_export",
     "record_priced_requests",
     "resolve_session",
