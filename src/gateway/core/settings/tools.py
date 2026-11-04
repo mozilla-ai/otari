@@ -745,6 +745,17 @@ def configured_fetch_default(settings: ToolSettings) -> str:
     return str(value) if value is not None else BUILTIN_FETCH
 
 
+def enrichment_enabled(settings: ToolSettings) -> bool:
+    """Whether a search's hits without page text have their pages read.
+
+    ``web_search_extract`` as set, else the environment, else yes.
+    """
+    value = _runtime_or_env(settings, "web_search_extract")
+    if isinstance(value, bool):
+        return value
+    return value is None or str(value).lower() not in {"0", "false", "no", "off"}
+
+
 def effective_web_search_max_calls(settings: ToolSettings) -> int:
     """How many search and fetch calls one request may make."""
     value = _runtime_or_env(settings, "web_search_max_calls")

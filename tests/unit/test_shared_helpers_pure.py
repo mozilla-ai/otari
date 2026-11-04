@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.pricing import PricingResponse
 from gateway.schemas.budgets import BudgetResponse, OrganizationBudgetPublic
+from gateway.services.api_keys import resolve_user_id
 
 
 def _make_error(detail: str, status_code: int = 400) -> HTTPException:
@@ -265,7 +265,7 @@ def test_pricing_response_from_model() -> None:
     pricing.output_price_per_million = 60.0
     pricing.cache_read_price_per_million = 5.0
     pricing.cache_write_price_per_million = 15.0
-    pricing.unit = "tokens"
+    pricing.unit = "token"
     pricing.origin = "api"
     pricing.created_at = datetime(2025, 3, 1, tzinfo=UTC)
     pricing.updated_at = datetime(2025, 3, 2, tzinfo=UTC)

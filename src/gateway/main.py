@@ -107,7 +107,6 @@ from gateway.services.pricing_init_service import (
     warn_about_unpriced_web_tools,
     warn_if_gateway_tools_lack_pricing,
     warn_if_require_pricing_without_pricing,
-    warn_if_router_candidates_lack_pricing,
 )
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
@@ -1001,7 +1000,6 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await warn_about_unpriced_web_tools(config, session)
             await warn_about_legacy_tool_prices(config, session)
             await warn_if_gateway_tools_lack_pricing(config, session)
-            await warn_if_router_candidates_lack_pricing(config, session)
             await load_aliases_at_startup(session)
             await load_policies_at_startup(session)
         # After the session above and not inside it: the runner reads through
@@ -1228,7 +1226,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app = FastAPI(
         title="otari",
-        description="Otari, an OpenAI-compatible LLM gateway with API key management",
+        description="Otari, an OpenAI-compatible AI gateway with API key management",
         version=__version__,
         docs_url=f"{API_ROOT}/docs" if config.enable_docs else None,
         redoc_url=f"{API_ROOT}/redoc" if config.enable_docs else None,

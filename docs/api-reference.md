@@ -323,7 +323,11 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   before the stream ended (an Anthropic stream reports its input tokens in
   `message_start`). The request is not treated as free.
 - A stream the client abandoned before the provider reported any usage, and
-  that ran no gateway tools, has nothing to bill and writes no usage row.
+  that ran no gateway tools, writes no usage row under the `fail` and
+  `allow_free` policies. Under `estimate` (the default of
+  `stream_missing_usage_policy`) it writes an `incomplete` row billed on an
+  estimate from the request and the text streamed so far: tokens only, with
+  no per-request charge.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:
@@ -370,7 +374,7 @@ provider or billing again.
 | Aspect | Behavior |
 |---|---|
 | Scope | A key belongs to the API key that sent it (or, for the master key, to the billed user), so two callers never see each other's responses. |
-| Same request | The same body, and the same `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`, `Otari-Router-Task`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers, since those change what the request does. Key order and whitespace in the JSON body do not count as a difference. |
+| Same request | The same body, and the same `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers, since those change what the request does. Key order and whitespace in the JSON body do not count as a difference. |
 | Different request, same key | `422`. |
 | Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer. |
 | Original failed | The next retry runs in its place. Only a successful response is kept. |
@@ -638,10 +642,7 @@ and any other failure returns 502.
 
 ## Routing policies
 
-Routing-policy management lives under `/api/v1/routing/policies`; learned-routing
-examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`,
-and an API key teaches and reads its own under `/api/v1/routing/me/preferences/rank` and
-`/api/v1/routing/me/status`.
+Routing-policy management lives under `/api/v1/routing/policies`.
 A subagent model recommendation is asked at `POST /api/v1/routing/recommend`, and the
 operator manages the subagent routers that answer it under `/api/v1/routing/recommenders`
 (see [Routing recommendations](#routing-recommendations)).

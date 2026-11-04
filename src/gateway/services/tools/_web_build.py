@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from gateway.core.env import otari_env
+from gateway.core.settings.tools import enrichment_enabled
 from gateway.services.tools._web_fetch import WebFetchBackend
 from gateway.services.tools._web_search import WebSearchBackend
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
@@ -59,7 +59,7 @@ def build_web_search_backends(
                 allowed=canonicalize_domain_rules(_domains(search_tool_entry, "allowed_domains")),
                 blocked=canonicalize_domain_rules(_domains(search_tool_entry, "blocked_domains")),
             ),
-            enrich=_enrich(config),
+            enrich=enrichment_enabled(config),
             allow_private=config.web_search_allow_private_hosts,
             trust_env_proxy=trust_env_proxy,
             purpose_hint=purpose_hint,
@@ -120,11 +120,3 @@ def _max_results(config: GatewayConfig, entry: Mapping[str, Any], resolved: int 
 def _domains(entry: Mapping[str, Any], field: str) -> tuple[str, ...]:
     values = entry.get(field)
     return tuple(str(value) for value in values) if isinstance(values, list) else ()
-
-
-def _enrich(config: GatewayConfig) -> bool:
-    """Whether hits without page text are enriched: the setting, else the environment, else yes."""
-    if config.web_search_extract is not None:
-        return config.web_search_extract
-    extract_env = otari_env("WEB_SEARCH_EXTRACT")
-    return extract_env is None or extract_env.lower() not in {"0", "false", "no", "off"}

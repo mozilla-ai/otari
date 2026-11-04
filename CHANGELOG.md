@@ -4,6 +4,72 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.38.0](https://github.com/mozilla-ai/otari/releases/tag/v0.38.0) - 2026-11-04
+
+
+
+### Bug Fixes
+
+- **health-checks:** Switch off a model its provider refuses during a run in [#2846](https://github.com/mozilla-ai/otari/pull/2846) by [@daavoo](https://github.com/daavoo) ([`11e2b45`](https://github.com/mozilla-ai/otari/commit/11e2b45888727baf31bbd1a9f9f22bc32c66fcd2))
+- **web:** Give Amazon Bedrock its own provider mark in [#2828](https://github.com/mozilla-ai/otari/pull/2828) by [@jigjigjig](https://github.com/jigjigjig) ([`afa6284`](https://github.com/mozilla-ai/otari/commit/afa62845b85fd160d3c255f47f61673cc7df6af0))
+- **web:** Keep focus in the table after a confirmed delete in [#2852](https://github.com/mozilla-ai/otari/pull/2852) by [@jigjigjig](https://github.com/jigjigjig) ([`e3c089f`](https://github.com/mozilla-ai/otari/commit/e3c089f1f50f294213387a06265b71b1937f97b3))
+
+
+### Features
+
+- **BREAKING:** **pricing:** Spell every price unit as models.dev does by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`aad0587`](https://github.com/mozilla-ai/otari/commit/aad05873fe9bb09f3a6b896552632eab85562cd2))
+- **dashboard:** Name a price unit as the API does in [#2820](https://github.com/mozilla-ai/otari/pull/2820) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`887ec8e`](https://github.com/mozilla-ai/otari/commit/887ec8e8bb9991483ec2dde925336e9371df5373))
+- **tools:** Bill the pages a search reads as fetches on the instance that read them in [#2831](https://github.com/mozilla-ai/otari/pull/2831) by [@aittalam](https://github.com/aittalam) ([`21296f1`](https://github.com/mozilla-ai/otari/commit/21296f1e03fdd2ffabb6b4f7a7190b9d89679d21))
+- **BREAKING:** **tools:** Refuse a search whose pages an unpriced fetch tool would read in [#2832](https://github.com/mozilla-ai/otari/pull/2832) by [@aittalam](https://github.com/aittalam) ([`fa0876a`](https://github.com/mozilla-ai/otari/commit/fa0876ac32ca16cc14133e8b83c563919f984f59))
+- **traces:** Keep the content of routed requests that ask for it in [#2685](https://github.com/mozilla-ai/otari/pull/2685) by [@agpituk](https://github.com/agpituk) ([`d849d42`](https://github.com/mozilla-ai/otari/commit/d849d426b284c537fbd5de5e437c2dd86691531c))
+- **images:** Add the image edit endpoint in [#2868](https://github.com/mozilla-ai/otari/pull/2868) by [@KevinGallaccio](https://github.com/KevinGallaccio) ([`bff9dab`](https://github.com/mozilla-ai/otari/commit/bff9dab802097b90a6891a305cb7cd0f2bfc7d59))
+
+
+
+### New Contributors
+
+- [@KevinGallaccio](https://github.com/KevinGallaccio) made their first contribution in [#2868](https://github.com/mozilla-ai/otari/pull/2868)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.37.0...v0.38.0
+## [0.37.0](https://github.com/mozilla-ai/otari/releases/tag/v0.37.0) - 2026-11-04
+
+
+
+### Bug Fixes
+
+- **dashboard:** Stop a filter below the fold scrolling the shell away in [#2817](https://github.com/mozilla-ai/otari/pull/2817) by [@peteski22](https://github.com/peteski22) ([`c96d0fa`](https://github.com/mozilla-ai/otari/commit/c96d0fac6453e81629bb915baf4c922656cff37e))
+- **provider-endpoints:** Point a private api_base at hosted providers in [#2830](https://github.com/mozilla-ai/otari/pull/2830) by [@daavoo](https://github.com/daavoo) ([`9030c46`](https://github.com/mozilla-ai/otari/commit/9030c46d474b7ff01dbdfae454be33ab7ebc02ed))
+
+
+### Features
+
+- **pricing:** Name every price unit in one module by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`dcfc6a3`](https://github.com/mozilla-ai/otari/commit/dcfc6a308b74d20c7971b98321283050aa30187d))
+- **catalog:** Note a v2 price unit the reader does not know by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`a948107`](https://github.com/mozilla-ai/otari/commit/a94810723e625910cd18e3862fd5da31de6bf380))
+- **pricing:** Accept every price unit on the pricing routes in [#2812](https://github.com/mozilla-ai/otari/pull/2812) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`8c2b6f9`](https://github.com/mozilla-ai/otari/commit/8c2b6f92fdf71901036d81500380bbcaa02e198e))
+- **pricing:** Give each stored search and fetch tool with no price the otari: price in force in [#2808](https://github.com/mozilla-ai/otari/pull/2808) by [@aittalam](https://github.com/aittalam) ([`91483b2`](https://github.com/mozilla-ai/otari/commit/91483b2f472c5869bda27a8a4b236b9ebc4b4965))
+- **any-search:** Add the Serply adapter in [#2341](https://github.com/mozilla-ai/otari/pull/2341) by [@googio](https://github.com/googio) ([`39a2ae8`](https://github.com/mozilla-ai/otari/commit/39a2ae847c51eb2ae668bf7f8755a03d5eb7d7c8))
+- **BREAKING:** **pricing:** Price each search and fetch tool by its own price alone in [#2809](https://github.com/mozilla-ai/otari/pull/2809) by [@aittalam](https://github.com/aittalam) ([`f9be6d4`](https://github.com/mozilla-ai/otari/commit/f9be6d4ec0a943bb1578bfe82ce2e7edf1500c55))
+- **any-search,any-fetch:** Send a User-Agent naming the library from every provider in [#2825](https://github.com/mozilla-ai/otari/pull/2825) by [@aittalam](https://github.com/aittalam) ([`bcc2f97`](https://github.com/mozilla-ai/otari/commit/bcc2f9717a5fc0d8ad1a0c782d6d112a194557aa))
+- **dashboard:** Show each search and fetch tool at its own price in [#2810](https://github.com/mozilla-ai/otari/pull/2810) by [@aittalam](https://github.com/aittalam) ([`7842259`](https://github.com/mozilla-ai/otari/commit/7842259ec1fc14fdb01205e6b78e5f77bead0ca4))
+- **any-search,any-fetch:** Give each library a version of its own in [#2827](https://github.com/mozilla-ai/otari/pull/2827) by [@aittalam](https://github.com/aittalam) ([`022679a`](https://github.com/mozilla-ai/otari/commit/022679a88b8f05570b5dd99f677f37452e3e2aa5))
+
+
+### Maintenance
+
+- **BREAKING:** **routing:** Remove the learned kNN and noop routers in [#2829](https://github.com/mozilla-ai/otari/pull/2829) by [@daavoo](https://github.com/daavoo) ([`9308f41`](https://github.com/mozilla-ai/otari/commit/9308f413da24505a5757ac8039af86380d680222))
+
+
+### Performance
+
+- **pricing:** Cache stored rates per process for 30 seconds in [#2804](https://github.com/mozilla-ai/otari/pull/2804) by [@daavoo](https://github.com/daavoo) ([`a733d88`](https://github.com/mozilla-ai/otari/commit/a733d887246df588286076fd31427abfdb5afb22))
+
+
+
+### New Contributors
+
+- [@googio](https://github.com/googio) made their first contribution in [#2341](https://github.com/mozilla-ai/otari/pull/2341)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.36.0...v0.37.0
 ## [0.36.0](https://github.com/mozilla-ai/otari/releases/tag/v0.36.0) - 2026-11-03
 
 

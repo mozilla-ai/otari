@@ -56,15 +56,15 @@ describe("providerMark", () => {
     expect(providerMark("llama")).toEqual(providerMark("meta"))
   })
 
-  it("tiles both AWS provider rows rather than showing the wordmark", () => {
-    // The rule would give them the AWS mark, but the only one in the set is the
-    // lowercase wordmark, unreadable at 16px. Asserted as absence, which is what
-    // makes the component draw a lettermark instead.
-    expect(providerMark("bedrock")).toBeUndefined()
+  it("gives Bedrock its own mark and never the AWS wordmark", () => {
+    // Bedrock has a product glyph, drawn with evenodd holes. SageMaker has
+    // none, and the only AWS mark in the set is the lowercase wordmark,
+    // unreadable at 16px, so it still tiles.
+    expect(hasProviderMark("bedrock")).toBe(true)
+    expect(providerMark("bedrock")?.shapes[0]?.fillRule).toBe("evenodd")
     expect(providerMark("sagemaker")).toBeUndefined()
-    expect(hasProviderMark("bedrock")).toBe(false)
-    // And the maker row for the same company agrees, so a card and a rail row
-    // never disagree about Amazon.
+    // The glyph names the service, not the company, so the Amazon maker row
+    // keeps its tile.
     expect(makerMark("amazon")).toBeUndefined()
   })
 
@@ -200,7 +200,7 @@ describe("makerMark", () => {
 
   it("tiles the two makers that have no usable mark", () => {
     // Amazon's only mark in the set is the aws wordmark, unreadable at these
-    // steps, so it tiles like the Bedrock and SageMaker rows. OpenBMB has none.
+    // steps, so it tiles like the SageMaker row. OpenBMB has none.
     expect(makerMark("amazon")).toBeUndefined()
     expect(makerMark("openbmb")).toBeUndefined()
   })

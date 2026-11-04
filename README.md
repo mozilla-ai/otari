@@ -4,7 +4,7 @@
 
 <div align="center">
 
-**An OpenAI-compatible LLM gateway you own and run.**
+**An AI gateway you own and run.**
 
 Route one endpoint to 40+ providers, issue virtual keys, enforce budgets, and
 track usage.

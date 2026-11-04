@@ -28,17 +28,14 @@ from gateway.api.routes._helpers import (
     country_gate_for,
     country_not_supported,
     missing_credential_error,
-    resolve_user_id,
 )
 from gateway.api.routes._pipeline import (
-    FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
     _raise_for_unresolvable_model,
     classify_provider_error,
     failure_status_code,
 )
-from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
 from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
@@ -47,9 +44,10 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.inference import BatchRecord
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import NO_TOOLS, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
-from gateway.rate_limit import check_rate_limit
+from gateway.rate_limit import check_rate_limit, rate_limit_headers
+from gateway.services.api_keys import resolve_user_id
 from gateway.services.batch_service import (
     claim_batch_accounting,
     get_batch_record,

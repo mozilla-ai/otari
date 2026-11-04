@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from any_llm.exceptions import ModelNotFoundError
 
+from gateway.services.inference import is_model_unavailable_error, upstream_error_message
 from gateway.services.providers import acompletion
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.types.model_type import ModelType
@@ -45,6 +46,8 @@ class ProbeOutcome:
     status_code: int | None
     error: str | None
     latency_ms: int
+    # The provider's own words when it refused the model itself, which no retry cures.
+    refusal: str | None = None
 
 
 def is_chat_model(kind: ModelType | None) -> bool:
@@ -109,7 +112,8 @@ async def probe(
     except TimeoutError:
         return ProbeOutcome(target, "fail", None, f"no answer within {timeout:g}s", _elapsed(started))
     except Exception as exc:  # noqa: BLE001 - every failure is a result, not an error of the run
-        return ProbeOutcome(target, "fail", _status_code(exc), _describe(exc), _elapsed(started))
+        refusal = (upstream_error_message(exc) or type(exc).__name__) if is_model_unavailable_error(exc) else None
+        return ProbeOutcome(target, "fail", _status_code(exc), _describe(exc), _elapsed(started), refusal)
     return ProbeOutcome(target, "pass", None, None, _elapsed(started))
 
 

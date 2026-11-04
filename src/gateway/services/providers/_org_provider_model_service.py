@@ -110,7 +110,7 @@ class _Price:
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
     pricing_id: uuid.UUID | None = None
-    unit: PriceUnit = "tokens"
+    unit: PriceUnit = "token"
 
 
 def _quantized(value: Decimal | None) -> Decimal | None:
@@ -167,7 +167,7 @@ def _price_from(rate: EffectiveRate) -> _Price:
         cache_read_price_per_million=as_float(rate.rates.cache_read_price_per_million),
         cache_write_price_per_million=as_float(rate.rates.cache_write_price_per_million),
         pricing_id=rate.row.id if rate.row is not None else None,
-        unit=rate.rates.unit or "tokens",
+        unit=rate.rates.unit or "token",
     )
 
 
@@ -183,7 +183,7 @@ def _seeded_row(
         cache_read_price_per_million=to_usd_or_none(as_float(default.cache_read_price_per_million)),
         cache_write_price_per_million=to_usd_or_none(as_float(default.cache_write_price_per_million)),
         pricing_tiers=list(default.pricing_tiers or []),
-        unit=default.unit or "tokens",
+        unit=default.unit or "token",
         origin=SEED_ORIGIN,
         effective_from=effective_from,
         effective_to=None,
@@ -225,7 +225,7 @@ def _model_public(row: OrgProviderKeyModel, price: _Price | None) -> OrgProvider
         cache_write_price_per_million=price.cache_write_price_per_million if price else None,
         price_source=price.source if price else None,
         pricing_id=price.pricing_id if price else None,
-        unit=price.unit if price else "tokens",
+        unit=price.unit if price else "token",
         enabled=row.enabled,
         created_at=row.created_at,
         updated_at=row.updated_at,

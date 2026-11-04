@@ -21,7 +21,7 @@ from gateway.services.pricing_service import (
     resolve_tool_rate,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.services.tools import configured_tools_to_price, deployment_tool_rate_keys
+from gateway.services.tools import configured_tools_to_price, deployment_tool_rate_keys, enriching_fetch_tool
 from gateway.types.tool_charges import InstanceRateKey
 
 
@@ -77,10 +77,16 @@ async def warn_about_unpriced_web_tools(config: GatewayConfig, db: AsyncSession)
     With ``require_pricing`` on, a request that would run the tool is refused
     with HTTP 402, except on a key exempt from budgets. With it off, a call
     reserves nothing before the provider is called and settles at zero unless
-    its provider reports a cost. A rate of 0 is a price. Fetch tools are checked
-    only where the fetch tool is enabled: only its calls take their price.
+    its provider reports a cost. A rate of 0 is a price. A fetch tool is checked
+    where the fetch tool is enabled, and where it reads the pages of the in-loop
+    search's hits, which take its price.
     """
-    keys = [key for key in deployment_tool_rate_keys(config) if key.kind == "search" or config.web_fetch_enabled]
+    enriching = enriching_fetch_tool(config)
+    keys = [
+        key
+        for key in deployment_tool_rate_keys(config)
+        if key.kind == "search" or config.web_fetch_enabled or key.name == enriching
+    ]
     unpriced = [key.name for key in keys if await resolve_tool_rate(db, (key,)) is None]
     if not unpriced:
         return
@@ -143,37 +149,6 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
             ", ".join(unpriced),
             keys,
         )
-
-
-async def warn_if_router_candidates_lack_pricing(config: GatewayConfig, db: AsyncSession) -> None:
-    """Warn at startup when a learned policy has an unpriced candidate.
-
-    The *learned* router scores candidates by cost, so it declines the moment one
-    of them has no price, and the policy quietly serves its default target forever.
-    That looks like a broken router rather than a missing pricing row, which is what
-    this line exists to say. The weighted router reads no prices, so it is exempt.
-
-    A warning rather than a refusal, unlike the same check on the write path
-    (``POST /v1/routing/policies``, which 400s). Refusing here would take a running
-    gateway down over an optimization that has a safe fallback; refusing a write
-    costs an operator one corrected request, with the policy in front of them.
-    """
-    from gateway.services.routing import backend_requires_pricing, unpriced_router_candidates
-
-    for name, spec in config.routing.policies.items():
-        if not backend_requires_pricing(spec.router_backend):
-            continue
-        missing = await unpriced_router_candidates(config, db, spec.router_candidates)
-        if missing:
-            logger.warning(
-                "Routing policy '%s' uses router '%s' but candidate(s) %s have no pricing, so the router "
-                "will decline every request and the policy will always serve '%s'. Add pricing (config "
-                f"`pricing` section or POST {API_ROOT}/pricing) for those models.",
-                name,
-                spec.router_backend,
-                ", ".join(missing),
-                spec.default_target,
-            )
 
 
 async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession) -> None:
@@ -298,7 +273,7 @@ async def initialize_tool_prices_from_config(config: GatewayConfig, db: AsyncSes
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if latest is not None and latest.input_price_per_million == per_million and latest.unit == "requests":
+        if latest is not None and latest.input_price_per_million == per_million and latest.unit == "request":
             continue
         db.add(
             ModelPricing(
@@ -308,7 +283,7 @@ async def initialize_tool_prices_from_config(config: GatewayConfig, db: AsyncSes
                 input_price_per_million=per_million,
                 output_price_per_million=Decimal(0),
                 pricing_tiers=[],
-                unit="requests",
+                unit="request",
                 origin="config",
             )
         )

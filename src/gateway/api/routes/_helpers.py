@@ -11,8 +11,9 @@ from fastapi import HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
+from starlette.types import Message
 
-from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
+from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.env import otari_env
 from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
@@ -34,7 +35,6 @@ from gateway.services.workspace_scope import default_workspace_id
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
-    from gateway.db import APIKey
     from gateway.services.provider_kwargs import MissingCredential
     from gateway.services.providers import CountryGate
 
@@ -44,73 +44,30 @@ GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
 ``monitor``-mode (or otherwise non-blocking) check ran."""
 
 
-def resolve_user_id(
-    user_id_from_request: str | None,
-    api_key: APIKey | None,
-    is_master_key: bool,
-    *,
-    master_key_error: HTTPException,
-    no_api_key_error: HTTPException,
-    no_user_error: HTTPException,
-    forbidden_user_error: HTTPException,
-    reject_mismatch: bool = True,
-) -> str:
-    """Resolve the effective user_id from request context.
+def bounded_body(request: Request, max_bytes: int, too_large: str) -> Request:
+    """``request``, refusing its body with 413 once more than ``max_bytes`` arrive, whatever ``Content-Length`` says.
 
-    The resolution order is:
-    1. If master key is used, the request *must* supply a user_id, and may
-       name any user (the master key is trusted to act on behalf of others).
-    2. For a non-master key, spend is *always* bound to the key's own user.
-       The request may echo the same user_id (e.g. OpenAI's ``user`` field for
-       tracking). Naming a *different* user is rejected by default. That refusal
-       is a misuse signal, not a budget control: spend binds to the key's own user
-       whether the name is rejected or ignored.
-
-    Args:
-        user_id_from_request: User identifier extracted from the request body
-        api_key: Authenticated API key object (None when using master key)
-        is_master_key: Whether the request was authenticated with a master key
-        master_key_error: Raised when master key is used but no user_id is provided
-        no_api_key_error: Raised when no API key is available
-        no_user_error: Raised when the API key has no associated user
-        forbidden_user_error: Raised when a non-master key names a user other
-            than its own (only when ``reject_mismatch`` is True)
-        reject_mismatch: The deployment-wide default. When True, a non-master key
-            naming a different user is rejected. When False, the mismatch is
-            ignored and spend is still bound to the key's own user (the client
-            ``user`` is treated as a provider-side tag only). A key whose own
-            ``reject_user_mismatch`` is not None overrides this in either
-            direction. Spend is bound to the key's user however this resolves;
-            leniency never lets a key charge another user.
-
-    Returns:
-        Resolved user_id string
-
+    For a route that reads its own multipart form after its auth check: FastAPI
+    parses ``File`` parameters before any dependency runs. A declared length over
+    the limit is refused before any byte is read, and a client that disconnects
+    mid-upload gets 400 rather than surfacing as a server error.
     """
-    if is_master_key:
-        if not user_id_from_request:
-            raise master_key_error
-        return user_id_from_request
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > max_bytes:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, too_large)
+    received = 0
 
-    if api_key is None:
-        raise no_api_key_error
-    if not api_key.user_id:
-        raise no_user_error
-    key_user_id = str(api_key.user_id)
+    async def receive() -> Message:
+        nonlocal received
+        message = await request.receive()
+        if message["type"] == "http.disconnect":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.")
+        received += len(message.get("body", b""))
+        if received > max_bytes:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, too_large)
+        return message
 
-    # A non-master key is bound to its own user. Allow the request to echo that
-    # same id; a different id is rejected (strict) or ignored (lenient) — either
-    # way spend binds to key_user_id, so a key can never charge another user.
-    # A key may override the deployment-wide default in either direction (NULL =
-    # inherit), so one client whose ``user`` field is telemetry can be let through
-    # without relaxing the check for every key, and a deployment that relaxed it
-    # globally can still pin an individual key strict.
-    if api_key.reject_user_mismatch is not None:
-        reject_mismatch = api_key.reject_user_mismatch
-    if reject_mismatch and user_id_from_request and user_id_from_request != key_user_id:
-        raise forbidden_user_error
-
-    return key_user_id
+    return Request(request.scope, receive)
 
 
 def text_from_content(content: Any) -> str:
@@ -161,43 +118,10 @@ _ROUTER_HEADER_OFF = frozenset({"off", "false", "0", "no", "none", "disabled"})
 _ROUTER_HEADER_ON = frozenset({"on", "true", "1", "yes", "auto", "default"})
 
 
-def routing_signal_from_messages(messages: Sequence[Any], raw_request: Request, *, has_tools: bool) -> RoutingSignal:
-    """Build the router's view of a chat-shaped request.
-
-    Flattens the prompt the same way guardrails do and reads the three routing
-    headers. Called on every request through the endpoint, whether or not the
-    model names a policy with a router, so it stays cheap: three header lookups
-    and one pass over the messages.
-    """
+def routing_signal(raw_request: Request) -> RoutingSignal:
+    """Build the router's view of a request from its routing headers."""
     return RoutingSignal(
-        task_signal=latest_user_text(messages),
-        trace_signal=first_user_text(messages),
-        trace_anchor=conversation_opening_text(messages),
         conversation_id=_header_value(raw_request, CONVERSATION_HEADER),
-        task_id=_header_value(raw_request, ROUTER_TASK_HEADER),
-        has_tools=has_tools,
-        # A conversation with an assistant turn is one whose routing decision has
-        # already been made, so trace-sticky reuse applies rather than a fresh
-        # decision.
-        is_continuation=any(isinstance(message, dict) and message.get("role") == "assistant" for message in messages),
-        opted_out=routing_opted_out(raw_request),
-    )
-
-
-def routing_signal_from_text(text: str, raw_request: Request, *, has_tools: bool) -> RoutingSignal:
-    """Build the router's view of a request with no message list (the responses API).
-
-    One text blob serves as all three signals: there is no turn structure to draw
-    a conversation opening from, so a routed responses request re-decides per call
-    unless the client sends a conversation id.
-    """
-    return RoutingSignal(
-        task_signal=text,
-        trace_signal=text,
-        trace_anchor=text,
-        conversation_id=_header_value(raw_request, CONVERSATION_HEADER),
-        task_id=_header_value(raw_request, ROUTER_TASK_HEADER),
-        has_tools=has_tools,
         opted_out=routing_opted_out(raw_request),
     )
 
@@ -235,45 +159,6 @@ def routing_opted_out(raw_request: Request) -> bool:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Invalid {ROUTER_HEADER} header '{raw}': expected 'on' or 'off'.",
     )
-
-
-def first_user_text(messages: Sequence[Any]) -> str:
-    """Return the text of the *first* ``role == "user"`` message.
-
-    The stable task signal for a conversation: it does not change as turns are
-    appended, so trace-sticky routing embeds the same thing on every turn and a
-    router that has forgotten its decision reproduces it rather than drifting.
-    Falls back to :func:`latest_user_text` when no user message is present.
-    """
-    for message in messages:
-        if isinstance(message, dict) and message.get("role") == "user":
-            text = text_from_content(message.get("content"))
-            if text:
-                return text
-    return latest_user_text(messages)
-
-
-def conversation_opening_text(messages: Sequence[Any]) -> str:
-    """Every turn before the first assistant reply, flattened.
-
-    Used to identify a conversation when the client sends no
-    ``Otari-Conversation-Id``. Richer than the first user turn alone, so it
-    separates conversations that share an opening question but differ in their
-    system preamble. Two conversations whose entire opening is identical still
-    collapse to one identity; only a client-supplied id can tell those apart.
-    """
-    parts: list[str] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        if message.get("role") == "assistant":
-            break
-        text = text_from_content(message.get("content"))
-        if text:
-            parts.append(text)
-    if parts:
-        return "\n".join(parts)
-    return first_user_text(messages)
 
 
 async def apply_input_guardrails(

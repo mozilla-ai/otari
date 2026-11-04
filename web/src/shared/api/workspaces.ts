@@ -488,10 +488,17 @@ export function useRemoveWorkspaceMember() {
 export function useSetWorkspaceTraceContent() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+    mutationFn: ({
+      id,
+      ...switches
+    }: {
+      id: string
+      trace_content_enabled?: boolean
+      trace_content_tool_output?: boolean
+    }) =>
       apiFetch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        body: JSON.stringify({ trace_content_enabled: enabled }),
+        body: JSON.stringify(switches),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })

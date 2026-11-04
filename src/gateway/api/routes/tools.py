@@ -145,10 +145,9 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
     # "unavailable" for a deployment that runs code perfectly well.
     sandbox_configured = config.sandbox_configured()
     deployment_searches = web_search_configured(config)
-    can_web_fetch = config.web_fetch_enabled and (
-        fetch_resolves(config, switches.search_policy) if switches.search_policy else True
-    )
-    can_web_search = search_resolves(config, switches.search_policy) if switches.search_policy else deployment_searches
+    policy = switches.search_policy
+    can_web_fetch = config.web_fetch_enabled and (policy is None or fetch_resolves(config, policy))
+    can_web_search = deployment_searches if policy is None else search_resolves(config, policy)
     return [
         ManagedTool(
             id=Tool.WEB_FETCH,

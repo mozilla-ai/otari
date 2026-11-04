@@ -4,16 +4,23 @@ A stored rate is always USD per million of its unit (``input_price_per_million``
 whatever the unit. A published price is not: models.dev and a provider's price
 list write a token price per million and an image price per one, so a reader
 that moves a price into a rate column scales it by ``PRICE_PER``.
+
+The names are models.dev's (``CostUnitV2Values`` in ``packages/core/src/schema-v2.ts``),
+singular, so a v2 price's ``unit`` is a ``PriceUnit`` as the document writes it.
+``request`` is Otari's own and follows the same rule. ``web_search`` is not a unit
+there: it is the ``web_search.price`` field, USD per 1,000 searches.
 """
 
-from typing import Literal, cast, get_args
+from typing import Annotated, Literal, cast, get_args
+
+from pydantic import BeforeValidator
 
 from gateway.types.models_dev import MODELS_DEV_UNITS
 
 PriceUnit = Literal[
-    "tokens",
-    "requests",
-    "images",
+    "token",
+    "request",
+    "image",
     "character",
     "megapixel",
     "second",
@@ -23,12 +30,11 @@ PriceUnit = Literal[
 
 PRICE_UNITS: tuple[PriceUnit, ...] = get_args(PriceUnit)
 
-# How many of the unit one published price buys. ``web_search`` is models.dev's
-# ``web_search.price``, USD per 1,000 searches, and ``requests`` is Otari's own.
+# How many of the unit one published price buys.
 PRICE_PER: dict[PriceUnit, int] = {
-    "tokens": 1_000_000,
-    "requests": 1,
-    "images": 1,
+    "token": 1_000_000,
+    "request": 1,
+    "image": 1,
     "character": 1_000_000,
     "megapixel": 1,
     "second": 1,
@@ -36,13 +42,26 @@ PRICE_PER: dict[PriceUnit, int] = {
     "web_search": 1_000,
 }
 
-# Where Otari's name for a models.dev unit is not the document's.
-_OTARI_NAMES: dict[str, PriceUnit] = {"token": "tokens", "image": "images"}
+# The plural names Otari used before it took models.dev's. Read for one release,
+# from a caller and from a row an older writer stored, and written nowhere.
+RETIRED_UNIT_NAMES: dict[str, PriceUnit] = {"tokens": "token", "requests": "request", "images": "image"}
+
+
+def current_unit_name(value: object) -> object:
+    """``value`` with a retired unit name replaced by its current one, and anything else as given."""
+    if isinstance(value, str):
+        return RETIRED_UNIT_NAMES.get(value, value)
+    return value
+
+
+# A unit as a request body or the config file may still spell it. The schema it
+# publishes is ``PriceUnit``'s, so a generated client learns the current names only.
+AcceptedPriceUnit = Annotated[PriceUnit, BeforeValidator(current_unit_name)]
 
 
 def models_dev_unit(value: str | None) -> PriceUnit | None:
-    """The unit a v2 price's ``unit`` names: ``tokens`` where the document gives none, ``None`` for one not known."""
+    """The unit a v2 price's ``unit`` names: ``token`` where the document gives none, ``None`` for one not known."""
     unit = value or "token"
     if unit not in MODELS_DEV_UNITS:
         return None
-    return _OTARI_NAMES.get(unit) or cast(PriceUnit, unit)
+    return cast(PriceUnit, unit)

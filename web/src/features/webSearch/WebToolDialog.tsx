@@ -243,7 +243,7 @@ export function WebToolDialog({
       input_price_per_million: perMillion,
       // A call is one unit; there is no output side of it to price.
       output_price_per_million: 0,
-      unit: "requests",
+      unit: "request",
     })
 
   const submit = async () => {
@@ -522,8 +522,8 @@ export function WebToolDialog({
                   ]}
                   description={
                     enrichingProvider?.reports_final_url === false
-                      ? `Reads the page for a hit that has no text. ${enrichingProvider.id} ${REDIRECT_WARNING}`
-                      : "Reads the page for a hit that has no text."
+                      ? `With enrichment on, reads the page for a hit that has no text and bills it as a fetch on that tool. ${enrichingProvider.id} ${REDIRECT_WARNING}`
+                      : "With enrichment on, reads the page for a hit that has no text and bills it as a fetch on that tool."
                   }
                 />
               ) : null}

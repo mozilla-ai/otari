@@ -100,15 +100,14 @@ def _country_fragment(gate: CountryGate) -> str:
 class RouterOrdering:
     """What a router backend decided for one request.
 
-    Passed *into* the compiler rather than fetched by it. Routing is asynchronous
-    (an embedding call and a query over stored examples) and the compiler is pure
-    and synchronous on purpose, so the I/O stays in the request pipeline and the
-    ordering arrives as a value. That also means ``explain`` and the tests can
+    Passed *into* the compiler rather than fetched by it. A backend's ``rank`` is
+    asynchronous and the compiler is pure and synchronous on purpose, so that work
+    stays in the request pipeline and the ordering arrives as a value. That also means ``explain`` and the tests can
     simulate a router without one existing.
 
     ``selectors`` is the pool in the router's preferred order, best first. Empty
-    means the router declined, which is a normal outcome (a cold pool, a
-    low-confidence neighborhood) and compiles to the policy's default target.
+    means the router declined, which is a normal outcome (no usable candidate, no
+    weights) and compiles to the policy's default target.
     """
 
     selectors: list[str]
@@ -217,10 +216,9 @@ def selection_consults_router(
     """Whether this request would actually reach the policy's ``router`` entry.
 
     Entries are evaluated in order, so a ``when`` entry ahead of the router wins
-    outright and the router's ranking is discarded. Asking first keeps the caller
-    from paying for a ranking (an embedding call and a scan of the user's stored
-    examples) whose result nothing reads, and keeps the router's decision log line
-    off requests it did not decide.
+    outright and the router's ranking is discarded. Asking first skips a ranking
+    whose result nothing reads, and keeps the router's decision log line off
+    requests it did not decide.
 
     Pure and synchronous like the rest of this module: it reads the same facts
     ``_select_head`` does, so the two cannot disagree about which entry wins.

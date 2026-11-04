@@ -56,11 +56,9 @@ from gateway.api.routes._helpers import (
     country_gate_for,
     country_not_supported,
     missing_credential_error,
-    resolve_user_id,
     with_retry_hint,
 )
 from gateway.api.routes._pipeline import (
-    FUNDS_CHECK_UNAVAILABLE_DETAIL,
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
     _elapsed_ms,
@@ -71,7 +69,6 @@ from gateway.api.routes._pipeline import (
     log_gateway_rejection,
     provider_error_headers,
     provider_failure_detail,
-    rate_limit_headers,
     throttle_early_rejection,
 )
 from gateway.api.routes._unavailable_models import note_unavailable_model
@@ -93,10 +90,17 @@ from gateway.model_labeling import relabel_model
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import NO_TOOLS, BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError
-from gateway.rate_limit import check_rate_limit
+from gateway.rate_limit import check_rate_limit, rate_limit_headers
 from gateway.schemas.inference import DecisionRequest, DecisionResponse
+from gateway.services.api_keys import (
+    API_KEY_NO_USER_DETAIL,
+    API_KEY_VALIDATION_FAILED_DETAIL,
+    MASTER_KEY_USER_REQUIRED_DETAIL,
+    USER_MISMATCH_DETAIL,
+    resolve_user_id,
+)
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
@@ -154,11 +158,10 @@ from gateway.services.providers import (
     serve_on_hosted_provider,
     unpriced_model_refusal,
 )
+from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
-
-PASSTHROUGH_PROVIDER_ERROR_DETAIL = "The request could not be completed by the provider"
 
 
 def resolve_passthrough_user_id(
@@ -175,19 +178,19 @@ def resolve_passthrough_user_id(
         is_master_key=is_master_key,
         master_key_error=HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="When using master key, 'user' field is required in request body",
+            detail=MASTER_KEY_USER_REQUIRED_DETAIL,
         ),
         no_api_key_error=HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key validation failed",
+            detail=API_KEY_VALIDATION_FAILED_DETAIL,
         ),
         no_user_error=HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key has no associated user",
+            detail=API_KEY_NO_USER_DETAIL,
         ),
         forbidden_user_error=HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="'user' field does not match the authenticated API key's user",
+            detail=USER_MISMATCH_DETAIL,
         ),
         reject_mismatch=reject_mismatch,
     )

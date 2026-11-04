@@ -26,7 +26,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
+from gateway.api.routes._helpers import latest_user_text, routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -39,7 +39,6 @@ from gateway.api.routes._pipeline import (
     prepare_gateway_tools,
     provider_error_headers,
     provider_failure_detail,
-    rate_limit_headers,
     resolve_dispatch_provider,
     resolve_request_context,
     run_non_stream,
@@ -108,7 +107,6 @@ __all__ = [
     "ChatCompletionRequest",
     "chat_completions",
     "log_usage",
-    "rate_limit_headers",
     "router",
     "run_chat_completion",
 ]
@@ -120,13 +118,12 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     The completion-param fields are derived from any-llm's ``CompletionParams``
     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
     forwards. Fields below either tighten a derived field (``messages``,
-    ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
-    gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
-    ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-    before the request is forwarded upstream, or restate a derived field
-    unchanged to document it (``max_completion_tokens``), which is only worth
-    doing where the wire contract is not guessable from the field itself.
+    ``response_format``), add gateway-internal behavior (``mcp_servers``,
+    ``mcp_server_ids``, ``guardrails``, ``tools_header``,
+    ``max_tool_iterations``) that is stripped before the request is forwarded
+    upstream, or restate a derived field unchanged to document it
+    (``max_completion_tokens``), which is only worth doing where the wire
+    contract is not guessable from the field itself.
     """
 
     # A field beyond the ones below is set aside here rather than kept on the
@@ -142,21 +139,6 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # any-llm types ``stream`` as ``bool | None``; keep the OpenAI wire contract
     # (a non-nullable boolean defaulting to false) for stable SDK generation.
     stream: bool = False
-    # Part of the OpenAI chat wire contract, but absent from any-llm's
-    # ``CompletionParams``, so derivation cannot supply it and the derived base
-    # (pydantic's default ``extra="ignore"``) dropped a caller's value before the
-    # provider call. Declared here so it survives ``model_dump`` and rides
-    # any-llm's ``**kwargs`` passthrough into the provider request. Left as a
-    # free-form string rather than an enum: the tier vocabulary is
-    # provider-specific ("auto"/"default"/"flex"/"scale"/"priority" on OpenAI,
-    # "auto"/"standard_only" on Anthropic) and grows independently of this
-    # gateway, so the provider is the right place to reject an unknown value.
-    # ``ResponsesParams`` already declares it, so /api/v1/responses never had the gap.
-    #
-    # Stopgap: remove this declaration once ``CompletionParams`` models the param
-    # and the SDK pin is bumped (mozilla-ai/any-llm#1269, tracked in #565). Until
-    # then it also shadows whatever annotation any-llm picks for it.
-    service_tier: str | None = None
     # Redeclared only to carry a description: the field is derived, but the
     # relationship between the two output-cap fields is the whole reason a caller
     # gets a completion instead of a 502, and it is not guessable from the schema.
@@ -638,9 +620,7 @@ async def run_chat_completion(
             user_forbidden_detail=_USER_FORBIDDEN,
             session_principal=session_principal,
             streaming=bool(request.stream),
-            routing_signal=lambda: routing_signal_from_messages(
-                request.messages, raw_request, has_tools=bool(request.tools)
-            ),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             tools=request.tools,
             code_execution_policies=tool_ports.code_execution_policy,

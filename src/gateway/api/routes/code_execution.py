@@ -48,13 +48,10 @@ from gateway.api.deps import (
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._passthrough import resolve_passthrough_user_id
 from gateway.api.routes._pipeline import (
-    FUNDS_CHECK_UNAVAILABLE_DETAIL,
     SANDBOX_UNAVAILABLE_DETAIL,
     SANDBOX_UNREACHABLE_DETAIL,
     _elapsed_ms,
-    _names_end_user,
     log_gateway_rejection,
-    rate_limit_headers,
 )
 from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.database import release_session
@@ -65,14 +62,15 @@ from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import InsufficientFundsError, ToolUse
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError, ToolUse
 from gateway.ports.code_execution_port import (
     SandboxNotReachableError,
     SandboxSessionGoneError,
     SandboxUnavailableError,
 )
-from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
+from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.schemas.tools import CodeExecuteRequest, CodeExecuteResponse, CodeExecutionOutputFile
+from gateway.services.api_keys import names_end_user
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -147,7 +145,7 @@ async def execute_code(
     api_key_id = api_key.id if api_key else None
     budget_exempt = api_key is not None and api_key.exclude_from_budget
 
-    if api_key is not None and request.user and _names_end_user(api_key, request.user):
+    if api_key is not None and request.user and names_end_user(api_key, request.user):
         rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
         end_user = await budget_service.resolve_end_user(
             api_key=api_key,

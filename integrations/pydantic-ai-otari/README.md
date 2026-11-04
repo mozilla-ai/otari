@@ -1,7 +1,7 @@
 # pydantic-ai-otari
 
 Run [Pydantic AI](https://ai.pydantic.dev) agents through
-[Otari](https://github.com/mozilla-ai/otari), the open-source LLM gateway, and get
+[Otari](https://github.com/mozilla-ai/otari), the open-source AI gateway, and get
 its budgets, usage tracking, fallback routing and guardrails on every model call.
 
 ```bash

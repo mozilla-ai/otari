@@ -794,7 +794,7 @@ describe("ActivityPage", () => {
         model_key: "cohere:rerank-v3.5",
         input_price_per_million: 2000,
         output_price_per_million: 0,
-        unit: "requests",
+        unit: "request",
       })
     })
   })

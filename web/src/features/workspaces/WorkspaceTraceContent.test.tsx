@@ -56,6 +56,7 @@ function policy(
 ): TraceContentPolicy {
   return {
     content_available: true,
+    tool_output: false,
     platform_break_glass: false,
     retention_days: 30,
     session_max_age_days: 90,
@@ -114,6 +115,98 @@ describe("WorkspaceTraceContent", () => {
       screen.getByRole("switch", {
         name: "Keep what agent sessions were about",
       }),
+    ).not.toBeChecked()
+  })
+
+  it("says tool output is kept only where the deployment keeps it", async () => {
+    mockApi()
+    const { unmount } = await renderToggle(
+      <WorkspaceTraceContent workspace={workspace()} />,
+    )
+    expect(
+      screen.getByText(/It does not keep what tools return/),
+    ).toBeInTheDocument()
+    unmount()
+
+    await renderToggle(
+      <WorkspaceTraceContent workspace={workspace()} />,
+      true,
+      { tool_output: true },
+    )
+    expect(
+      screen.getByText(/it also keeps what each tool returned/),
+    ).toBeInTheDocument()
+  })
+
+  it("offers a tool output switch only where the deployment keeps tool output", async () => {
+    mockApi()
+    const { unmount } = await renderToggle(
+      <WorkspaceTraceContent
+        workspace={workspace({ trace_content_enabled: true })}
+      />,
+    )
+    expect(
+      screen.queryByRole("switch", { name: "Keep what tools returned" }),
+    ).not.toBeInTheDocument()
+    unmount()
+
+    await renderToggle(
+      <WorkspaceTraceContent
+        workspace={workspace({ trace_content_enabled: true })}
+      />,
+      true,
+      { tool_output: true },
+    )
+    expect(
+      screen.getByRole("switch", { name: "Keep what tools returned" }),
+    ).toBeChecked()
+  })
+
+  it("asks before turning tool output off, then turns it off", async () => {
+    const sent = mockApi()
+    await renderToggle(
+      <WorkspaceTraceContent
+        workspace={workspace({ trace_content_enabled: true })}
+      />,
+      true,
+      { tool_output: true },
+    )
+
+    await userEvent.click(
+      screen.getByRole("switch", { name: "Keep what tools returned" }),
+    )
+    expect(sent).toEqual([])
+    await userEvent.click(
+      screen.getByRole("button", { name: "Stop keeping tool output" }),
+    )
+
+    expect(sent).toEqual([
+      {
+        url: `${API_ROOT}/workspaces/${workspace().id}`,
+        method: "PATCH",
+        body: { trace_content_tool_output: false },
+      },
+    ])
+  })
+
+  it("says no tool output is kept where the workspace turned it off", async () => {
+    mockApi()
+    await renderToggle(
+      <WorkspaceTraceContent
+        workspace={workspace({
+          trace_content_enabled: true,
+          trace_content_tool_output: false,
+        })}
+      />,
+      true,
+      { tool_output: true },
+    )
+
+    expect(
+      screen.getByText(/It does not keep what tools return/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("switch", { name: "Keep what tools returned" }),
     ).not.toBeChecked()
   })
 

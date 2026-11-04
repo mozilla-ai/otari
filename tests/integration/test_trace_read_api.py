@@ -831,6 +831,28 @@ def test_a_workspace_keeps_no_content_until_its_managers_turn_it_on(
         assert barrier is not None and barrier.generation == 2
 
 
+def test_a_workspace_turns_tool_output_off_for_itself_and_ends_the_generation(
+    client: TestClient, world: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    workspace_id = _workspace_id(db_session_factory, "One")
+
+    shown = _as(client, world["admin"], "GET", f"/workspaces/{workspace_id}")
+    assert shown.json()["trace_content_tool_output"] is True
+    refused = _as(
+        client, world["member"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_tool_output": False}
+    )
+    assert refused.status_code == status.HTTP_403_FORBIDDEN
+    turned_off = _as(
+        client, world["admin"], "PATCH", f"/workspaces/{workspace_id}", json={"trace_content_tool_output": False}
+    )
+    assert turned_off.status_code == status.HTTP_200_OK, turned_off.text
+    assert turned_off.json()["trace_content_tool_output"] is False
+    # Tool output already captured on the old generation is never stored.
+    with db_session_factory() as session:
+        barrier = session.get(TraceContentBarrier, workspace_id)
+        assert barrier is not None and barrier.generation == 2
+
+
 def test_a_workspaces_managers_delete_its_stored_content_and_keep_its_sessions(
     client: TestClient,
     world: dict[str, str],
@@ -873,6 +895,7 @@ def test_the_content_policy_says_whether_the_deployment_keeps_content_and_only_t
     policy = _as(client, world["member"], "GET", path).json()
     assert policy == {
         "content_available": False,
+        "tool_output": False,
         "platform_break_glass": False,
         "retention_days": config.trace_retention_days,
         "session_max_age_days": config.trace_session_max_age_days,
@@ -882,8 +905,12 @@ def test_the_content_policy_says_whether_the_deployment_keeps_content_and_only_t
     monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
     # Allowed, but with no key to seal it with nothing would be kept, so a workspace is not offered it.
     assert _as(client, world["member"], "GET", path).json()["content_available"] is False
+    monkeypatch.setattr(config, "trace_content_tool_output", True)
+    assert _as(client, world["member"], "GET", path).json()["tool_output"] is False
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    assert _as(client, world["member"], "GET", path).json()["content_available"] is True
+    policy = _as(client, world["member"], "GET", path).json()
+    assert policy["content_available"] is True
+    assert policy["tool_output"] is True
 
 
 def test_a_share_records_a_polling_reader_once_and_pages_a_long_history(

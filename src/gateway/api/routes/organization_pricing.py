@@ -45,7 +45,7 @@ from gateway.services.organization_pricing_service import (
     PricingOverrideInput,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.types.price_unit import PriceUnit
+from gateway.types.price_unit import AcceptedPriceUnit
 
 # Master key on the router, as every management router declares it.
 # The role gate is a separate question answered in the service: the credential
@@ -86,7 +86,7 @@ class OrganizationModelPricingRates(BaseModel):
         ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
     )
     output_price_per_million: float = Field(
-        ge=0, description="Price per 1M output tokens; unused by a rate in requests or images"
+        ge=0, description="Price per 1M output tokens; unused by a rate per request or per image"
     )
     cache_read_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cached-input tokens"
@@ -100,13 +100,13 @@ class OrganizationModelPricingRates(BaseModel):
     )
     effective_from: datetime | None = Field(default=None, description=_EFFECTIVE_FROM_DESCRIPTION)
     effective_to: datetime | None = Field(default=None, description=_EFFECTIVE_TO_DESCRIPTION)
-    unit: PriceUnit = Field(
-        default="tokens",
+    unit: AcceptedPriceUnit = Field(
+        default="token",
         description=(
-            "What the rates are per: tokens for a model, requests or images for a non-token endpoint. "
-            "A completion model priced per requests is charged one request per successful call."
+            "What the rates are per: token for a model, request or image for a non-token endpoint. "
+            "A completion model priced per request is charged one request per successful call."
             " Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored "
-            "and prices nothing."
+            "and prices nothing. The plural names tokens, requests and images are still read for one release."
         ),
     )
 
@@ -199,7 +199,7 @@ class OrganizationModelPricingPublic(BaseModel):
             cache_read_price_per_million=as_float(override.cache_read_price_per_million),
             cache_write_price_per_million=as_float(override.cache_write_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
-            unit=override.unit or "tokens",
+            unit=override.unit or "token",
             effective_from=override.effective_from,
             effective_to=override.effective_to,
             created_at=override.created_at,

@@ -30,6 +30,9 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Protocol
 
+# What a caller is told when the billing port cannot say whether an organization's funds cover a request.
+FUNDS_CHECK_UNAVAILABLE_DETAIL = "This organization's funds could not be checked. Retry later."
+
 
 @dataclass(frozen=True)
 class BilledModel:

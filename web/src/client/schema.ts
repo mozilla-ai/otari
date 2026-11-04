@@ -2092,6 +2092,31 @@ export interface paths {
         patch: operations["hosted-providers-update_hosted_model"];
         trace?: never;
     };
+    "/api/v1/images/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Image
+         * @description OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and names an existing user.
+         *     - API key: usage and spend go to the key's own user. A ``user`` naming a
+         *       different user is refused with 403, or ignored when mismatch rejection is off.
+         */
+        post: operations["images-edit_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/images/generations": {
         parameters: {
             query?: never;
@@ -5322,7 +5347,7 @@ export interface paths {
          * Create Rerank
          * @description Rerank documents by relevance to a query.
          *
-         *     Billing: a model priced per request (``unit: requests``) is charged per
+         *     Billing: a model priced per request (``unit: request``) is charged per
          *     search unit the provider reports, or for one unit when it reports none. A
          *     model priced per token is charged on the input tokens the provider reports.
          *
@@ -5360,57 +5385,6 @@ export interface paths {
          *     web_search.
          */
         post: operations["responses-create_response"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/routing/me/preferences/rank": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rank Own Candidates
-         * @description Record scored examples into the calling key's own routing memory.
-         *
-         *     The memory is the key's user's in the key's workspace, the pool that key's
-         *     requests vote over; nothing in the body can name another. Validation, storage
-         *     and the response are those of ``POST /api/v1/routing/preferences/rank``.
-         *
-         *     Each call counts against the user's request rate limit, and is refused (403)
-         *     when the router's embedding provider does not serve the caller's country,
-         *     because embedding an example sends its prompt there.
-         */
-        post: operations["routing-rank_own_candidates"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/routing/me/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Own Routing Memory Status
-         * @description Report how warm the calling key's own routing memory is, per pool.
-         *
-         *     The same report as ``GET /api/v1/routing/status``, for the key's user in the
-         *     key's workspace.
-         */
-        get: operations["routing-own_routing_memory_status"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5491,40 +5465,6 @@ export interface paths {
          * @description Delete a stored policy in one scope.
          */
         delete: operations["routing-delete_policy"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/routing/preferences/rank": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rank Candidates
-         * @description Record scored examples: one routing-memory record each, plus an audit row.
-         *
-         *     The routing-memory record is written before its audit row for each example,
-         *     because it is the load-bearing one (the router votes over it) and embedding it
-         *     can fail; writing the audit row only afterwards means a failed embedding never
-         *     leaves an orphan audit row.
-         *
-         *     A failed embedding is a 502 that names the model, not a 500. Every example in
-         *     the batch is embedded, so this is the call an operator makes most often and the
-         *     one most likely to meet a misconfigured ``router_embedding_model``.
-         *
-         *     Score keys are stored canonically as ``instance:model`` (see
-         *     :func:`_validated_scores`), which is the form the router canonicalizes its
-         *     candidates to, so how a policy spells a candidate cannot decide whether it
-         *     matches.
-         */
-        post: operations["routing-rank_candidates"];
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5617,33 +5557,6 @@ export interface paths {
          *     provider and the API base stay the same.
          */
         patch: operations["agent-recommenders-update_agent_recommender"];
-        trace?: never;
-    };
-    "/api/v1/routing/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Routing Memory Status
-         * @description Report how warm one user's routing memory is in one workspace, per pool.
-         *
-         *     ``user_id`` is required rather than optional because there is no aggregate
-         *     answer: warmth is per user, and a total across users would describe a pool
-         *     that no request ever votes over. The same holds across workspaces, which is
-         *     why ``workspace_id`` narrows rather than aggregating; it merely defaults
-         *     instead of being required, because a single-workspace deployment has one
-         *     answer.
-         */
-        get: operations["routing-routing_memory_status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/scoped-budgets": {
@@ -6923,9 +6836,9 @@ export interface paths {
         head?: never;
         /**
          * Update Workspace
-         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.
          *
-         *     Turning content off keeps nothing new from the next export on; what is already
+         *     Turning either off keeps nothing new of it from the next export on; what is already
          *     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
          */
         patch: operations["workspaces-update_workspace"];
@@ -8793,40 +8706,6 @@ export interface components {
             /** Data */
             data: components["schemas"]["BlockedEmailPublic"][];
         };
-        /** Body_audio-create_transcription */
-        "Body_audio-create_transcription": {
-            /** File */
-            file: string;
-            /** Language */
-            language?: string | null;
-            /** Model */
-            model: string;
-            /** Prompt */
-            prompt?: string | null;
-            /** Response Format */
-            response_format?: string | null;
-            /** Temperature */
-            temperature?: number | null;
-            /** User */
-            user?: string | null;
-        };
-        /** Body_files-create_file */
-        "Body_files-create_file": {
-            /** File */
-            file: string;
-            /**
-             * Purpose
-             * @default user_data
-             */
-            purpose: string;
-            /** User */
-            user?: string | null;
-        };
-        /** Body_playground-upload_playground_file */
-        "Body_playground-upload_playground_file": {
-            /** File */
-            file: string;
-        };
         /**
          * BreakGlassCreate
          * @description Why you are opening a session's content without its owner's share. Recorded with the opening.
@@ -9550,7 +9429,7 @@ export interface components {
              * Endpoints
              * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
              */
-            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
+            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/images/edits" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /**
@@ -9659,13 +9538,12 @@ export interface components {
          *     The completion-param fields are derived from any-llm's ``CompletionParams``
          *     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
          *     forwards. Fields below either tighten a derived field (``messages``,
-         *     ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-         *     not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
-         *     gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
-         *     ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-         *     before the request is forwarded upstream, or restate a derived field
-         *     unchanged to document it (``max_completion_tokens``), which is only worth
-         *     doing where the wire contract is not guessable from the field itself.
+         *     ``response_format``), add gateway-internal behavior (``mcp_servers``,
+         *     ``mcp_server_ids``, ``guardrails``, ``tools_header``,
+         *     ``max_tool_iterations``) that is stripped before the request is forwarded
+         *     upstream, or restate a derived field unchanged to document it
+         *     (``max_completion_tokens``), which is only worth doing where the wire
+         *     contract is not guessable from the field itself.
          */
         ChatCompletionRequest: {
             /** Frequency Penalty */
@@ -11395,7 +11273,7 @@ export interface components {
             router_candidates?: string[];
             /**
              * Router Weights
-             * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.
+             * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so it is knowable here: the plan above is the real ordering by share, not the decline path.
              */
             router_weights?: {
                 [key: string]: number;
@@ -12358,7 +12236,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
+            unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelPublic
@@ -12434,7 +12312,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
+            unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelsPublic
@@ -13005,14 +12883,6 @@ export interface components {
              */
             workspace_id: string;
         };
-        /** KeyRankRequest */
-        KeyRankRequest: {
-            /**
-             * Examples
-             * @description The scored prompts to record.
-             */
-            examples: components["schemas"]["ScoredExample"][];
-        };
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.
@@ -13064,24 +12934,6 @@ export interface components {
              * Name
              * @description Human-friendly display name.
              */
-            name: string;
-        };
-        /**
-         * LearnedPolicy
-         * @description A policy whose selection depends on routing memory, for the status overview.
-         *
-         *     Only a *learned* policy belongs here. A weighted policy names a router too, but
-         *     its split is written in the policy document, so listing it under a warmth report
-         *     would tie it to a pool it never reads.
-         */
-        LearnedPolicy: {
-            /** Backend */
-            backend: string;
-            /** Candidates */
-            candidates: string[];
-            /** Default Target */
-            default_target: string;
-            /** Name */
             name: string;
         };
         /**
@@ -13714,10 +13566,10 @@ export interface components {
             })[];
             /**
              * Unit
-             * @default tokens
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * ModerationRequest
@@ -14038,8 +13890,8 @@ export interface components {
          *     ``deployment`` for the deployment's own price list, and None when nothing
          *     prices the model yet. ``pricing_id`` names the organization's own row where
          *     there is one, so a client can edit that rate without re-deriving the key.
-         *     ``unit`` says what the rates are per, as on a pricing row: tokens, requests
-         *     or images, so a per-request rate is not read as a per-token one.
+         *     ``unit`` says what the rates are per, as on a pricing row: token, request
+         *     or image, so a per-request rate is not read as a per-token one.
          */
         OrgProviderKeyModelPublic: {
             /** Cache Read Price Per Million */
@@ -14075,10 +13927,10 @@ export interface components {
             pricing_id?: string | null;
             /**
              * Unit
-             * @default tokens
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
             /** Updated At */
             updated_at?: string | null;
         };
@@ -15046,7 +14898,7 @@ export interface components {
             model_key: string;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens; unused by a rate in requests or images
+             * @description Price per 1M output tokens; unused by a rate per request or per image
              */
             output_price_per_million: number;
             /**
@@ -15056,11 +14908,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
-             * @default tokens
+             * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingPublic
@@ -15165,7 +15017,7 @@ export interface components {
             input_price_per_million: number;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens; unused by a rate in requests or images
+             * @description Price per 1M output tokens; unused by a rate per request or per image
              */
             output_price_per_million: number;
             /**
@@ -15175,11 +15027,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
-             * @default tokens
+             * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingsPublic
@@ -15946,13 +15798,6 @@ export interface components {
             /** Workspace Id */
             workspace_id?: string | null;
         };
-        /** PoolStatus */
-        PoolStatus: {
-            /** Records */
-            records: number;
-            /** Warm */
-            warm: boolean;
-        };
         /**
          * PricingDriftRow
          * @description A stored deployment rate beside the default it shadows.
@@ -16071,14 +15916,14 @@ export interface components {
             output_price_per_million: number;
             /**
              * Price Per Request
-             * @description USD for each request, for a rate in requests; null for any other unit.
+             * @description USD for each request, for a rate per request; null for any other unit.
              */
             price_per_request?: number | null;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
             /**
              * Unit
-             * @description What the rates are per: tokens, requests, or images.
+             * @description What the rates are per: token for a model, request or image for a non-token endpoint.
              */
             unit: string;
             /** Updated At */
@@ -16406,33 +16251,6 @@ export interface components {
             /** Providers */
             providers: components["schemas"]["ProviderInfoSchema"][];
         };
-        /** RankRequest */
-        RankRequest: {
-            /**
-             * Examples
-             * @description The scored prompts to record.
-             */
-            examples: components["schemas"]["ScoredExample"][];
-            /**
-             * User Id
-             * @description Whose routing memory these examples belong to.
-             */
-            user_id: string;
-            /**
-             * Workspace Id
-             * @description Which workspace's routing memory these examples belong to. Omit for the deployment's default workspace. Only requests billing to that workspace vote over them.
-             */
-            workspace_id?: string | null;
-        };
-        /** RankResponse */
-        RankResponse: {
-            /** Pools */
-            pools: components["schemas"]["RecordedPool"][];
-            /** Recorded */
-            recorded: number;
-            /** Seed Count */
-            seed_count: number;
-        };
         /**
          * RateLimitRuleCreate
          * @description A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.
@@ -16648,18 +16466,6 @@ export interface components {
              * @description Why the request was refused.
              */
             detail: string;
-        };
-        /**
-         * RecordedPool
-         * @description How warm one pool is after the write.
-         */
-        RecordedPool: {
-            /** Records */
-            records: number;
-            /** Task Id */
-            task_id: string | null;
-            /** Warm */
-            warm: boolean;
         };
         /**
          * ReencryptSearchToolsResponse
@@ -17078,42 +16884,6 @@ export interface components {
             master_key: string;
         };
         /**
-         * RouterStatus
-         * @description How warm this user's routing memory is, and what depends on it.
-         *
-         *     Routing memory has no single warmth: it is a set of independent pools.
-         *     ``default_pool`` is what a request with no ``Otari-Router-Task`` header votes
-         *     over (every record the user has in this workspace, labeled or not) and
-         *     ``tasks`` lists each partition, which only requests carrying that label use.
-         *     Each crosses ``seed_count`` on its own.
-         */
-        RouterStatus: {
-            /** Alpha */
-            alpha: number;
-            /** Confidence Floor */
-            confidence_floor: number;
-            default_pool: components["schemas"]["PoolStatus"];
-            /** Embedding Model */
-            embedding_model: string;
-            /** Granularity */
-            granularity: string;
-            /** K */
-            k: number;
-            /** Policies */
-            policies: components["schemas"]["LearnedPolicy"][];
-            /** Seed Count */
-            seed_count: number;
-            /** Tasks */
-            tasks: components["schemas"]["TaskPool"][];
-            /** User Id */
-            user_id: string;
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-        };
-        /**
          * SandboxCredentialPublic
          * @description Where the key a hosted sandbox provider leases with comes from. Never the key itself.
          */
@@ -17232,35 +17002,6 @@ export interface components {
             type: "score";
         } & {
             [key: string]: unknown;
-        };
-        /**
-         * ScoredExample
-         * @description One prompt and how well each candidate answered it.
-         */
-        ScoredExample: {
-            /**
-             * Label Source
-             * @description Provenance of the scores: 'human' or 'judge'.
-             * @default human
-             */
-            label_source: string;
-            /**
-             * Prompt
-             * @description The prompt that was tried.
-             */
-            prompt: string;
-            /**
-             * Scores
-             * @description Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and meaningful: two models that both answered well is exactly the case where the router should take the cheaper one.
-             */
-            scores: {
-                [key: string]: number;
-            };
-            /**
-             * Task Id
-             * @description Partition this example belongs to, matching the Otari-Router-Task header requests send. Omit to file it in the user's default pool.
-             */
-            task_id?: string | null;
         };
         /**
          * SearchProviderOptionSchema
@@ -17741,12 +17482,12 @@ export interface components {
             model_key: string;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens; unused by a rate in requests or images
+             * @description Price per 1M output tokens; unused by a rate per request or per image
              */
             output_price_per_million?: number;
             /**
              * Price Per Request
-             * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.
+             * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'request' with input_price_per_million at a million times this; not combined with token prices.
              */
             price_per_request?: number | null;
             /**
@@ -17756,11 +17497,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
-             * @default tokens
+             * @description What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * SignupRequest
@@ -17826,7 +17567,7 @@ export interface components {
             cache_write_tokens: number | null;
             /**
              * Content
-             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, tool.output), only where the workspace keeps content, the client sent it or Otari ran the tool that produced it, and the reader may open it. Empty otherwise.
              */
             content: {
                 [key: string]: string;
@@ -18018,15 +17759,6 @@ export interface components {
              * Format: uuid
              */
             organization_id: string;
-        };
-        /** TaskPool */
-        TaskPool: {
-            /** Records */
-            records: number;
-            /** Task Id */
-            task_id: string;
-            /** Warm */
-            warm: boolean;
         };
         /**
          * TestServiceRequest
@@ -18315,6 +18047,11 @@ export interface components {
              * @description Days after it started that a session is deleted, however active it still is.
              */
             session_max_age_days: number;
+            /**
+             * Tool Output
+             * @description Whether content also keeps what each tool returned, on a request routed through the gateway. Never true where content_available is false.
+             */
+            tool_output: boolean;
         };
         /** TraceCountPublic */
         TraceCountPublic: {
@@ -19981,6 +19718,12 @@ export interface components {
              * @default false
              */
             trace_content_enabled: boolean;
+            /**
+             * Trace Content Tool Output
+             * @description Whether this workspace also keeps what each tool returned, where it keeps content and the deployment keeps tool output.
+             * @default true
+             */
+            trace_content_tool_output: boolean;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -19995,6 +19738,11 @@ export interface components {
              * @description Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.
              */
             trace_content_enabled?: boolean | null;
+            /**
+             * Trace Content Tool Output
+             * @description Also keep what each tool returned, where this workspace keeps content and the deployment keeps tool output. Turning it off keeps none from the next request on, whatever the deployment allows.
+             */
+            trace_content_tool_output?: boolean | null;
         };
         /**
          * WorkspaceWebSearchConfigPublic
@@ -20742,7 +20490,22 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_audio-create_transcription"];
+                "multipart/form-data": {
+                    /** File */
+                    file: string;
+                    /** Language */
+                    language?: string | null;
+                    /** Model */
+                    model: string;
+                    /** Prompt */
+                    prompt?: string | null;
+                    /** Response Format */
+                    response_format?: string | null;
+                    /** Temperature */
+                    temperature?: number | null;
+                    /** User */
+                    user?: string | null;
+                };
             };
         };
         responses: {
@@ -20754,6 +20517,13 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description The audio upload exceeds the maximum request size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -22510,7 +22280,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_files-create_file"];
+                "multipart/form-data": {
+                    /** File */
+                    file: string;
+                    /**
+                     * Purpose
+                     * @default user_data
+                     */
+                    purpose?: string;
+                    /** User */
+                    user?: string | null;
+                };
             };
         };
         responses: {
@@ -22522,6 +22302,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OpenAIFileObject"] | components["schemas"]["AnthropicFileMetadata"];
                 };
+            };
+            /** @description The upload exceeds the configured maximum size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -23414,6 +23201,65 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "images-edit_image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description The image or images to edit. */
+                    image?: string[];
+                    /** @description Same as image. */
+                    "image[]"?: string[];
+                    /** @description Where to edit: the transparent areas of this PNG. */
+                    mask?: string;
+                    /** Model */
+                    model: string;
+                    /** N */
+                    n?: number | null;
+                    /** Prompt */
+                    prompt: string;
+                    /** Quality */
+                    quality?: string | null;
+                    /** Response Format */
+                    response_format?: string | null;
+                    /** Size */
+                    size?: string | null;
+                    /** User */
+                    user?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description The upload is larger than 50 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A required field is missing, or a field is the wrong type. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -28461,7 +28307,10 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_playground-upload_playground_file"];
+                "multipart/form-data": {
+                    /** File */
+                    file: string;
+                };
             };
         };
         responses: {
@@ -28473,6 +28322,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OpenAIFileObject"];
                 };
+            };
+            /** @description The upload exceeds the configured maximum size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -29334,59 +29190,6 @@ export interface operations {
             };
         };
     };
-    "routing-rank_own_candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KeyRankRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RankResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "routing-own_routing_memory_status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RouterStatus"];
-                };
-            };
-        };
-    };
     "routing-list_policies": {
         parameters: {
             query?: {
@@ -29507,39 +29310,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "routing-rank_candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RankRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RankResponse"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -29698,40 +29468,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRecommenderPublic"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "routing-routing_memory_status": {
-        parameters: {
-            query: {
-                /** @description Whose routing memory to report on. */
-                user_id: string;
-                /** @description Which workspace's routing memory to report on. Omit for the default workspace. */
-                workspace_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RouterStatus"];
                 };
             };
             /** @description Validation Error */

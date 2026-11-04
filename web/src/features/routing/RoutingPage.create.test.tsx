@@ -117,9 +117,6 @@ describe("Creating a routing policy", () => {
     ]) {
       expect(dialog().getByRole("radio", { name: choice })).toBeInTheDocument()
     }
-    expect(
-      dialog().queryByRole("radio", { name: "Smart router" }),
-    ).not.toBeInTheDocument()
     expect(dialog().getByRole("radio", { name: "Fallback" })).toBeChecked()
     expect(
       dialog().getByText(/backups tried in order when it fails/),
