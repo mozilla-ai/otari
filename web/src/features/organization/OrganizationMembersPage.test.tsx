@@ -385,6 +385,35 @@ describe("OrganizationMembersPage", () => {
     ).toBeNull()
   })
 
+  it("does not lock an owner as the last one when another is on a different page", async () => {
+    // Operator is on page 1; page 2 holds one more owner and no other.
+    const filler = Array.from({ length: 24 }, (_, index) =>
+      organizationMember({
+        organization_member_id: `member-${index}`,
+        user_id: `user-${index}`,
+        full_name: `Member ${String(index).padStart(2, "0")}`,
+      }),
+    )
+    const second = organizationMember({
+      organization_member_id: "second-owner",
+      user_id: "second-owner-user",
+      full_name: "Second Owner",
+      role: "owner",
+    })
+    mockApi({ members: [OWNER, ...filler, second] })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationMembersPage />)
+    await screen.findByText("Operator")
+
+    await user.click(screen.getByRole("button", { name: "Next page, members" }))
+    await screen.findByText("Second Owner")
+    const owner = rowFor("Second Owner")
+    expect(within(owner).getByLabelText(/^Role for Second Owner/)).toBeEnabled()
+    expect(
+      within(owner).queryByLabelText(/This is the last active owner/),
+    ).toBeNull()
+  })
+
   it("suspends a member rather than deleting them, and says so", async () => {
     const requests = mockApi({ members: [OWNER, ANALYST] })
     const user = userEvent.setup()

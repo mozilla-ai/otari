@@ -907,9 +907,15 @@ export function OrganizationMembersPage() {
   const budgets = isOperator ? deploymentBudgets : organizationBudgets
 
   const rows = useMemo(() => members.data?.data ?? [], [members.data])
-  // A searched page holds only the owners who matched, so it cannot say who
-  // the last one is; that is left to the server while a term is applied.
-  const ownersInView = search.term ? undefined : rows
+  // Only a page holding the whole roster can say who the last owner is: not a
+  // searched one, not a previous term's rows held while the next are asked
+  // for, and not one page of several. Otherwise that is left to the server.
+  const ownersInView =
+    !search.term &&
+    !members.isPlaceholderData &&
+    members.data?.count === rows.length
+      ? rows
+      : undefined
 
   // Removing the last member on a page leaves it empty while earlier pages
   // still hold rows. Adjusted during render, the way `TablePagination` adjusts
@@ -1376,10 +1382,7 @@ export function OrganizationMembersPage() {
           placeholder="Search by name or email"
           value={search.value}
           maxLength={SEARCH_MAX_LENGTH}
-          onChange={(next) => {
-            search.onChange(next)
-            setPage(0)
-          }}
+          onChange={search.onChange}
           // Not a previous term's total, held as placeholder data while the
           // new one is asked for.
           resultCount={

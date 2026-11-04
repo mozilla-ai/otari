@@ -131,8 +131,9 @@ export function activeOwnerCount(
  * sentence so the disabled control says why rather than just refusing.
  *
  * `members` is undefined when the caller cannot see every owner, as under a
- * search; the last-owner rule is then left to the server rather than read off
- * a subset, where it would lock an owner who is not the last.
+ * search or on one page of several; the last-owner rule is then left to the
+ * server rather than read off a subset, where it would lock an owner who is
+ * not the last.
  */
 export function membershipChangeBlockedReason({
   member,
