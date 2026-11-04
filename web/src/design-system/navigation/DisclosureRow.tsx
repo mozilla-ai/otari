@@ -20,17 +20,32 @@ export function DisclosureRow({
   trailing,
   isOpen,
   onToggle,
+  chevronPlacement = "end",
   children,
 }: {
   label: ReactNode
   help?: ReactNode
-  /** A count or a status, to the left of the chevron. */
+  /** A count or a status, at the row's end. */
   trailing?: ReactNode
   isOpen: boolean
   onToggle: () => void
+  /**
+   * `start` puts the chevron before the label, as a tree does, for a row whose
+   * panel holds rows like the ones around it: the open state then reads where
+   * the eye starts the row rather than at its far end.
+   */
+  chevronPlacement?: "start" | "end"
   children: ReactNode
 }) {
   const panelId = useId()
+  const chevron = (
+    <FiChevronRight
+      aria-hidden="true"
+      className={`h-4 w-4 shrink-0 text-subtle transition-transform duration-150 ease-out motion-reduce:transition-none ${
+        isOpen ? "rotate-90" : ""
+      }`}
+    />
+  )
   return (
     <>
       <button
@@ -38,8 +53,11 @@ export function DisclosureRow({
         aria-expanded={isOpen}
         aria-controls={panelId}
         onClick={onToggle}
-        className="flex min-h-11 w-full items-center gap-6 px-4 py-3 text-left transition-colors duration-150 ease-out hover:bg-surface-subtle focus-visible:otari-focus-ring motion-reduce:transition-none"
+        className={`flex min-h-11 w-full items-center px-4 py-3 text-left transition-colors duration-150 ease-out hover:bg-surface-subtle focus-visible:otari-focus-ring motion-reduce:transition-none ${
+          chevronPlacement === "start" ? "gap-2" : "gap-6"
+        }`}
       >
+        {chevronPlacement === "start" ? chevron : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-emphasis">{label}</span>
           {help ? (
@@ -48,12 +66,7 @@ export function DisclosureRow({
         </span>
         <span className="flex shrink-0 items-center gap-3">
           {trailing}
-          <FiChevronRight
-            aria-hidden="true"
-            className={`h-4 w-4 text-subtle transition-transform duration-150 ease-out motion-reduce:transition-none ${
-              isOpen ? "rotate-90" : ""
-            }`}
-          />
+          {chevronPlacement === "end" ? chevron : null}
         </span>
       </button>
       {/* Rendered whether or not it is open, so `aria-controls` above always

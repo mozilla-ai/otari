@@ -125,12 +125,15 @@ from gateway.services.providers import (
     hosted_implementation,
     load_hosted_names_at_startup,
     load_provider_endpoints_at_startup,
+    load_workspace_hosted_access_at_startup,
     refuse_unsafe_configured_endpoints,
     reset_hosted_name_index,
     reset_provider_endpoint_cache,
+    reset_workspace_hosted_access_cache,
     run_catalog_updater,
     run_hosted_name_refresher,
     run_provider_endpoint_refresher,
+    run_workspace_hosted_access_refresher,
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
 from gateway.services.routing import (
@@ -512,6 +515,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         "provider endpoint",
         lambda _config, _container: run_provider_endpoint_refresher(),
         reset_provider_endpoint_cache,
+    ),
+    _LifespanWorker(
+        "workspace hosted provider access",
+        lambda _config, _container: run_workspace_hosted_access_refresher(),
+        reset_workspace_hosted_access_cache,
     ),
     _LifespanWorker(
         "hosted provider name", lambda config, _container: run_hosted_name_refresher(config), reset_hosted_name_index
@@ -1009,6 +1017,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # vendor handshake.
         await load_guardrail_runner_at_startup()
         await load_provider_endpoints_at_startup()
+        await load_workspace_hosted_access_at_startup()
         await load_stored_country_database_at_startup(config)
         if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
             await load_sandbox_credentials_at_startup(config.effective_sandbox_provider())

@@ -35,6 +35,7 @@ import type {
   WorkspaceActivation,
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
+  WorkspaceHostedProvider,
   WorkspaceMcpServer,
   WorkspaceMcpServerHealth,
   WorkspaceMember,
@@ -790,6 +791,24 @@ export function workspaceProviderKeyOverride(
     usable: true,
     // Empty is the answer "every model this key serves", never "no model".
     allowed_models: [],
+    zero_data_retention: false,
+    ...overrides,
+  }
+}
+
+export function workspaceHostedProvider(
+  overrides: Partial<WorkspaceHostedProvider> = {},
+): WorkspaceHostedProvider {
+  return {
+    provider: "gemini",
+    // Full inheritance, which is every workspace's state until an admin
+    // changes it: on, every model, nothing stored.
+    enabled: true,
+    models: null,
+    customized: false,
+    served_models: ["gemini-2.5-flash", "gemini-2.5-pro"],
+    served_by_own_key: false,
+    zero_data_retention: false,
     ...overrides,
   }
 }

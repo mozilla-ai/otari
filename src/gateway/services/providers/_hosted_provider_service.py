@@ -96,7 +96,11 @@ from gateway.services.providers._hosted_credentials import (
     reencrypted,
     unmask_api_base,
 )
-from gateway.services.providers._hosted_name_index import forget_hosted_name, remember_hosted_name
+from gateway.services.providers._hosted_name_index import (
+    forget_hosted_name,
+    remember_hosted_name,
+    remember_hosted_zero_data_retention,
+)
 from gateway.services.providers._hosted_offers import HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
 from gateway.services.providers._hosted_sources import HostedSource, HostedSources
@@ -261,6 +265,7 @@ class HostedProviderService:
                 shadows_config=shadows_config,
             )
         remember_hosted_name(name, implementation)
+        remember_hosted_zero_data_retention(name, row.zero_data_retention)
         return public
 
     async def update_provider(self, provider: str, request: HostedProviderUpdateRequest) -> HostedProviderPublic:
@@ -329,6 +334,7 @@ class HostedProviderService:
                 row.supported_countries = request.supported_countries
             await self.providers.save(row)
             public = self._public(source)
+        remember_hosted_zero_data_retention(row.name, row.zero_data_retention)
         # The cached listing was made on what this request may just have changed.
         get_model_cache().clear(row.name)
         return public
@@ -350,10 +356,12 @@ class HostedProviderService:
                 await self.models.delete_for_provider(name)
             await self.providers.delete_row(row)
         forget_hosted_name(name)
+        remember_hosted_zero_data_retention(name, False)
         if source.shadows_config:
             # The configuration entry of the same name serves again, as its own implementation.
             entry = self.sources.entries()[name]
             remember_hosted_name(name, entry.provider)
+            remember_hosted_zero_data_retention(name, entry.zero_data_retention)
         get_model_cache().clear(name)
 
     async def list_models(self, provider: str, *, skip: int = 0, limit: int = 500) -> HostedModelsPublic:

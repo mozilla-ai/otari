@@ -35,7 +35,12 @@ from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
 from gateway.services.catalog import dated_builds
 from gateway.services.provider_kwargs import reaches_organization_key, split_selector
-from gateway.services.tenancy.org_provider_key_service import cached_org_key_offer, cached_org_model_restriction
+from gateway.services.tenancy.org_provider_key_service import (
+    cached_org_key_offer,
+    cached_org_key_zero_data_retention,
+    cached_org_model_restriction,
+    cached_org_provider_kwargs,
+)
 
 
 def effective_allowlist(api_key: APIKey | None, user: User | None = None) -> list[str] | None:
@@ -423,8 +428,30 @@ def organization_key_refusal(
     hosted provider reaches an organization key (``reaches_organization_key``),
     so only it is subject to that key's allow-list; a request with no
     workspace has no organization key to ask about.
+
+    A workspace requiring zero data retention also refuses a configured
+    instance, which cannot be declared, and a key that is not declared. A
+    hosted provider is held to it where its credential is resolved.
     """
-    if workspace_id is None or not reaches_organization_key(config, instance):
+    if workspace_id is None:
+        return None
+    # Imported here: the providers package imports this module through model discovery.
+    from gateway.services.providers import workspace_requires_zero_data_retention
+
+    if workspace_requires_zero_data_retention(workspace_id) and (
+        instance in config.providers
+        or (
+            reaches_organization_key(config, instance)
+            and cached_org_provider_kwargs(workspace_id, provider) is not None
+            and not cached_org_key_zero_data_retention(workspace_id, provider)
+        )
+    ):
+        return ModelRefusal(
+            code=MODEL_NOT_ALLOWED,
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=f"Model '{selector}' is not served with zero data retention, which this workspace requires.",
+        )
+    if not reaches_organization_key(config, instance):
         return None
     return org_model_refusal(workspace_id, provider, model, selector=selector, through_alias=through_alias)
 

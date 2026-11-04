@@ -1876,6 +1876,12 @@
                   "value": ""
                 },
                 {
+                  "description": "For a signed-in caller, list only what a request billed to this workspace may call, with its own disabled keys and model lists applied. A workspace the caller cannot see answers 404. Ignored for an API key, which already names its workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Number of matching models to skip.",
                   "disabled": true,
                   "key": "skip",
@@ -1978,7 +1984,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&zero_data_retention=&released_within_days=&sort=&direction=&include_facets="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&workspace_id=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&zero_data_retention=&released_within_days=&sort=&direction=&include_facets="
             }
           }
         },
@@ -1999,7 +2005,15 @@
                 "models",
                 ":model_id"
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models/:model_id",
+              "query": [
+                {
+                  "description": "For a signed-in caller, only the offerings a request billed to this workspace may call.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/catalog/models/:model_id?workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -13534,6 +13548,191 @@
         }
       ],
       "name": "workspace-code-execution-policy"
+    },
+    {
+      "item": [
+        {
+          "name": "List Workspace Hosted Providers",
+          "request": {
+            "description": "Every hosted provider this workspace's organization may use, with what this workspace keeps of it.\n\nAny member of the workspace may read it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "hosted-providers"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/hosted-providers",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Hosted Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Switch a hosted provider off for this workspace, or narrow it to some of its models.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. It can only narrow what the organization may use: a model the\ndeployment does not serve on the provider is refused with 400. Sending the\ninherited state (enabled, every model) is a reset.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "hosted-providers",
+                ":provider"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/hosted-providers/:provider",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reset Workspace Hosted Provider",
+          "request": {
+            "description": "Drop this workspace's rule for a hosted provider, so it inherits the provider whole. Idempotent.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "hosted-providers",
+                ":provider"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/hosted-providers/:provider",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Workspace Provider Policy",
+          "request": {
+            "description": "What this workspace requires of every provider serving it. Any member of the workspace may read it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-policy"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-policy",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Provider Policy",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"require_zero_data_retention\": false\n}"
+            },
+            "description": "Require zero data retention of every provider serving this workspace, or stop requiring it.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. Required, a request is refused with 403 on an organization key or a\nhosted provider not declared zero data retention, and on any provider\nconfigured in config.yml, which cannot be declared.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-policy"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-policy",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspace-hosted-providers"
     },
     {
       "item": [

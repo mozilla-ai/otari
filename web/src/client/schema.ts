@@ -6966,6 +6966,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/hosted-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Hosted Providers
+         * @description Every hosted provider this workspace's organization may use, with what this workspace keeps of it.
+         *
+         *     Any member of the workspace may read it.
+         */
+        get: operations["workspace-hosted-providers-list_workspace_hosted_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/hosted-providers/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Workspace Hosted Provider
+         * @description Switch a hosted provider off for this workspace, or narrow it to some of its models.
+         *
+         *     An organization owner/admin, or an owner/admin of this workspace, may write
+         *     it. It can only narrow what the organization may use: a model the
+         *     deployment does not serve on the provider is refused with 400. Sending the
+         *     inherited state (enabled, every model) is a reset.
+         */
+        put: operations["workspace-hosted-providers-set_workspace_hosted_provider"];
+        post?: never;
+        /**
+         * Reset Workspace Hosted Provider
+         * @description Drop this workspace's rule for a hosted provider, so it inherits the provider whole. Idempotent.
+         */
+        delete: operations["workspace-hosted-providers-reset_workspace_hosted_provider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/mcp-servers": {
         parameters: {
             query?: never;
@@ -7277,6 +7328,35 @@ export interface paths {
          * @description Remove one model from this workspace's allow-list for a key. Idempotent.
          */
         delete: operations["provider-keys-remove_workspace_provider_key_model_restriction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Provider Policy
+         * @description What this workspace requires of every provider serving it. Any member of the workspace may read it.
+         */
+        get: operations["workspace-hosted-providers-get_workspace_provider_policy"];
+        /**
+         * Set Workspace Provider Policy
+         * @description Require zero data retention of every provider serving this workspace, or stop requiring it.
+         *
+         *     An organization owner/admin, or an owner/admin of this workspace, may write
+         *     it. Required, a request is refused with 403 on an organization key or a
+         *     hosted provider not declared zero data retention, and on any provider
+         *     configured in config.yml, which cannot be declared.
+         */
+        put: operations["workspace-hosted-providers-set_workspace_provider_policy"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -19560,6 +19640,66 @@ export interface components {
             name: string;
         };
         /**
+         * WorkspaceHostedProviderAccessRequest
+         * @description What one workspace may do with one hosted provider. Replaces whatever it stored before.
+         */
+        WorkspaceHostedProviderAccessRequest: {
+            /**
+             * Enabled
+             * @description False switches the provider off for this workspace.
+             */
+            enabled: boolean;
+            /**
+             * Models
+             * @description The models this workspace may call on the provider. Null for every model the deployment serves on it, including ones added later. A list must name at least one model.
+             */
+            models?: string[] | null;
+        };
+        /**
+         * WorkspaceHostedProviderPublic
+         * @description One hosted provider as one workspace sees it.
+         */
+        WorkspaceHostedProviderPublic: {
+            /**
+             * Customized
+             * @description Whether this workspace stores a departure from full inheritance.
+             */
+            customized: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Models
+             * @description This workspace's model list, or null for every served model.
+             */
+            models: string[] | null;
+            /**
+             * Provider
+             * @description The hosted provider's name, as a request's selector prefix spells it.
+             */
+            provider: string;
+            /**
+             * Served By Own Key
+             * @description Whether the workspace calls this provider on the organization's own key, so this row is not used.
+             */
+            served_by_own_key: boolean;
+            /**
+             * Served Models
+             * @description The models the deployment serves on the provider for this organization, or null for any priced one.
+             */
+            served_models: string[] | null;
+            /**
+             * Zero Data Retention
+             * @description Whether the deployment declares this provider keeps no prompt or completion data.
+             * @default false
+             */
+            zero_data_retention: boolean;
+        };
+        /** WorkspaceHostedProvidersPublic */
+        WorkspaceHostedProvidersPublic: {
+            /** Data */
+            data: components["schemas"]["WorkspaceHostedProviderPublic"][];
+        };
+        /**
          * WorkspaceMcpServerCheckRequest
          * @description Connection details to check without storing them, for a form to test before it saves.
          *
@@ -19878,6 +20018,11 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+            /**
+             * Zero Data Retention
+             * @default false
+             */
+            zero_data_retention: boolean;
         };
         /**
          * WorkspaceProviderKeyOverrideRequest
@@ -19910,6 +20055,22 @@ export interface components {
         WorkspaceProviderModelRestrictionsPublic: {
             /** Models */
             models: string[];
+        };
+        /** WorkspaceProviderPolicyPublic */
+        WorkspaceProviderPolicyPublic: {
+            /** Require Zero Data Retention */
+            require_zero_data_retention: boolean;
+        };
+        /**
+         * WorkspaceProviderPolicyRequest
+         * @description What one workspace requires of every provider serving it.
+         */
+        WorkspaceProviderPolicyRequest: {
+            /**
+             * Require Zero Data Retention
+             * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml.
+             */
+            require_zero_data_retention: boolean;
         };
         /** WorkspacePublic */
         WorkspacePublic: {
@@ -21827,6 +21988,8 @@ export interface operations {
                 at_context?: number | null;
                 /** @description Case-insensitive text in a model's name, vendor, id, selectors, or provider instances. */
                 search?: string | null;
+                /** @description For a signed-in caller, list only what a request billed to this workspace may call, with its own disabled keys and model lists applied. A workspace the caller cannot see answers 404. Ignored for an API key, which already names its workspace. */
+                workspace_id?: string | null;
                 /** @description Number of matching models to skip. */
                 skip?: number;
                 /** @description Maximum number of models to return. */
@@ -21886,7 +22049,10 @@ export interface operations {
     };
     "catalog-get_catalog_model": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description For a signed-in caller, only the offerings a request billed to this workspace may call. */
+                workspace_id?: string | null;
+            };
             header?: never;
             path: {
                 model_id: string;
@@ -31959,6 +32125,105 @@ export interface operations {
             };
         };
     };
+    "workspace-hosted-providers-list_workspace_hosted_providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceHostedProvidersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-hosted-providers-set_workspace_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceHostedProviderAccessRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceHostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-hosted-providers-reset_workspace_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceHostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "mcp-servers-list_workspace_mcp_servers": {
         parameters: {
             query?: {
@@ -32668,6 +32933,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-hosted-providers-get_workspace_provider_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProviderPolicyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-hosted-providers-set_workspace_provider_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceProviderPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProviderPolicyPublic"];
                 };
             };
             /** @description Validation Error */

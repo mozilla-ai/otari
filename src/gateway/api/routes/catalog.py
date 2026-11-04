@@ -397,14 +397,17 @@ async def _group(
     offerings: dict[str, _Offering] = {}
     for obj in real:
         seed, metadata, instance, model_id, provider_type = offering_seed(config, catalog, obj)
-        seeds.append(seed)
-
-        pricing, source, reference = viewer_price(obj, overrides, instance=instance, model_id=model_id, as_of=now)
         credential = _get_credential(
             config,
             instance,
             hosted=obj.deployment_managed or served_on_deployment_key(merged.deployment_key_models, obj.id),
         )
+        declared = zero_retention.declared(instance, credential.value)
+        if merged.requires_zero_data_retention and not declared:
+            continue
+        seeds.append(seed)
+
+        pricing, source, reference = viewer_price(obj, overrides, instance=instance, model_id=model_id, as_of=now)
 
         offerings[obj.id] = _Offering(
             wire=CatalogOffering(
@@ -414,7 +417,7 @@ async def _group(
                 provider_type=provider_type,
                 credential=credential,
                 discovered=obj.id in merged.discovered_keys,
-                zero_data_retention=zero_retention.declared(instance, credential.value),
+                zero_data_retention=declared,
                 # From the merged catalog, so the flat listing reports the same limits.
                 context_window=obj.context_window,
                 max_output_tokens=obj.max_output_tokens,
@@ -582,13 +585,19 @@ async def _merged_for(
     caller: CatalogCaller,
     session_identity: TenancyUser | None,
     model_provider: ModelProviderPort,
+    workspace_id: uuid.UUID | None = None,
 ) -> MergedCatalog:
     if caller is None:
         return await build_real_model_catalog(
             db, config, auth=(None, False), session_identity=None, anonymous=True, model_provider=model_provider
         )
     return await build_real_model_catalog(
-        db, config, auth=caller, session_identity=session_identity, model_provider=model_provider
+        db,
+        config,
+        auth=caller,
+        session_identity=session_identity,
+        model_provider=model_provider,
+        workspace_id=workspace_id,
     )
 
 
@@ -612,7 +621,7 @@ async def list_catalog(
     models every organization reaches, at the deployment's rates, and nothing
     that belongs to a tenant.
     """
-    merged = await _merged_for(db, config, caller, session_identity, model_provider)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, query.workspace_id)
     grouped = await _group(
         db,
         config,
@@ -652,6 +661,10 @@ async def get_catalog_model(
     model_provider: RequestSessionModelProviderPortDep,
     hosted_providers: HostedProviderServiceDep,
     org_provider_keys: OrgProviderKeyServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the offerings a request billed to this workspace may call."),
+    ] = None,
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 
@@ -666,7 +679,7 @@ async def get_catalog_model(
     A signed-in caller's offerings also carry their organization's own usage of
     each over the last 30 days.
     """
-    merged = await _merged_for(db, config, caller, session_identity, model_provider)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
     grouped = await _group(
         db,
         config,
