@@ -273,12 +273,6 @@ read through a fetch instance with no price is refused with `402` before it
 runs, the detail naming that instance's row; `web_search_extract: false` turns
 the reading of pages off.
 
-**Upgrading from 0.36.** A fetch instance that reads pages needs a price, as
-the fetch tool does, or every search it enriches answers `402` under
-`require_pricing`. `builtin_fetch` has one on every upgraded database, and the
-startup warning names an instance that lacks one whether or not the fetch tool
-is enabled.
-
 ### Searches a provider runs itself
 
 A model's own search tool, such as Anthropic's `web_search_<date>` forwarded to
@@ -1062,6 +1056,16 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.37: the pages a search reads are billed as fetches
+
+The pages a search reads to enrich its results are billed as fetches on the
+fetch instance that read them (see
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). That instance needs
+a price, as the fetch tool does, or every search it enriches answers `402`
+under `require_pricing`. `builtin_fetch` has one on every upgraded database,
+and the startup warning names an instance that lacks one whether or not the
+fetch tool is enabled.
 
 ### From 0.36: a search or fetch tool is billed at its own price only
 
