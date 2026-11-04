@@ -86,6 +86,18 @@ _GATE_ATTRIBUTES = (
     "otari.policy.digest",
 )
 
+# Instrumentation scopes known to count the cache outside ``gen_ai.usage.input_tokens``, as
+# Anthropic's API does: OpenLIT passes Anthropic's counts through, and ``otari hook`` reports its
+# judge's the same way. OpenLLMetry counts it in, as the GenAI conventions say it should.
+_ADDITIVE_CACHE_SCOPES = frozenset({"openlit.instrumentation.anthropic", HOOK_SCOPE})
+_INCLUSIVE_CACHE_SCOPES = frozenset({"opentelemetry.instrumentation.anthropic"})
+# The cache-write count's names: the GenAI registry's, the one OpenLLMetry and OpenLIT send, and ``otari hook``'s.
+CACHE_WRITE_ATTRIBUTES = (
+    "gen_ai.usage.cache_write.input_tokens",
+    "gen_ai.usage.cache_creation.input_tokens",
+    "gen_ai.usage.cache_write_tokens",
+)
+
 # Token counts and durations are stored as 32-bit integers.
 _INT32_MAX = 2_147_483_647
 # Digits a numeric string attribute may have: anything longer is past the clamp anyway.
@@ -268,6 +280,20 @@ def _span_id(otel_trace_id: str, otel_span_id: str) -> str:
     return f"otlp-{digest}"
 
 
+def cache_in_input(scope: str, input_tokens: int, cached: int) -> bool:
+    """Whether a GenAI span's ``input_tokens`` already count its ``cached`` reads and writes.
+
+    By the emitter where its scope is known. Otherwise by the GenAI conventions,
+    which count cached tokens inside ``input_tokens``, so cached tokens that
+    outnumber it were reported on top of it instead.
+    """
+    if scope in _ADDITIVE_CACHE_SCOPES:
+        return False
+    if scope in _INCLUSIVE_CACHE_SCOPES:
+        return True
+    return cached <= input_tokens
+
+
 def _first_int(attributes: Mapping[str, Any], *keys: str) -> int | None:
     """The first of ``keys`` that holds a count, keeping a reported zero."""
     return next((count for key in keys if (count := _int(attributes, key)) is not None), None)
@@ -343,11 +369,9 @@ def _projected(span: OtlpSpan, window: _Window, tool: _ToolFacts | None) -> Span
         "gen_ai.usage.cache_read.input_tokens",
         "gen_ai.usage.cached_tokens",
     )
-    cache_write = _first_int(attributes, "gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.cache_write_tokens")
+    cache_write = _first_int(attributes, *CACHE_WRITE_ATTRIBUTES)
     cached = (cache_read or 0) + (cache_write or 0)
-    # The GenAI conventions count cached tokens inside ``input_tokens``, so cached
-    # tokens that outnumber it were reported on top of it instead.
-    if input_tokens is not None and cached > input_tokens:
+    if input_tokens is not None and not cache_in_input(span.scope, input_tokens, cached):
         input_tokens = min(input_tokens + cached, _INT32_MAX)
     return SpanRecord(
         span_id=_span_id(span.trace_id, span.span_id),

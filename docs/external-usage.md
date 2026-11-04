@@ -121,7 +121,16 @@ path itself.
 
 Otari reads the OpenTelemetry GenAI provider, model, response ID, input-token,
 output-token, and cache-token attributes, and records usage from the spans that
-carry tokens. Prompt, response, and tool content is never stored. The spans are
+carry tokens. The conventions count cached tokens inside the input tokens, but
+some instrumentation reports them on top, so Otari reads OpenLLMetry's
+Anthropic spans as counting them in and OpenLIT's as counting them on top. From
+any other emitter, cached tokens that outnumber the input tokens are read as
+reported on top of them. Cache writes are read from
+`gen_ai.usage.cache_write.input_tokens` or
+`gen_ai.usage.cache_creation.input_tokens`, and the share Anthropic bills at
+the one-hour rate from
+`anthropic.usage.cache_creation.ephemeral_1h_input_tokens` where it is sent.
+Prompt, response, and tool content is never stored. The spans are
 also kept on the exporting key's agent trace: how they are grouped into sessions,
 and the per-export limits, are in
 [Agent traces](traces.md#instrumented-agents).

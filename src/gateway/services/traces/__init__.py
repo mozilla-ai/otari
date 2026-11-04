@@ -11,12 +11,14 @@ from gateway.services.traces._context import ContextWeights, context_of, read_co
 from gateway.services.traces._identity import SessionRef, harness_of, is_subagent, resolve_session
 from gateway.services.traces._membership import TraceMembershipListener
 from gateway.services.traces._otlp import (
+    CACHE_WRITE_ATTRIBUTES,
     CLAUDE_CODE_USAGE_SOURCE,
     HOOK_SCOPE,
     HOOK_USAGE_SOURCE,
     MAX_SPANS_PER_EXPORT,
     OtlpSpan,
     PricedRequest,
+    cache_in_input,
     gate_usage_event_id,
     project_otlp_spans,
     record_otlp_export,
@@ -31,6 +33,7 @@ from gateway.services.traces._writer import TraceWriter
 __all__ = [
     "ContextWeights",
     "AnsweredCall",
+    "CACHE_WRITE_ATTRIBUTES",
     "CLAUDE_CODE_USAGE_SOURCE",
     "HOOK_SCOPE",
     "HOOK_USAGE_SOURCE",
@@ -51,6 +54,7 @@ __all__ = [
     "harness_of",
     "identifier_or_none",
     "is_subagent",
+    "cache_in_input",
     "context_of",
     "gate_usage_event_id",
     "project_otlp_spans",

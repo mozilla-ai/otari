@@ -23,9 +23,11 @@ provenance ``source`` is the client (``otari.client_name``, or ``claude_code`` /
 responses, and user identity are never persisted.
 
 Claude Code reports cache reads/writes additively (outside ``input_tokens``);
-Codex and OpenAI-shaped emitters report cached tokens as a subset of
-``input_tokens``. Each mapped event carries ``cache_tokens_in_prompt`` so the
-pricing layer de-includes the OpenAI shape instead of double-charging cache reads.
+Codex reports cached tokens as a subset of ``input_tokens``, as the GenAI
+conventions say every emitter should. A GenAI span is read by its instrumentation
+scope where that says which (``cache_in_input``). Each mapped event carries
+``cache_tokens_in_prompt`` so the pricing layer de-includes the inclusive shape
+instead of double-charging cache reads.
 
 Both protobuf and JSON OTLP payloads are accepted (optionally gzip-encoded), and a
 standard OTLP export response is returned. Authentication requires a budget-exempt
@@ -98,6 +100,7 @@ from gateway.services.external_usage_service import (
     token_count,
 )
 from gateway.services.traces import (
+    CACHE_WRITE_ATTRIBUTES,
     CLAUDE_CODE_USAGE_SOURCE,
     HOOK_SCOPE,
     HOOK_USAGE_SOURCE,
@@ -105,6 +108,7 @@ from gateway.services.traces import (
     PricedRequest,
     TraceService,
     TraceWriter,
+    cache_in_input,
     gate_usage_event_id,
     record_otlp_export,
     record_priced_requests,
@@ -138,10 +142,8 @@ _MAX_METRIC_DATA_POINTS = 10 * MAX_EVENTS_PER_BATCH
 # ``gen_ai.request.model``), so the generic GenAI mapping would skip them.
 _CODEX_USAGE_EVENTS = ("codex.api_request", "codex.sse_event")
 
-# Providers that report cache reads/writes *additively* (outside ``input_tokens``),
-# the Anthropic shape. Everything else is assumed OpenAI-shaped, where cached
-# tokens are a subset of ``input_tokens`` and must be de-included before pricing.
-_ADDITIVE_CACHE_PROVIDERS = {"anthropic"}
+# The share of a cache write Anthropic bills at the 1h rate, where an emitter passes its usage through.
+_CACHE_WRITE_1H = "anthropic.usage.cache_creation.ephemeral_1h_input_tokens"
 
 # ``Status.code`` of a span that ended in error (``STATUS_CODE_ERROR`` in the OTLP schema).
 _STATUS_CODE_ERROR = 2
@@ -315,6 +317,7 @@ def _build_event(
     fallback_event_id: str | None,
     default_timestamp: datetime | None,
     duration_ms: float | None,
+    scope: str = "",
 ) -> tuple[str, ExternalUsageEvent] | None:
     """Map span/log attributes onto a (source, event), or None to skip.
 
@@ -325,10 +328,9 @@ def _build_event(
     """
     provider: Any
     duration: Any
-    # Neither Claude Code's events nor the GenAI attributes read below carry the 5m/1h cache-write split, so
-    # every write books at the cache-write rate. That is below the 2x input a Claude model's 1h write costs,
-    # so an imported estimate never reads above true cost. A caller holding the split sends
-    # cache_write_1h_tokens to POST /api/v1/usage/external-events.
+    # Claude Code's events carry no 5m/1h cache-write split, so each of their writes books at the
+    # cache-write rate. That is below the 2x input a Claude model's 1h write costs, so an imported
+    # estimate never reads above true cost.
     cache_write_1h = 0
     reasoning = 0
     event_name = attrs.get("event.name")
@@ -381,12 +383,13 @@ def _build_event(
             or attrs.get("gen_ai.usage.cache_read.input_tokens")
             or attrs.get("gen_ai.usage.cached_tokens")
         )
-        cache_write = token_count(attrs.get("gen_ai.usage.cache_write_tokens"))
+        cache_write = max(token_count(attrs.get(key)) for key in CACHE_WRITE_ATTRIBUTES)
+        cache_write_1h = min(token_count(attrs.get(_CACHE_WRITE_1H)), cache_write)
         client = attrs.get("otari.client_name")
         source = _sanitize_source(str(client)) if client else _DEFAULT_SOURCE
         session = attrs.get("otari.user_session_label") or attrs.get("otari.session_label")
         duration = duration_ms
-        cache_tokens_in_prompt = str(provider).strip().lower() not in _ADDITIVE_CACHE_PROVIDERS
+        cache_tokens_in_prompt = cache_in_input(scope, input_tokens, cache_read + cache_write)
 
     timestamp = _resolve_timestamp(attrs, default_timestamp)
     if not (event_id and model and provider and timestamp):
@@ -615,6 +618,7 @@ async def receive_traces(
                     or None,
                     default_timestamp=_nanos_to_dt(span.start_time_unix_nano),
                     duration_ms=duration,
+                    scope=scope,
                 )
                 if mapped is not None:
                     pairs.append(mapped)
@@ -682,6 +686,7 @@ async def receive_logs(
                     fallback_event_id=None,
                     default_timestamp=timestamp,
                     duration_ms=None,
+                    scope=scope_logs.scope.name,
                 )
                 if mapped is not None:
                     pairs.append(mapped)

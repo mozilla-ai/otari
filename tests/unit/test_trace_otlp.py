@@ -511,13 +511,14 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
 
 
 @pytest.mark.parametrize(
-    ("provider", "input_tokens", "cache_read_key", "cache_write_key"),
+    ("provider", "input_tokens", "cache_read_key", "cache_write_key", "scope"),
     [
         pytest.param(
             "anthropic",
             48_210,
             "gen_ai.usage.cache_read.input_tokens",
-            "gen_ai.usage.cache_creation.input_tokens",
+            "gen_ai.usage.cache_write.input_tokens",
+            "",
             id="inside-as-the-conventions-count-them",
         ),
         pytest.param(
@@ -525,6 +526,7 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
             48_210,
             "gen_ai.usage.cached_tokens",
             "gen_ai.usage.cache_write_tokens",
+            "",
             id="inside-under-older-names",
         ),
         pytest.param(
@@ -532,12 +534,29 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
             300,
             "gen_ai.usage.cache_read_tokens",
             "gen_ai.usage.cache_write_tokens",
+            "",
             id="on-top-when-they-outnumber-it",
+        ),
+        pytest.param(
+            "anthropic",
+            48_210,
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            "opentelemetry.instrumentation.anthropic",
+            id="inside-from-openllmetry",
+        ),
+        pytest.param(
+            "anthropic",
+            300,
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            "openlit.instrumentation.anthropic",
+            id="on-top-from-openlit",
         ),
     ],
 )
 def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported_its_cache(
-    provider: str, input_tokens: int, cache_read_key: str, cache_write_key: str
+    provider: str, input_tokens: int, cache_read_key: str, cache_write_key: str, scope: str
 ) -> None:
     attrs = {
         "gen_ai.provider.name": provider,
@@ -546,11 +565,23 @@ def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported
         cache_write_key: 6_010,
         "gen_ai.usage.reasoning.output_tokens": 12,
     }
-    [write] = _project(_span("a", attrs=attrs))
+    [write] = _project(_span("a", attrs=attrs, scope=scope))
 
     [span] = write.spans
     assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (48_210, 41_900, 6_010)
     assert span.reasoning_tokens == 12
+
+
+def test_a_known_emitters_cache_is_counted_its_way_even_where_fresh_input_outnumbers_it() -> None:
+    attrs = {
+        "gen_ai.provider.name": "anthropic",
+        "gen_ai.usage.input_tokens": 50_000,
+        "gen_ai.usage.cache_read.input_tokens": 300,
+        "gen_ai.usage.cache_creation.input_tokens": 150,
+    }
+    [write] = _project(_span("a", attrs=attrs, scope="openlit.instrumentation.anthropic"))
+
+    assert write.spans[0].input_tokens == 50_450
 
 
 def test_a_reported_zero_cache_count_is_kept_not_stored_as_unknown() -> None:
