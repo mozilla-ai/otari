@@ -10,10 +10,11 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyVa
 
 from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
-from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, TraceWriter, project_otlp_spans
+from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, SessionRef, TraceWriter, project_otlp_spans
 from gateway.services.traces._collector import call_id_digest
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, record_priced_requests
 from gateway.services.traces._reading import _gate_summaries
+from gateway.services.traces._service import _growth
 from gateway.types.traces import TraceWrite, is_identifier
 
 _WORKSPACE = uuid.uuid4()
@@ -96,6 +97,42 @@ def test_spans_naming_one_conversation_share_a_trace_across_otel_traces() -> Non
     )
 
     assert sorted(len(write.spans) for write in writes) == [1, 2]
+
+
+def test_a_conversation_named_on_the_root_alone_holds_its_whole_otel_trace() -> None:
+    writes = _project(
+        _span("root", attrs={"gen_ai.conversation.id": "conv-1"}),
+        _span("chat", parent="root", attrs={"gen_ai.operation.name": "chat"}),
+        _span("tool", parent="chat", attrs={"gen_ai.operation.name": "execute_tool"}),
+    )
+
+    [write] = writes
+    assert len(write.spans) == 3
+
+
+def test_a_conversation_named_below_the_root_holds_the_spans_around_it() -> None:
+    writes = _project(
+        _span("root"),
+        _span("agent", parent="root", attrs={"gen_ai.conversation.id": "conv-1"}),
+        _span("sibling", parent="root"),
+    )
+
+    [write] = writes
+    assert len(write.spans) == 3
+
+
+def test_two_conversations_in_one_otel_trace_each_keep_the_spans_under_them() -> None:
+    writes = _project(
+        _span("a", attrs={"gen_ai.conversation.id": "conv-a"}),
+        _span("a1", parent="a"),
+        _span("b", attrs={"gen_ai.conversation.id": "conv-b"}),
+        _span("b1", parent="b"),
+    )
+
+    assert sorted(sorted(span.otel_span_id or "" for span in write.spans) for write in writes) == [
+        ["a", "a1"],
+        ["b", "b1"],
+    ]
 
 
 def test_a_claude_sessions_threads_share_one_trace() -> None:
@@ -584,6 +621,18 @@ def test_a_known_emitters_cache_is_counted_its_way_even_where_fresh_input_outnum
     assert write.spans[0].input_tokens == 50_450
 
 
+@pytest.mark.parametrize(
+    ("attrs", "request_id"),
+    [({"gen_ai.response.id": "msg_1"}, "msg_1"), ({}, "a"), ({"gen_ai.response.id": "not an id"}, None)],
+)
+def test_an_llm_span_carries_the_id_the_ledger_priced_its_call_by(
+    attrs: dict[str, str], request_id: str | None
+) -> None:
+    [write] = _project(_span("a", attrs={"gen_ai.operation.name": "chat", **attrs}))
+
+    assert write.spans[0].request_id == request_id
+
+
 def test_a_reported_zero_cache_count_is_kept_not_stored_as_unknown() -> None:
     attrs = {
         "gen_ai.usage.input_tokens": 100,
@@ -778,6 +827,25 @@ def test_a_priced_request_reaches_a_session_only_from_a_source_the_trace_store_h
     assert len(writer.writes) == written
 
 
+def test_a_priced_request_read_off_its_exported_span_reaches_that_session_from_any_source() -> None:
+    writer = _Writer()
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [PricedRequest("msg_1", "conv-1", datetime.now(UTC), Decimal("0.01"), "otel", traced=True, harness=None)],
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id=None,
+        retention=timedelta(days=30),
+    )
+
+    [write] = writer.writes
+    assert write.harness is None
+    assert write.trace_id == SessionRef(source="otlp", key="conv-1").trace_id(_WORKSPACE, None, None)
+    assert [(span.request_id, span.cost_snapshot) for span in write.spans] == [("msg_1", Decimal("0.01"))]
+
+
 def test_a_priced_request_whose_id_a_span_cannot_carry_is_skipped_and_the_rest_recorded() -> None:
     writer = _Writer()
 
@@ -815,3 +883,18 @@ def test_an_exports_spans_are_taken_in_when_it_was_admitted_not_when_it_finished
     ).writes
 
     assert write.captured_at == admitted
+
+
+def test_a_call_two_instrumentations_both_exported_counts_its_tokens_once_in_the_session() -> None:
+    call = {"gen_ai.operation.name": "chat", "gen_ai.usage.input_tokens": 500, "gen_ai.usage.output_tokens": 20}
+    [write] = _project(
+        _span("sdk", attrs={**call, "gen_ai.response.id": "msg_1"}),
+        _span("openllmetry", attrs={**call, "gen_ai.response.id": "msg_1"}),
+        _span("next", attrs={**call, "gen_ai.response.id": "msg_2"}),
+    )
+
+    growth = _growth((_WORKSPACE, write.trace_id), list(write.spans), _NOW)
+
+    # Both spans of the call are kept.
+    assert len(write.spans) == 3
+    assert (growth.input_tokens, growth.output_tokens) == (1000, 40)

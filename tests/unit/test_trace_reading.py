@@ -287,3 +287,19 @@ def test_a_requests_cost_the_ledger_priced_later_is_read_on_the_request_and_coun
     assert [(span.span_id, span.cost_snapshot) for span in spans] == [("turn", None), ("llm-1", Decimal("0.25"))]
     [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
     assert turn.cost == Decimal("0.25")
+
+
+def test_a_call_two_instrumentations_both_exported_is_priced_on_one_of_its_spans() -> None:
+    usage = _span("usage-1", "llm", operation="usage", request_id="msg_1", cost_snapshot=Decimal("0.25"))
+    spans = _price_requests(
+        [
+            replace(_span("sdk", "llm", request_id="msg_1"), origin="otlp"),
+            replace(_span("openllmetry", "llm", request_id="msg_1"), origin="otlp"),
+            usage,
+        ]
+    )
+
+    assert [(span.span_id, span.cost_snapshot) for span in spans] == [
+        ("sdk", Decimal("0.25")),
+        ("openllmetry", None),
+    ]

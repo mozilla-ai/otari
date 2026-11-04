@@ -692,9 +692,28 @@ def _key(trace: TraceWrite) -> TraceKey:
     return (trace.workspace_id, trace.trace_id)
 
 
+def _counted_once(llm: list[SpanRecord]) -> list[SpanRecord]:
+    """The LLM spans whose tokens a session counts: one per call an agent exported.
+
+    Two instrumentations of one process can each describe the same call, sharing its
+    response id; both spans are kept, its tokens counted once. A gateway request's
+    spans share its request id across calls, so only an exported span is held to it.
+    """
+    seen: set[str] = set()
+    counted: list[SpanRecord] = []
+    for span in llm:
+        if span.origin == "otlp" and span.request_id and span.operation != USAGE_OPERATION:
+            if span.request_id in seen:
+                continue
+            seen.add(span.request_id)
+        counted.append(span)
+    return counted
+
+
 def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> TraceGrowth:
     moments = [_span_moment(span, written_at) for span in spans]
     llm = [span for span in spans if span.kind == "llm"]
+    calls = _counted_once(llm)
     errors = [span for span in spans if span.outcome == "error" and not span.recovered]
     return TraceGrowth(
         workspace_id=key[0],
@@ -706,8 +725,8 @@ def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> Tra
         # A tool's error goes back to the model, which usually carries on, so it does not fail the session.
         # An MCP tool's too, a transport failure included; a failed MCP connection is not a tool's and does.
         failing_errors=sum(1 for span in errors if span.kind != "tool"),
-        input_tokens=sum(span.input_tokens or 0 for span in llm),
-        output_tokens=sum(span.output_tokens or 0 for span in llm),
+        input_tokens=sum(span.input_tokens or 0 for span in calls),
+        output_tokens=sum(span.output_tokens or 0 for span in calls),
         cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),
         earliest=min(earliest for earliest, _ in moments),
         latest=max(latest for _, latest in moments),

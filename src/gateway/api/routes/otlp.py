@@ -110,6 +110,8 @@ from gateway.services.traces import (
     TraceWriter,
     cache_in_input,
     gate_usage_event_id,
+    otlp_harness,
+    otlp_sessions,
     record_otlp_export,
     record_priced_requests,
 )
@@ -494,14 +496,44 @@ async def _content_generation(traces: TraceService, config: GatewayConfig, works
         return None
 
 
-def _record_priced(request: Request, priced: list[PricedEvent], *, api_key: APIKey, config: GatewayConfig) -> None:
-    """Hand each priced event's cost to the session it names: the session's cost is the ledger's."""
+def _priced_requests(
+    priced: list[PricedEvent], spans: list[OtlpSpan], event_spans: dict[str, tuple[str, str]]
+) -> list[PricedRequest]:
+    """Each priced event in the session of the span it was read from, or else the session it names."""
+    sessions = otlp_sessions(spans)
+    by_key = {(span.trace_id, span.span_id): span for span in spans}
+    requests: list[PricedRequest] = []
+    for e in priced:
+        key = event_spans.get(e.source_event_id)
+        session = sessions.get(key) if key is not None else None
+        if session is not None and key is not None:
+            harness = otlp_harness(by_key[key])
+            requests.append(
+                PricedRequest(
+                    e.source_event_id, session.key, e.timestamp, e.cost, e.source, e.rates, traced=True, harness=harness
+                )
+            )
+        elif e.session_label:
+            requests.append(PricedRequest(e.source_event_id, e.session_label, e.timestamp, e.cost, e.source, e.rates))
+    return requests
+
+
+def _record_priced(
+    request: Request,
+    priced: list[PricedEvent],
+    *,
+    api_key: APIKey,
+    config: GatewayConfig,
+    spans: list[OtlpSpan] | None = None,
+    event_spans: dict[str, tuple[str, str]] | None = None,
+) -> None:
+    """Hand each priced event's cost to its session: the session's cost is the ledger's."""
     writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
     if writer is None or not priced:
         return
     record_priced_requests(
         writer,
-        (PricedRequest(e.source_event_id, e.session_label, e.timestamp, e.cost, e.source, e.rates) for e in priced),
+        _priced_requests(priced, spans or [], event_spans or {}),
         budget_exempt=api_key.exclude_from_budget,
         workspace_id=api_key.workspace_id,
         user_id=api_key.user_id,
@@ -579,12 +611,15 @@ async def receive_traces(
 
     pairs: list[tuple[str, ExternalUsageEvent]] = []
     received: list[tuple[str, Any]] = []
+    # Each usage event's span, by its OTel trace and span id, so its cost reaches that span's session.
+    event_spans: dict[str, tuple[str, str]] = {}
     for resource_spans in parsed.resource_spans:
         for scope_spans in resource_spans.scope_spans:
             scope = scope_spans.scope.name
             claude = scope.startswith(CLAUDE_SCOPE_PREFIX)
             for span in scope_spans.spans:
                 received.append((scope, span))
+                span_key = (span.trace_id.hex(), span.span_id.hex())
                 duration = None
                 if span.start_time_unix_nano and span.end_time_unix_nano:
                     duration = (span.end_time_unix_nano - span.start_time_unix_nano) / 1_000_000
@@ -599,7 +634,9 @@ async def receive_traces(
                         duration_ms=duration,
                         failed=span.status.code == _STATUS_CODE_ERROR,
                     )
-                    pairs.extend((CLAUDE_SOURCE, event) for event in events)
+                    for event in events:
+                        pairs.append((CLAUDE_SOURCE, event))
+                        event_spans.setdefault(event.source_event_id, span_key)
                     continue
                 attrs = _attributes(span.attributes)
                 if scope == HOOK_SCOPE:
@@ -622,6 +659,11 @@ async def receive_traces(
                 )
                 if mapped is not None:
                     pairs.append(mapped)
+                    event_spans.setdefault(mapped[1].source_event_id, span_key)
+    # A Claude SDK span books its response under its own source, so an instrumentation library's
+    # span of the same response in this export would book it twice.
+    booked = {event.source_event_id for source, event in pairs if source == CLAUDE_SOURCE}
+    pairs = [pair for pair in pairs if pair[0] == CLAUDE_SOURCE or pair[1].source_event_id not in booked]
 
     response = ExportTraceServiceResponse()
     priced: list[PricedEvent] = []
@@ -634,6 +676,7 @@ async def receive_traces(
 
     # Only an export whose usage was taken is recorded, best-effort and off the
     # request path; the writer is absent where nothing records traces.
+    spans = [_otlp_span(span, scope) for scope, span in received] if writer is not None else []
     if writer is not None and received:
         # The switch after the generation: content captured while the switch is
         # turned off then carries the generation the turning off ends.
@@ -642,7 +685,7 @@ async def receive_traces(
         )
         record_otlp_export(
             writer,
-            (_otlp_span(span, scope) for scope, span in received),
+            spans,
             total=len(received),
             budget_exempt=api_key.exclude_from_budget,
             workspace_id=api_key.workspace_id,
@@ -653,7 +696,7 @@ async def receive_traces(
             content_generation=generation,
             admitted_at=admitted_at,
         )
-    _record_priced(request, priced, api_key=api_key, config=config)
+    _record_priced(request, priced, api_key=api_key, config=config, spans=spans, event_spans=event_spans)
     return _otlp_response(content_type, response)
 
 

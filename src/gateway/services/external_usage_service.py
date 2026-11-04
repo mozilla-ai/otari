@@ -305,7 +305,7 @@ class PricedEvent:
     """An imported event as it was priced, for the session it names to show what it cost."""
 
     source_event_id: str
-    session_label: str
+    session_label: str | None
     timestamp: datetime
     cost: Decimal
     source: str
@@ -715,7 +715,7 @@ async def ingest_external_events(
         pricing = _resolve_pricing(pricing_index, event.provider, event.model, event.timestamp)
         row = _build_row(request.source, target_user, event, pricing, api_key_id, usage_workspace_id)
         rows.append(row)
-        if priced is not None and row.cost is not None and event.session_label:
+        if priced is not None and row.cost is not None:
             priced.append(
                 PricedEvent(
                     event.source_event_id,

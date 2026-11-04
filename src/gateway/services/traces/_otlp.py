@@ -178,6 +178,15 @@ def _request_id(attributes: Mapping[str, Any]) -> str | None:
     return value if value is not None and ID_PATTERN.fullmatch(value) else None
 
 
+def usage_event_id(span: OtlpSpan) -> str | None:
+    """The id the usage ledger prices a GenAI span's call by: its response id, or the span's own.
+
+    Held to the id pattern, like a Claude Code request's: a span carries only an id it can fold a cost onto.
+    """
+    value = _str(span.attributes, "gen_ai.response.id") or span.span_id
+    return value if ID_PATTERN.fullmatch(value) else None
+
+
 def _str(attributes: Mapping[str, Any], *keys: str) -> str | None:
     for key in keys:
         value = attributes.get(key)
@@ -238,12 +247,44 @@ def _false(attributes: Mapping[str, Any], key: str) -> bool:
     return value is False or (isinstance(value, str) and value.strip().lower() == "false")
 
 
-def _session(span: OtlpSpan) -> SessionRef:
+def _named_session(span: OtlpSpan) -> str | None:
     # A Claude Managed Agents session names each thread a conversation of its own.
     keys: tuple[str, ...] = ("anthropic.session.id", "gen_ai.conversation.id", "otari.session_label")
-    if span.names_harness_session:
-        keys = ("session.id", *keys)
-    return SessionRef(source="otlp", key=_str(span.attributes, *keys) or span.trace_id)
+    try:
+        if span.names_harness_session:
+            keys = ("session.id", *keys)
+        return _str(span.attributes, *keys)
+    except Exception:  # noqa: BLE001 - a span that cannot be read names nothing; projecting it drops it
+        return None
+
+
+def otlp_sessions(spans: Iterable[OtlpSpan]) -> dict[tuple[str, str], SessionRef]:
+    """Each span's session, keyed by its OTel trace and span id.
+
+    A span that names no session is in its nearest ancestor's that does, failing
+    that in the first one its OTel trace names, and failing that in the OTel
+    trace's own. An emitter names its conversation on the root span alone, so
+    only spans of one export are seen: one whose trace's session arrives in
+    another export is grouped by its OTel trace.
+    """
+    spans = [span for span in spans if span.trace_id and span.span_id]
+    named = {(span.trace_id, span.span_id): _named_session(span) for span in spans}
+    parents = {(span.trace_id, span.span_id): span.parent_span_id for span in spans}
+    traces: dict[str, str] = {}
+    for (trace_id, _), name in named.items():
+        if name is not None:
+            traces.setdefault(trace_id, name)
+    sessions: dict[tuple[str, str], SessionRef] = {}
+    for span in spans:
+        key = (span.trace_id, span.span_id)
+        found: str | None = None
+        at, seen = key, set()
+        while found is None and at in named and at not in seen:
+            seen.add(at)
+            found = named[at]
+            at = (span.trace_id, parents[at] or "")
+        sessions[key] = SessionRef(source="otlp", key=found or traces.get(span.trace_id) or span.trace_id)
+    return sessions
 
 
 def _tool_facts(spans: Iterable[OtlpSpan]) -> dict[tuple[str, str], _ToolFacts]:
@@ -392,6 +433,7 @@ def _projected(span: OtlpSpan, window: _Window, tool: _ToolFacts | None) -> Span
         cache_read_tokens=cache_read,
         cache_write_tokens=cache_write,
         reasoning_tokens=_int(attributes, "gen_ai.usage.reasoning.output_tokens"),
+        request_id=usage_event_id(span) if kind == "llm" else None,
         tool_name=tool_name,
         tool_type=identifier_or_none(_str(attributes, "gen_ai.tool.type")),
         otel_trace_id=span.trace_id[:64],
@@ -573,7 +615,8 @@ def _gate_record(span: OtlpSpan, window: _Window) -> SpanRecord:
     )
 
 
-def _harness(span: OtlpSpan) -> str | None:
+def otlp_harness(span: OtlpSpan) -> str | None:
+    """The harness a received span names, or None."""
     named = identifier_or_none(_str(span.attributes, "otari.client_name"))
     if named:
         return named
@@ -599,13 +642,14 @@ def _project(
     invalid = 0
     over_cap = 0
     tools = _tool_facts(spans)
+    sessions = otlp_sessions(spans)
     for span in spans:
         if not span.trace_id or not span.span_id:
             continue
         if span.scope == HOOK_SCOPE and span.name == _HOOK_USAGE_SPAN:
             continue
         try:
-            session = _session(span)
+            session = sessions[(span.trace_id, span.span_id)]
             if session not in by_session and len(by_session) >= max_traces:
                 over_cap += 1
                 continue
@@ -618,7 +662,7 @@ def _project(
             invalid += 1
             continue
         by_session.setdefault(session, []).append(record)
-        harness.setdefault(session, _harness(span))
+        harness.setdefault(session, otlp_harness(span))
     if invalid:
         SPANS_DROPPED.labels(reason="invalid").inc(invalid)
     if over_cap:
@@ -740,6 +784,10 @@ class PricedRequest:
     source: str
     # USD per million tokens on each of :data:`RATE_METERS`, where the request was priced by the token.
     rates: Mapping[str, Decimal] = field(default_factory=dict)
+    # Whether the session was read off the spans the request was exported with, which the trace store has
+    # whatever the source; and the harness those spans name.
+    traced: bool = False
+    harness: str | None = _CLAUDE_CODE_HARNESS
 
 
 def gate_usage_event_id(scope: str, name: str, span_id: str, parent_span_id: str) -> str | None:
@@ -780,10 +828,11 @@ def record_priced_requests(
     api_key_id: str | None,
     retention: timedelta,
 ) -> None:
-    """Hand what each priced model request, Claude Code's or a judge gate's, cost to its session. Never raises.
+    """Hand what each priced model request cost to its session. Never raises.
 
     Only for a key that may import (``budget_exempt``), as :func:`record_otlp_export` holds its spans to,
-    and only usage from a source whose sessions the trace store has.
+    and only usage whose session the trace store has: read off the spans it was exported with, or from
+    Claude Code's or a judge gate's.
     """
     if not budget_exempt:
         return
@@ -791,14 +840,18 @@ def record_priced_requests(
     window = _Window(floor=now - retention, ceiling=now + _FUTURE_SKEW)
     try:
         by_session: dict[SessionRef, list[SpanRecord]] = {}
+        harness: dict[SessionRef, str | None] = {}
         for request in itertools.islice(requests, MAX_SPANS_PER_EXPORT):
             # A ledger id a span cannot carry could never fold onto one, and would fail the whole export.
-            if request.source not in _SESSION_USAGE_SOURCES or not ID_PATTERN.fullmatch(request.request_id):
+            if not (request.traced or request.source in _SESSION_USAGE_SOURCES):
+                continue
+            if not ID_PATTERN.fullmatch(request.request_id):
                 continue
             session = SessionRef(source="otlp", key=request.session_key)
             if session not in by_session and len(by_session) >= MAX_TRACES_PER_EXPORT:
                 continue
             by_session.setdefault(session, []).append(_usage_span(request, window))
+            harness.setdefault(session, request.harness)
         for session, records in by_session.items():
             writer.submit(
                 TraceWrite(
@@ -807,7 +860,7 @@ def record_priced_requests(
                     user_id=user_id,
                     api_key_id=api_key_id,
                     session_source="otlp",
-                    harness=_CLAUDE_CODE_HARNESS,
+                    harness=harness[session],
                     spans=tuple(records),
                 )
             )

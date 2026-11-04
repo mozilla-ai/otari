@@ -91,7 +91,12 @@ def _price_requests(spans: list[SpanRecord]) -> list[SpanRecord]:
     for span in spans:
         if span.operation == USAGE_OPERATION:
             continue
-        usage = priced.get(span.request_id or "") if span.kind in _PRICED_KINDS and span.cost_snapshot is None else None
+        # Popped, so a call two instrumentations both exported is priced on one of its spans.
+        usage = (
+            priced.pop(span.request_id or "", None)
+            if span.kind in _PRICED_KINDS and span.cost_snapshot is None
+            else None
+        )
         if usage is not None and usage.cost_snapshot is not None:
             cost = usage.cost_snapshot + (
                 further.get(span.request_id or "", Decimal(0)) if span.kind == "guardrail" else Decimal(0)
