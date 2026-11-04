@@ -44,6 +44,7 @@ from gateway.ports.billing_port import (
 )
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
@@ -2647,6 +2648,11 @@ async def get_feedback_service(
     return FeedbackService()
 
 
+def get_feedback_delivery_port(container: Annotated[Container, Depends(get_container)]) -> FeedbackDeliveryPort:
+    """Resolve where accepted feedback goes; it holds no session, released above."""
+    return container.resolve(FeedbackDeliveryPort, None)
+
+
 class _DirectToolAccounts:
     """The direct tool service's accounts: the api-keys rules for who a call bills, and the budgets service."""
 
@@ -2876,6 +2882,7 @@ __all__ = [
     "get_session_identity",
     "reset_config",
     "set_config",
+    "get_feedback_delivery_port",
     "get_feedback_service",
     "get_file_store",
     "get_log_writer",

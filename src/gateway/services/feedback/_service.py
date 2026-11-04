@@ -9,7 +9,6 @@ from gateway.core.config import API_ROOT
 from gateway.exceptions.feedback_exceptions import AnotherAccountError, FeedbackDeliveryError, UnshareableEmailError
 from gateway.log_config import logger
 from gateway.rate_limit import RateLimiter
-from gateway.schemas.feedback import FeedbackSubmission
 
 FEEDBACK_RECEIVER = f"https://api.otari.ai{API_ROOT}/feedback/submissions"
 # Each send is a real POST upstream, and the receiver's own limit is shared by
@@ -44,9 +43,9 @@ class FeedbackService:
             raise AnotherAccountError
         return email
 
-    async def submit(self, body: FeedbackSubmission, reply_to: str | None = None) -> None:
+    async def submit(self, message: str, reply_to: str | None = None) -> None:
         # Named field by field: the receiver refuses any field it does not know.
-        payload = {"message": body.message}
+        payload = {"message": message}
         if reply_to is not None:
             payload["reply_to"] = reply_to
         try:

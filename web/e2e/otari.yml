@@ -16,3 +16,6 @@ federation_member_rules: true
 web_search_url: "http://search.invalid"
 web_fetch_enabled: true
 sandbox_url: "http://sandbox.invalid"
+# On, so the Contact spec can reach the dialog; every send it makes is
+# intercepted in the browser and never leaves the machine.
+feedback_enabled: true

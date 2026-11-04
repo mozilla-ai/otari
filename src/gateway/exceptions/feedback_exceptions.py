@@ -4,8 +4,8 @@ from fastapi import status
 
 from gateway.exceptions import TenancyValidationError
 
-UNSHAREABLE_EMAIL = "Your email could not be attached. Untick it to send without it."
-ANOTHER_ACCOUNT = "You are now signed in as another account. Reload the page to share that email."
+UNSHAREABLE_EMAIL = "We can't reply to this email address. Send your message without it."
+ANOTHER_ACCOUNT = "You're signed in as someone else now. Reload the page and try again."
 
 
 class FeedbackDeliveryError(Exception):

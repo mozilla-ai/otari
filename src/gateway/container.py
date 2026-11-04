@@ -36,6 +36,7 @@ from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
 from gateway.adapters.content_key_adapter import build_content_key_port
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
+from gateway.adapters.feedback_delivery_adapter import ReceiverFeedbackDeliveryAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
@@ -53,6 +54,7 @@ from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
@@ -265,6 +267,11 @@ def _model_provider_adapter_factory(
 def _telemetry_storage_adapter(session: AsyncSession | None) -> TelemetryStoragePort:
     """Build the core ``TelemetryStoragePort`` adapter for one request."""
     return DatabaseTelemetryStorageAdapter(session)
+
+
+def _feedback_delivery_adapter(session: AsyncSession | None) -> FeedbackDeliveryPort:
+    """Build the core ``FeedbackDeliveryPort`` adapter, which needs no session."""
+    return ReceiverFeedbackDeliveryAdapter()
 
 
 def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
@@ -548,6 +555,9 @@ def build_container(
     # price of its own, and changes nothing above it: the call is metered and
     # recorded here either way.
     container.bind(AgentModelRecommenderPort, _agent_model_recommender)
+    # Feedback: the base forwards each message to the otari.ai intake. The
+    # build that runs the intake delivers in its own process instead.
+    container.bind(FeedbackDeliveryPort, _feedback_delivery_adapter)
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in
@@ -591,6 +601,7 @@ def build_container(
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     _verify_port_shape(container, ModelProviderPort)
     _verify_port_shape(container, UsageSignalPort)
+    _verify_port_shape(container, FeedbackDeliveryPort)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:
