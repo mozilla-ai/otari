@@ -220,9 +220,15 @@ export function ProviderComboBox({
           .map((provider) => ({
             id: provider.id,
             name: providerCatalogName(provider.id, provider.name),
+            // Our name replaces the gateway's, so keep the gateway's findable:
+            // "copilot" still reaches GitHub Models.
+            alias: provider.name,
           }))
       : []
-    return [...extra, ...catalogOptions]
+    return [
+      ...extra.map((option) => ({ ...option, alias: undefined })),
+      ...catalogOptions,
+    ]
   }, [catalog.data, extra, includeCatalog, excludeIds])
 
   // Seed the input with the selected option's display name. The field owns its
@@ -242,7 +248,8 @@ export function ProviderComboBox({
     (option) =>
       !query ||
       option.name.toLowerCase().includes(query) ||
-      option.id.toLowerCase().includes(query),
+      option.id.toLowerCase().includes(query) ||
+      option.alias?.toLowerCase().includes(query),
   )
 
   // Both gated on `includeCatalog`: a picker offering only the API dialects must
@@ -262,6 +269,9 @@ export function ProviderComboBox({
   return (
     <ComboBox.Root
       allowsEmptyCollection
+      // `visible` is already filtered above, on the id and the gateway name as
+      // well as ours; the default filter would match our name alone.
+      defaultFilter={() => true}
       // Opening on focus makes this read as a pick-from-a-list control rather
       // than a free-text field, but an autofocused instance opens its list on
       // mount: measured in jsdom, `autoFocus` leaves the input

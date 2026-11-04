@@ -14,8 +14,8 @@
  *
  * Keys are any-llm's own provider ids, read off `AnyLLM.get_supported_providers()`
  * rather than recalled, because a key that is not a real id is a row that never
- * gets its name and nothing fails. The four ids with no widely-used brand
- * spelling of their own are deliberately absent and fall through unchanged.
+ * gets its name and nothing fails. An id with no widely-used brand
+ * spelling of its own is deliberately absent and falls through unchanged.
  *
  * `mzai` and `otari` are in it for the same reason every vendor is. A deployment
  * serving its own models would otherwise have shown them lowercase while every
@@ -110,6 +110,6 @@ export function providerCatalogName(
   providerId: string,
   backendName: string | undefined,
 ): string {
-  const known = PROVIDER_DISPLAY_NAMES[providerId.trim().toLowerCase()]
-  return known ?? (backendName || providerId)
+  const known = providerDisplayName(providerId)
+  return known !== providerId ? known : backendName || providerId
 }
