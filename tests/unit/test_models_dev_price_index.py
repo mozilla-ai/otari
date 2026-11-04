@@ -449,3 +449,70 @@ def test_vertex_claude_is_priced_where_v2_lists_it_and_where_v1_does() -> None:
 
     assert price("google-vertex") == Decimal(3)
     assert price("google-vertex-anthropic") == Decimal(3)
+
+
+def test_a_v2_entry_carries_every_price_the_document_gives() -> None:
+    """The index keeps the whole cost block beside the v1 rates it derives, for a row to store."""
+    from gateway.types.models_dev import parse_catalog_v2, pricing_document
+
+    sample = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_v2_sample.json"
+    document = json.loads(sample.read_text("utf-8"))
+    catalog = parse_catalog_v2(document)
+
+    index = ModelsDevPriceIndex.from_catalog(catalog)
+
+    entry = index.get("openai", "gpt-4o")
+    assert entry is not None and entry.pricing is not None
+    assert pricing_document(entry.pricing) == document["openai"]["models"]["gpt-4o"]["cost"]
+    assert entry.input == Decimal("2.5")
+
+
+def test_a_v1_entry_carries_no_block(index: ModelsDevPriceIndex) -> None:
+    entry = index.get("anthropic", "claude-sonnet-4-5")
+    assert entry is not None
+    assert entry.pricing is None
+
+
+def _two_hosts(first_search: float, second_search: float) -> ModelsDevPriceIndex:
+    from gateway.types.models_dev import parse_catalog_v2
+
+    def host(name: str, search: float) -> dict[str, Any]:
+        cost = {"text": {"input": {"price": 3}, "output": {"price": 15}}, "web_search": {"price": search}}
+        return {"id": name, "models": {"shared-model": {"id": "shared-model", "cost": cost}}}
+
+    return ModelsDevPriceIndex.from_catalog(
+        parse_catalog_v2({"hosta": host("hosta", first_search), "hostb": host("hostb", second_search)})
+    )
+
+
+def test_hosts_that_agree_on_the_text_price_alone_give_no_block() -> None:
+    entry = _two_hosts(10, 35).resolve(None, "shared-model")
+
+    assert entry is not None
+    assert (entry.input, entry.pricing) == (Decimal(3), None)
+
+
+def test_hosts_that_agree_on_the_whole_block_give_it() -> None:
+    entry = _two_hosts(10, 10).resolve(None, "shared-model")
+
+    assert entry is not None and entry.pricing is not None
+    assert entry.pricing.web_search is not None and entry.pricing.web_search.price == 10
+
+
+def test_hosts_that_write_the_same_block_in_another_order_still_agree() -> None:
+    from gateway.types.models_dev import parse_catalog_v2
+
+    first = {"text": {"input": {"price": 3}, "output": {"price": 15}}, "web_search": {"price": 10}}
+    second = {"web_search": {"price": 10}, "text": {"output": {"price": 15}, "input": {"price": 3}}}
+    index = ModelsDevPriceIndex.from_catalog(
+        parse_catalog_v2(
+            {
+                "hosta": {"id": "hosta", "models": {"shared-model": {"id": "shared-model", "cost": first}}},
+                "hostb": {"id": "hostb", "models": {"shared-model": {"id": "shared-model", "cost": second}}},
+            }
+        )
+    )
+
+    entry = index.resolve(None, "shared-model")
+
+    assert entry is not None and entry.pricing is not None
