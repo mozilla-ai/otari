@@ -708,7 +708,7 @@ def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
     key = _key(client)
     probe.FUNDS["available"] = Decimal("0")
 
-    with patch("gateway.api.routes.search.run_direct_search", new=AsyncMock()) as searched:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as searched:
         response = _search(client, key)
 
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
@@ -728,7 +728,7 @@ def test_a_direct_search_whose_funds_check_fails_is_refused_and_refunded(
     key = _key(client)
     probe.FAULTS.add("funds")
 
-    with patch("gateway.api.routes.search.run_direct_search", new=AsyncMock()) as searched:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as searched:
         response = _search(client, key)
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, response.text
@@ -764,12 +764,13 @@ def test_a_direct_search_whose_admission_does_not_commit_is_not_served(
     key = _key(client)
 
     with (
-        patch("gateway.api.routes.search.release_session", new=AsyncMock(return_value=False)),
-        patch("gateway.api.routes.search.run_direct_search", new=AsyncMock()) as searched,
+        patch("gateway.api.deps.release_session", new=AsyncMock(return_value=False)),
+        patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as searched,
     ):
         response = _search(client, key)
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE, response.text
+    assert response.json()["detail"] == "This organization's funds could not be checked. Retry later."
     searched.assert_not_called()
     assert probe.LEDGER == []
     assert _user(client)["reserved"] == pytest.approx(0.0)

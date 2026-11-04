@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -34,11 +34,17 @@ from gateway.api.deps import (
 )
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
 from gateway.core.settings.pricing import PricingConfig
-from gateway.exceptions.tools_exceptions import SearchToolNotFoundError
+from gateway.exceptions.tools_exceptions import (
+    SearchToolNotFoundError,
+    WebSearchCredentialRefusedError,
+    WebSearchPolicyResolutionFailedError,
+    WebSearchPolicyResolutionFailure,
+)
 from gateway.inflight import InFlightRegistry
 from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
+from gateway.models.usage import UsageLog
 from gateway.schemas.tools import SearchResponse
 from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
 from gateway.services.secret_box import generate_secret_key
@@ -1068,7 +1074,7 @@ def test_a_config_priced_search_is_reserved_before_it_runs(
         headers=master_key_header,
     ).json()
 
-    with patch("gateway.api.routes.search.run_direct_search", AsyncMock()) as searched:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", AsyncMock()) as searched:
         resp = client.post(
             f"{API_ROOT}/search/fake-search",
             json=SEARCH_PAYLOAD,
@@ -1093,7 +1099,7 @@ def test_search_is_tracked_while_its_provider_call_runs(client: TestClient, api_
         seen.append(registry.snapshot())
         return DirectSearchResult(response=SearchResponse(search_tool=search.instance.name, results=[]), cost=None)
 
-    with patch("gateway.api.routes.search.run_direct_search", slow_search):
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", slow_search):
         resp = client.post(
             f"{API_ROOT}/search",
             json={**SEARCH_PAYLOAD, "search_tool_name": "fake-search"},
@@ -1391,6 +1397,30 @@ def test_a_named_call_runs_on_the_tools_own_key_though_the_workspace_has_one(
     ]
 
 
+def test_a_pick_that_raises_answers_with_the_errors_own_status(
+    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str], api_key_obj: dict[str, Any]
+) -> None:
+    """A domain error from the pick answers with its status, a 5xx with the generic detail, and each is logged."""
+    not_found = SearchToolNotFoundError("fake-search")
+    with patch("gateway.services.tools._direct_tool_call.pick_direct_search_instance", side_effect=not_found):
+        resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert (resp.status_code, resp.json()["detail"]) == (404, not_found.message)
+
+    refused = WebSearchCredentialRefusedError("exa", "carries no API key, which the provider requires")
+    with patch("gateway.services.tools._direct_tool_call.pick_direct_search_instance", side_effect=refused):
+        resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "The request could not be completed by the provider"
+    assert "exa" not in resp.text
+
+    rows = _search_rows(client, master_key_header, api_key_obj["user_id"])
+    assert sorted((row["model"], row["provider"], row["status_code"]) for row in rows) == [
+        ("fake-search", None, 404),
+        ("fake-search", None, 502),
+    ]
+    assert [row["error_message"] for row in rows if row["status_code"] == 502] == [refused.message]
+
+
 def test_a_tool_removed_after_it_was_picked_is_refused_and_logged(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1398,7 +1428,10 @@ def test_a_tool_removed_after_it_was_picked_is_refused_and_logged(
     api_key_obj: dict[str, Any],
 ) -> None:
     """Another writer can delete a stored tool between the pick and the resolve."""
-    with patch("gateway.api.routes.search.resolve_direct_search", side_effect=SearchToolNotFoundError("fake-search")):
+    with patch(
+        "gateway.services.tools._direct_tool_call.resolve_direct_search",
+        side_effect=SearchToolNotFoundError("fake-search"),
+    ):
         resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
 
     assert resp.status_code == 404
@@ -1435,7 +1468,7 @@ def test_a_library_tool_without_its_key_is_refused_before_the_provider(
     keyless_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     headers = _keyed(keyless_client, master_key_header, "keyless")
-    with patch("gateway.api.routes.search.run_direct_search", AsyncMock()) as searched:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", AsyncMock()) as searched:
         resp = keyless_client.post(f"{API_ROOT}/search/exa", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 400
@@ -1658,7 +1691,7 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
     """Refused after the budget checks, its hold released, the provider never called, the refusal logged."""
     headers = _on_request_budget(strict_client, master_key_header, "unpriced-search")
     run = AsyncMock()
-    with patch("gateway.api.routes.search.run_direct_search", run):
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", run):
         resp = strict_client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 402, resp.text
@@ -1869,3 +1902,89 @@ def test_a_refused_search_carries_its_request_id(client: TestClient, api_key_hea
     resp = client.post(f"{API_ROOT}/search/no-such-tool", json=SEARCH_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 400, resp.text
     assert resp.headers[REQUEST_ID_HEADER]
+
+
+@pytest.fixture
+def rpm_client(test_config: GatewayConfig) -> Generator[TestClient]:
+    yield from _client_on(test_config, rate_limit_rpm=3)
+
+
+def test_a_served_search_carries_its_rate_limit_headers(
+    rpm_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _keyed(rpm_client, master_key_header, "rpm-search")
+
+    resp = rpm_client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert (resp.headers["X-RateLimit-Limit"], resp.headers["X-RateLimit-Remaining"]) == ("3", "2")
+    assert int(resp.headers["X-RateLimit-Reset"]) > 0
+
+
+def test_a_refused_search_carries_no_rate_limit_headers(
+    rpm_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _keyed(rpm_client, master_key_header, "rpm-refused")
+
+    resp = rpm_client.post(f"{API_ROOT}/search/nope", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 400, resp.text
+    assert "X-RateLimit-Limit" not in resp.headers
+
+
+class _UnreadablePolicy:
+    """A web search policy whose stored rules cannot be read."""
+
+    async def resolve(
+        self, workspace_id: uuid.UUID, requested_tools: Sequence[WebTool]
+    ) -> ResolvedWebSearchConfig | None:
+        raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID)
+
+
+def test_a_policy_that_cannot_be_read_is_a_503_naming_why(
+    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str], api_key_obj: dict[str, Any]
+) -> None:
+    client.app.dependency_overrides[get_workspace_web_search_policies] = _UnreadablePolicy  # type: ignore[attr-defined]
+
+    resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+
+    assert resp.status_code == 503, resp.text
+    message = WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID.message
+    assert resp.json()["detail"] == message
+    assert resp.headers[REQUEST_ID_HEADER]
+    (row,) = _search_rows(client, master_key_header, api_key_obj["user_id"])
+    assert (row["status"], row["status_code"], row["error_message"], row["model"]) == (
+        "error",
+        503,
+        message,
+        "fake-search",
+    )
+
+
+def test_every_usage_row_names_its_request_its_workspace_and_counts_toward_budget(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A served search, a failed one and a refused one each write one row the request's id groups."""
+    headers = _keyed(client, master_key_header, "row-shapes")
+    failing = {**SEARCH_PAYLOAD, "provider_options": {"error": "http_error", "error_status": 503}}
+
+    served = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+    failed = client.post(f"{API_ROOT}/search/fake-search", json=failing, headers=headers)
+    refused = client.post(f"{API_ROOT}/search/nope", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert [served.status_code, failed.status_code, refused.status_code] == [200, 502, 400]
+    rows = {row["request_group_id"]: row for row in _search_rows(client, master_key_header, "row-shapes")}
+    assert set(rows) == {resp.headers[REQUEST_ID_HEADER] for resp in (served, failed, refused)}
+    ok, error, refusal = (rows[resp.headers[REQUEST_ID_HEADER]] for resp in (served, failed, refused))
+    assert (ok["status"], ok["status_code"], ok["error_message"]) == ("success", None, None)
+    assert (ok["prompt_tokens"], ok["completion_tokens"], ok["total_tokens"]) == (0, 0, 0)
+    assert (error["status"], error["status_code"], error["cost"]) == ("error", 503, None)
+    assert (error["prompt_tokens"], error["model"], error["provider"]) == (None, "fake-search", "fake")
+    assert (refusal["status"], refusal["status_code"], refusal["cost"]) == ("error", 400, None)
+    assert (refusal["prompt_tokens"], refusal["model"], refusal["provider"]) == (None, "nope", None)
+    for row in (ok, error, refusal):
+        assert row["counts_toward_budget"] is True
+        assert row["latency_ms"] is not None
+        assert row["api_key_id"] is not None
+    workspaces = set(db_session.scalars(select(UsageLog.workspace_id).where(UsageLog.user_id == "row-shapes")).all())
+    assert workspaces == {uuid.UUID(_default_workspace_id(client, master_key_header))}
