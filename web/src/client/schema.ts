@@ -1473,6 +1473,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Fetch
+         * @description Fetch one page through a configured fetch tool.
+         *
+         *     The tool is taken from ``fetch_tool_name``, which may be omitted: the
+         *     deployment's ``web_fetch_default_tool`` then serves, else ``builtin_fetch``,
+         *     the gateway's own fetcher. Such a call runs on the workspace's organization
+         *     fetch key when it has one. While the deployment's ``web_fetch_enabled`` is
+         *     off, the call is refused, as ``otari_web_fetch`` is. The URL must pass the
+         *     workspace's domain lists and the gateway's own checks: a public http or
+         *     https URL that names no private address. The built-in fetcher also checks
+         *     where each host resolves.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user, as
+         *       on chat completions.
+         */
+        post: operations["fetch-create_fetch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fetch/{fetch_tool_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Fetch For Tool
+         * @description Fetch one page through the fetch tool named in the path.
+         *
+         *     Identical to ``POST /api/v1/fetch`` except that the path names the tool,
+         *     which then runs on its own key. Any ``fetch_tool_name`` in the body is
+         *     ignored.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user, as
+         *       on chat completions.
+         */
+        post: operations["fetch-create_fetch_for_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/files": {
         parameters: {
             query?: never;
@@ -10168,7 +10245,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.
+             * @description Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, [] = no tool, or search and fetch tool names ('*' for every tool). A model wildcard never grants a tool.
              */
             allowed_tools?: string[] | null;
             /**
@@ -10304,7 +10381,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.
+             * @description Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, [] = no tool, or search and fetch tool names ('*' for every tool). A key can only narrow your own tool access.
              */
             allowed_tools?: string[] | null;
             /**
@@ -10499,7 +10576,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).
+             * @description Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: null = the search tools allowed_models grants, [] = no tool, or search and fetch tool names ('*' for every tool).
              */
             allowed_tools?: string[] | null;
             /**
@@ -11625,6 +11702,110 @@ export interface components {
              * @default Bearer
              */
             token_type: string;
+        };
+        /**
+         * FetchRequest
+         * @description A direct fetch request: one page, read through the deployment's fetch tool or the one named.
+         * @example {
+         *       "max_chars": 20000,
+         *       "url": "https://example.com/article"
+         *     }
+         */
+        FetchRequest: {
+            /**
+             * Fetch Tool Name
+             * @description Configured fetch tool to run on, builtin_fetch included. Optional: the deployment's web_fetch_default_tool serves, else builtin_fetch. Ignored on POST /api/v1/fetch/{fetch_tool_name}.
+             */
+            fetch_tool_name?: string | null;
+            /**
+             * Include Raw
+             * @description Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw holds only content_kind and redirect_count.
+             * @default false
+             */
+            include_raw: boolean;
+            /**
+             * Max Chars
+             * @description Cut the page text to this many characters. Unset, the tool's own max_chars option applies, else the provider's own limits.
+             */
+            max_chars?: number | null;
+            /**
+             * Provider Options
+             * @description Native options for the provider that serves the call, under the provider's own names, as GET /api/v1/search-tools/providers?kind=fetch lists them. An option the provider does not take from a request is refused with a 400. On a call that names no tool they go to whichever provider serves it, so name the tool when they are meant for one provider.
+             */
+            provider_options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Url
+             * @description The page to fetch: one public http or https URL.
+             */
+            url: string;
+            /**
+             * User
+             * @description User ID for usage attribution
+             */
+            user?: string | null;
+        };
+        /**
+         * FetchResponse
+         * @description A completed direct fetch: one page's text and where it came from.
+         */
+        FetchResponse: {
+            /**
+             * Content Type
+             * @description The page's content type; empty when the provider does not report one.
+             * @default
+             */
+            content_type: string;
+            /**
+             * Fetch Tool
+             * @description The configured fetch tool that served the request
+             */
+            fetch_tool: string;
+            /**
+             * Final Url
+             * @description Where the page was found after redirects. The URL asked for when the provider does not report where a redirect led (reports_final_url in the provider catalog).
+             */
+            final_url: string;
+            /**
+             * Object
+             * @default fetch
+             * @constant
+             */
+            object: "fetch";
+            /**
+             * Published
+             * @description When the page was published, where the provider reports it.
+             */
+            published?: string | null;
+            /**
+             * Raw
+             * @description The provider's whole response, untouched; only when the request set include_raw.
+             */
+            raw?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Text
+             * @description The page's text, as the provider extracted it.
+             */
+            text: string;
+            /**
+             * Title
+             * @description The page's title; empty when the provider gave none.
+             * @default
+             */
+            title: string;
+            /**
+             * Truncated
+             * @description Whether text is less than the whole page: the body or the extracted text hit a limit of the provider's, or max_chars cut it.
+             */
+            truncated: boolean;
+            /**
+             * Url
+             * @description The URL fetched, as asked, in canonical form.
+             */
+            url: string;
         };
         /**
          * GateDefinitionRequest
@@ -22454,6 +22635,75 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "fetch-create_fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FetchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "fetch-create_fetch_for_tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Configured fetch tool to run on, builtin_fetch included */
+                fetch_tool_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FetchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

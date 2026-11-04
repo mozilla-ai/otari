@@ -5845,7 +5845,7 @@
                 "type": "null"
               }
             ],
-            "description": "Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.",
+            "description": "Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, [] = no tool, or search and fetch tool names ('*' for every tool). A model wildcard never grants a tool.",
             "title": "Allowed Tools"
           },
           "capture_agent_telemetry": {
@@ -6212,7 +6212,7 @@
                 "type": "null"
               }
             ],
-            "description": "Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.",
+            "description": "Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, [] = no tool, or search and fetch tool names ('*' for every tool). A key can only narrow your own tool access.",
             "title": "Allowed Tools"
           },
           "capture_agent_telemetry": {
@@ -6592,7 +6592,7 @@
                 "type": "null"
               }
             ],
-            "description": "Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).",
+            "description": "Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: null = the search tools allowed_models grants, [] = no tool, or search and fetch tool names ('*' for every tool).",
             "title": "Allowed Tools"
           },
           "blocked": {
@@ -8885,6 +8885,165 @@
           "expires_in"
         ],
         "title": "FederationTokenResponse",
+        "type": "object"
+      },
+      "FetchRequest": {
+        "description": "A direct fetch request: one page, read through the deployment's fetch tool or the one named.",
+        "example": {
+          "max_chars": 20000,
+          "url": "https://example.com/article"
+        },
+        "properties": {
+          "fetch_tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Configured fetch tool to run on, builtin_fetch included. Optional: the deployment's web_fetch_default_tool serves, else builtin_fetch. Ignored on POST /api/v1/fetch/{fetch_tool_name}.",
+            "title": "Fetch Tool Name"
+          },
+          "include_raw": {
+            "default": false,
+            "description": "Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw holds only content_kind and redirect_count.",
+            "title": "Include Raw",
+            "type": "boolean"
+          },
+          "max_chars": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cut the page text to this many characters. Unset, the tool's own max_chars option applies, else the provider's own limits.",
+            "title": "Max Chars"
+          },
+          "provider_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Native options for the provider that serves the call, under the provider's own names, as GET /api/v1/search-tools/providers?kind=fetch lists them. An option the provider does not take from a request is refused with a 400. On a call that names no tool they go to whichever provider serves it, so name the tool when they are meant for one provider.",
+            "title": "Provider Options"
+          },
+          "url": {
+            "description": "The page to fetch: one public http or https URL.",
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID for usage attribution",
+            "title": "User"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "FetchRequest",
+        "type": "object"
+      },
+      "FetchResponse": {
+        "description": "A completed direct fetch: one page's text and where it came from.",
+        "properties": {
+          "content_type": {
+            "default": "",
+            "description": "The page's content type; empty when the provider does not report one.",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "fetch_tool": {
+            "description": "The configured fetch tool that served the request",
+            "title": "Fetch Tool",
+            "type": "string"
+          },
+          "final_url": {
+            "description": "Where the page was found after redirects. The URL asked for when the provider does not report where a redirect led (reports_final_url in the provider catalog).",
+            "title": "Final Url",
+            "type": "string"
+          },
+          "object": {
+            "const": "fetch",
+            "default": "fetch",
+            "title": "Object",
+            "type": "string"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the page was published, where the provider reports it.",
+            "title": "Published"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's whole response, untouched; only when the request set include_raw.",
+            "title": "Raw"
+          },
+          "text": {
+            "description": "The page's text, as the provider extracted it.",
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "description": "The page's title; empty when the provider gave none.",
+            "title": "Title",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "Whether text is less than the whole page: the body or the extracted text hit a limit of the provider's, or max_chars cut it.",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "url": {
+            "description": "The URL fetched, as asked, in canonical form.",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fetch_tool",
+          "url",
+          "final_url",
+          "text",
+          "truncated"
+        ],
+        "title": "FetchResponse",
         "type": "object"
       },
       "GateDefinitionRequest": {
@@ -32299,6 +32458,119 @@
         "summary": "Submit Feedback",
         "tags": [
           "feedback"
+        ]
+      }
+    },
+    "/api/v1/fetch": {
+      "post": {
+        "description": "Fetch one page through a configured fetch tool.\n\nThe tool is taken from ``fetch_tool_name``, which may be omitted: the\ndeployment's ``web_fetch_default_tool`` then serves, else ``builtin_fetch``,\nthe gateway's own fetcher. Such a call runs on the workspace's organization\nfetch key when it has one. While the deployment's ``web_fetch_enabled`` is\noff, the call is refused, as ``otari_web_fetch`` is. The URL must pass the\nworkspace's domain lists and the gateway's own checks: a public http or\nhttps URL that names no private address. The built-in fetcher also checks\nwhere each host resolves.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
+        "operationId": "fetch-create_fetch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FetchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FetchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Fetch",
+        "tags": [
+          "fetch"
+        ]
+      }
+    },
+    "/api/v1/fetch/{fetch_tool_name}": {
+      "post": {
+        "description": "Fetch one page through the fetch tool named in the path.\n\nIdentical to ``POST /api/v1/fetch`` except that the path names the tool,\nwhich then runs on its own key. Any ``fetch_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
+        "operationId": "fetch-create_fetch_for_tool",
+        "parameters": [
+          {
+            "description": "Configured fetch tool to run on, builtin_fetch included",
+            "in": "path",
+            "name": "fetch_tool_name",
+            "required": true,
+            "schema": {
+              "description": "Configured fetch tool to run on, builtin_fetch included",
+              "title": "Fetch Tool Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FetchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FetchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Fetch For Tool",
+        "tags": [
+          "fetch"
         ]
       }
     },

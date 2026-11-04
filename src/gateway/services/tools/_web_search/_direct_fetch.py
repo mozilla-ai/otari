@@ -6,7 +6,7 @@ and gates, bills and logs the call.
 - :func:`pick_direct_fetch_instance` returns the instance the request names,
   else the one ``web_fetch_default_tool`` names,
   else ``builtin_fetch``. A deployment with ``web_fetch_enabled`` off serves
-  none: the switch covers every page the gateway fetches.
+  none, as it offers no ``otari_web_fetch``.
 - :func:`resolve_direct_fetch` returns the :class:`DirectFetch`. A call that
   names its instance runs on the instance's own key. A call that names none
   runs on the organization fetch key in the workspace's policy, when there is
