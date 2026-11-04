@@ -198,7 +198,9 @@ take the request past a limit is not run: the model is told it was refused
 Completions' `otari_tool_calls`), it is recorded as a failed call and not
 charged, and the request goes on. A call priced only by the cost its provider
 reports, with no rate, holds nothing, since that cost is known only once it
-returns. The pages a search reads to enrich its results are one hold, taken
+returns, and a call held at its rate that reports more is charged what it
+reported, which can take the request past a limit by the difference. The pages
+a search reads to enrich its results are one hold, taken
 once the search returns, for the pages it will read at the rate their fetch is
 billed at (the fetch instance's own, or `otari:web_fetch` on an organization
 fetch key); when it does not fit, no page is read, the results show their
