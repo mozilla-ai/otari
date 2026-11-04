@@ -42,9 +42,13 @@ from gateway.models.tools import WebTool
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError, ToolUse
 from gateway.services.tools._web_access import web_access_disabled_refusal
 from gateway.services.tools._web_search import (
+    pick_direct_fetch_instance,
     pick_direct_search_instance,
+    resolve_direct_fetch,
     resolve_direct_search,
+    run_direct_fetch,
     run_direct_search,
+    unpriced_direct_fetch_detail,
     unpriced_direct_search_detail,
 )
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL, redacted_upstream_detail
@@ -54,10 +58,10 @@ if TYPE_CHECKING:
     import httpx
 
     from gateway.core.config import GatewayConfig
-    from gateway.core.settings.tools import ToolInstance
+    from gateway.core.settings.tools import ToolInstance, ToolKind
     from gateway.models.api_keys import APIKey
     from gateway.models.tools import ResolvedWebSearchConfig
-    from gateway.schemas.tools import SearchRequest, SearchResponse
+    from gateway.schemas.tools import FetchRequest, FetchResponse, SearchRequest, SearchResponse
     from gateway.types.tool_charges import RateKey
 
 ResultT = TypeVar("ResultT")
@@ -165,8 +169,8 @@ class DirectToolAccounts(Protocol):
         """The end user a service key names, created on first use, and the budget it is on."""
         ...
 
-    async def tool_refusal(self, api_key: APIKey | None, *, provider: str, tool: str) -> str | None:
-        """Why the key may not run the tool, or ``None`` when it may."""
+    async def tool_refusal(self, api_key: APIKey | None, *, kind: ToolKind, provider: str, tool: str) -> str | None:
+        """Why the key may not run the tool of this kind, or ``None`` when it may."""
         ...
 
 
@@ -269,7 +273,7 @@ def _elapsed_ms(started_at: float) -> int:
 
 
 class DirectToolService:
-    """Runs direct tool calls: :meth:`search` runs one on a configured search tool."""
+    """Runs direct tool calls: :meth:`search` on a configured search tool, :meth:`fetch` on a fetch tool."""
 
     def __init__(
         self,
@@ -320,11 +324,43 @@ class DirectToolService:
             resolve=resolve,
         )
 
+    async def fetch(
+        self, request: FetchRequest, *, caller: DirectCaller, tool_name: str | None, endpoint: str
+    ) -> DirectToolOutcome[FetchResponse]:
+        """Read one page through the fetch tool named, else the deployment's; ``endpoint`` labels its usage row."""
+        config = self._config
+        client = self._web_client
+
+        def resolve(tool: ToolInstance, policy: ResolvedWebSearchConfig | None) -> DirectToolCall[FetchResponse]:
+            # A workspace whose organization brought its own fetch key reads pages with it
+            # on a call that names no tool, so its own account pays. The tool is still what
+            # the request is allowlisted, rate-limited and timed out as.
+            fetch = resolve_direct_fetch(config, tool, policy, request, named=tool_name is not None)
+            return DirectToolCall(
+                provider=fetch.resolved.provider,
+                label=fetch.resolved.label,
+                rate_keys=fetch.resolved.rate_keys,
+                deployment_paid=not fetch.resolved.on_credential,
+                unpriced_detail=unpriced_direct_fetch_detail(fetch),
+                pricing_key=gateway_tool_pricing_key(WebTool.FETCH.value),
+                run=lambda: run_direct_fetch(fetch, client, trust_env_proxy=config.web_retrieval_trust_env_proxy),
+            )
+
+        return await self._run(
+            endpoint=endpoint,
+            kind="fetch",
+            caller=caller,
+            tool_name=tool_name,
+            pick=lambda: pick_direct_fetch_instance(config, tool_name),
+            policy_tools=(WebTool.FETCH,),
+            resolve=resolve,
+        )
+
     async def _run(
         self,
         *,
         endpoint: str,
-        kind: str,
+        kind: ToolKind,
         caller: DirectCaller,
         tool_name: str | None,
         pick: Callable[[], ToolInstance],
@@ -338,7 +374,7 @@ class DirectToolService:
         for the row of a pick that resolved nothing. ``policy_tools`` are the web
         tools the workspace's policy is read for. ``resolve`` turns the instance
         and that policy into the call, or raises a domain error. ``kind`` is the
-        call's noun in the log lines.
+        tool's kind, which the key's tool list is checked for and the log lines name.
         """
         started_at = time.monotonic()
         request_id = caller.request_id
@@ -465,7 +501,7 @@ class DirectToolService:
         # Tool access control (per-key), by the tool's name. A key with no list of its
         # own inherits its user's, and a key restricted to models must be granted the
         # tool, which is the fail-closed side to be on for a spend surface.
-        not_allowed = await self._accounts.tool_refusal(api_key, provider=tool.provider, tool=tool.name)
+        not_allowed = await self._accounts.tool_refusal(api_key, kind=kind, provider=tool.provider, tool=tool.name)
         if not_allowed is not None:
             raise await refused(
                 not_allowed, HTTPStatus.FORBIDDEN, model=tool.name, provider=tool.provider, workspace_id=workspace_id
@@ -566,6 +602,10 @@ class DirectToolService:
         try:
             result = await call.run()
         except Exception as exc:
+            if isinstance(exc, TenancyError) and not isinstance(exc, DirectToolFailedError) and exc.status_code < 500:
+                # The call's own checks refused it after the hold, as a fetch refuses the
+                # URL a provider found the page at: a refusal, not a provider failure.
+                raise await refused_after_hold(exc.message, exc.status_code) from exc
             if isinstance(exc, DirectToolFailedError):
                 # The failure's safe fields ride as headers (decision 67); the detail stays generic.
                 failed, row_status, failure_headers = (

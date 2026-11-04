@@ -215,6 +215,9 @@ class HostedProvider(Base):
     # Serve a model the roster does not list, as a ``config.yml`` instance does.
     # A model the roster switches off is still refused.
     serves_unlisted_models: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The operator's declaration that the upstream keeps no prompt or completion
+    # data. Shown in the catalog; nothing is enforced on it.
+    zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
     # The one organization served on this provider, or None for every one. Any
     # other organization is answered as if the provider were not configured.
     # RESTRICT: SET NULL would open the provider to every organization, and

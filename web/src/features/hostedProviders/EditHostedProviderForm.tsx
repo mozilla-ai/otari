@@ -23,12 +23,13 @@ import {
   ProviderCredentialFields,
   parseClientArgs,
 } from "@/features/providers/providerFields"
+import { ZeroDataRetentionField } from "@/features/providers/ZeroDataRetentionField"
 import {
   useTestHostedProvider,
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
-
 import { movesToAnotherOrigin } from "./endpointOrigin"
+
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
 import { SupportedCountriesField } from "./SupportedCountriesField"
 import { formatCountries, parseCountries } from "./supportedCountries"
@@ -52,6 +53,7 @@ interface EditDraft {
   redacted: string[]
   servesUnlistedModels: boolean
   supportedCountries: string
+  zeroDataRetention: boolean
 }
 
 function draftFrom(provider: HostedProvider): EditDraft {
@@ -67,6 +69,7 @@ function draftFrom(provider: HostedProvider): EditDraft {
     redacted,
     servesUnlistedModels: provider.serves_unlisted_models,
     supportedCountries: formatCountries(provider.supported_countries),
+    zeroDataRetention: provider.zero_data_retention,
   }
 }
 
@@ -153,6 +156,9 @@ export function EditHostedProviderForm({
           ...(draft.servesUnlistedModels === provider.serves_unlisted_models
             ? {}
             : { serves_unlisted_models: draft.servesUnlistedModels }),
+          ...(draft.zeroDataRetention === provider.zero_data_retention
+            ? {}
+            : { zero_data_retention: draft.zeroDataRetention }),
           ...(countriesChanged ? { supported_countries: countries.value } : {}),
         },
       },
@@ -205,6 +211,12 @@ export function EditHostedProviderForm({
         isSelected={draft.servesUnlistedModels}
         onChange={(servesUnlistedModels) =>
           setDraft({ ...draft, servesUnlistedModels })
+        }
+      />
+      <ZeroDataRetentionField
+        isSelected={draft.zeroDataRetention}
+        onChange={(zeroDataRetention) =>
+          setDraft({ ...draft, zeroDataRetention })
         }
       />
       <SupportedCountriesField

@@ -434,6 +434,9 @@ export function HostedProvidersPage() {
           {row.shadows_config ? (
             <Badge tone="muted">Overrides config.yml</Badge>
           ) : null}
+          {row.zero_data_retention ? (
+            <Badge tone="muted">Zero data retention</Badge>
+          ) : null}
         </span>
       ),
     },

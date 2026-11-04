@@ -104,6 +104,7 @@ describe("catalogRequest", () => {
           maxInput: 3,
           pricing: "custom",
           source: "discovered",
+          zeroDataRetention: true,
           releasedWithinDays: 365,
         },
         "input",
@@ -122,6 +123,7 @@ describe("catalogRequest", () => {
       max_input: 3,
       pricing: "custom",
       source: "discovered",
+      zero_data_retention: true,
       released_within_days: 365,
       sort: "input",
       direction: "desc",
@@ -137,6 +139,7 @@ describe("catalogRequest", () => {
     expect(params.min_context).toBeUndefined()
     expect(params.max_input).toBeUndefined()
     expect(params.released_within_days).toBeUndefined()
+    expect(params.zero_data_retention).toBeUndefined()
   })
 })
 
@@ -175,6 +178,7 @@ describe("the list's URL", () => {
         maxInput: 3,
         pricing: "priced",
         source: "discovered",
+        zeroDataRetention: true,
         releasedWithinDays: 365,
       },
       sort: "name",

@@ -214,6 +214,7 @@ function storedProvider(name: string, decryptable = true): HostedProvider {
     api_key_last4: "1234",
     decryptable,
     serves_unlisted_models: false,
+    zero_data_retention: false,
     shadows_config: false,
     source: "database",
   }

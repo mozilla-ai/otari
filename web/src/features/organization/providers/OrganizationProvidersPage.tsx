@@ -48,6 +48,7 @@ import {
   ProviderCredentialFields,
   parseClientArgs,
 } from "@/features/providers/providerFields"
+import { ZeroDataRetentionField } from "@/features/providers/ZeroDataRetentionField"
 import {
   useArchiveOrgProviderKey,
   useCreateOrgProviderKey,
@@ -112,6 +113,7 @@ interface KeyDraft {
   credentials: CredentialFieldValues
   /** Typed secrets already stored, so blank means "keep it" rather than "clear it". */
   redacted: string[]
+  zeroDataRetention: boolean
 }
 
 const EMPTY_DRAFT: KeyDraft = {
@@ -122,6 +124,7 @@ const EMPTY_DRAFT: KeyDraft = {
   clientArgs: "",
   credentials: {},
   redacted: [],
+  zeroDataRetention: false,
 }
 
 function draftFrom(key: OrgProviderKey): KeyDraft {
@@ -141,6 +144,7 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
     clientArgs: formatClientArgs(rest),
     credentials: typed,
     redacted,
+    zeroDataRetention: key.zero_data_retention,
   }
 }
 
@@ -194,6 +198,7 @@ function KeyForm({
         name: draft.name.trim(),
         api_base: apiBase === "" ? null : apiBase,
         client_args: clientArgs,
+        zero_data_retention: draft.zeroDataRetention,
       }
       // Omitted rather than sent as null when it was left blank: an explicit
       // null clears the stored credential, and "I did not retype the secret" is
@@ -208,6 +213,7 @@ function KeyForm({
       api_key: draft.apiKey === "" ? null : draft.apiKey,
       api_base: apiBase === "" ? null : apiBase,
       client_args: clientArgs,
+      zero_data_retention: draft.zeroDataRetention,
     }
     create.mutate(body, { onSuccess: onClose })
   }
@@ -287,6 +293,13 @@ function KeyForm({
           editing
             ? "Optional. Point this key at a compatible endpoint of your own instead of the provider's default. A new URL needs the API key, and any hidden credential below, entered again, because the key will be sent there."
             : "Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+        }
+      />
+
+      <ZeroDataRetentionField
+        isSelected={draft.zeroDataRetention}
+        onChange={(zeroDataRetention) =>
+          setDraft({ ...draft, zeroDataRetention })
         }
       />
 
@@ -406,6 +419,12 @@ export function OrganizationProvidersPage() {
             <span className="flex items-center gap-2 text-mono-caption text-muted">
               <Dot className="bg-accent" />
               DEFAULT
+            </span>
+          ) : null}
+          {row.zero_data_retention ? (
+            <span className="flex items-center gap-2 text-mono-caption text-muted">
+              <Dot className="bg-text-subtle" />
+              ZERO DATA RETENTION
             </span>
           ) : null}
           {row.archived_at ? (

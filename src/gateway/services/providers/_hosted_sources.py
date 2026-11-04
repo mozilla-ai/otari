@@ -75,6 +75,11 @@ class HostedSource:
         return self.row.supported_countries if self.row is not None else self._entry.supported_countries
 
     @property
+    def zero_data_retention(self) -> bool:
+        """Whether the operator declared that the upstream keeps no prompt or completion data."""
+        return self.row.zero_data_retention if self.row is not None else self._entry.zero_data_retention
+
+    @property
     def declared_models(self) -> tuple[str, ...]:
         """The model ids configuration offers when the provider cannot list them; none for a row."""
         return () if self.entry is None else self.entry.models
@@ -130,6 +135,14 @@ class HostedSources:
         for name, entry in entries.items():
             merged.setdefault(name, HostedSource(entry=entry))
         return [merged[name] for name in sorted(merged)]
+
+    async def zero_data_retention_names(self, organization_id: uuid.UUID | None) -> frozenset[str]:
+        """The enabled hosted providers ``organization_id`` may use that declare zero data retention, by name."""
+        return frozenset(
+            source.name
+            for source in await self.all()
+            if source.enabled and source.zero_data_retention and not source.withheld_from(organization_id)
+        )
 
     async def names_limited_to_countries(self) -> list[str]:
         """The enabled hosted providers that serve only some countries, by name."""

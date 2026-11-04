@@ -1,6 +1,6 @@
 """The direct tool service on its own: the order of its steps, its refusals, and what it holds, refunds and settles.
 
-The search runs on any-search's ``fake`` provider; who pays, the ledger, the gates
+A search runs on any-search's ``fake`` provider and a fetch on any-fetch's; who pays, the ledger, the gates
 and the workspace's policy are fakes that record what the service asked of them.
 """
 
@@ -23,7 +23,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, ToolUse
-from gateway.schemas.tools import SearchRequest
+from gateway.schemas.tools import FetchRequest, SearchRequest
 from gateway.services.tools import DirectCaller, DirectToolCall, DirectToolService, DirectToolUsage
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
 
@@ -34,6 +34,7 @@ RATE_LIMIT = {"X-RateLimit-Limit": "3"}
 class _Accounts:
     def __init__(self, *, refusal: str | None = None) -> None:
         self.refusal = refusal
+        self.kinds: list[str] = []
 
     def names_end_user(self, caller: DirectCaller) -> bool:
         return False
@@ -44,7 +45,8 @@ class _Accounts:
     async def end_user(self, api_key: Any, external_id: str, *, requested_budget_id: str | None) -> tuple[str, None]:
         raise AssertionError("no end user is named")
 
-    async def tool_refusal(self, api_key: Any, *, provider: str, tool: str) -> str | None:
+    async def tool_refusal(self, api_key: Any, *, kind: str, provider: str, tool: str) -> str | None:
+        self.kinds.append(kind)
         return self.refusal
 
 
@@ -124,9 +126,12 @@ class _Policies:
 
 def _config(**updates: Any) -> GatewayConfig:
     options = {"hits": [{"url": "https://example.com/otari"}], "cost": 0.007}
+    page = {"text": "The canned page.", "cost": 0.002}
     return GatewayConfig(
         require_pricing=updates.pop("require_pricing", False),
+        web_fetch_enabled=updates.pop("web_fetch_enabled", True),
         search_tools={"fake-search": {"provider": "fake", "options": options}, "fake-free": {"provider": "fake"}},
+        fetch_tools={"fake-fetch": {"provider": "fake", "options": page}},
         **updates,
     )
 
@@ -324,3 +329,76 @@ async def test_a_canceled_call_is_refunded() -> None:
         await _search(ledger=ledger)
 
     assert ledger.steps[-1] == ("refund", "hold")
+
+
+async def _fetch(
+    url: str = "https://example.com/article",
+    *,
+    accounts: _Accounts | None = None,
+    ledger: _Ledger | None = None,
+    gates: _Gates | None = None,
+    policies: _Policies | None = None,
+    options: dict[str, Any] | None = None,
+    **config: Any,
+) -> Any:
+    async with httpx.AsyncClient() as client:
+        service = DirectToolService(
+            config=_config(**config),
+            accounts=accounts or _Accounts(),
+            ledger=ledger or _Ledger(),
+            gates=gates or _Gates(),
+            policies=policies or _Policies(),
+            web_client=client,
+        )
+        caller = DirectCaller(api_key=None, is_master_key=True, user="billed", end_user_budget_id=None, request_id="r2")
+        request = FetchRequest(url=url, provider_options=options)
+        return await service.fetch(request, caller=caller, tool_name="fake-fetch", endpoint="/v1/fetch")
+
+
+@pytest.mark.asyncio
+async def test_a_served_fetch_settles_at_its_reported_cost_and_asks_for_the_fetch_tool() -> None:
+    accounts, ledger, gates = _Accounts(), _Ledger(), _Gates()
+
+    outcome = await _fetch(accounts=accounts, ledger=ledger, gates=gates)
+
+    assert (outcome.response.fetch_tool, outcome.response.text) == ("fake-fetch", "The canned page.")
+    assert accounts.kinds == ["fetch"]
+    assert ledger.steps[-1] == ("settle", "hold", Decimal("0.002"))
+    (row,) = gates.rows
+    assert (row.status, row.endpoint, row.request_group_id) == ("success", "/v1/fetch", "r2")
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_with_web_fetch_off_is_refused_before_the_hold() -> None:
+    ledger = _Ledger()
+
+    with pytest.raises(DirectToolCallError) as refused:
+        await _fetch(ledger=ledger, web_fetch_enabled=False)
+
+    assert refused.value.status_code == 400
+    assert ledger.steps == []
+
+
+@pytest.mark.asyncio
+async def test_a_page_found_at_a_disallowed_url_is_a_refusal_after_the_hold() -> None:
+    """The provider's call refuses where it found the page, so the hold is refunded and the row is a refusal."""
+    ledger, gates = _Ledger(), _Gates()
+    policy = ResolvedWebSearchConfig(
+        enabled=True,
+        max_results=None,
+        purpose_hint=None,
+        allowed_domains=None,
+        blocked_domains=("example.org",),
+        provider_options=None,
+        authorized_tools=None,
+    )
+
+    with pytest.raises(DirectToolCallError) as refused:
+        await _fetch(
+            ledger=ledger, gates=gates, policies=_Policies(policy), options={"final_url": "https://example.org/x"}
+        )
+
+    assert refused.value.status_code == 403
+    assert ledger.steps[-1] == ("refund", "hold")
+    (row,) = gates.rows
+    assert (row.status, row.status_code, row.cost) == ("error", 403, None)
