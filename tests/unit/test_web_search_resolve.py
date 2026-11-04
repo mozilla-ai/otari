@@ -27,6 +27,7 @@ from gateway.models.tools import (
 )
 from gateway.services.tools import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search import _resolve
+from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, InstanceRateKey
 
 _ORG = WebToolCredentialSource.ORG
@@ -866,6 +867,39 @@ def test_fetch_options_layer_the_instances_and_take_out_the_count(caplog: pytest
     assert resolved.max_chars == 500
     assert dict(resolved.options) == {"title": "T", "account": "a"}
     assert "'max_results'" in _warnings(caplog)
+
+
+def test_a_direct_fetch_takes_the_request_layer_checked() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake", "options": {"title": "T"}}})
+
+    resolved = resolve_fetch(config, None, requested="test-fetch", for_search=None, request_options={"title": "R"})
+
+    assert dict(resolved.options) == {"title": "R"}
+    for refused in ({"nope": 1}, {"account": "ours"}):
+        with pytest.raises(WebSearchOptionRefusedError):
+            resolve_fetch(config, None, requested="test-fetch", for_search=None, request_options=refused)
+
+
+def test_a_direct_fetch_on_a_credential_keeps_the_instances_name_and_timeout() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake", "timeout": 4}})
+    credential = WebFetchCredential(provider="exa", source=_ORG, api_key="org-fetch-key")
+
+    resolved = resolve_fetch(config, None, requested="test-fetch", for_search=None, direct_credential=credential)
+
+    assert (resolved.name, resolved.provider, resolved.api_key, resolved.timeout) == (
+        "test-fetch",
+        "exa",
+        "org-fetch-key",
+        4.0,
+    )
+    assert (resolved.label, resolved.rate_keys, resolved.on_credential) == ("org:exa", ("otari:web_fetch",), True)
+
+
+def test_a_direct_fetch_on_an_instance_without_a_timeout_gets_the_direct_one() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake"}})
+
+    assert resolve_fetch(config, None, requested="test-fetch", for_search=None).timeout == 30.0
+    assert resolve_fetch(config, None, requested="builtin_fetch", for_search=None).timeout == NETWORK_DEADLINE_SECONDS
 
 
 def test_fetch_takes_no_workspace_layer() -> None:

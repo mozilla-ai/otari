@@ -31,8 +31,10 @@ import httpx
 import any_search
 from gateway.core.config import API_ROOT
 from gateway.core.settings.tools import (
+    BUILTIN_FETCH,
     NO_SEARCH_DEFAULT,
     ToolInstance,
+    ToolKind,
     ToolSettings,
     configured_search_default,
     effective_search_instances,
@@ -199,16 +201,17 @@ def unpriced_direct_search_detail(search: DirectSearch) -> str:
     counts, since the deployment pays for the call; for ``otari:web_search``,
     the organization's own override counts too.
     """
-    return _unpriced_detail(
-        search.instance.name, search.resolved.rate_keys[0], organization_key=search.resolved.on_credential
+    return direct_unpriced_detail(
+        "search", search.instance.name, search.resolved.rate_keys[0], organization_key=search.resolved.on_credential
     )
 
 
-def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
-    """The 402's message: the price ``rate_key`` names for a search on ``tool``, and where to set it.
+def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
+    """The 402's message: the price ``rate_key`` names for a ``kind`` call on ``tool``, and where to set it.
 
     Both can be set on the dashboard's Web search pricing page or through the
-    API, and an instance declared in the configuration file by its ``price_per_call``.
+    API, and an instance declared in the configuration file by its
+    ``price_per_call``, which ``builtin_fetch`` has no entry for.
     """
     if organization_key:
         missing = f"is priced at {describe_rate_key(rate_key)}, which has no pricing"
@@ -219,14 +222,17 @@ def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) ->
     else:
         # The deployment pays for the call, so an organization's own override does not count.
         missing = "has no price the deployment's operator set"
+        in_config = (
+            "" if tool == BUILTIN_FETCH else ", or with price_per_call on its entry if it is declared in config.yml"
+        )
         how = (
             f"Set one on the dashboard's Web search pricing page, with POST {API_ROOT}/pricing using kind "
-            "'search' and the tool's name as model_key, or with price_per_call on its entry if it is declared "
-            "in config.yml"
+            f"'{kind}' and the tool's name as model_key{in_config}"
         )
+    plural = "searches" if kind == "search" else "fetches"
     return (
-        f"A search on '{tool}' {missing}, and require_pricing is on, so it is not run. "
-        f"{how}; a zero rate is valid. Or set require_pricing to false to serve searches unpriced."
+        f"A {kind} on '{tool}' {missing}, and require_pricing is on, so it is not run. "
+        f"{how}; a zero rate is valid. Or set require_pricing to false to serve {plural} unpriced."
     )
 
 

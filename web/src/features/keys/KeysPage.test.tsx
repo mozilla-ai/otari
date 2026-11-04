@@ -1883,7 +1883,9 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Advanced" }))
 
     expect(
-      screen.getByText(/search tool on \/v1\/search until you change/),
+      screen.getByText(
+        /search and fetch tool on \/v1\/search and \/v1\/fetch until/,
+      ),
     ).toBeInTheDocument()
     expect(
       screen.getByText(/model until you change this access/),
