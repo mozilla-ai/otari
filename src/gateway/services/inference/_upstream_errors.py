@@ -532,6 +532,16 @@ def is_upstream_stream_interrupted(exc: BaseException) -> bool:
     )
 
 
+def is_provider_cut(exc: BaseException) -> bool:
+    """Whether a stream failed because the provider ended it, not because of a fault of the gateway's own.
+
+    A dropped or incomplete stream, a mid-stream timeout, and a failure the provider reports with an HTTP
+    status. An error that is none of these (a bug while formatting a chunk, a guardrail, a database
+    failure) is the gateway's own.
+    """
+    return is_upstream_stream_interrupted(exc) or upstream_exception_shape(exc) != (None, None)
+
+
 def _causal_chain(exc: BaseException) -> Iterator[BaseException]:
     """``exc`` and every exception behind it, through any-llm's wrapper and Python's own chaining."""
     pending: list[BaseException] = [exc]

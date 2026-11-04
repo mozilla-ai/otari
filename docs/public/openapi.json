@@ -24310,6 +24310,17 @@
             ],
             "title": "Status Code"
           },
+          "stream_cut_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Cut By"
+          },
           "tags": {
             "anyOf": [
               {

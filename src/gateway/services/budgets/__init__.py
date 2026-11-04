@@ -24,6 +24,7 @@ from gateway.services.budgets._reservations import (
     rerank_estimate,
     reserve_budget,
     settle_abandoned_stream,
+    settle_cut_stream,
 )
 from gateway.services.budgets._retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.budgets._scoped_enforcement import ApplicableBudget, BudgetScopeRequest
@@ -59,6 +60,7 @@ __all__ = [
     "refund_reservation",
     "reserve_budget",
     "settle_abandoned_stream",
+    "settle_cut_stream",
     "retime_ceilings_for_budget",
     "run_reservation_sweeper",
 ]
