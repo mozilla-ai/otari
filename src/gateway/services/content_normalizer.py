@@ -257,8 +257,8 @@ class _Resolved:
         An image is rewritten to the image part a provider reads, because no
         provider's document part takes one.
         """
-        if _is_image(self.mime):
-            return replace(self.source(_IMAGE), needs_inline=True)
+        if image_type := _image_type(self.mime):
+            return replace(self.source(_IMAGE), mime=image_type, needs_inline=True)
         return self.source(_DOCUMENT)
 
 
@@ -267,8 +267,10 @@ class _Resolved:
 _PROVIDER_IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 
 
-def _is_image(mime: str) -> bool:
-    return mime.split(";", 1)[0].strip().lower() in _PROVIDER_IMAGE_TYPES
+def _image_type(mime: str) -> str | None:
+    """``mime`` without parameters when it is one of those formats, the bare type Anthropic's ``media_type`` takes."""
+    bare = mime.split(";", 1)[0].strip().lower()
+    return bare if bare in _PROVIDER_IMAGE_TYPES else None
 
 
 async def _resolve_from_ref(
@@ -656,8 +658,8 @@ async def _normalize_block(
         if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
             return _sandbox_file_text(fmt, staged.filename)
-        if _is_image(src.mime):
-            src.kind, src.needs_inline = _IMAGE, True
+        if image_type := _image_type(src.mime):
+            src.kind, src.mime, src.needs_inline = _IMAGE, image_type, True
         else:
             src.kind = _DOCUMENT
 

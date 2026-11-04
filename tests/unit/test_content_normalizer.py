@@ -447,6 +447,16 @@ async def test_an_inline_anthropic_image_in_a_file_block_is_rewritten_to_an_imag
 
 
 @pytest.mark.asyncio
+async def test_an_uploaded_image_type_loses_its_parameters() -> None:
+    files = _files(_stored("file-png", "post.png", "image/PNG; charset=binary"), data=b"\x89PNG\r\n\x1a\n")
+    msgs = [{"role": "user", "content": [{"type": "document", "source": {"type": "file", "file_id": "file-png"}}]}]
+    out, _ = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="anthropic", files=files, user_id="u"
+    )
+    assert out[0]["content"][0]["source"]["media_type"] == "image/png"
+
+
+@pytest.mark.asyncio
 async def test_an_uploaded_image_no_provider_reads_stays_a_document(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
         return ExtractionResult(data.decode("utf-8"), True, "ok")

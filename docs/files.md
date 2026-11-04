@@ -304,7 +304,7 @@ For each file/image block it resolves the **target model's** capabilities, then:
 
 | Target model                                          | Documents                                  | Images                                                        |
 | ----------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------- |
-| **Natively capable** (e.g. Anthropic, OpenAI, GPT-4o) | forwarded unchanged                        | forwarded unchanged                                           |
+| **Natively capable** (e.g. Anthropic, OpenAI, GPT-4o) | forwarded unchanged                        | forwarded unchanged; an upload is inlined as an image part    |
 | **Text-only** (most local models)                     | extracted to text and inlined              | captioned by a vision model / OCR, or dropped with a log line |
 
 
