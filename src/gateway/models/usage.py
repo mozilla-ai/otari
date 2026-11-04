@@ -162,7 +162,8 @@ class UsageLog(Base):
     pricing_version: Mapped[str | None] = mapped_column(String(255))
     calculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # "success", "error", or "absorbed". ``absorbed`` is a failed attempt that a
+    # "success", "error", "incomplete" (a stream the client abandoned, billed on an
+    # estimate), or "absorbed". ``absorbed`` is a failed attempt that a
     # routing policy recovered from by trying the next candidate: the request
     # itself succeeded (or failed on a later attempt), so counting it as an error
     # would make a working fallback chain look like an outage. Every error metric

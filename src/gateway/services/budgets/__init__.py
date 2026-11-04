@@ -7,10 +7,13 @@ from gateway.services.budgets._periods import budget_window, period_window
 from gateway.services.budgets._reservation_moves import PricingLookup
 from gateway.services.budgets._reservations import (
     ZERO,
+    AbandonedStreamRow,
     EstimateInputs,
     ReservationHandle,
     count_estimate,
+    estimate_abandoned_stream_usage,
     estimate_cost,
+    estimate_output_tokens,
     estimate_tokens,
     get_budget_state,
     hold_tool_call,
@@ -20,6 +23,7 @@ from gateway.services.budgets._reservations import (
     refund_reservation,
     rerank_estimate,
     reserve_budget,
+    settle_abandoned_stream,
 )
 from gateway.services.budgets._retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.budgets._scoped_enforcement import ApplicableBudget, BudgetScopeRequest
@@ -28,6 +32,7 @@ from gateway.services.budgets._service import BudgetService
 
 __all__ = [
     "ZERO",
+    "AbandonedStreamRow",
     "ApplicableBudget",
     "BudgetMembershipListener",
     "BudgetScopeRequest",
@@ -41,6 +46,8 @@ __all__ = [
     "estimate_cost",
     "count_estimate",
     "rerank_estimate",
+    "estimate_abandoned_stream_usage",
+    "estimate_output_tokens",
     "estimate_tokens",
     "get_budget_state",
     "hold_tool_call",
@@ -51,6 +58,7 @@ __all__ = [
     "record_external_spend",
     "refund_reservation",
     "reserve_budget",
+    "settle_abandoned_stream",
     "retime_ceilings_for_budget",
     "run_reservation_sweeper",
 ]

@@ -323,7 +323,11 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   before the stream ended (an Anthropic stream reports its input tokens in
   `message_start`). The request is not treated as free.
 - A stream the client abandoned before the provider reported any usage, and
-  that ran no gateway tools, has nothing to bill and writes no usage row.
+  that ran no gateway tools, writes no usage row under the `fail` and
+  `allow_free` policies. Under `estimate` (the default of
+  `stream_missing_usage_policy`) it writes an `incomplete` row billed on an
+  estimate from the request and the text streamed so far: tokens only, with
+  no per-request charge.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:
