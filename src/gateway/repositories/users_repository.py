@@ -155,22 +155,23 @@ async def provision_attribution_users(db: AsyncSession, user_ids: Sequence[str])
     For a member who has neither a key nor a Playground request yet, so something can name them before they
     first act. Unlike :func:`get_or_create_attribution_user`, nothing here revives a row: an insert that finds one
     already there, including one created and deleted by another transaction since, leaves it as it is, because
-    deleting a user is an operator's revocation. What is returned is read under :func:`lock_live_users`, so it
-    holds until the caller commits.
+    deleting a user is an operator's revocation.
+
+    Nothing existing is locked here, and rows are inserted in id order, the order :func:`lock_live_users` takes:
+    a caller that then locks its users takes every lock in one order, so two such callers cannot deadlock. What
+    is returned is a plain read; a caller that relies on it until commit locks the rows itself.
     """
     if not user_ids:
         return set()
     existing = set((await db.execute(select(User.user_id).where(User.user_id.in_(list(user_ids))))).scalars().all())
-    for user_id in dict.fromkeys(user_ids):
-        if user_id in existing:
-            continue
+    for user_id in sorted(set(user_ids) - existing):
         try:
             async with db.begin_nested():
                 db.add(User(user_id=user_id, alias=None))
                 await db.flush()
         except IntegrityError:
             continue
-    return await lock_live_users(db, user_ids)
+    return await live_attribution_user_ids(db, user_ids)
 
 
 async def attribution_spend(db: AsyncSession, user_ids: Sequence[str]) -> dict[str, User]:

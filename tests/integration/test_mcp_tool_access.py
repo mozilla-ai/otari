@@ -785,6 +785,61 @@ def test_a_grant_sent_while_the_user_is_deleted_waits_and_is_refused(
     assert _listed(client, _new_key(client, master_key_header, user_id="victim")) == []
 
 
+def test_concurrent_grants_naming_the_same_people_do_not_deadlock(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each request reaches its member check, where each used to lock one of the two, before either goes on."""
+    first_key = _new_key(client, master_key_header)
+    here = _workspace_id(test_db, first_key)
+    home = test_db.get(Workspace, here)
+    assert home is not None
+    there = Workspace(name="There", organization_id=home.organization_id)
+    alice = Identity(email="alice@example.test", full_name="Alice", active_organization_id=home.organization_id)
+    bob = Identity(email="bob@example.test", full_name="Bob", active_organization_id=home.organization_id)
+    test_db.add_all([there, alice, bob])
+    test_db.commit()
+    test_db.add_all(
+        [
+            WorkspaceMember(workspace_id=workspace, user_id=person.id, role="member", status="active")
+            for workspace in (here, there.id)
+            for person in (alice, bob)
+        ]
+    )
+    test_db.commit()
+    for person, workspace in ((alice, here), (bob, there.id)):
+        made = client.post(f"{API_ROOT}/users", json={"user_id": str(person.id)}, headers=master_key_header)
+        assert made.status_code in (200, 201), made.text
+        _new_key(client, master_key_header, user_id=str(person.id), workspace_id=str(workspace))
+    servers = [_store(test_db, here, "github", everyone=[]), _store(test_db, there.id, "jira", everyone=[])]
+    both_checked = threading.Barrier(2)
+    provision = provision_attribution_users
+
+    async def provision_then_wait(db: Any, user_ids: Any) -> set[str]:
+        live = await provision(db, user_ids)
+        await anyio.to_thread.run_sync(both_checked.wait, 10)
+        return live
+
+    monkeypatch.setattr(
+        "gateway.services.tenancy.workspace_mcp_server_service.provision_attribution_users", provision_then_wait
+    )
+    answers: dict[str, Any] = {}
+
+    def grant(row: WorkspaceMcpServer) -> None:
+        answers[row.name] = client.post(
+            f"{_servers(row.workspace_id)}/{row.id}/access/grants",
+            json={"user_ids": [str(alice.id), str(bob.id)], "tools": ["*"]},
+            headers=master_key_header,
+        )
+
+    threads = [threading.Thread(target=grant, args=(row,)) for row in servers]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+
+    assert {name: answer.status_code for name, answer in answers.items()} == {"github": 200, "jira": 200}
+
+
 @pytest.mark.asyncio
 async def test_minting_a_member_s_row_never_revives_one_deleted_meanwhile(postgres_url: str) -> None:
     """The row is created and deleted by another transaction while the insert waits; the insert leaves it so."""
