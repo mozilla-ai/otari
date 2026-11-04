@@ -5,8 +5,8 @@ name: Otari Design System
 #
 # Three jobs, split by what each costs.
 #
-# `catalog` is the pull request gate: it builds the catalog, which is where a
-# story that stops compiling fails, and it takes about a minute.
+# `catalog` builds the catalog, which is where a story that stops compiling
+# fails, and it takes about a minute.
 #
 # `render` walks every story in both themes in headless Chromium. It takes about
 # two and a half minutes on a hosted runner (recent main runs took 141s, 133s,
@@ -19,10 +19,8 @@ name: Otari Design System
 # the frame, and an icon requested from the origin root rather than the base
 # path. Both compiled cleanly.
 #
-# The gap this leaves is real and worth stating: a story that compiles but throws
-# at render reaches main, and `render` is what reports it there. Reduce that by
-# running the sweep locally before pushing, which is where it is fast:
-# `pnpm --dir web exec node .storybook/smoke.mjs`.
+# `pnpm --dir web exec node .storybook/smoke.mjs` runs the same sweep locally,
+# where it is fast.
 #
 # Only `publish` needs Pages, and it runs on main alone.
 on:
