@@ -24,6 +24,8 @@ from gateway.services.pricing import (
     price_usage,
     validated_units,
 )
+from gateway.services.pricing._usage_pricing import METERS
+from gateway.types.price_unit import PRICE_UNITS
 
 _CASES: list[dict[str, Any]] = json.loads(
     (Path(__file__).resolve().parents[1] / "fixtures" / "usage_pricing_cases.json").read_text()
@@ -95,6 +97,29 @@ def test_the_gate_admits_exactly_what_settlement_can_price(case: dict[str, Any])
     admitted = can_price(_rate(case["rate"]), meter=meter, reports_tokens=reports_tokens)
 
     assert admitted == (_price(case) is not None)
+
+
+def test_every_meter_is_keyed_on_a_price_unit() -> None:
+    """The table and the vocabulary name the same things, and the five newer units have no row yet."""
+    assert set(METERS) <= set(PRICE_UNITS)
+    assert set(METERS) == {"token", "request", "image"}
+
+
+@pytest.mark.parametrize("reports_tokens", [False, True])
+@pytest.mark.parametrize("units", [{}, {"requests": 1}, {"search_units": 2}, {"images": 1}])
+@pytest.mark.parametrize("unit", PRICE_UNITS)
+def test_the_gate_and_settlement_agree_on_every_unit_and_report(
+    unit: str, units: dict[str, int], *, reports_tokens: bool
+) -> None:
+    """Both ask the one table, so no unit can pass the gate and settle unpriced, or the reverse."""
+    rate = ModelPricing(
+        model_key="provider:model", input_price_per_million=Decimal(1), output_price_per_million=Decimal(2), unit=unit
+    )
+    tokens = billable_usage(input_tokens=100, output_tokens=50, cache_tokens_included=True) if reports_tokens else None
+
+    admitted = can_price(rate, meter=next(iter(units), None), reports_tokens=reports_tokens)
+
+    assert admitted == (price_usage(rate, tokens=tokens, units=units) is not None)
 
 
 @pytest.mark.parametrize("count", [True, 1.5, -1, 1_000_001, "2"])

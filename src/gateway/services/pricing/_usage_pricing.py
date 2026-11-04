@@ -1,15 +1,17 @@
 """Which meter a rate prices, and what one successful attempt costs at it.
 
-The rate's ``unit`` chooses the meter. A ``token`` rate prices tokens, an
-``image`` rate an ``images`` count, and a ``request`` rate a ``requests`` or
-``search_units`` count, or one request for an attempt that reported neither.
-The one exception is a ``token`` rate on an endpoint billed per image or per
-request, which is read in that endpoint's unit, as the configuration guide
-documented before the rate's unit decided. Settlement prices through
-:func:`price_usage`.
+The rate's ``unit`` chooses the meter, through one table, :data:`METERS`. A
+``token`` rate prices tokens, an ``image`` rate an ``images`` count, and a
+``request`` rate a ``requests`` or ``search_units`` count, or one request for
+an attempt that reported neither. The one exception is a ``token`` rate on an
+endpoint billed per image or per request, which is read in that endpoint's
+unit, as the configuration guide documented before the rate's unit decided.
+Settlement prices through :func:`price_usage`, and the ``require_pricing``
+gate asks :func:`can_price` the same table, so a rate the gate admits is one
+settlement prices. A unit with no row prices nothing.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from math import ceil, isfinite
@@ -29,6 +31,7 @@ from gateway.core.metered_pricing import (
 )
 from gateway.log_config import logger
 from gateway.models.pricing import MAX_REPORTED_UNITS, UNIT_METERS, ModelPricing
+from gateway.types.price_unit import PriceUnit
 
 _REQUESTS, _SEARCH_UNITS, _IMAGES = UNIT_METERS
 
@@ -47,6 +50,28 @@ class UsageCharge:
     cost: Decimal
     meters: dict[str, int]
     lines: list[ChargeLine]
+
+
+@dataclass(frozen=True)
+class Meter:
+    """One row of :data:`METERS`: how a rate in one unit reads an attempt and prices it.
+
+    ``reads`` names the counts of a report the meter prices, and ``tokens``
+    whether it prices a report of tokens. ``needs_report`` says the meter prices
+    nothing without one of those; the request meter does not, settling one
+    request for an attempt that reported neither. ``settles_completion`` says a
+    completion can be settled at the rate.
+    """
+
+    reads: tuple[str, ...]
+    tokens: bool
+    needs_report: bool
+    settles_completion: bool
+    charge: Callable[[ModelPricing, dict[str, int], BillableUsage | None], UsageCharge | None]
+
+    def admits(self, meter: str | None, *, reports_tokens: bool) -> bool:
+        """Whether an attempt that reports ``meter`` and, when ``reports_tokens``, tokens meets this meter."""
+        return not self.needs_report or meter in self.reads or (self.tokens and reports_tokens)
 
 
 def validated_units(raw: Mapping[str, object]) -> dict[str, int]:
@@ -85,29 +110,8 @@ def price_usage(
     counts = validated_units(units)
     if rate is None:
         return None
-    unit = rate.unit or "token"
-    if unit == "request":
-        meter = next((m for m in (_REQUESTS, _SEARCH_UNITS) if m in counts), _REQUESTS)
-        return _per_unit(meter, counts.get(meter, 1), _request_rate(rate))
-    if unit == "image":
-        return _per_unit(_IMAGES, counts[_IMAGES], _image_rate(rate)) if _IMAGES in counts else None
-    if unit != "token":
-        return None
-    for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
-        if meter in counts:
-            _warn_legacy(rate, meter)
-            return _per_unit(meter, counts[meter], unit_rate(rate))
-    if to_decimal(rate.input_price_per_million) is None:
-        return None
-    if tokens is None or (tokens.total_input_tokens <= 0 and tokens.completion_tokens <= 0):
-        return None
-    cost, meters, lines = price_billable_usage(rate, tokens)
-    return UsageCharge(cost, meters, lines)
-
-
-# The rates the token meters read: a rate in ``token``, and an ``image`` rate
-# on a completion, which is read in tokens as it always was.
-_TOKEN_METERED_UNITS: frozenset[str] = frozenset({"token", "image"})
+    row = meter_for(rate)
+    return row.charge(rate, counts, tokens) if row is not None else None
 
 
 def has_completion_meter(rate: ModelPricing | None) -> bool:
@@ -119,7 +123,8 @@ def has_completion_meter(rate: ModelPricing | None) -> bool:
     """
     if rate is None:
         return False
-    return priced_per_request(rate) or (rate.unit or "token") in _TOKEN_METERED_UNITS
+    row = meter_for(rate)
+    return row is not None and row.settles_completion
 
 
 def estimate_settles(rate: ModelPricing | None) -> bool:
@@ -159,14 +164,8 @@ def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: b
     """
     if rate is None or to_decimal(rate.input_price_per_million) is None:
         return False
-    unit = rate.unit or "token"
-    if unit == "request":
-        return True
-    if unit == "image":
-        return meter == _IMAGES
-    if unit != "token":
-        return False
-    return reports_tokens or meter in (_IMAGES, _REQUESTS)
+    row = meter_for(rate)
+    return row is not None and row.admits(meter, reports_tokens=reports_tokens)
 
 
 def request_rate(rate: ModelPricing | None) -> Decimal:
@@ -215,6 +214,51 @@ def _per_unit(meter: str, count: int, unit_rate: Decimal | None) -> UsageCharge 
     line_meter = "request" if meter == _REQUESTS else meter
     line: ChargeLine = {"meter": line_meter, "units": count, "unit_rate": float(unit_rate), "cost": float(cost)}
     return UsageCharge(cost, {meter: count}, [line])
+
+
+def _charge_tokens(rate: ModelPricing, counts: dict[str, int], tokens: BillableUsage | None) -> UsageCharge | None:
+    for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
+        if meter in counts:
+            _warn_legacy(rate, meter)
+            return _per_unit(meter, counts[meter], unit_rate(rate))
+    if to_decimal(rate.input_price_per_million) is None:
+        return None
+    if tokens is None or (tokens.total_input_tokens <= 0 and tokens.completion_tokens <= 0):
+        return None
+    cost, meters, lines = price_billable_usage(rate, tokens)
+    return UsageCharge(cost, meters, lines)
+
+
+def _charge_requests(rate: ModelPricing, counts: dict[str, int], _: BillableUsage | None) -> UsageCharge | None:
+    meter = next((m for m in (_REQUESTS, _SEARCH_UNITS) if m in counts), _REQUESTS)
+    return _per_unit(meter, counts.get(meter, 1), _request_rate(rate))
+
+
+def _charge_images(rate: ModelPricing, counts: dict[str, int], _: BillableUsage | None) -> UsageCharge | None:
+    return _per_unit(_IMAGES, counts[_IMAGES], _image_rate(rate)) if _IMAGES in counts else None
+
+
+# The meter each unit prices by. A unit with no row (``second``, ``minute``) is
+# stored ahead of its meter and prices nothing; a new unit is one row here.
+# An ``image`` rate on a completion is read in tokens, as it always was.
+METERS: dict[PriceUnit, Meter] = {
+    "token": Meter(
+        reads=(_IMAGES, _REQUESTS), tokens=True, needs_report=True, settles_completion=True, charge=_charge_tokens
+    ),
+    "request": Meter(
+        reads=(_REQUESTS, _SEARCH_UNITS),
+        tokens=False,
+        needs_report=False,
+        settles_completion=True,
+        charge=_charge_requests,
+    ),
+    "image": Meter(reads=(_IMAGES,), tokens=False, needs_report=True, settles_completion=True, charge=_charge_images),
+}
+
+
+def meter_for(rate: ModelPricing) -> Meter | None:
+    """The meter ``rate``'s unit prices by, or ``None`` when no meter reads that unit."""
+    return METERS.get(rate.unit or "token")
 
 
 def _warn_legacy(rate: ModelPricing, meter: str) -> None:
