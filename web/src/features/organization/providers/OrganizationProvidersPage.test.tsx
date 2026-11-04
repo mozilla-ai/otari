@@ -412,7 +412,7 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(await screen.findByRole("option", { name: "Amazon Bedrock" }))
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
     // Not called an API key here: Bedrock's credential is a bearer token or an
     // IAM secret, depending on which shape the organization uses.
@@ -446,7 +446,7 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(await screen.findByRole("option", { name: "Amazon Bedrock" }))
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
 
     const submit = screen.getByRole("button", {
@@ -482,7 +482,7 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(await screen.findByRole("option", { name: "Amazon Bedrock" }))
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
     await user.type(
       screen.getByRole("textbox", { name: /AWS region/ }),

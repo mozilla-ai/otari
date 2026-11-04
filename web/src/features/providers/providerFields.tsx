@@ -14,7 +14,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useProviderCatalog } from "@/shared/api/providers"
-import { providerDisplayName } from "@/shared/helpers/providers"
+import { providerCatalogName } from "@/shared/helpers/providers"
 
 import {
   type CredentialFieldValues,
@@ -219,13 +219,7 @@ export function ProviderComboBox({
           .filter((provider) => !excludeIds?.includes(provider.id))
           .map((provider) => ({
             id: provider.id,
-            // The catalog falls back to the bare id when models.dev has no
-            // name for a provider (`xai`), so spell it as the rest of the
-            // dashboard does.
-            name:
-              provider.name === provider.id
-                ? providerDisplayName(provider.id)
-                : provider.name,
+            name: providerCatalogName(provider.id, provider.name),
           }))
       : []
     return [...extra, ...catalogOptions]
