@@ -14,6 +14,7 @@ from gateway.services.tools._web_search._direct import (
     refuse_unpriced_direct_search,
     resolve_direct_search,
     run_direct_search,
+    unpriced_direct_search_detail,
 )
 from gateway.services.tools._web_search._litellm import (
     CHARS_PER_TOKEN,
@@ -55,6 +56,7 @@ __all__ = [
     "page_budget_chars",
     "pick_direct_search_instance",
     "refuse_unpriced_direct_search",
+    "unpriced_direct_search_detail",
     "resolve_direct_search",
     "resolve_fetch",
     "resolve_in_loop_search",

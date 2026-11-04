@@ -15,6 +15,8 @@ its own allowlist, budget and usage steps.
 - :func:`refuse_unpriced_direct_search` raises
   :class:`DirectSearchPricingRequiredError` when ``require_pricing`` is on,
   the key is not exempt from budgets, and no pricing row prices the call.
+- :func:`unpriced_direct_search_detail` names the row ``require_pricing``
+  needs, for the 402 a direct tool call answers when none prices it.
 - :func:`run_direct_search` calls the provider through any-search, or through
   the SearXNG client for a ``searxng`` instance and the Tavily or Brave client
   for an organization key on those providers.
@@ -193,6 +195,13 @@ def resolve_direct_search(
     )
 
 
+def unpriced_direct_search_detail(search: DirectSearch) -> str:
+    """The 402's message for a search ``require_pricing`` cannot bill: the row to add, and where."""
+    return _unpriced_detail(
+        search.instance.name, search.resolved.rate_keys[0], organization_key=search.resolved.on_credential
+    )
+
+
 def refuse_unpriced_direct_search(
     search: DirectSearch, *, priced: bool, require_pricing: bool, budget_exempt: bool
 ) -> None:
@@ -212,9 +221,7 @@ def refuse_unpriced_direct_search(
     rate_keys = search.resolved.rate_keys
     if priced or not require_pricing or budget_exempt or not rate_keys:
         return
-    raise DirectSearchPricingRequiredError(
-        _unpriced_detail(search.instance.name, rate_keys[0], organization_key=search.resolved.on_credential)
-    )
+    raise DirectSearchPricingRequiredError(unpriced_direct_search_detail(search))
 
 
 def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
