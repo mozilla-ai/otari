@@ -12,9 +12,6 @@ its own allowlist, budget and usage steps.
   with that key's provider and options, under the rate key
   ``otari:web_search``. The count is capped at the policy's ``max_results``;
   the policy's provider options are not applied.
-- :func:`refuse_unpriced_direct_search` raises
-  :class:`DirectSearchPricingRequiredError` when ``require_pricing`` is on,
-  the key is not exempt from budgets, and no pricing row prices the call.
 - :func:`unpriced_direct_search_detail` names the row ``require_pricing``
   needs, for the 402 a direct tool call answers when none prices it.
 - :func:`run_direct_search` calls the provider through any-search, or through
@@ -43,7 +40,6 @@ from gateway.core.settings.tools import (
 from gateway.exceptions.tools_exceptions import (
     DirectSearchFailedError,
     DirectSearchFieldRefusedError,
-    DirectSearchPricingRequiredError,
     SearchToolMisconfiguredError,
     SearchToolSelectionError,
 )
@@ -196,32 +192,16 @@ def resolve_direct_search(
 
 
 def unpriced_direct_search_detail(search: DirectSearch) -> str:
-    """The 402's message for a search ``require_pricing`` cannot bill: the row to add, and where."""
+    """The 402's message for a search ``require_pricing`` cannot bill: the row to add, and where.
+
+    For an instance's own price, or the ``<provider>:<instance>`` row it was
+    priced under before it had a kind, only the operator's price or override
+    counts, since the deployment pays for the call; for ``otari:web_search``,
+    the organization's own override counts too.
+    """
     return _unpriced_detail(
         search.instance.name, search.resolved.rate_keys[0], organization_key=search.resolved.on_credential
     )
-
-
-def refuse_unpriced_direct_search(
-    search: DirectSearch, *, priced: bool, require_pricing: bool, budget_exempt: bool
-) -> None:
-    """Refuse a direct search that ``require_pricing`` cannot bill.
-
-    ``priced`` says one of the call's rate keys found a pricing row. For an
-    instance's own price, or the ``<provider>:<instance>`` row it was priced
-    under before it had a kind, only the operator's price or override counts,
-    since the deployment pays for the call; for ``otari:web_search``,
-    the organization's own override counts too. The search is refused when
-    ``require_pricing`` is on and nothing priced it, even if the provider
-    reports its own cost; a zero rate is a price. Two calls pass unpriced: one
-    on a key exempt from budgets, which is never debited, and one with no rate
-    keys, which this gateway does not settle. Raises :class:`DirectSearchPricingRequiredError`, whose message
-    names the row to add.
-    """
-    rate_keys = search.resolved.rate_keys
-    if priced or not require_pricing or budget_exempt or not rate_keys:
-        return
-    raise DirectSearchPricingRequiredError(unpriced_direct_search_detail(search))
 
 
 def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
