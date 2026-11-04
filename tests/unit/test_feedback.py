@@ -9,7 +9,6 @@ import pytest
 
 from gateway.exceptions.feedback_exceptions import FeedbackDeliveryError
 from gateway.log_config import logger as gateway_logger
-from gateway.schemas.feedback import FeedbackSubmission
 from gateway.services.feedback import FeedbackService
 
 
@@ -41,10 +40,10 @@ async def test_receiver_statuses(upstream: int, expected: int | None, gateway_lo
 
     service = FeedbackService(transport=httpx.MockTransport(receive))
     if expected is None:
-        await service.submit(FeedbackSubmission(message="PRIVATE feedback"))
+        await service.submit("PRIVATE feedback")
     else:
         with pytest.raises(FeedbackDeliveryError) as error:
-            await service.submit(FeedbackSubmission(message="PRIVATE feedback"))
+            await service.submit("PRIVATE feedback")
         assert error.value.status_code == expected
         assert error.value.retry_after == (3600 if expected == 429 else None)
         assert f"Feedback receiver answered {upstream}" in gateway_logs.text
@@ -59,7 +58,7 @@ async def test_untrusted_retry_header(retry_after: str) -> None:
         transport=httpx.MockTransport(lambda request: httpx.Response(429, headers={"Retry-After": retry_after}))
     )
     with pytest.raises(FeedbackDeliveryError) as error:
-        await service.submit(FeedbackSubmission(message="Idea"))
+        await service.submit("Idea")
     assert error.value.retry_after is None
 
 
@@ -73,7 +72,7 @@ async def test_timeout_has_no_automatic_retry() -> None:
         raise httpx.ReadTimeout("private upstream details", request=request)
 
     with pytest.raises(FeedbackDeliveryError) as error:
-        await FeedbackService(transport=httpx.MockTransport(receive)).submit(FeedbackSubmission(message="Idea"))
+        await FeedbackService(transport=httpx.MockTransport(receive)).submit("Idea")
     assert error.value.status_code == 503
     assert calls == 1
 
@@ -87,8 +86,8 @@ async def test_only_the_named_fields_are_forwarded(gateway_logs: pytest.LogCaptu
         return httpx.Response(204)
 
     service = FeedbackService(transport=httpx.MockTransport(receive))
-    await service.submit(FeedbackSubmission(message="Idea", share_email="private@example.com"), "private@example.com")
-    await service.submit(FeedbackSubmission(message="Idea", share_email="private@example.com"))
+    await service.submit("Idea", "private@example.com")
+    await service.submit("Idea")
     assert [json.loads(request.content) for request in calls] == [
         {"message": "Idea", "reply_to": "private@example.com"},
         {"message": "Idea"},

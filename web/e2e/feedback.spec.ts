@@ -4,7 +4,7 @@ import { login, MASTER_KEY } from "./helpers"
 const MESSAGE =
   "We use Otari to track research spending. Comparing groups would help."
 
-// The e2e gateway has feedback on, so the off case is stubbed in the bootstrap.
+// The e2e gateway turns feedback on, so the off case is stubbed in the bootstrap.
 // Every submission is intercepted and never reaches the receiver.
 async function disableFeedback(page: Page) {
   await page.route("**/api/v1/bootstrap", async (route) => {
@@ -36,24 +36,26 @@ test("desktop: the top bar opens it beside Documentation, a failure keeps the dr
   })
   await login(page)
   // The account menu's row is the phone's entry, so on a desktop it is hidden.
+  // The operator has no email, so no consent line names one.
   await page.getByRole("button", { name: /^Account:/ }).click()
   await expect(
     page
       .getByRole("dialog", { name: "Account" })
-      .getByRole("button", { name: "Feedback", exact: true }),
+      .getByRole("button", { name: "Contact", exact: true }),
   ).toHaveCount(0)
   await page.keyboard.press("Escape")
   const topBar = page.locator("header")
-  const trigger = topBar.getByRole("button", { name: "Feedback", exact: true })
+  const trigger = topBar.getByRole("button", { name: "Contact", exact: true })
   expect(
     await topBar
       .getByRole("link", { name: "Documentation", exact: true })
       .evaluate((link) => link.nextElementSibling?.textContent),
-  ).toBe("Feedback")
+  ).toBe("Contact")
   await trigger.click()
-  const dialog = page.getByRole("dialog", { name: "Feedback", exact: true })
-  const field = dialog.getByRole("textbox", { name: "Feedback" })
+  const dialog = page.getByRole("dialog", { name: "Contact", exact: true })
+  const field = dialog.getByRole("textbox", { name: "Contact" })
   await expect(field).toBeFocused()
+  await expect(dialog.getByText(/^By sending/)).toHaveCount(0)
   await field.fill(MESSAGE)
   await field.press("ControlOrMeta+Enter")
   await expect(dialog.getByRole("alert")).toHaveText(
@@ -69,7 +71,7 @@ test("desktop: the top bar opens it beside Documentation, a failure keeps the dr
   expect(payloads).toEqual([{ message: MESSAGE }, { message: MESSAGE }])
 })
 
-test("an account with an email is offered it, off, and the shortcut sends from the tick", async ({
+test("an account with an email is told where replies go, and the shortcut sends it", async ({
   page,
 }) => {
   // The e2e operator has no email, so the context names one.
@@ -92,17 +94,15 @@ test("an account with an email is offered it, off, and the shortcut sends from t
   await login(page)
   await page
     .locator("header")
-    .getByRole("button", { name: "Feedback", exact: true })
+    .getByRole("button", { name: "Contact", exact: true })
     .click()
-  const dialog = page.getByRole("dialog", { name: "Feedback", exact: true })
-  const share = dialog.getByRole("checkbox", {
-    name: "Share ada.lovelace@example.com so the team can reply",
-  })
-  await expect(share).not.toBeChecked()
-  await dialog.getByRole("textbox", { name: "Feedback" }).fill(MESSAGE)
-  // `force`: the input sits behind the box that paints it.
-  await share.check({ force: true })
-  await expect(share).toBeFocused()
+  const dialog = page.getByRole("dialog", { name: "Contact", exact: true })
+  await expect(
+    dialog.getByText(
+      "By sending, you agree we can reply to ada.lovelace@example.com about this message only.",
+    ),
+  ).toBeVisible()
+  await dialog.getByRole("textbox", { name: "Contact" }).fill(MESSAGE)
   await page.keyboard.press("ControlOrMeta+Enter")
   await expect(page.getByRole("dialog", { name: "Thank you!" })).toContainText(
     "If we have a question, we’ll write to ada.lovelace@example.com.",
@@ -136,14 +136,14 @@ test.describe("phone", () => {
     })
     await openNavigation.click()
     await page.getByRole("button", { name: /^Account:/ }).click()
-    await page.getByRole("button", { name: "Feedback", exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: "Feedback", exact: true })
+    await page.getByRole("button", { name: "Contact", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Contact", exact: true })
     await expect(openNavigation).toHaveAttribute("aria-expanded", "false")
     await expect.poll(async () => (await dialog.boundingBox())?.width).toBe(390)
     await expect
       .poll(async () => (await dialog.boundingBox())?.height)
       .toBe(844)
-    const field = dialog.getByRole("textbox", { name: "Feedback" })
+    const field = dialog.getByRole("textbox", { name: "Contact" })
     // No autofocus on touch, so the keyboard does not cover the sheet on open.
     await expect(field).not.toBeFocused()
     await field.fill("A mobile idea")
@@ -161,13 +161,13 @@ test.describe("phone", () => {
   })
 })
 
-test("a gateway with feedback off never offers it", async ({ page }) => {
+test("a gateway with feedback off never offers Contact", async ({ page }) => {
   await disableFeedback(page)
   await login(page)
   await expect(
     page.getByRole("link", { name: "Documentation", exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByRole("button", { name: "Feedback", exact: true }),
+    page.getByRole("button", { name: "Contact", exact: true }),
   ).toHaveCount(0)
 })

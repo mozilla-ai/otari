@@ -5,7 +5,6 @@ import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { RestoreFocus } from "@/design-system/feedback/FormDialog"
 import { useDirtyGuard } from "@/design-system/feedback/useDirtyGuard"
-import { Checkbox } from "@/design-system/forms/Checkbox"
 import { ProductMark } from "@/design-system/ProductMark"
 import { ApiError } from "@/shared/api/client"
 import { useSendFeedback } from "@/shared/api/feedback"
@@ -33,7 +32,7 @@ function canShare(email: string): boolean {
 }
 
 /**
- * A message to the Otari team, opened from Feedback beside Documentation: in the
+ * A message to the Otari team, opened from Contact beside Documentation: in the
  * top bar from `md` up, and in the account menu below it.
  *
  * Not a `FormDialog`: that frame always renders a titled header, a footer rule
@@ -54,13 +53,13 @@ export function FeedbackDialog({
   onOpenChange: (open: boolean) => void
   returnFocusRef?: RefObject<HTMLElement | null>
   /**
-   * The signed-in account's address, offered so the team can reply. Without
-   * one there is nothing to offer and the message goes alone.
+   * The signed-in account's address, which replies go to. Without one no reply
+   * is possible, so the consent line is not shown and the message goes alone.
    */
   email?: string | null
 }) {
-  // Only an address the gateway will attach: offering one it refuses would be a
-  // box that fails every send.
+  // Only an address the gateway will attach: naming one it refuses would be a
+  // consent that fails every send.
   const shareable = email && canShare(email) ? email : null
   const headingId = useId()
   const thanksId = useId()
@@ -72,19 +71,10 @@ export function FeedbackDialog({
   // What the sent message carried, so the thanks name it even if the shown
   // address has changed while it was in flight.
   const [sentTo, setSentTo] = useState<string | null>(null)
-  // The address the tick agreed to. Another one showing (a session changed in
-  // another tab) clears it, and it stays cleared if the first one comes back.
-  const [agreedTo, setAgreedTo] = useState<string | null>(null)
-  const [shownAddress, setShownAddress] = useState(shareable)
-  if (shareable !== shownAddress) {
-    setShownAddress(shareable)
-    setAgreedTo(null)
-  }
-  const repliesTo =
-    agreedTo !== null && agreedTo === shareable ? agreedTo : null
   const { mutate, reset, isPending, error } = useSendFeedback()
-  // A 422 is a refusal the person can act on (untick the email), so it keeps
-  // the gateway's reason; anything else is a delivery a retry may get through.
+  // A 422 is a refusal the person can act on (reload as the account now signed
+  // in), so it keeps the gateway's reason; anything else is a delivery a retry
+  // may get through.
   const notSent =
     error instanceof ApiError && error.status === 422
       ? error
@@ -104,8 +94,6 @@ export function FeedbackDialog({
     setIsEmptySend(false)
     setIsSent(false)
     setSentTo(null)
-    // Opt-in each time: a tick from an earlier message is not consent to this one.
-    setAgreedTo(null)
     reset()
   }, [isOpen, reset])
 
@@ -124,6 +112,9 @@ export function FeedbackDialog({
       setIsEmptySend(true)
       return
     }
+    // The address the consent line named, which the gateway sends only when it
+    // is still the session's own.
+    const repliesTo = shareable
     mutate(
       repliesTo
         ? { message: trimmed, share_email: repliesTo }
@@ -148,7 +139,7 @@ export function FeedbackDialog({
       {/* Driven from state, so the trigger slot is filled and hidden, as in
           `FormDialog`. */}
       <Modal.Trigger aria-hidden className="hidden">
-        Feedback
+        Contact
       </Modal.Trigger>
       <Modal.Backdrop isDismissable={!isPending}>
         <Modal.Container
@@ -229,7 +220,7 @@ export function FeedbackDialog({
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <Modal.Heading id={headingId} className="sr-only">
-                  Feedback
+                  Contact
                 </Modal.Heading>
                 <div className="flex min-h-52 flex-1 flex-col gap-4 px-6 pt-6 pb-4 max-sm:px-4 max-sm:pt-1">
                   <ErrorBanner error={notSent} />
@@ -255,28 +246,21 @@ export function FeedbackDialog({
                     aria-invalid={isEmptySend || undefined}
                     readOnly={isPending}
                     maxLength={MAX_MESSAGE_LENGTH}
-                    placeholder="What’s on your mind?"
+                    placeholder="How can we help?"
                     className="text-foreground placeholder:text-subtle min-h-0 w-full flex-1 resize-none bg-transparent text-base focus:outline-none [field-sizing:content]"
                   />
                 </div>
                 {/* Its own line rather than the footer's free lane: the address
-                    is the point of the label, there is no room for it beside
-                    Send, and that lane is the empty-send reason's and the
-                    guard's. */}
+                    is the point of it, there is no room for it beside Send,
+                    and that lane is the empty-send reason's and the guard's. */}
                 {shareable ? (
-                  <div className="shrink-0 px-6 pb-5 max-sm:px-4 max-sm:pb-3">
-                    <Checkbox
-                      isSelected={repliesTo !== null}
-                      onChange={(selected) =>
-                        setAgreedTo(selected ? shareable : null)
-                      }
-                      isDisabled={isPending}
-                    >
-                      <span className="min-w-0 break-words">
-                        Share {shareable} so the team can reply
-                      </span>
-                    </Checkbox>
-                  </div>
+                  <p
+                    data-feedback-part="consent"
+                    className="text-caption shrink-0 px-6 pb-5 break-words max-sm:px-4 max-sm:pb-3"
+                  >
+                    By sending, you agree we can reply to {shareable} about this
+                    message only.
+                  </p>
                 ) : null}
                 <footer
                   data-feedback-footer={guard.isGuarding ? "guard" : "send"}
