@@ -1907,7 +1907,10 @@ def get_direct_tool_scaffold(
     web_search_policy: WorkspaceWebSearchPoliciesDep,
     billing: BillingPortDep,
 ) -> DirectToolScaffold:
-    """Build the direct tool scaffold on the request's session, which its billing port writes on too."""
+    """Bundle the request's session with the services and ports the builders in :mod:`gateway.api.deps` return.
+
+    The billing port writes on that same session.
+    """
     return DirectToolScaffold(
         db=db,
         config=config,
