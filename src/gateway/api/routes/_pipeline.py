@@ -58,6 +58,7 @@ from functools import partial, reduce
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
 
 import httpx
+import httpx2
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import (
     AnyLLMError,
@@ -66,6 +67,7 @@ from any_llm.exceptions import (
     MissingApiKeyError,
     UnsupportedParameterError,
 )
+from any_llm.providers.anthropic.base import BaseAnthropicProvider
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -312,7 +314,7 @@ from gateway.services.providers import (
     ensure_provider_country,
     hosted_credential_for,
     hosted_models_for,
-    owned_endpoint_http_client,
+    owned_endpoint_sdk_client,
     serve_on_hosted_provider,
     unpriced_model_refusal,
 )
@@ -1566,7 +1568,7 @@ async def _prepare_for_dispatch(
     if resolved.owned_endpoint is not None:
         # The client re-checks and pins the endpoint's address on every request
         # and follows no redirect; see ``services/providers``.
-        client_args = {"http_client": owned_endpoint_http_client()}
+        client_args = {"http_client": owned_endpoint_sdk_client(resolved.provider)}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
     served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
     ctx.deployment_paid = served.deployment_paid
@@ -5563,18 +5565,23 @@ async def _open_tool_backends(
 # The connect timeout the anthropic and openai SDKs default to. Only the response
 # needs the long budget; a short connect keeps failover off a dead provider fast.
 _PROVIDER_CONNECT_TIMEOUT_S = 5.0
+# Providers whose one set of call kwargs reaches both OpenAI's SDK (httpx) and
+# Anthropic's (httpx2). Neither SDK accepts the other's ``Timeout``, so they get
+# plain seconds, and a long connect with it.
+_BOTH_SDK_PROVIDERS = frozenset({LLMProvider.DEEPSEEK, LLMProvider.META})
 
 
 def _with_provider_timeout(kwargs: dict[str, Any], config: GatewayConfig) -> dict[str, Any]:
     """``kwargs`` with ``provider_request_timeout_seconds``, when the provider takes a per-request timeout.
 
     Without one the anthropic SDK refuses a non-streaming call whose ``max_tokens``
-    could outlast its default limit. A ``native`` provider's SDK takes an
-    ``httpx.Timeout``, so its connect stays short; a ``mapped`` one converts a
-    float into its own setting. any-llm rejects any timeout for an
-    ``unsupported`` provider, and for a pre-built client it cannot rebuild
-    (Bedrock's bearer-token shape), so those keep their client's own timeout,
-    as does a client the operator gave a ``timeout`` in ``client_args``.
+    could outlast its default limit. A ``native`` provider's SDK takes a
+    ``Timeout`` (httpx2's for Anthropic's SDK, httpx's otherwise), so its
+    connect stays short; a ``mapped`` one converts a float into its own
+    setting. any-llm rejects any timeout for an ``unsupported`` provider, and
+    for a pre-built client it cannot rebuild (Bedrock's bearer-token shape), so
+    those keep their client's own timeout, as does a client the operator gave a
+    ``timeout`` in ``client_args``.
     """
     client_args = kwargs.get("client_args") or {}
     if "timeout" in client_args or "client" in client_args:
@@ -5583,14 +5590,18 @@ def _with_provider_timeout(kwargs: dict[str, Any], config: GatewayConfig) -> dic
     try:
         if provider is None:
             provider, _ = AnyLLM.split_model_provider(kwargs["model"])
-        support = AnyLLM.get_provider_class(provider).TIMEOUT_SUPPORT
+        provider_class = AnyLLM.get_provider_class(provider)
+        support = provider_class.TIMEOUT_SUPPORT
     except (KeyError, TypeError, ValueError, ImportError, AttributeError, AnyLLMError):
         # Unresolvable here means unresolvable in any-llm too, which reports it.
         return kwargs
     seconds = config.provider_request_timeout_seconds
-    if support == "native":
-        return {**kwargs, "timeout": httpx.Timeout(seconds, connect=min(seconds, _PROVIDER_CONNECT_TIMEOUT_S))}
-    if support == "mapped":
+    connect = min(seconds, _PROVIDER_CONNECT_TIMEOUT_S)
+    if support == "native" and issubclass(provider_class, BaseAnthropicProvider):
+        return {**kwargs, "timeout": httpx2.Timeout(seconds, connect=connect)}
+    if support == "native" and LLMProvider(provider) not in _BOTH_SDK_PROVIDERS:
+        return {**kwargs, "timeout": httpx.Timeout(seconds, connect=connect)}
+    if support in ("native", "mapped"):
         return {**kwargs, "timeout": seconds}
     return kwargs
 

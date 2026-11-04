@@ -47,7 +47,7 @@ from gateway.services.providers._missing_credential import (
     unpriced_model_refusal,
 )
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
-from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client
+from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client, owned_endpoint_sdk_client
 from gateway.services.providers._provider_clients import (
     acompletion,
     amessages,
@@ -96,6 +96,7 @@ __all__ = [
     "normalize_api_base",
     "organization_to_serve",
     "owned_endpoint_http_client",
+    "owned_endpoint_sdk_client",
     "provider_for",
     "public_api_base",
     "refresh_provider_endpoint_cache",
