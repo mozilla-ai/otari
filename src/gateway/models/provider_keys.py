@@ -57,7 +57,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text, true
+from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, false, text, true
 from sqlmodel import Field
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
@@ -117,6 +117,9 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # ``UtcDateTime``'s own docstring describes for the tenancy timestamps).
     archived_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     is_org_default: bool = Field(default=False, nullable=False)
+    # The organization's declaration that this key's upstream account keeps no
+    # prompt or completion data. Shown in the catalog; nothing is enforced on it.
+    zero_data_retention: bool = Field(default=False, nullable=False, sa_column_kwargs={"server_default": false()})
 
 
 # ==============================================================================

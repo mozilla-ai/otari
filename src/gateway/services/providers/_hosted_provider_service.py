@@ -245,6 +245,7 @@ class HostedProviderService:
                     restricted_to_organization_id=request.restricted_to_organization_id,
                     serves_unlisted_models=request.serves_unlisted_models,
                     supported_countries=request.supported_countries,
+                    zero_data_retention=request.zero_data_retention,
                 )
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
@@ -319,6 +320,8 @@ class HostedProviderService:
                 row.enabled = request.enabled
             if request.serves_unlisted_models is not None:
                 row.serves_unlisted_models = request.serves_unlisted_models
+            if request.zero_data_retention is not None:
+                row.zero_data_retention = request.zero_data_retention
             if "restricted_to_organization_id" in request.model_fields_set:
                 await self._require_organization(request.restricted_to_organization_id)
                 row.restricted_to_organization_id = request.restricted_to_organization_id
@@ -748,6 +751,14 @@ class HostedProviderService:
         """
         return await self.runtime.serveable_models(organization_id=organization_id)
 
+    async def zero_data_retention_names(self, *, organization_id: uuid.UUID | None) -> frozenset[str]:
+        """The enabled providers serveable to ``organization_id`` that declare zero data retention.
+
+        ``None`` is the deployment's own view, which sees every provider.
+        """
+        async with self.uow:
+            return await self.sources.zero_data_retention_names(organization_id)
+
     async def resolve(
         self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
     ) -> ResolvedHostedProvider | None:
@@ -854,6 +865,7 @@ class HostedProviderService:
             enabled=entry.enabled,
             restricted_to_organization_id=entry.restricted_to_organization_id,
             supported_countries=list(entry.supported_countries) if entry.supported_countries is not None else None,
+            zero_data_retention=entry.zero_data_retention,
         )
 
     async def _require_organization(self, organization_id: uuid.UUID | None) -> None:

@@ -171,6 +171,38 @@ async def test_moving_a_key_to_another_host_needs_its_credentials_again(async_db
     assert (await update(api_base=None)).api_base is None, "the provider's own host needs no credential again"
 
 
+async def test_a_provider_counts_as_zero_data_retention_only_while_every_key_declares_it(
+    async_db: AsyncSession,
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    primary = await service.create_key_for_user(
+        user=owner,
+        request=OrgProviderKeyCreateRequest(
+            provider="openai", name="primary", api_key="sk-live-1234", zero_data_retention=True
+        ),
+    )
+    assert primary.zero_data_retention is True
+
+    async def declared() -> frozenset[str]:
+        return await service.get_zero_data_retention_providers(organization_id=organization.id)
+
+    assert await declared() == frozenset({"openai"})
+    second = await service.create_key_for_user(user=owner, request=_create_request(name="second"))
+    assert second.zero_data_retention is False
+    assert await declared() == frozenset()
+
+    kept = await service.update_key_for_user(
+        user=owner, key_id=second.id, request=OrgProviderKeyUpdateRequest(zero_data_retention=None)
+    )
+    assert kept.zero_data_retention is False, "an explicit null changes nothing"
+    await service.update_key_for_user(
+        user=owner, key_id=second.id, request=OrgProviderKeyUpdateRequest(zero_data_retention=True)
+    )
+    assert await declared() == frozenset({"openai"})
+
+
 async def test_delete_requires_archived_first(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")

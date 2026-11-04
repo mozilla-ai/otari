@@ -97,6 +97,7 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
     provider_type: "nebius",
     credential: "deployment",
     discovered: true,
+    zero_data_retention: false,
     context_window: 200_000,
     max_output_tokens: 128_000,
     quantization: null,
@@ -679,6 +680,33 @@ describe("ModelCatalogPage", () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Clear" }))
     expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+  })
+
+  it("narrows to models a zero data retention provider offers, and marks them", async () => {
+    const asked: URLSearchParams[] = []
+    const glm = { ...GLM, zero_data_retention_providers: ["fireworks"] }
+    mockApi({
+      list: (params) => {
+        asked.push(params)
+        const models =
+          params.get("zero_data_retention") === "true" ? [glm] : [glm, KIMI]
+        return { ...CATALOG, count: models.length, models }
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(await within(list).findByText("Zero data retention")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Data retention" }))
+    await user.click(
+      screen.getByRole("checkbox", { name: "Zero data retention only" }),
+    )
+
+    await waitFor(() =>
+      expect(within(list).queryByText(/Kimi K2.6/)).toBeNull(),
+    )
+    expect(asked.at(-1)?.get("zero_data_retention")).toBe("true")
   })
 
   it("narrows by what a model produces", async () => {

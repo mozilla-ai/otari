@@ -670,6 +670,34 @@ def test_a_visitor_reads_the_hosted_models_too(
 
 
 @pytest.fixture
+def zero_retention_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    mcs.clear_catalog_cache()
+    hosted = {"groq": {"api_key": "sk-fake", "models": ["glm-5.3"], "zero_data_retention": True}}
+    try:
+        yield from build_test_client(_config(postgres_url, public_catalog=True, hosted_providers=hosted))
+    finally:
+        mcs.clear_catalog_cache()
+
+
+def test_a_hosted_provider_declared_zero_data_retention_marks_its_offerings(
+    zero_retention_client: TestClient, master_header: dict[str, str]
+) -> None:
+    bind_model_provider(zero_retention_client, HostedModelProvider("groq", models={"groq": ["glm-5.3"]}))
+    _price(zero_retention_client, master_header, "groq:glm-5.3", 0.4, 1.6)
+    _price(zero_retention_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+    _price(zero_retention_client, master_header, _NEBIUS_KIMI, 0.6, 2.4)
+
+    body = _get(zero_retention_client, f"{API_ROOT}/catalog/models", params={"zero_data_retention": True})
+    assert [(model["id"], model["zero_data_retention_providers"]) for model in body["models"]] == [
+        ("z-ai/glm-5.3", ["groq"])
+    ]
+
+    detail = _get(zero_retention_client, f"{API_ROOT}/catalog/models/z-ai/glm-5.3")
+    flags = {offering["provider"]: offering["zero_data_retention"] for offering in detail["offerings"]}
+    assert flags == {"groq": True, "nebius": False}
+
+
+@pytest.fixture
 def throttled_public_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
     mcs.clear_catalog_cache()
     try:

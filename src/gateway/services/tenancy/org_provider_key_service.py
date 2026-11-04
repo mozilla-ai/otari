@@ -488,6 +488,7 @@ class OrgProviderKeyService:
                 last4=last4,
                 api_base=request.api_base,
                 client_args=request.client_args,
+                zero_data_retention=request.zero_data_retention,
             )
             await self.db.commit()
         except IntegrityError:
@@ -517,6 +518,9 @@ class OrgProviderKeyService:
             raise OrgProviderKeyArchivedError(key_id)
 
         update_data = request.model_dump(exclude_unset=True)
+        # A declaration is true or false; an explicit null changes nothing.
+        if update_data.get("zero_data_retention", False) is None:
+            del update_data["zero_data_retention"]
         if "name" in update_data:
             new_name = _validated_name(update_data["name"])
             update_data["name"] = new_name
@@ -948,6 +952,19 @@ class OrgProviderKeyService:
                 for workspace_id in workspace_ids
             )
         )
+
+    async def get_zero_data_retention_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        """Returns the providers whose every usable key in the organization declares zero data retention.
+
+        Every key rather than any: which key serves a workspace depends on its
+        defaults and overrides, so one undeclared key means a request may go
+        out on an account that keeps data.
+        """
+        declared: dict[str, bool] = {}
+        for key in await self.keys.list_live_keys(organization_id):
+            if key_is_usable(key):
+                declared[key.provider] = declared.get(key.provider, True) and key.zero_data_retention
+        return frozenset(provider for provider, zero in declared.items() if zero)
 
 
 __all__ = [

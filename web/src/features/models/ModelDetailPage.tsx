@@ -218,6 +218,7 @@ function offeringColumns({
                   ? `${providerDisplayName(row.provider_type)} · `
                   : ""}
                 {credentialLabel(row.credential)}
+                {row.zero_data_retention ? " · Zero data retention" : ""}
                 {row.quantization ? ` · ${row.quantization}` : ""}
               </span>
             </span>

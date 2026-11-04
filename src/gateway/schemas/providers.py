@@ -41,6 +41,13 @@ class OrgProviderKeyCreateRequest(SQLModel):
     api_key: str | None = Field(default=None)
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
+    zero_data_retention: bool = Field(
+        default=False,
+        description=(
+            "The organization's declaration that the provider account behind this key keeps no prompt or "
+            "completion data. The catalog shows it and filters on it; nothing is enforced on it."
+        ),
+    )
 
 
 class OrgProviderKeyUpdateRequest(SQLModel):
@@ -50,6 +57,7 @@ class OrgProviderKeyUpdateRequest(SQLModel):
     api_key: str | None = None
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
+    zero_data_retention: bool | None = None
 
 
 class OrgProviderKeyPublic(SQLModel):
@@ -63,6 +71,7 @@ class OrgProviderKeyPublic(SQLModel):
     client_args: dict[str, Any] | None = None
     last4: str | None = None
     is_org_default: bool
+    zero_data_retention: bool = False
     usable: bool = Field(
         description=(
             "False when the stored credential cannot be decrypted on this deployment, so the key "
@@ -117,6 +126,7 @@ class OrgProviderKeyPublic(SQLModel):
             client_args=redact_secret_like_values(key.client_args),
             last4=key.last4,
             is_org_default=key.is_org_default,
+            zero_data_retention=key.zero_data_retention,
             usable=usable,
             offered_count=offered_count,
             serving_count=serving_count,
@@ -368,6 +378,8 @@ class HostedProviderCreateRequest(SQLModel):
     whether or not something prices it. ``supported_countries`` keeps the
     provider to requests from those ISO country codes, checked as well as
     ``provider_supported_countries``; null serves every country.
+    ``zero_data_retention`` declares that the upstream keeps no prompt or
+    completion data; the catalog shows it and nothing enforces it.
     """
 
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
@@ -381,6 +393,7 @@ class HostedProviderCreateRequest(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
     supported_countries: list[str] | None = Field(default=None, max_length=300)
+    zero_data_retention: bool = False
 
     @field_validator("supported_countries")
     @classmethod
@@ -413,6 +426,7 @@ class HostedProviderUpdateRequest(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool | None = None
     supported_countries: list[str] | None = Field(default=None, max_length=300)
+    zero_data_retention: bool | None = None
 
     @field_validator("supported_countries")
     @classmethod
@@ -440,7 +454,8 @@ class HostedProviderPublic(SQLModel):
     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
     ``serves_unlisted_models`` is true for one that serves a model its roster
     does not list. ``supported_countries`` is null for one that serves every
-    country.
+    country. ``zero_data_retention`` is the operator's declaration that the
+    upstream keeps no prompt or completion data.
     """
 
     id: uuid.UUID | None = None
@@ -456,6 +471,7 @@ class HostedProviderPublic(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
     supported_countries: list[str] | None = None
+    zero_data_retention: bool = False
     shadows_config: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -491,6 +507,7 @@ class HostedProviderPublic(SQLModel):
             restricted_to_organization_id=row.restricted_to_organization_id,
             serves_unlisted_models=row.serves_unlisted_models,
             supported_countries=row.supported_countries,
+            zero_data_retention=row.zero_data_retention,
             shadows_config=shadows_config,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -509,6 +526,7 @@ class HostedProviderPublic(SQLModel):
         enabled: bool,
         restricted_to_organization_id: uuid.UUID | None,
         supported_countries: list[str] | None = None,
+        zero_data_retention: bool = False,
     ) -> HostedProviderPublic:
         """Read one configuration entry for the API, masked as a row is.
 
@@ -525,6 +543,7 @@ class HostedProviderPublic(SQLModel):
             enabled=enabled,
             restricted_to_organization_id=restricted_to_organization_id,
             supported_countries=supported_countries,
+            zero_data_retention=zero_data_retention,
         )
 
 
