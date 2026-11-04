@@ -751,11 +751,11 @@ function CreateKeyDialog({
             }}
           />
           <ToolScopeControl
-            title="Restrict this key's search and fetch tools"
+            title="Restrict this key's search tools"
             description={
               isDeploymentWide
-                ? "Which search and fetch tools this key may run on /v1/search and /v1/fetch. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can never exceed its owner's."
-                : "Which search and fetch tools this key may run on /v1/search and /v1/fetch. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can never exceed yours."
+                ? "Which search tools this key may run on /v1/search. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can never exceed its owner's."
+                : "Which search tools this key may run on /v1/search. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can never exceed yours."
             }
             inheritLabel={
               isDeploymentWide ? "Inherit owner's tools" : "Inherit your tools"
@@ -1041,11 +1041,11 @@ function EditKeyForm({
         }}
       />
       <ToolScopeControl
-        title="Restrict this key's search and fetch tools"
+        title="Restrict this key's search tools"
         description={
           isDeploymentWide
-            ? "Which search and fetch tools this key may run on /v1/search and /v1/fetch. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). It can never exceed its owner's."
-            : "Which search and fetch tools this key may run on /v1/search and /v1/fetch. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). It can never exceed yours."
+            ? "Which search tools this key may run on /v1/search. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). It can never exceed its owner's."
+            : "Which search tools this key may run on /v1/search. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). It can never exceed yours."
         }
         inheritLabel={
           isDeploymentWide ? "Inherit owner's tools" : "Inherit your tools"
