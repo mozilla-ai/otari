@@ -9,9 +9,9 @@ import { useUpdateWorkspaceMcpServer } from "@/shared/api/tools"
 
 /**
  * Which of a server's tools count as read, the set a "Read tools only" rule
- * allows. The labels are the manager's: the server's own `readOnlyHint` only
- * pre-ticks the list when nothing is labeled yet, and a save is what makes it
- * a label, since a server can call any tool read-only.
+ * allows. The labels are the manager's: the server's own `readOnlyHint` is
+ * named as a suggestion and never ticked for them, since a server can call any
+ * tool read-only and one click must not turn its word into a label.
  *
  * The caller keys this on the stored labels, so a save re-seeds it and closes
  * the editor.
@@ -29,9 +29,8 @@ export function McpReadTools({
   const stored = server.read_tools
   const hinted = server.health?.read_only_hinted_tools ?? []
   const tools = server.allowed_tools ?? server.health?.tools ?? []
-  const seed = stored.length > 0 ? stored : hinted
   const [isEditing, setEditing] = useState(false)
-  const [picked, setPicked] = useState<string[]>([...seed])
+  const [picked, setPicked] = useState<string[]>([...stored])
   const isChanged = picked.join() !== stored.join()
 
   return (
@@ -50,9 +49,9 @@ export function McpReadTools({
       {isEditing ? (
         <div className="flex flex-col gap-3">
           {stored.length === 0 && hinted.length > 0 ? (
-            <p className="text-caption">
-              Ticked from what the server says about its own tools. Check each
-              one before saving: the server's word is not a label.
+            <p className="text-caption break-words">
+              The server marks {hinted.join(", ")} as read-only. Its word is not
+              a label: tick each one you trust.
             </p>
           ) : null}
           <ToolChecklist
@@ -81,7 +80,7 @@ export function McpReadTools({
             <Button
               onPress={() => {
                 setEditing(false)
-                setPicked([...seed])
+                setPicked([...stored])
                 update.reset()
               }}
             >

@@ -284,6 +284,16 @@ def _walk(schema: dict[str, Any]) -> tuple[int, int, bool]:
 # --------------------------------------------------------------------------- #
 
 
+def reads_as_pattern(name: str) -> bool:
+    """Whether a tool name would read as a pattern in an access rule: a wildcard, or a preset such as ``@read``.
+
+    A server's tool names are untrusted, and one named ``*`` or ``search*`` that a manager ticks would be stored as a
+    wildcard reaching tools the server adds later. MCP's tool-name charset has neither character, so such a tool is
+    left out of discovery and of the checked catalog rather than offered.
+    """
+    return "*" in name or name.startswith("@")
+
+
 def screen_tool(tool: MCPTool) -> str | None:
     """Return the warning code that omits ``tool``, or ``None`` to admit it.
 
@@ -293,7 +303,7 @@ def screen_tool(tool: MCPTool) -> str | None:
     safely return or execute, or a schema that would make it fetch another
     schema over the network to be understood at all.
     """
-    if not tool.name or len(tool.name) > TOOL_NAME_MAX_LENGTH:
+    if not tool.name or len(tool.name) > TOOL_NAME_MAX_LENGTH or reads_as_pattern(tool.name):
         return WARN_NAME_UNSUPPORTED
     if _oversized(tool.description, TOOL_DESCRIPTION_MAX_BYTES):
         return WARN_DESCRIPTION_TOO_LARGE
@@ -809,7 +819,7 @@ async def _check_once(server: ResolvedMcpServer) -> ServerCheck:
     stack = AsyncExitStack()
     try:
         session = await stack.enter_async_context(open_session(server, screen_answers=True))
-        listed = await collect_tools(session, allowed_tools=None)
+        listed = [tool for tool in await collect_tools(session, allowed_tools=None) if not reads_as_pattern(tool.name)]
         return ServerCheck(
             tool_names=[tool.name for tool in listed],
             read_only_hinted=[

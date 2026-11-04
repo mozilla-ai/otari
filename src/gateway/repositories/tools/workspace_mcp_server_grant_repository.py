@@ -22,12 +22,16 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
     def __init__(self, db: AsyncSession | UnitOfWork) -> None:
         super().__init__(db, WorkspaceMcpServerGrant)
 
-    async def for_caller(self, api_key_id: str, user_id: str | None) -> list[WorkspaceMcpServerGrant]:
-        """Every grant naming this key or its owner, on any server."""
-        subject = WorkspaceMcpServerGrant.api_key_id == api_key_id
+    async def for_caller(self, api_key_id: str | None, user_id: str | None) -> list[WorkspaceMcpServerGrant]:
+        """Every grant naming this key or this user, on any server; a session passes no key."""
+        subjects = []
+        if api_key_id is not None:
+            subjects.append(WorkspaceMcpServerGrant.api_key_id == api_key_id)
         if user_id is not None:
-            subject = or_(subject, WorkspaceMcpServerGrant.user_id == user_id)
-        return list((await self.db.execute(select(WorkspaceMcpServerGrant).where(subject))).scalars().all())
+            subjects.append(WorkspaceMcpServerGrant.user_id == user_id)
+        if not subjects:
+            return []
+        return list((await self.db.execute(select(WorkspaceMcpServerGrant).where(or_(*subjects)))).scalars().all())
 
     async def for_server(self, server_id: uuid.UUID) -> list[WorkspaceMcpServerGrant]:
         """A server's grants, oldest first."""

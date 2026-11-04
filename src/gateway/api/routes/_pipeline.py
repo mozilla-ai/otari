@@ -1252,11 +1252,13 @@ class RequestContext:
         source_label: str | None = None,
         country_gate: CountryGate | None = None,
         api_key: APIKey | None = None,
+        session: bool = False,
     ) -> None:
         self.config = config
-        # The key that authenticated the request; ``None`` for the master key and a session principal,
-        # which no MCP access list binds.
+        # The key that authenticated the request; ``None`` for the master key and a session principal.
         self.api_key = api_key
+        # Whether a dashboard session (the Playground) made the request, which MCP access binds as its user.
+        self.session = session
         # The request's trace while it is served; None where nothing records one.
         self.trace = trace
         # Sent to the client as ``Otari-Request-ID``.
@@ -3523,6 +3525,7 @@ async def resolve_request_context(
         trace=trace,
         source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
         api_key=api_key,
+        session=session_principal is not None,
     )
 
 
@@ -4445,7 +4448,9 @@ async def _admit_mcp_servers(
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
     try:
         access = (
-            await resolve_request_mcp_access(ctx.db, ctx.api_key, ctx.workspace_id)
+            await resolve_request_mcp_access(
+                ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
+            )
             if declared.mcp_servers or declared.mcp_server_ids
             else McpAccess()
         )

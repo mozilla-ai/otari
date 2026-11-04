@@ -178,7 +178,7 @@ describe("McpServerDetailPage, exposed tools and connection", () => {
     expect(await patchBody(calls)).toEqual({ allowed_tools: ["get_issue"] })
   })
 
-  it("labels read tools, ticked first from the server's own hints", async () => {
+  it("labels read tools, naming the server's own hints without ticking them", async () => {
     const calls = mockMcpServerApi({
       server: workspaceMcpServer({
         workspace_id: WORKSPACE,
@@ -193,13 +193,21 @@ describe("McpServerDetailPage, exposed tools and connection", () => {
 
     expect(screen.getByText(/None labeled/)).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Edit read tools" }))
-    const list = screen.getByRole("list", { name: "Read tools" })
+    // The server calls delete_issue read-only; the manager is who decides, one tick at a time.
     expect(
-      within(list).getByRole("checkbox", { name: "list_issues" }),
-    ).toBeChecked()
-    // The server calls delete_issue read-only; the manager is who decides.
+      screen.getByText(
+        /The server marks list_issues, delete_issue as read-only/,
+      ),
+    ).toBeVisible()
+    const list = screen.getByRole("list", { name: "Read tools" })
+    for (const name of ["list_issues", "get_issue", "delete_issue"]) {
+      expect(within(list).getByRole("checkbox", { name })).not.toBeChecked()
+    }
+    expect(
+      screen.getByRole("button", { name: "Save read tools" }),
+    ).toBeDisabled()
     await user.click(
-      within(list).getByRole("checkbox", { name: "delete_issue" }),
+      within(list).getByRole("checkbox", { name: "list_issues" }),
     )
     await user.click(within(list).getByRole("checkbox", { name: "get_issue" }))
     await user.click(screen.getByRole("button", { name: "Save read tools" }))

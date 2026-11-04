@@ -6,6 +6,7 @@ request-server switch run against the real database. URLs are public IP literals
 
 from __future__ import annotations
 
+import sys
 import time
 import uuid
 from collections.abc import Callable, Iterator, Sequence
@@ -306,6 +307,24 @@ def test_the_connection_check_suggests_read_tools_without_labeling_them(
     stored = client.get(f"{_servers(row.workspace_id)}/{row.id}", headers=master_key_header).json()
     assert stored["health"]["read_only_hinted_tools"] == ["list_issues", "delete_issue"]
     assert stored["read_tools"] == []
+
+
+def test_the_connection_check_leaves_out_a_tool_named_like_a_pattern(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool the server names ``*`` or ``search*`` would be stored as a wildcard once a manager ticked it."""
+    monkeypatch.setattr(sys.modules[__name__], "TOOL_NAMES", ("list_issues", "*", "search*", "@read"))
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github")
+
+    checked = client.post(f"{_servers(row.workspace_id)}/{row.id}/check", headers=master_key_header)
+
+    assert checked.status_code == 200, checked.text
+    assert checked.json()["health"]["tools"] == ["list_issues"]
 
 
 @pytest.mark.parametrize("read_tools", [["list_*"], ["@read"], [""], None])

@@ -40,8 +40,8 @@ def test_a_tool_name_at_the_execution_limit_is_admitted() -> None:
     assert screen_tool(_tool(name="x" * TOOL_NAME_MAX_LENGTH)) is None
 
 
-@pytest.mark.parametrize("name", ["", "x" * (TOOL_NAME_MAX_LENGTH + 1)])
-def test_a_tool_name_execution_cannot_accept_is_omitted(name: str) -> None:
+@pytest.mark.parametrize("name", ["", "x" * (TOOL_NAME_MAX_LENGTH + 1), "*", "search*", "@read"])
+def test_a_tool_name_execution_or_an_access_rule_cannot_take_is_omitted(name: str) -> None:
     assert screen_tool(_tool(name=name)) == "mcp_tool_name_unsupported"
 
 

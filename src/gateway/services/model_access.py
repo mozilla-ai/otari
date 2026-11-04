@@ -331,7 +331,7 @@ class McpAccess:
 
     ``key_grants`` and ``user_grants`` are the tool patterns the caller's key and its owner hold on
     each server, by server id. A key's grant decides over its owner's, and either over the server's
-    ``everyone_tools``. ``unrestricted`` is the master key and a dashboard session, which no rule binds.
+    ``everyone_tools``. ``unrestricted`` is the master key, which no rule binds.
     """
 
     unrestricted: bool = False
@@ -360,14 +360,24 @@ class McpAccess:
 
 
 async def resolve_request_mcp_access(
-    db: AsyncSession, api_key: APIKey | None, workspace_id: uuid.UUID | None
+    db: AsyncSession,
+    api_key: APIKey | None,
+    workspace_id: uuid.UUID | None,
+    *,
+    session_user_id: str | None = None,
 ) -> McpAccess:
-    """The MCP access of a request's key: its grants and its owner's, and its workspace's request-server switch."""
-    if api_key is None:
+    """The MCP access of a request's caller, and its workspace's request-server switch.
+
+    A key holds its own grants and its owner's. A dashboard session (the Playground) has no key, so it holds its
+    user's grants, as one of their keys with no rule of its own would. Only the master key, which has neither, is
+    unrestricted.
+    """
+    if api_key is None and session_user_id is None:
         return McpAccess(unrestricted=True)
+    key_id, user_id = (api_key.id, api_key.user_id) if api_key is not None else (None, session_user_id)
     key_grants: dict[uuid.UUID, tuple[str, ...]] = {}
     user_grants: dict[uuid.UUID, tuple[str, ...]] = {}
-    for grant in await WorkspaceMcpServerGrantRepository(db).for_caller(api_key.id, api_key.user_id):
+    for grant in await WorkspaceMcpServerGrantRepository(db).for_caller(key_id, user_id):
         (key_grants if grant.api_key_id is not None else user_grants)[grant.server_id] = tuple(grant.tools)
     workspace = await WorkspaceRepository(db).get(workspace_id) if workspace_id is not None else None
     return McpAccess(

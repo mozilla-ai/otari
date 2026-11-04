@@ -183,8 +183,10 @@ source:
 
 A tool pattern is a tool name, `*` for every tool, a name prefix ending in `*`
 (`get_*`), or `@read` for the server's read tools; a pattern with `*` anywhere
-else, or any other `@` preset, is refused. The master key and a dashboard
-session, which the Playground runs as, are not bound by any ACL.
+else, or any other `@` preset, is refused. Only the master key is not bound by
+any ACL. A dashboard session, which the Playground runs as, has no key, so it is
+bound as its user: that user's rule, else the default policy. The Playground
+offers only the servers it can reach.
 
 #### Read tools
 
@@ -217,7 +219,7 @@ read-only.
   by URL, which no ACL covers. A workspace allows it by default; turning off
   `request_mcp_servers_allowed` with `PATCH /api/v1/workspaces/{workspace_id}` refuses
   such a request with a `400`, so that a workspace's ACLs cannot be stepped around.
-  The master key and a dashboard session may still name servers.
+  The master key may still name servers; a dashboard session may not.
 
 The ACL is managed under
 `/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}`, by organization
@@ -383,7 +385,9 @@ one with a `$ref` pointing outside itself:
 
 A tool name outside the 1–256-character execution limit is omitted with
 `mcp_tool_name_unsupported`, so every tool returned by discovery can be sent
-back to the execution endpoint.
+back to the execution endpoint. So is a name containing `*` or starting with
+`@`, which an access rule would read as a pattern rather than a name; such a
+tool is also left out of the tools a connection check lists.
 
 Otari does not validate an `inputSchema` against a JSON Schema dialect, and never
 truncates, rewrites, or drops a keyword. It bounds the size, depth and property
