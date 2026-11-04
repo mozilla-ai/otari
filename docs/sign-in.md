@@ -197,7 +197,12 @@ Organization roles do not implicitly grant access to process-wide settings or
 credentials.
 
 Use the master key through `Authorization: Bearer <master-key>` or
-`Otari-Key: <master-key>`. Applications should use scoped API keys instead.
+`Otari-Key: <master-key>`. Applications should use scoped API keys instead. An
+inference request on the master key uses the deployment's default workspace.
+
+Operators can read the operator usage API (`/api/v1/usage`), which covers every
+workspace of the operator's active organization (the default organization for
+the master key).
 
 An operator manages every account on the deployment from the dashboard's
 Accounts page (`/api/v1/admin/users`): deactivate or reactivate one, grant or

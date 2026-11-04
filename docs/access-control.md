@@ -16,7 +16,7 @@ steps and the rules.
 | Service key and end user | A key whose requests bill the people an application serves | [Track spend per end user](end-users.md) |
 | Budget | A spend, token or request limit over a period | [Budgets](budgets.md) |
 | Provider key | The organization's credential for an upstream LLM provider | [Provider keys](provider-keys.md) |
-| Master key and operators | Authority over the deployment as a whole | [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration) |
+| Operator | Runs a self-hosted deployment as a whole | [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration) |
 
 ## How they relate
 
@@ -38,14 +38,14 @@ Budgets sit over all of it. A per-user budget limits each user on it, and a
 scoped budget caps an organization, a workspace, a membership or a single API
 key. A request has to fit every budget that applies.
 
-The master key, and an identity granted operator access, act on the whole
-deployment; organization roles stop at their organization.
+Organization roles stop at their organization; on a self-hosted deployment,
+[operators](sign-in.md#deployment-wide-account-administration) act on the whole
+deployment.
 
 ## How a request is attributed
 
 The API key that authenticates a request determines its workspace. A caller
-cannot select another workspace with a header, and an inference request on the
-master key uses the deployment's default workspace. The request's usage is
+cannot select another workspace with a header. The request's usage is
 recorded in that workspace and its spend billed to the key's user.
 
 A client-provided `user` value never moves spend away from the key's user:

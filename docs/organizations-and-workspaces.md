@@ -84,9 +84,7 @@ Organization and workspace memberships use four roles:
 A request's usage lands in the workspace of the API key that authenticated it
 (see [How a request is attributed](access-control.md#how-a-request-is-attributed)).
 Organization and workspace usage views then apply the signed-in identity's
-membership. Deployment operators can read the operator usage API, which covers
-every workspace of the operator's active organization (the default organization
-for the master key).
+membership.
 
 Routing fallback and built-in tools can create several internal attempts, but a
 successful request remains one caller-visible request. The activity log records

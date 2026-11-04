@@ -22,18 +22,19 @@ Run every command that follows from this directory.
 ## 2. Create the settings
 
 Otari runs here on environment variables alone, which Compose reads from
-`.env`. Generate the file:
+`.env`. Generate the file, unless it already exists: a second `OTARI_SECRET_KEY`
+would make the provider keys Otari has stored undecryptable.
 
 ```bash
-export OTARI_MASTER_KEY=$(openssl rand -hex 32)
-cat > .env <<EOF
+test -e .env || cat > .env <<EOF
 OTARI_CONFIG_PATH=/dev/null
 OTARI_DATABASE_URL=postgresql://otari:otari@postgres:5432/otari
 OTARI_DEFAULT_PRICING=true
-OTARI_MASTER_KEY=$OTARI_MASTER_KEY
+OTARI_MASTER_KEY=$(openssl rand -hex 32)
 OTARI_SECRET_KEY=$(docker run --rm docker.io/mzdotai/otari:latest otari gen-secret-key)
 OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)
 EOF
+export OTARI_MASTER_KEY=$(grep '^OTARI_MASTER_KEY=' .env | cut -d= -f2-)
 ```
 
 - `OTARI_CONFIG_PATH=/dev/null` tells Compose to start Otari with no
@@ -46,8 +47,8 @@ EOF
 - `OTARI_PROVIDER_ACCOUNT_PEPPER` names the provider accounts that hold copies
   of attached files. Compose requires it.
 
-The first command also keeps the master key in your shell for steps 4 and 5. Git
-ignores `.env`.
+The last command keeps the master key in your shell for steps 4 and 5, and is
+safe to run again in a new shell. Git ignores `.env`.
 
 ## 3. Start Otari
 
@@ -122,6 +123,7 @@ credential for them, and records every request.
 
 ## Next steps
 
+- [Run the dashboard](run-the-dashboard.md): sign in as the operator and set up the dashboard.
 - [Admin dashboard](dashboard.md): manage keys, users and providers in the browser.
 - [Access control](access-control.md): give each application its own key and budget.
 - [Models](models.md): connect more providers and choose model names.

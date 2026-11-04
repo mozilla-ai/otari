@@ -72,24 +72,17 @@ email names the inviter by their address as well as the name they chose, and an
 address the mail server would refuse, such as one ending in a dot, is refused
 when it is invited.
 
-Invitation email is limited, because it carries text an organization chose (its
-name, the inviter's name) from the deployment's own sender, and on a deployment
-where anyone can create an organization that would otherwise make it an open
-relay. Over any 24 hours an organization can send only so many invitation
-emails, and an address can receive only so many from every organization
-together, so revoking and inviting again cannot flood it; the settings and their
-defaults are under [Mail](configuration.md#mail). An invitation over a limit is
-still created, and its link is returned to share by hand, as when mail is off:
-the link costs the deployment nothing, and refusing would stop a legitimate
-admin partway through a bulk invite. The counts are kept in `rate_limit_store`,
-so with Redis they hold across replicas.
+Invitation email is limited. Over any 24 hours an organization can send only so
+many invitation emails, and an address can receive only so many from every
+organization together, so revoking and inviting again cannot flood it. An
+invitation over a limit is still created, and its link is returned to share by
+hand, so a bulk invite never stops partway. Self-hosted deployments set the
+limits under [Mail](configuration.md#invitations).
 
 The API can also add a member directly (`POST /api/v1/organizations/me/members`),
 active at once with no invitation to accept and no email. A new address added
-that way gets in by signing up, by "Forgot your password?" or through a provider,
-so on a deployment with no mail and no provider it waits for an operator's
-password link. Invite it instead, since the invitation link itself can set its
-first password.
+that way gets in by signing up, by "Forgot your password?" or through a provider.
+Invite it instead, since the invitation link itself can set its first password.
 
 Opening the link lets the invitee accept. If the invited address has never signed
 in, the accept page asks them to choose a first password, and once they accept
@@ -154,7 +147,8 @@ as the invited address, and choose its first password where the link allows one,
 so send it only to that person.
 Do not put tokens in logs or analytics. The browser validates and accepts them
 through the public invitation endpoints. A link works once, and expires after
-`invitation_expiry_hours`.
+seven days unless a self-hosted deployment
+[changes that](configuration.md#invitations).
 
 A signed-in person also sees the invitations addressed to them, and accepts or
 declines one without a token: they are already authenticated as the addressee,
