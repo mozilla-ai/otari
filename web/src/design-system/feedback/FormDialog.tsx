@@ -104,7 +104,7 @@ export interface FormDialogProps {
   tabs?: ReactNode
   /**
    * `Field`, `SecretField`, `Select`, `Checkbox`. A field with a description
-   * takes `reserveMessage`, so an error replaces that line instead of moving
+   * takes `shouldReserveMessage`, so an error replaces that line instead of moving
    * the footer; one with nothing to say under it reserves nothing.
    */
   children: ReactNode
