@@ -45,6 +45,7 @@ import {
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
@@ -340,6 +341,11 @@ export function HostedProvidersPage() {
   // A name rather than a row: the update report's own remove offer can name a
   // provider this page has not loaded.
   const [pendingDelete, setPendingDelete] = useState("")
+  // Above the access gates below: a hook cannot follow an early return.
+  const editingTarget = useHeldDialogTarget(
+    providers.data?.data.find((row) => row.name === editingProvider),
+  )
+  const editing = editingTarget.held
 
   const openAdd = () => {
     setEditingProvider("")
@@ -379,7 +385,6 @@ export function HostedProvidersPage() {
 
   const rows = providers.data?.data ?? []
   const deleting = rows.find((row) => row.name === pendingDelete)
-  const editing = rows.find((row) => row.name === editingProvider)
   const expanded = rows.find((row) => row.name === modelsFor)
   // Health is keyed by name, and a configured instance of the same name is the
   // one dialed under it, so its status would read as this row's. Such a row,
@@ -698,9 +703,9 @@ export function HostedProvidersPage() {
       />
       {editing ? (
         <EditHostedProviderForm
-          key={editing.name}
+          key={`${editing.name}:${editingTarget.generation}`}
           provider={editing}
-          isOpen
+          isOpen={editingTarget.isOpen}
           onClose={() => setEditingProvider("")}
         />
       ) : null}

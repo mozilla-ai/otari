@@ -64,6 +64,7 @@ import { useOrganizationPricing } from "@/shared/api/pricing"
 import { formatRelative } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
+import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
@@ -374,7 +375,10 @@ export function OrganizationProvidersPage() {
     setAdding(true)
   }
 
-  const editing = keys.data?.find((key) => key.id === editingId)
+  const editingTarget = useHeldDialogTarget(
+    keys.data?.find((key) => key.id === editingId),
+  )
+  const editing = editingTarget.held
   const archivedCount = (keys.data ?? []).filter((key) =>
     Boolean(key.archived_at),
   ).length
@@ -651,8 +655,8 @@ export function OrganizationProvidersPage() {
         // Remounted per row: the draft is seeded from the key once, so editing a
         // second key would otherwise open with the first one's values.
         <KeyForm
-          key={editing.id}
-          isOpen
+          key={`${editing.id}:${editingTarget.generation}`}
+          isOpen={editingTarget.isOpen}
           editing={editing}
           onClose={() => setEditingId(undefined)}
         />
