@@ -3,6 +3,7 @@ import {
   AccessListControl,
   type AccessListCopy,
   type AccessOption,
+  type AccessPicker,
 } from "@/features/models/AccessListControl"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { useSearchTools } from "@/shared/api/tools"
@@ -24,15 +25,42 @@ const COPY: Omit<AccessListCopy, "inherit"> = {
     </>
   ),
   pickPrompt: "Pick at least one tool below, or choose “No tool”.",
-  inputLabel: "Add a tool",
-  placeholder: "Search and fetch tools…",
+}
+
+type ToolListing = ReturnType<typeof useSearchTools>
+
+// One kind's picker, over that kind's own listing. Nothing to pick while the
+// listing is read, so the dropdown says it is loading rather than offering the
+// star alone as if it were everything.
+function pickerFor(
+  kind: "search" | "fetch",
+  listing: ToolListing,
+): AccessPicker {
+  const names = [
+    ...new Set(
+      [...(listing.data?.stored ?? []), ...(listing.data?.config ?? [])].map(
+        (tool) => tool.name,
+      ),
+    ),
+  ].sort((a, b) => a.localeCompare(b))
+  const label = kind === "search" ? "Search tools" : "Fetch tools"
+  return {
+    label,
+    catalog: listing.isLoading
+      ? []
+      : [EVERY_TOOL, ...names.map((name) => ({ id: name, label: name }))],
+    inputLabel: `Add a ${kind} tool`,
+    placeholder: `${label}…`,
+    loadingMessage: listing.isLoading ? `Loading the ${kind} tools…` : "",
+  }
 }
 
 // The tool access-list, the same tri-state as model access, granted by name
-// apart from it, so no model wildcard reaches a tool. It names search and fetch
-// tools alike, builtin_fetch among the fetch ones. Only the deployment operator
-// may list the tools, so anyone else is offered every tool or none, and keeps
-// the names already on the list.
+// apart from it, so no model wildcard reaches a tool. allowed_tools holds search
+// and fetch tool names in one list, builtin_fetch among the fetch ones; each kind
+// is picked from its own listing. Only the deployment operator may list the
+// tools, so anyone else is offered every tool or none, and keeps the names
+// already on the list.
 export function ToolScopeControl({
   initial,
   onChange,
@@ -50,22 +78,10 @@ export function ToolScopeControl({
   const canList = isSettled && isOperator
   const searchTools = useSearchTools("search", canList)
   const fetchTools = useSearchTools("fetch", canList)
-  const isLoading = searchTools.isLoading || fetchTools.isLoading
-
-  const names = [
-    ...new Set(
-      [searchTools.data, fetchTools.data].flatMap((listing) =>
-        [...(listing?.stored ?? []), ...(listing?.config ?? [])].map(
-          (tool) => tool.name,
-        ),
-      ),
-    ),
-  ].sort((a, b) => a.localeCompare(b))
-  // Nothing to pick while the lists are read, so the dropdown says it is loading
-  // rather than offering the star alone as if it were everything.
-  const catalog: AccessOption[] = isLoading
-    ? []
-    : [EVERY_TOOL, ...names.map((name) => ({ id: name, label: name }))]
+  const pickers = [
+    pickerFor("search", searchTools),
+    pickerFor("fetch", fetchTools),
+  ]
 
   const hint =
     isSettled && !isOperator
@@ -81,9 +97,8 @@ export function ToolScopeControl({
       title={title}
       description={description}
       copy={{ ...COPY, inherit: inheritLabel }}
-      catalog={catalog}
+      pickers={pickers}
       hint={hint}
-      loadingMessage={isLoading ? "Loading the tools…" : null}
     />
   )
 }

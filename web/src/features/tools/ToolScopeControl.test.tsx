@@ -70,32 +70,45 @@ describe("ToolScopeControl", () => {
     vi.restoreAllMocks()
   })
 
-  it("offers an operator every search and fetch tool by name, once each, and the star", async () => {
+  it("offers an operator each kind's tools in a picker of its own, once each, and the star", async () => {
     mockApi({ operator: true })
     const user = userEvent.setup()
     const onChange = renderControl(["news"])
 
     // Every option has an "e" in it, so the filter keeps them all.
-    await user.type(screen.getByLabelText("Add a tool"), "e")
+    await user.type(screen.getByLabelText("Add a search tool"), "e")
     expect(
       await screen.findByRole("option", { name: "deepseek" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("option", { name: "builtin_fetch" }),
+      screen.getByRole("option", { name: "* · every search and fetch tool" }),
+    ).toBeInTheDocument()
+    // A fetch tool is offered by the fetch picker alone.
+    expect(
+      screen.queryByRole("option", { name: "builtin_fetch" }),
+    ).not.toBeInTheDocument()
+    // Already on the list, and listed once though stored and config both name it.
+    expect(
+      screen.queryByRole("option", { name: "news" }),
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole("option", { name: "deepseek" }))
+    expect(onChange).toHaveBeenLastCalledWith(["news", "deepseek"], true)
+
+    await user.type(screen.getByLabelText("Add a fetch tool"), "e")
+    expect(
+      await screen.findByRole("option", { name: "builtin_fetch" }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole("option", { name: "tabstack-fetch" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("option", { name: "* · every search and fetch tool" }),
-    ).toBeInTheDocument()
-    // Already on the list, and listed once though stored and config both name it.
-    expect(
-      screen.queryByRole("option", { name: "news" }),
+      screen.queryByRole("option", { name: "deepseek" }),
     ).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole("option", { name: "deepseek" }))
-    expect(onChange).toHaveBeenLastCalledWith(["news", "deepseek"], true)
+    await user.click(screen.getByRole("option", { name: "builtin_fetch" }))
+    expect(onChange).toHaveBeenLastCalledWith(
+      ["news", "deepseek", "builtin_fetch"],
+      true,
+    )
   })
 
   it("offers anyone else every tool or none, without reading the list", async () => {
@@ -106,7 +119,7 @@ describe("ToolScopeControl", () => {
     expect(
       await screen.findByText(/Only the deployment operator can list/),
     ).toBeInTheDocument()
-    await user.type(screen.getByLabelText("Add a tool"), "e")
+    await user.type(screen.getByLabelText("Add a search tool"), "e")
     await user.click(
       await screen.findByRole("option", {
         name: "* · every search and fetch tool",
@@ -164,8 +177,10 @@ describe("ToolScopeControl", () => {
     const user = userEvent.setup()
     renderControl(["deepseek"])
 
-    await user.type(await screen.findByLabelText("Add a tool"), "*")
-    expect(await screen.findByText("Loading the tools…")).toBeInTheDocument()
+    await user.type(await screen.findByLabelText("Add a search tool"), "*")
+    expect(
+      await screen.findByText("Loading the search tools…"),
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("option", { name: "* · every search and fetch tool" }),
     ).not.toBeInTheDocument()
