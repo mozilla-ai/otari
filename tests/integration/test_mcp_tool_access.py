@@ -331,6 +331,26 @@ def test_the_connection_check_leaves_out_a_tool_named_like_a_pattern(
     assert checked.json()["health"]["tools"] == ["list_issues"]
 
 
+def test_discovery_applies_the_caller_s_rule_before_the_returned_tool_limit(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server offering more tools than a response may carry still answers a key allowed one of them."""
+    names = tuple(f"tool_{index}" for index in range(mcp_stateless.DISCOVERY_MAX_TOOLS + 1))
+    monkeypatch.setattr(sys.modules[__name__], "TOOL_NAMES", names)
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=[])
+    _grant(client, master_key_header, row, ["tool_7"], keys=[key])
+
+    response = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(key))
+
+    assert response.status_code == 200, response.text
+    assert [tool["name"] for tool in response.json()["tools"]] == ["tool_7"]
+
+
 def test_a_catalog_stored_before_the_screen_is_read_back_without_pattern_names(
     client: TestClient, master_key_header: dict[str, str], test_db: Session
 ) -> None:

@@ -553,7 +553,7 @@ Gateway-owned ceilings, not caller-controlled request fields:
 | Request | `arguments` encoded size, nesting depth | 256 KiB, depth 32 |
 | Discovery | `tools/list` pages followed | 20 |
 | Discovery | live descriptors examined | 1,000 |
-| Discovery | returned tools | 200 |
+| Discovery | returned tools, counted after the caller's access list | 200 |
 | Discovery | per description / schema / annotations | 4 KiB / 64 KiB at depth 32 / 16 KiB |
 | Discovery | serialized response | 1 MiB |
 | Discovery | total request, concurrency, admission wait | 15 s, 4 per process, 5 s |

@@ -608,10 +608,9 @@ async def list_mcp_tools(
             await release_session(db)
             await _require_safe_url(server)
             track_request(raw_request, endpoint=TOOLS_ENDPOINT, model=TOOLS_LABEL)
-            catalog = await discover_stored_tools(server)
             patterns = _caller_patterns(principal, server)
-            visible = [tool for tool in catalog.tools if is_mcp_tool_allowed(patterns, tool.name)]
-            warnings = [(name, code) for name, code in catalog.warnings if is_mcp_tool_allowed(patterns, name)]
+            catalog = await discover_stored_tools(server, lambda name: is_mcp_tool_allowed(patterns, name))
+            visible, warnings = catalog.tools, catalog.warnings
 
             response = McpToolsResponse(
                 server_id=server.id,

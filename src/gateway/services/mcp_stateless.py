@@ -521,19 +521,25 @@ class DiscoveredCatalog:
     warnings: list[tuple[str, str]]
 
 
-async def discover_stored_tools(server: ResolvedMcpServer) -> DiscoveredCatalog:
-    """List the live tools a stored server's allowlist admits.
+async def discover_stored_tools(
+    server: ResolvedMcpServer, admits: Callable[[str], bool] | None = None
+) -> DiscoveredCatalog:
+    """List the live tools a stored server's allowlist admits, and of those, the ones ``admits`` lets the caller see.
 
     One bounded session, one paginated ``tools/list``, per-tool screening, and
-    a ceiling on the whole serialized answer. Every failure is ``not_started``:
-    discovery runs no tool.
+    a ceiling on the whole serialized answer. The caller's filter runs before
+    the screening and the ceilings on what is returned, so a server offering
+    more tools than a response may carry still answers a caller allowed a few
+    of them; the limits on pages, bytes read and descriptors examined still
+    bound the listing itself. Every failure is ``not_started``: discovery runs
+    no tool.
 
     Raises:
         McpExecutionError: with the code and status the route returns.
     """
     try:
         async with DISCOVERY_GATE.slot():
-            return await _run_in_owner_task(_discover_once(server))
+            return await _run_in_owner_task(_discover_once(server, admits))
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
     except McpExecutionError:
@@ -551,7 +557,7 @@ async def discover_stored_tools(server: ResolvedMcpServer) -> DiscoveredCatalog:
         raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
 
-async def _discover_once(server: ResolvedMcpServer) -> DiscoveredCatalog:
+async def _discover_once(server: ResolvedMcpServer, admits: Callable[[str], bool] | None) -> DiscoveredCatalog:
     stack = AsyncExitStack()
     try:
         session = await stack.enter_async_context(open_session(server))
@@ -559,6 +565,8 @@ async def _discover_once(server: ResolvedMcpServer) -> DiscoveredCatalog:
             listed = await collect_tools(session, allowed_tools=server.allowed_tools)
         except McpDiscoveryRefused:
             raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502) from None
+        if admits is not None:
+            listed = [tool for tool in listed if admits(tool.name)]
 
         tools: list[MCPTool] = []
         warnings: list[tuple[str, str]] = []
