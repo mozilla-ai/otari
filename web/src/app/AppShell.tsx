@@ -242,7 +242,7 @@ function NavRowLink({
         recordNavigation(to, isActive)
         onNavigate()
       }}
-      className={navRowClass({ isActive, isCollapsed, isNested })}
+      className={`${navRowClass({ isActive, isCollapsed, isNested })} w-full`}
       // Spelled out with a badge, which would otherwise run into the label
       // ("Code executionBeta") in the accessible name.
       aria-label={
@@ -340,7 +340,7 @@ function NavGroup({
         <Button
           variant="ghost"
           aria-label={item.label}
-          className={`${navRowClass({ isActive: holdsCurrent, isCollapsed: true })} w-auto!`}
+          className={`${navRowClass({ isActive: holdsCurrent, isCollapsed: true })} w-full`}
         >
           <item.icon className={NAV_ICON_CLASS} aria-hidden="true" />
         </Button>
@@ -403,7 +403,7 @@ function NavGroup({
               rail's trigger a few lines up keeps the full selected marker,
               because there no child is on screen to carry it. */}
         <Disclosure.Trigger
-          className={navRowClass({ isAncestor: holdsCurrent })}
+          className={`${navRowClass({ isAncestor: holdsCurrent })} w-full`}
         >
           <item.icon className={NAV_ICON_CLASS} aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate text-left">
@@ -1080,7 +1080,7 @@ function AppShellChrome() {
                     type="button"
                     ref={orgNavTriggerRef}
                     onClick={() => openMobileLevel("organization")}
-                    className={`${navRowClass()} cursor-pointer`}
+                    className={`${navRowClass()} w-full cursor-pointer`}
                   >
                     <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
                     <span className="min-w-0 flex-1 truncate text-left">
@@ -1099,7 +1099,7 @@ function AppShellChrome() {
                         organizationLanding?.to ?? "/organization/members"
                       recordNavigation(to, pathname === to)
                     }}
-                    className={navRowClass({ isCollapsed: effectiveCollapsed })}
+                    className={`${navRowClass({ isCollapsed: effectiveCollapsed })} w-full`}
                     aria-label={effectiveCollapsed ? "Organization" : undefined}
                     title={
                       effectiveCollapsed
