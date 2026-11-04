@@ -103,8 +103,9 @@ on whether or not something prices it, and a model the roster switches off is
 still refused.
 
 A provider can stop serving a model it still lists, as Together does with a
-model it moves to dedicated endpoints. The first request the provider refuses
-that way on the hosted credential switches the model off, with
+model it moves to dedicated endpoints. The first request or
+[health check](health-checks.md) the provider refuses that way on the hosted
+credential switches the model off, with
 `disabled_reason: unavailable`, and emails the Health page's alert list
 ([Health checks](health-checks.md#email-alerts)); an operator switches it back
 on if the refusal was wrong. Only a refusal Otari recognizes as being about the
