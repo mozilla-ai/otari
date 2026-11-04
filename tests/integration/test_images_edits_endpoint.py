@@ -206,6 +206,20 @@ def test_edits_refuses_an_upload_over_the_cap(client: TestClient, api_key_header
     mock.assert_not_called()
 
 
+def test_edits_refuses_files_over_the_cap_inside_the_body_cap(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """The body cap leaves room for the form framing, so files just over their own cap are still refused."""
+    files = [("image", ("a.png", b"\x00" * 600, "image/png")), ("mask", ("m.png", b"\x00" * 600, "image/png"))]
+    with (
+        patch("gateway.api.routes.images._MAX_EDIT_UPLOAD_BYTES", 1000),
+        patch(_PATCH_TARGET, new_callable=AsyncMock) as mock,
+    ):
+        resp = client.post(_EDITS_URL, data=_form(), files=files, headers=api_key_header)
+    assert resp.status_code == 413
+    mock.assert_not_called()
+
+
 def test_edits_parses_no_upload_without_credentials(client: TestClient) -> None:
     """The auth check answers before the body is read, so an anonymous upload is never stored."""
     with patch("gateway.api.routes.images.bounded_body") as bounded:

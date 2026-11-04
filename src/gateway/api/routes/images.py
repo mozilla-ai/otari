@@ -135,7 +135,8 @@ _EDIT_UPLOAD_SCHEMA = {
         "image[]": {"type": "array", "items": _FILE_SCHEMA, "description": "Same as image."},
         "mask": {**_FILE_SCHEMA, "description": "Where to edit: the transparent areas of this PNG."},
     },
-    "required": [*_EDIT_FORM_SCHEMA["required"], "image"],
+    # ``image`` or ``image[]``, either one: the route checks that at least one file came.
+    "required": _EDIT_FORM_SCHEMA["required"],
 }
 
 
@@ -178,6 +179,10 @@ def _edit_files(form: FormData) -> tuple[list[UploadFile], UploadFile | None]:
     mask = form.get("mask")
     if mask is not None and not isinstance(mask, UploadFile):
         raise _invalid("mask", "Expected a file, not a text field")
+    # The body cap leaves room for the form around the files, so the files get their own.
+    files = [*uploads, *([mask] if mask is not None else [])]
+    if sum(upload.size or 0 for upload in files) > _MAX_EDIT_UPLOAD_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, _EDIT_TOO_LARGE)
     return uploads, mask
 
 

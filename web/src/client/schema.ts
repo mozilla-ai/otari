@@ -23211,7 +23211,7 @@ export interface operations {
             content: {
                 "multipart/form-data": {
                     /** @description The image or images to edit. */
-                    image: string[];
+                    image?: string[];
                     /** @description Same as image. */
                     "image[]"?: string[];
                     /** @description Where to edit: the transparent areas of this PNG. */

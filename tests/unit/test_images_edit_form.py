@@ -29,3 +29,8 @@ def test_edit_form_takes_the_openai_multi_image_spelling() -> None:
 def test_edit_schema_names_every_accepted_field() -> None:
     """The OpenAPI body is written by hand too, so it must list what the route reads."""
     assert set(images._EDIT_UPLOAD_SCHEMA["properties"]) == _accepted()
+
+
+def test_edit_schema_requires_neither_image_spelling() -> None:
+    """Either ``image`` or ``image[]`` is enough, so the schema cannot require one of them."""
+    assert {"model", "prompt"} == set(images._EDIT_UPLOAD_SCHEMA["required"])

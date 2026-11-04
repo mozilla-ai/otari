@@ -33585,8 +33585,7 @@
                 },
                 "required": [
                   "model",
-                  "prompt",
-                  "image"
+                  "prompt"
                 ],
                 "type": "object"
               }
