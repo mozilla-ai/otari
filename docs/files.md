@@ -313,6 +313,10 @@ because the providers' document parts take PDFs. Any other upload (Markdown,
 CSV, plain text, an office document) is extracted to text for every model. A
 document block the caller wrote inline is forwarded as written.
 
+A file block (`file`, `input_file`, Anthropic's `document` or `container_upload`)
+whose upload or `file_data` is an image is handled as an image: a vision model is
+sent it as an image part, and a text-only model gets its caption.
+
 Scanned/image-only PDFs (no extractable text) are rasterized page-by-page and
 sent through the image path.
 

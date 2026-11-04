@@ -373,6 +373,60 @@ async def test_text_document_is_extracted_for_a_pdf_capable_model(
     assert stats.files_extracted == 1
 
 
+_IMAGE_FILE_BLOCKS = [
+    ("openai", {"type": "file", "file": {"file_id": "file-png"}}),
+    ("responses", {"type": "input_file", "file_id": "file-png"}),
+    ("anthropic", {"type": "document", "source": {"type": "file", "file_id": "file-png"}}),
+    ("anthropic", {"type": "container_upload", "file_id": "file-png"}),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("fmt", "block"), _IMAGE_FILE_BLOCKS)
+async def test_an_uploaded_image_in_a_file_block_reaches_a_vision_model_as_an_image(
+    fmt: cn.WireFormat, block: dict[str, Any]
+) -> None:
+    files = _files(_stored("file-png", "post.png", "image/png"), data=b"\x89PNG\r\n\x1a\n")
+    msgs = [{"role": "user", "content": [block]}]
+    out, stats = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt=fmt, files=files, user_id="u")
+    part = out[0]["content"][0]
+    if fmt == "anthropic":
+        assert part == {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}}
+    elif fmt == "responses":
+        assert part == {"type": "input_image", "image_url": _PNG_DATA_URL}
+    else:
+        assert part == {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}
+    assert stats.dropped == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("fmt", "block"), _IMAGE_FILE_BLOCKS)
+async def test_an_uploaded_image_in_a_file_block_is_described_for_a_text_only_model(
+    monkeypatch: pytest.MonkeyPatch, fmt: cn.WireFormat, block: dict[str, Any]
+) -> None:
+    async def fake_describe(
+        config: GatewayConfig, data_url: str, **_: Any
+    ) -> tuple[str | None, CompletionUsage | None]:
+        return "a red circle", None
+
+    monkeypatch.setattr(cn, "describe_image", fake_describe)
+    files = _files(_stored("file-png", "post.png", "image/png"), data=b"\x89PNG\r\n\x1a\n")
+    msgs = [{"role": "user", "content": [block]}]
+    out, stats = await normalize_messages(
+        msgs, config=GatewayConfig(vision_strategy="describe"), caps=_TEXT_ONLY, fmt=fmt, files=files, user_id="u"
+    )
+    assert "a red circle" in out[0]["content"][0]["text"]
+    assert stats.images_described == 1
+    assert stats.dropped == 0
+
+
+@pytest.mark.asyncio
+async def test_an_inline_image_in_a_file_block_is_rewritten_to_an_image_part() -> None:
+    msgs = [{"role": "user", "content": [{"type": "file", "file": {"file_data": _PNG_DATA_URL}}]}]
+    out, _ = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt="openai", files=None, user_id="u")
+    assert out[0]["content"][0] == {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}
+
+
 @pytest.mark.parametrize(
     ("filename", "taken", "expected"),
     [

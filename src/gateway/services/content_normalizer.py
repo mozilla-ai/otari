@@ -251,6 +251,20 @@ class _Resolved:
     def source(self, kind: str) -> _Source:
         return _Source(kind, self.data, self.mime, self.filename, None, self.staged is not None, self.staged)
 
+    def attachment(self) -> _Source:
+        """The source of a file block, which is an image when its bytes are one.
+
+        An image is rewritten to the image part a provider reads, because no
+        provider's document part takes one.
+        """
+        if _is_image(self.mime):
+            return replace(self.source(_IMAGE), needs_inline=True)
+        return self.source(_DOCUMENT)
+
+
+def _is_image(mime: str) -> bool:
+    return mime.split(";", 1)[0].strip().lower().startswith("image/")
+
 
 async def _resolve_from_ref(
     ref: dict[str, Any],
@@ -352,12 +366,12 @@ async def _classify(
             if src.get("type") == "file":
                 resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
                 if resolved:
-                    return resolved.source(_DOCUMENT)
+                    return resolved.attachment()
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
         resolved = await _resolve_from_ref(ref, files=files, user_id=user_id, workspace_id=workspace_id)
         if resolved:
-            return resolved.source(_DOCUMENT)
+            return resolved.attachment()
         return None
 
     return None
@@ -637,7 +651,7 @@ async def _normalize_block(
         if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
             return _sandbox_file_text(fmt, staged.filename)
-        src.kind = _DOCUMENT
+        src.kind = _IMAGE if _is_image(src.mime) else _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf and _is_native_document(src)
     if native:
