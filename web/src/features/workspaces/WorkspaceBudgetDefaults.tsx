@@ -145,26 +145,24 @@ export function NarrowedDefaults({
       )}
       {available.length > 0 && budgets.length > 0 ? (
         <div className="flex items-end gap-2">
-          <FilterSelect
+          <Select
             label="Provider"
             value={provider}
             onChange={setProvider}
-            options={[
-              { value: "", label: "Select a provider…" },
-              ...available.map((instance) => ({
-                value: instance,
-                label: instance,
-              })),
-            ]}
+            placeholder="Select a provider…"
+            shouldReserveMessage={false}
+            options={available.map((instance) => ({
+              value: instance,
+              label: instance,
+            }))}
           />
-          <FilterSelect
+          <Select
             label="Budget"
             value={budgetId}
             onChange={setBudgetId}
-            options={[
-              { value: "", label: "Select a budget…" },
-              ...budgetChoices(budgets),
-            ]}
+            placeholder="Select a budget…"
+            shouldReserveMessage={false}
+            options={budgetChoices(budgets)}
           />
           <Button
             size="sm"
