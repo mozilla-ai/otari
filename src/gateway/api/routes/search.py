@@ -42,12 +42,11 @@ its own cost; a key exempt from budgets is still served.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
+from fastapi import APIRouter, Depends, Path, Request, Response
 
 from gateway.api.deps import DirectToolServiceDep, verify_api_key_or_master_key
 from gateway.api.request_id import set_request_id
 from gateway.core.config import END_USER_BUDGET_HEADER
-from gateway.exceptions.tools_exceptions import DirectToolCallError
 from gateway.models.api_keys import APIKey
 from gateway.schemas.tools import SearchRequest, SearchResponse
 from gateway.services.tools import DirectCaller
@@ -140,7 +139,6 @@ async def _dispatch_search(
     auth_result: tuple[APIKey | None, bool],
     service: DirectToolServiceDep,
 ) -> SearchResponse:
-    """Run the search on the service under a fresh request id, and answer with what it returns or refuses."""
     api_key, is_master_key = auth_result
     request_id = str(uuid.uuid4())
     set_request_id(raw_request, response, request_id)
@@ -151,10 +149,7 @@ async def _dispatch_search(
         end_user_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
         request_id=request_id,
     )
-    try:
-        outcome = await service.search(request, caller=caller, tool_name=tool_name, endpoint=SEARCH_ENDPOINT)
-    except DirectToolCallError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message, headers=exc.headers) from exc
+    outcome = await service.search(request, caller=caller, tool_name=tool_name, endpoint=SEARCH_ENDPOINT)
     for name, value in outcome.headers.items():
         response.headers[name] = value
     return outcome.response

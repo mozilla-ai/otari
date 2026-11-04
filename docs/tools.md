@@ -654,8 +654,9 @@ Enable it at deployment time with `web_fetch_enabled: true` in `config.yml` or
 `OTARI_WEB_FETCH_ENABLED=true` in the environment. When disabled,
 `otari_web_fetch` remains discoverable with `"available": false`, requests
 declaring it are rejected without affecting other tools or ordinary completion
-requests, and [`POST /api/v1/fetch`](#direct-fetch) answers `400`: the switch
-covers every page the gateway fetches.
+requests, and [`POST /api/v1/fetch`](#direct-fetch) answers `400`. The switch
+covers the managed fetch tool and direct fetch only; search result enrichment
+follows `web_search_extract`.
 
 Declare Fetch on any completion API with `{"type": "otari_web_fetch"}`. The
 model-facing function accepts exactly one field:
@@ -1072,8 +1073,8 @@ runs a query, so a client that runs its own agent loop reads pages through the
 gateway without a completion for each. It runs on the deployment's fetch tool,
 `web_fetch_default_tool` else `builtin_fetch`, or on the tool named in the path
 or in `fetch_tool_name`, `builtin_fetch` included. While
-[`web_fetch_enabled`](#web-fetch) is off, the gateway fetches no page, and a call
-is refused with `400`.
+[`web_fetch_enabled`](#web-fetch) is off, a call is refused with `400`, as
+`otari_web_fetch` is.
 
 A direct fetch that names no tool runs on the workspace's usable
 [organization fetch key](#organization-search-keys), if it has one, in place of
@@ -1088,7 +1089,9 @@ The workspace's web access policy applies in full: its switch, and its allowed
 and blocked domain lists, which bind the URL asked for and, on `builtin_fetch`,
 every redirect. (Direct search reads the switch and the results ceiling only.)
 A provider tool is held to the URL it reports finding the page at, as
-[Fetch providers](#fetch-providers) says. A private address is never fetched. A
+[Fetch providers](#fetch-providers) says. A URL that names a private address is
+refused; whether a host resolves to one is checked by the built-in fetcher, and
+not for a provider tool, which resolves it on its own network. A
 URL the lists disallow is a `403`, and one that is not a public `http` or
 `https` URL a `400`, before anything is held for the call; a host the built-in
 fetcher cannot resolve, or that resolves to a private address, fails the fetch

@@ -562,9 +562,9 @@ completion; both are described in [Built-in tools](tools.md#direct-fetch). A
 client that runs its own agent loop reads pages this way, with the gateway's URL
 checks, prices and budgets, without a completion for each page.
 
-`web_fetch_enabled` decides whether the gateway fetches any page, for this
-endpoint as for the `otari_web_fetch` tool, and is read on every request: while
-it is off, a call is refused with `400`.
+`web_fetch_enabled` governs this endpoint as it governs the `otari_web_fetch`
+tool, read on every request: while it is off, a call is refused with `400`.
+Search result enrichment follows `web_search_extract` instead.
 
 **Which tool.** The path names the tool. On `POST /api/v1/fetch`, the body's
 `fetch_tool_name` does, else the deployment's `web_fetch_default_tool`, else
@@ -581,8 +581,11 @@ for the tool's name or `*`, as a search does
 its allowed and blocked domain lists, which bind the URL asked for and, on the
 built-in fetcher, every redirect. A provider tool is held to the URL it reports
 finding the page at; DeepSeek, Exa and Tabstack report none, so a redirect they
-follow escapes the lists (see [Fetch providers](tools.md#fetch-providers)). A
-private, loopback or link-local address is never fetched, whatever the lists say.
+follow escapes the lists (see [Fetch providers](tools.md#fetch-providers)).
+Whatever the lists say, a URL that names a private, loopback or link-local
+address is refused. The built-in fetcher also refuses a host that resolves to
+one, redirects included; a provider tool resolves hosts on its own network,
+where the gateway checks only the URL it reports finding the page at.
 
 **Request.**
 

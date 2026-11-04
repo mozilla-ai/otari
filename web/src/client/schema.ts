@@ -1490,9 +1490,10 @@ export interface paths {
          *     deployment's ``web_fetch_default_tool`` then serves, else ``builtin_fetch``,
          *     the gateway's own fetcher. Such a call runs on the workspace's organization
          *     fetch key when it has one. While the deployment's ``web_fetch_enabled`` is
-         *     off, the gateway fetches no page and the call is refused. The URL must pass
-         *     the workspace's domain lists and the fetcher's own checks: a public http or
-         *     https address, never a private one.
+         *     off, the call is refused, as ``otari_web_fetch`` is. The URL must pass the
+         *     workspace's domain lists and the gateway's own checks: a public http or
+         *     https URL that names no private address. The built-in fetcher also checks
+         *     where each host resolves.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.

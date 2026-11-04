@@ -31,12 +31,11 @@ after the budget checks; a key exempt from budgets is still served.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
+from fastapi import APIRouter, Depends, Path, Request, Response
 
 from gateway.api.deps import DirectToolServiceDep, verify_api_key_or_master_key
 from gateway.api.request_id import set_request_id
 from gateway.core.config import END_USER_BUDGET_HEADER
-from gateway.exceptions.tools_exceptions import DirectToolCallError
 from gateway.models.api_keys import APIKey
 from gateway.schemas.tools import FetchRequest, FetchResponse
 from gateway.services.tools import DirectCaller
@@ -60,9 +59,10 @@ async def create_fetch(
     deployment's ``web_fetch_default_tool`` then serves, else ``builtin_fetch``,
     the gateway's own fetcher. Such a call runs on the workspace's organization
     fetch key when it has one. While the deployment's ``web_fetch_enabled`` is
-    off, the gateway fetches no page and the call is refused. The URL must pass
-    the workspace's domain lists and the fetcher's own checks: a public http or
-    https address, never a private one.
+    off, the call is refused, as ``otari_web_fetch`` is. The URL must pass the
+    workspace's domain lists and the gateway's own checks: a public http or
+    https URL that names no private address. The built-in fetcher also checks
+    where each host resolves.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
@@ -132,7 +132,6 @@ async def _dispatch_fetch(
     auth_result: tuple[APIKey | None, bool],
     service: DirectToolServiceDep,
 ) -> FetchResponse:
-    """Run the fetch on the service under a fresh request id, and answer with what it returns or refuses."""
     api_key, is_master_key = auth_result
     request_id = str(uuid.uuid4())
     set_request_id(raw_request, response, request_id)
@@ -143,10 +142,7 @@ async def _dispatch_fetch(
         end_user_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
         request_id=request_id,
     )
-    try:
-        outcome = await service.fetch(request, caller=caller, tool_name=tool_name, endpoint=FETCH_ENDPOINT)
-    except DirectToolCallError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message, headers=exc.headers) from exc
+    outcome = await service.fetch(request, caller=caller, tool_name=tool_name, endpoint=FETCH_ENDPOINT)
     for name, value in outcome.headers.items():
         response.headers[name] = value
     return outcome.response
