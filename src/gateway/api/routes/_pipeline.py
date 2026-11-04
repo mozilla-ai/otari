@@ -212,7 +212,6 @@ from gateway.services.budgets import (
     EstimateInputs,
     PricingLookup,
     ReservationHandle,
-    estimate_abandoned_stream_usage,
     estimate_cost,
     estimate_tokens,
     get_budget_state,
@@ -221,6 +220,7 @@ from gateway.services.budgets import (
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
+    settle_abandoned_stream,
 )
 from gateway.services.catalog import not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
@@ -6079,19 +6079,18 @@ def build_streaming_response(
         # metering exists to close. A row is written only when there is something to
         # bill: reported usage, tool work, or, under the 'estimate' policy, the
         # request and the text streamed so far.
-        has_tool_work = tool_tally is not None and not tool_tally.is_empty()
-        estimated = (
-            None
-            if reported_usage is not None
-            else estimate_abandoned_stream_usage(
-                policy=config.stream_missing_usage_policy, prompt_chars=prompt_chars, streamed_chars=streamed_chars
-            )
+        row = settle_abandoned_stream(
+            policy=config.stream_missing_usage_policy,
+            prompt_chars=prompt_chars,
+            streamed_chars=streamed_chars,
+            reported_usage=reported_usage,
+            has_tool_work=tool_tally is not None and not tool_tally.is_empty(),
         )
         if rate_limit_grant is not None:
-            await rate_limit_grant.settle(_settled_tokens(reported_usage or estimated))
+            await rate_limit_grant.settle(_settled_tokens(row.usage if row else None))
         if reservation is None:
             return
-        if has_tool_work or reported_usage is not None or estimated is not None:
+        if row is not None:
             logged = await record_usage(
                 db=db,
                 log_writer=log_writer,
@@ -6100,9 +6099,9 @@ def build_streaming_response(
                 provider=provider,
                 endpoint=adapter.endpoint,
                 user_id=user_id,
-                usage_override=reported_usage or estimated,
-                error=None if estimated is not None else "client disconnected before the stream completed",
-                incomplete=estimated is not None,
+                usage_override=row.usage,
+                error=row.error,
+                incomplete=row.incomplete,
                 latency_ms=_elapsed_ms(started_at),
                 ttft_ms=_ttft_ms(started_at, first_chunk_at),
                 counts_toward_budget=_handle_counts_toward_budget(reservation),
@@ -6114,11 +6113,9 @@ def build_streaming_response(
                 safety_identifier=safety_identifier,
                 deployment_paid=deployment_paid,
             )
-            await _charge(logged, expects_cost=(reported_usage or estimated) is not None)
+            await _charge(logged, expects_cost=row.usage is not None)
             if abandoned_cost := logged.cost:
-                await reconcile_reservation(
-                    db, reservation, abandoned_cost, actual_tokens=_settled_tokens(reported_usage or estimated)
-                )
+                await reconcile_reservation(db, reservation, abandoned_cost, actual_tokens=_settled_tokens(row.usage))
                 return
         await refund_reservation(db, reservation)
 

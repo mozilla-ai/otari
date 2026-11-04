@@ -69,7 +69,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig, WebTool
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.rate_limit import RateLimitInfo
-from gateway.services.budgets import ReservationHandle, estimate_abandoned_stream_usage, estimate_output_tokens
+from gateway.services.budgets import ReservationHandle, estimate_output_tokens, settle_abandoned_stream
 from gateway.services.inference import DeploymentCharge
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
@@ -2868,9 +2868,19 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
     assert bool(router.affinities) is (outcome in {"on_complete", "on_no_usage"})
 
 
-def test_abandoned_stream_usage_is_estimated_only_under_the_estimate_policy() -> None:
-    usage = estimate_abandoned_stream_usage(policy="estimate", prompt_chars=400, streamed_chars=10)
-    assert usage is not None
-    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (100, 3, 103)
-    assert estimate_abandoned_stream_usage(policy="ignore", prompt_chars=400, streamed_chars=10) is None
-    assert estimate_abandoned_stream_usage(policy="estimate", prompt_chars=None, streamed_chars=10) is None
+def test_abandoned_stream_row_reads_as_incomplete_only_when_estimated() -> None:
+    args: dict[str, Any] = {"policy": "estimate", "prompt_chars": 400, "streamed_chars": 10, "has_tool_work": False}
+    estimated = settle_abandoned_stream(**args, reported_usage=None)
+    assert estimated is not None
+    assert (estimated.incomplete, estimated.error) == (True, None)
+    assert estimated.usage is not None and estimated.usage.total_tokens == 103
+
+    reported = CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    disconnected = settle_abandoned_stream(**args, reported_usage=reported)
+    assert disconnected is not None
+    assert (disconnected.usage, disconnected.incomplete) == (reported, False)
+    assert disconnected.error == "client disconnected before the stream completed"
+
+    ignored = {**args, "policy": "ignore"}
+    assert settle_abandoned_stream(**ignored, reported_usage=None) is None
+    assert settle_abandoned_stream(**{**ignored, "has_tool_work": True}, reported_usage=None) is not None

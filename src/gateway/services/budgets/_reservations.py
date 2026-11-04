@@ -448,6 +448,38 @@ def estimate_abandoned_stream_usage(
     )
 
 
+@dataclass(frozen=True)
+class AbandonedStreamRow:
+    """The usage row to write for a stream the client abandoned."""
+
+    usage: CompletionUsage | None
+    incomplete: bool
+    error: str | None
+
+
+def settle_abandoned_stream(
+    *,
+    policy: str,
+    prompt_chars: int | None,
+    streamed_chars: int,
+    reported_usage: CompletionUsage | None,
+    has_tool_work: bool,
+) -> AbandonedStreamRow | None:
+    """The row an abandoned stream owes, or None when there is nothing to bill."""
+    estimated = (
+        None
+        if reported_usage is not None
+        else estimate_abandoned_stream_usage(policy=policy, prompt_chars=prompt_chars, streamed_chars=streamed_chars)
+    )
+    if not (has_tool_work or reported_usage is not None or estimated is not None):
+        return None
+    return AbandonedStreamRow(
+        usage=reported_usage or estimated,
+        incomplete=estimated is not None,
+        error=None if estimated is not None else "client disconnected before the stream completed",
+    )
+
+
 def estimate_cost(
     pricing: ModelPricing | None,
     *,
