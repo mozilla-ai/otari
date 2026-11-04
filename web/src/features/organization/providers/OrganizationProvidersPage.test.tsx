@@ -159,6 +159,34 @@ describe("OrganizationProvidersPage", () => {
     expect(trigger).toBeInTheDocument()
   })
 
+  it("narrows the keys by name or provider", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({ id: "k-1", name: "Production", provider: "openai" }),
+        orgProviderKey({ id: "k-2", name: "Backup", provider: "gemini" }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+    await screen.findByText("Production")
+    const search = screen.getByRole("searchbox", {
+      name: "Search provider keys",
+    })
+
+    // By the name the Provider column shows ("Google Gemini"), not only the id.
+    await user.type(search, "google")
+    await waitFor(() =>
+      expect(screen.queryByText("Production")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("Backup")).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, "nothing-like-this")
+    expect(
+      await screen.findByText("No provider keys match this search."),
+    ).toBeInTheDocument()
+  })
+
   it("marks a key the deployment cannot decrypt and says how to fix it", async () => {
     // Every other signal on the row reads normal: the key is stored, it has a
     // last4, nothing disabled it. What is wrong is that the ciphertext no longer
@@ -401,6 +429,33 @@ describe("OrganizationProvidersPage", () => {
       name: "Production",
       api_key: "sk-secret",
     })
+  })
+
+  it("ends a search once a key is added, and not when the form is cancelled", async () => {
+    mockApi({
+      keys: [orgProviderKey({ id: "k-1", name: "Backup", provider: "gemini" })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+    const search = await screen.findByRole("searchbox", {
+      name: "Search provider keys",
+    })
+    await user.type(search, "zzz")
+
+    await user.click(screen.getByRole("button", { name: "Add provider key" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(search).toHaveValue("zzz")
+
+    await user.click(screen.getByRole("button", { name: "Add provider key" }))
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Production")
+    await user.type(screen.getByLabelText("API key"), "sk-secret")
+    await user.click(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    )
+
+    await waitFor(() => expect(search).toHaveValue(""))
   })
 
   it("asks Bedrock for its region by name and sends it in client_args", async () => {

@@ -9,8 +9,10 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
 import {
   useAutomaticFallbacks,
@@ -21,13 +23,28 @@ import {
 } from "@/shared/api/routing"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
-import { BackupsCell, MainModelCell } from "./PolicyCells"
+import { BackupsCell, MainModelCell, selectorText } from "./PolicyCells"
 import type { Intent } from "./policyDraft"
-import { isEditableInForm, type RoutingRow, rowKeyOf } from "./policyModel"
+import {
+  findBudgetConditions,
+  findCandidates,
+  findFallthroughTarget,
+  isEditableInForm,
+  type RoutingRow,
+  rowKeyOf,
+} from "./policyModel"
 import { useRoutingRows } from "./useRoutingRows"
+
+/** What Applies to says for a policy with no user scope, and what finds it. */
+const EVERY_CALLER = "Every caller"
 
 export function RoutingPage() {
   const navigate = useNavigate()
@@ -39,6 +56,25 @@ export function RoutingPage() {
     canEdit,
     writeWorkspaceId,
   } = useRoutingRows()
+  const search = useListSearch()
+  // What the row shows: its name, who it applies to, and every model it can
+  // send to (the main one, a budget's tier-downs, the pool and the backups),
+  // each by its selector and by the model and provider names the cells print.
+  const shown = rows.filter((row) => {
+    const selectors = [
+      findFallthroughTarget(row.spec),
+      ...findCandidates(row.spec),
+      ...findBudgetConditions(row.spec).map((condition) => condition.target),
+      ...(row.spec.on_failure ?? []),
+    ]
+    return matchesSearch(
+      search.term,
+      row.name,
+      row.user_id ?? EVERY_CALLER,
+      ...selectors,
+      ...selectors.map(selectorText),
+    )
+  })
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   const deleteOrgPolicy = useDeleteOrganizationRoutingPolicy()
@@ -101,7 +137,7 @@ export function RoutingPage() {
         header: "Applies to",
         cell: (policy) =>
           (policy.user_id ?? null) === null ? (
-            <span className="text-muted">Every caller</span>
+            <span className="text-muted">{EVERY_CALLER}</span>
           ) : (
             <CopyableValue value={policy.user_id ?? ""} label="user id" />
           ),
@@ -212,6 +248,9 @@ export function RoutingPage() {
         isDeploymentWide={isOperator}
         workspaceId={writeWorkspaceId}
         onClose={closeCreate}
+        // The dialog closes with no other word that the policy exists, so a
+        // search it does not match would hide it: making one ends the search.
+        onSaved={() => search.onChange("")}
       />
 
       {rows.length === 0 && !isListLoading ? (
@@ -246,16 +285,37 @@ export function RoutingPage() {
           </EmptyState>
         )
       ) : (
-        <TableScrollFrame className="otari-routing-table">
-          <DataTable
-            ariaLabel="Routing policies"
-            columns={columns}
-            rows={rows}
-            getRowKey={rowKeyOf}
-            isLoading={isListLoading}
-            emptyContent="No routing policies yet."
-          />
-        </TableScrollFrame>
+        <>
+          <Toolbar>
+            <SearchField
+              label="Search routing policies"
+              placeholder="Search by name or model"
+              value={search.value}
+              maxLength={SEARCH_MAX_LENGTH}
+              onChange={search.onChange}
+              resultCount={
+                search.isSettled && !isListLoading && !error
+                  ? shown.length
+                  : undefined
+              }
+              className="w-full md:w-96"
+            />
+          </Toolbar>
+          <TableScrollFrame className="otari-routing-table">
+            <DataTable
+              ariaLabel="Routing policies"
+              columns={columns}
+              rows={shown}
+              getRowKey={rowKeyOf}
+              isLoading={isListLoading}
+              emptyContent={
+                search.term
+                  ? "No routing policies match this search."
+                  : "No routing policies yet."
+              }
+            />
+          </TableScrollFrame>
+        </>
       )}
 
       <AutomaticFallbacksSection />

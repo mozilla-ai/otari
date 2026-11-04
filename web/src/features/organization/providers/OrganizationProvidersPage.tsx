@@ -25,11 +25,13 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { PricingOverrideDialog } from "@/features/organization/PricingOverrideDialog"
 import { canManage } from "@/features/organization/roles"
 import {
@@ -64,6 +66,11 @@ import { useOrganizationPricing } from "@/shared/api/pricing"
 import { formatRelative } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
+import {
+  matchesSearch,
+  SEARCH_MAX_LENGTH,
+  useListSearch,
+} from "@/shared/hooks/useListSearch"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
@@ -148,11 +155,14 @@ function KeyForm({
   isOpen,
   editing,
   onClose,
+  onCreated,
 }: {
   isOpen: boolean
   /** The key being edited, or null when the form is creating one. */
   editing: OrgProviderKey | null
   onClose: () => void
+  /** Fired once a create is written, which closing the form is not. */
+  onCreated?: () => void
 }) {
   const create = useCreateOrgProviderKey()
   const update = useUpdateOrgProviderKey()
@@ -209,7 +219,12 @@ function KeyForm({
       api_base: apiBase === "" ? null : apiBase,
       client_args: clientArgs,
     }
-    create.mutate(body, { onSuccess: onClose })
+    create.mutate(body, {
+      onSuccess: () => {
+        onClose()
+        onCreated?.()
+      },
+    })
   }
 
   return (
@@ -380,6 +395,15 @@ export function OrganizationProvidersPage() {
   ).length
   const rows = (keys.data ?? []).filter(
     (key) => showArchived || !key.archived_at,
+  )
+  const search = useListSearch()
+  const shown = rows.filter((key) =>
+    matchesSearch(
+      search.term,
+      key.name,
+      key.provider,
+      providerDisplayName(key.provider),
+    ),
   )
   // The key whose models are open, if it is on the table: an archived key's
   // id can sit in the URL while archived rows are hidden.
@@ -646,6 +670,8 @@ export function OrganizationProvidersPage() {
         isOpen={adding && secretKeyConfigured}
         editing={null}
         onClose={() => setAdding(false)}
+        // A new key the search does not match would vanish with the dialog.
+        onCreated={() => search.onChange("")}
       />
       {editing ? (
         // Remounted per row: the draft is seeded from the key once, so editing a
@@ -660,12 +686,25 @@ export function OrganizationProvidersPage() {
 
       {/* The page is a stack of bands that set their own spacing, so this one
           carries its own air rather than taking it from a column gap. */}
-      {archivedCount > 0 ? (
-        <div className="pb-3">
-          <Checkbox isSelected={showArchived} onChange={setShowArchived}>
-            Show archived ({archivedCount})
-          </Checkbox>
-        </div>
+      {canEdit && ((keys.data ?? []).length > 0 || search.value) ? (
+        <Toolbar className="pb-3">
+          <SearchField
+            label="Search provider keys"
+            placeholder="Search by name or provider"
+            value={search.value}
+            maxLength={SEARCH_MAX_LENGTH}
+            onChange={search.onChange}
+            resultCount={
+              search.isSettled && keys.isSuccess ? shown.length : undefined
+            }
+            className="w-full md:w-96"
+          />
+          {archivedCount > 0 ? (
+            <Checkbox isSelected={showArchived} onChange={setShowArchived}>
+              Show archived ({archivedCount})
+            </Checkbox>
+          ) : null}
+        </Toolbar>
       ) : null}
 
       {/* Withheld from a member along with the read that fills it: the banner
@@ -680,10 +719,14 @@ export function OrganizationProvidersPage() {
           <DataTable
             ariaLabel="Organization provider keys"
             columns={columns}
-            rows={rows}
+            rows={shown}
             getRowKey={(row) => row.id}
             isLoading={context.isPending || keys.isLoading}
-            emptyContent="No provider keys yet. Add one to let every workspace in this organization call that provider."
+            emptyContent={
+              search.term
+                ? "No provider keys match this search."
+                : "No provider keys yet. Add one to let every workspace in this organization call that provider."
+            }
           />
         </TableScrollFrame>
       ) : null}
