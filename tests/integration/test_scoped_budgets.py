@@ -309,6 +309,36 @@ async def test_several_tool_calls_at_one_price_are_one_hold(async_db: AsyncSessi
 
 
 @pytest.mark.asyncio
+async def test_several_tool_calls_that_do_not_fit_together_hold_nothing(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """One call at 0.5 fits the user budget and three do not, so the three are refused whole:
+    every leg, the handle and the ledger row keep the reservation's 1.0."""
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
+    async_db.add(org_cap)
+    async_db.add(Budget(budget_id="snug", max_budget=2.0))
+    await async_db.commit()
+    user = (await async_db.execute(select(User).where(User.user_id == tenancy.user_id))).scalar_one()
+    user.budget_id = "snug"
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update", calls=3) is None
+
+    assert await _counters(async_db, org_cap.id) == (0.0, 1.0)
+    assert (handle.estimate, handle.scoped_estimate) == (Decimal("1.0"), Decimal("1.0"))
+    async_db.expire_all()
+    user = (await async_db.execute(select(User).where(User.user_id == tenancy.user_id))).scalar_one()
+    assert user.reserved == pytest.approx(1.0)
+    assert handle.reservation_id is not None
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    assert row.estimate == Decimal("1.0")
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update") == Decimal("0.5")
+
+
+@pytest.mark.asyncio
 async def test_a_tool_call_the_user_budget_refuses_gives_the_ceilings_growth_back(
     async_db: AsyncSession, tenancy: Fixture
 ) -> None:
