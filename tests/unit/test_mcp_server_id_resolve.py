@@ -54,4 +54,4 @@ async def test_resolve_one_reads_the_workspaces_row(monkeypatch: pytest.MonkeyPa
     out = await WorkspaceMcpServers(session).resolve_one(workspace_id, server_id)
 
     assert out is None
-    resolve.assert_awaited_once_with(session, workspace_id=workspace_id, server_id=server_id)
+    resolve.assert_awaited_once_with(session, workspace_id=workspace_id, server_id=server_id, access=None)

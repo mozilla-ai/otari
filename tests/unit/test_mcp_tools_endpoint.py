@@ -98,7 +98,9 @@ class _Servers:
     async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> Any:
         raise AssertionError("the stateless routes resolve one server")
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def resolve_one(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
+    ) -> ResolvedMcpServer | None:
         self.asked.append((workspace_id, server_id))
         await asyncio.sleep(self.delay_s)
         return self.server

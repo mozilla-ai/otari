@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
+    WorkspaceMcpServerAccessDeniedError,
     WorkspaceMcpServerAlreadyExistsError,
     WorkspaceMcpServerCheckBusyError,
     WorkspaceMcpServerGrantNotFoundError,
@@ -561,6 +562,7 @@ async def resolve_workspace_mcp_server(
     *,
     workspace_id: uuid.UUID,
     server_id: uuid.UUID,
+    access: McpAccess | None = None,
 ) -> ResolvedMcpServer | None:
     """Resolve one stored server for the caller-orchestrated MCP endpoints.
 
@@ -579,6 +581,12 @@ async def resolve_workspace_mcp_server(
     decrypt, for the same reason the plural resolver does: connecting without a
     credential the workspace configured would send an unauthenticated request
     to a server that expects one.
+
+    With the caller's ``access``, a disabled server is ``None`` and one the
+    access list grants nothing on raises
+    :class:`~gateway.exceptions.tools_exceptions.WorkspaceMcpServerAccessDeniedError`,
+    both before the token is decrypted, so a token that will not decrypt cannot
+    tell a caller with no access that the server exists.
     """
     row = (
         await db.execute(
@@ -590,6 +598,12 @@ async def resolve_workspace_mcp_server(
     ).scalar_one_or_none()
     if row is None:
         return None
+    if access is not None:
+        if not row.enabled:
+            return None
+        if not access.patterns_for(row.id, row.everyone_tools, row.read_tools):
+            source, _ = access.decide(row.id, row.everyone_tools)
+            raise WorkspaceMcpServerAccessDeniedError(row.id, name=row.name, decided_by=f"mcp_{source}")
     return ResolvedMcpServer(
         id=row.id,
         name=row.name,
@@ -659,9 +673,13 @@ class WorkspaceMcpServers:
         """See :func:`list_reachable_mcp_servers`."""
         return await list_reachable_mcp_servers(self._db, workspace_id=workspace_id, access=access)
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def resolve_one(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: McpAccess | None = None
+    ) -> ResolvedMcpServer | None:
         """See :func:`resolve_workspace_mcp_server`."""
-        return await resolve_workspace_mcp_server(self._db, workspace_id=workspace_id, server_id=server_id)
+        return await resolve_workspace_mcp_server(
+            self._db, workspace_id=workspace_id, server_id=server_id, access=access
+        )
 
 
 class WorkspaceMcpServerService:

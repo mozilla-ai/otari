@@ -115,7 +115,9 @@ class _Servers:
         self.asked.append(access)
         return [McpServerConfig(name="github", url="https://93.184.216.34/mcp", caller_tool_patterns=["list_*"])]
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def resolve_one(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
+    ) -> ResolvedMcpServer | None:
         return None
 
 

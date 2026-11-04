@@ -55,6 +55,7 @@ from gateway.api.trace_capture import begin_request_trace
 # parameters and every request fails validation before the handler runs.
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
+from gateway.exceptions.tools_exceptions import WorkspaceMcpServerAccessDeniedError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
@@ -381,14 +382,23 @@ async def _resolve_server(
     principal: _Principal,
     servers: WorkspaceMcpServers,
     mcp_server_id: uuid.UUID,
+    *,
+    on_denied: Callable[[WorkspaceMcpServerAccessDeniedError], None] | None = None,
 ) -> ResolvedMcpServer:
     """Resolve the stored server, applying the outcome ladder.
 
     No MCP network access happens here or in anything it raises, so a refusal on
-    these grounds never reaches the remote server.
+    these grounds never reaches the remote server. The caller's access is applied
+    before the stored token is decrypted, so a token that will not decrypt cannot
+    tell a caller with no access that the server exists. ``on_denied`` hears of a
+    server the access list refused, which is still answered as an unknown one.
     """
     try:
-        resolved = await servers.resolve_one(principal.workspace_id, mcp_server_id)
+        resolved = await servers.resolve_one(principal.workspace_id, mcp_server_id, principal.mcp_access)
+    except WorkspaceMcpServerAccessDeniedError as denied:
+        if on_denied is not None:
+            on_denied(denied)
+        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404) from None
     except (SecretDecryptionError, SecretBoxUnavailableError):
         # Connecting without the credential the workspace configured would send
         # an unauthenticated request to a server that expects one.
@@ -704,7 +714,23 @@ async def execute_mcp_tool(
         async with asyncio.timeout(mcp_stateless.EXECUTION_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
             trace = _begin_trace(raw_request, config, principal, started)
-            server = await _resolve_server(principal, servers, request.mcp_server_id)
+
+            def record_denied(denied: WorkspaceMcpServerAccessDeniedError) -> None:
+                # The caller is told the server does not exist; the trace says which server, and why.
+                if trace is not None:
+                    trace.record_tool_call(
+                        tool_name=request.tool_name,
+                        tool_type="mcp",
+                        started=datetime.now(UTC),
+                        ok=False,
+                        arguments=None,
+                        mcp_server=denied.name,
+                        mcp_server_id=str(denied.mcp_server_id),
+                        decided_by=denied.decided_by,
+                        refused=True,
+                    )
+
+            server = await _resolve_server(principal, servers, request.mcp_server_id, on_denied=record_denied)
             allowed, decided_by = _decide_tool(principal, server, request.tool_name)
             if not allowed:
                 if trace is not None:

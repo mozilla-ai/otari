@@ -134,7 +134,9 @@ class _Servers:
     ) -> list[McpServerConfig]:
         return await self._resolve_many(workspace_id, server_ids)
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def resolve_one(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
+    ) -> ResolvedMcpServer | None:
         return None
 
 

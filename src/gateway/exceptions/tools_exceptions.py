@@ -19,6 +19,20 @@ class WorkspaceMcpServerNotFoundError(TenancyNotFoundError):
         super().__init__(f"MCP server {mcp_server_id} not found")
 
 
+class WorkspaceMcpServerAccessDeniedError(WorkspaceMcpServerNotFoundError):
+    """A stored server the caller's access list grants nothing on.
+
+    Answered exactly as an unknown server, which is why it is one; it carries the server and the rule that
+    decided, for a trace to record what the caller could not be told.
+    """
+
+    def __init__(self, mcp_server_id: object, *, name: str, decided_by: str):
+        super().__init__(mcp_server_id)
+        self.mcp_server_id = mcp_server_id
+        self.name = name
+        self.decided_by = decided_by
+
+
 class WorkspaceMcpServerGrantNotFoundError(TenancyNotFoundError):
     def __init__(self, grant_id: object):
         super().__init__(f"MCP server grant {grant_id} not found")

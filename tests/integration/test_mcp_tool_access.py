@@ -795,6 +795,46 @@ def test_a_call_outside_the_servers_tool_list_is_traced_as_refused_by_the_server
     assert span.attributes["otari.tool.decision_source"] == "mcp_server"
 
 
+def test_a_call_to_a_server_the_key_cannot_reach_is_a_404_traced_as_blocked(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=[])
+
+    response = client.post(f"{API_ROOT}/mcp/execute", json=_execute_body(row, "create_issue"), headers=_bearer(key))
+
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == CODE_SERVER_NOT_FOUND
+    [span] = _tool_spans(db_session_factory, key, 1)
+    assert (span.tool_name, span.outcome) == ("create_issue", "blocked")
+    assert span.attributes is not None
+    assert span.attributes["otari.mcp.server"] == "github"
+    assert span.attributes["otari.tool.decision_source"] == "mcp_everyone"
+
+
+def test_an_unreadable_token_does_not_tell_a_key_without_access_that_the_server_exists(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    allowed = _new_key(client, master_key_header)
+    denied = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, allowed), "github", everyone=[])
+    _grant(client, master_key_header, row, ["*"], keys=[allowed])
+    row.encrypted_token = "not-a-sealed-token"
+    test_db.commit()
+
+    seen_by_denied = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(denied))
+    unknown = client.get(f"{API_ROOT}/mcp/servers/{uuid.uuid4()}/tools", headers=_bearer(denied))
+    seen_by_allowed = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(allowed))
+
+    assert (seen_by_denied.status_code, seen_by_denied.json()["code"]) == (404, CODE_SERVER_NOT_FOUND)
+    assert seen_by_denied.json()["detail"] == unknown.json()["detail"]
+    assert seen_by_allowed.status_code == 500
+
+
 def test_direct_calls_naming_a_conversation_are_steps_of_one_session(
     client: TestClient,
     master_key_header: dict[str, str],
