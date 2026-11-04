@@ -5,7 +5,7 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { SecretField } from "@/design-system/forms/SecretField"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Select } from "@/design-system/forms/Select"
 import { GuardrailJsonField } from "@/features/guardrails/GuardrailJsonField"
 import {
   type ParameterErrors,
@@ -17,6 +17,9 @@ import {
 // catalog reports. The whole point of the catalog is that this file names no
 // guardrail and no parameter: it renders whatever the guardrails service says
 // its profiles take.
+
+/** The blank choice of an enum, under a value no choice can be named. */
+const UNSET_CHOICE = "\u0000unset"
 
 /** What a field shows when it is left blank, which is the profile's own default. */
 function placeholderFor(spec: GuardrailParameterSpec): string | undefined {
@@ -89,28 +92,28 @@ function ParameterControl({
 
   if (spec.type === "enum" && spec.choices) {
     return (
-      <div className="flex flex-col gap-1">
-        <FilterSelect
-          label={label}
-          value={String(value ?? "")}
-          disabled={disabled}
-          onChange={onChange}
-          // A blank option is what leaves the profile's own default in force,
-          // so an optional enum stays clearable; a required one has no such
-          // state and its blank entry is the unset the error message names.
-          options={[
-            { value: "", label: spec.required ? "Choose a value" : "Default" },
-            ...spec.choices.map((choice) => ({ value: choice, label: choice })),
-          ]}
-        />
-        <FieldMessages shouldReserve>
-          {error ? (
-            <span className="text-caption text-danger">{error}</span>
-          ) : description ? (
-            <span className="text-caption">{description}</span>
-          ) : null}
-        </FieldMessages>
-      </div>
+      <Select
+        label={label}
+        value={String(value ?? "") || UNSET_CHOICE}
+        isDisabled={disabled}
+        onChange={(next) => onChange(next === UNSET_CHOICE ? "" : next)}
+        description={description}
+        isInvalid={Boolean(error)}
+        errorMessage={error}
+        shouldReserveMessage
+        // A blank option is what leaves the profile's own default in force,
+        // so an optional enum stays clearable; a required one has no such
+        // state and its blank entry is the unset the error message names.
+        // Carried under a sentinel, because `Select` reads an empty value as
+        // "nothing chosen" and would show a placeholder instead of this label.
+        options={[
+          {
+            value: UNSET_CHOICE,
+            label: spec.required ? "Choose a value" : "Default",
+          },
+          ...spec.choices.map((choice) => ({ value: choice, label: choice })),
+        ]}
+      />
     )
   }
 
