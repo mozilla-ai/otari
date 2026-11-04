@@ -10,6 +10,7 @@ import ast
 import logging
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -338,15 +339,38 @@ def test_build_mime_puts_no_newline_in_any_header() -> None:
         sender_email="otari@example.com\r\nBcc: attacker@evil.example",
         sender_name="Otari\r\nBcc: attacker@evil.example",
         message=MESSAGE,
+        reply_to="grace@example.com\r\nBcc: attacker@evil.example",
     )
 
     assembled = build_mime(envelope)
 
-    for header in ("From", "To", "Subject"):
+    for header in ("From", "To", "Subject", "Reply-To"):
         assert "\r" not in assembled[header], header
         assert "\n" not in assembled[header], header
     # And it serializes, which is what a raw newline would have prevented.
     assert assembled.as_string()
+
+
+def test_reply_to_is_a_header_only_when_given() -> None:
+    envelope = MailEnvelope(
+        to="support@example.com", sender_email="otari@example.com", sender_name="Otari", message=MESSAGE
+    )
+
+    assert build_mime(envelope)["Reply-To"] is None
+    assert build_mime(replace(envelope, reply_to="grace@example.com"))["Reply-To"] == "grace@example.com"
+
+
+@pytest.mark.asyncio
+async def test_send_puts_the_reply_address_on_the_wire() -> None:
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        client = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = client
+        delivery = await Mailer(_ready()).send(to="support@example.com", message=MESSAGE, reply_to="grace@example.com")
+
+    assert delivery.delivered is True
+    _sender, recipients, body = client.sendmail.call_args.args
+    assert recipients == ["support@example.com"]
+    assert "\nReply-To: grace@example.com\n" in body
 
 
 @pytest.mark.asyncio
