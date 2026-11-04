@@ -3,7 +3,8 @@
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Never
 
 from sqlalchemy import and_, case, func, select
@@ -15,6 +16,48 @@ from gateway.repositories.base_repository import BaseRepository
 # The statuses that end a request. ``absorbed`` is an attempt a later one recovered
 # from, so counting it would count one request twice.
 _REQUEST_STATUSES = ("success", "error", "incomplete")
+
+
+def new_usage_row(
+    *,
+    workspace_id: uuid.UUID,
+    api_key_id: str | None,
+    user_id: str,
+    model: str,
+    provider: str | None,
+    endpoint: str,
+    status: str,
+    latency_ms: int,
+    counts_toward_budget: bool,
+    request_group_id: str,
+    error_message: str | None = None,
+    status_code: int | None = None,
+    cost: Decimal | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+) -> UsageLog:
+    """A new usage row holding these values, with a fresh id and the current time."""
+    return UsageLog(
+        id=str(uuid.uuid4()),
+        timestamp=datetime.now(UTC),
+        workspace_id=workspace_id,
+        api_key_id=api_key_id,
+        user_id=user_id,
+        model=model,
+        provider=provider,
+        endpoint=endpoint,
+        status=status,
+        latency_ms=latency_ms,
+        counts_toward_budget=counts_toward_budget,
+        request_group_id=request_group_id,
+        error_message=error_message,
+        status_code=status_code,
+        cost=cost,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+    )
 
 
 @dataclass(frozen=True)

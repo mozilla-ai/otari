@@ -4,7 +4,8 @@ import uuid
 from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated
+from decimal import Decimal
+from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import Depends, HTTPException, Query, Request, status
@@ -25,7 +26,9 @@ from gateway.core.database import DATABASE_ERRORS, create_session, describe_data
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
+from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
 from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError, TraceBreakGlassUnnamedError
+from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
@@ -33,7 +36,10 @@ from gateway.models.tenancy import MANAGEMENT_ROLES, Workspace
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
-from gateway.ports.billing_port import BillingPort
+from gateway.ports.billing_port import (
+    BillingPort,
+    InsufficientFundsError,
+)
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
@@ -43,6 +49,7 @@ from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
@@ -83,9 +90,16 @@ from gateway.repositories.tools import (
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.traces import TracesRepositories
-from gateway.repositories.usage_and_telemetry import UsageLogRepository
+from gateway.repositories.usage_and_telemetry import (
+    UsageLogRepository,
+    new_usage_row,
+)
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import (
+    API_KEY_NO_USER_DETAIL,
+    API_KEY_VALIDATION_FAILED_DETAIL,
+    MASTER_KEY_USER_REQUIRED_DETAIL,
+    USER_MISMATCH_DETAIL,
     ApiKeyMembershipListener,
     ApiKeyService,
     FederatedTokenVerifier,
@@ -95,17 +109,32 @@ from gateway.services.api_keys import (
     is_access_token,
     key_refusal,
     match_federation_rules,
+    names_end_user,
     read_access_token,
+    resolve_user_id,
     unverified_issuer,
 )
-from gateway.services.budgets import BudgetMembershipListener, BudgetService
+from gateway.services.budgets import (
+    BudgetMembershipListener,
+    BudgetScopeRequest,
+    BudgetService,
+    ReservationHandle,
+    reconcile_reservation,
+    refund_reservation,
+    reserve_budget,
+)
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService
 from gateway.services.identity import IdentityService
-from gateway.services.inference import InferenceService
+from gateway.services.inference import (
+    DeploymentCharge,
+    InferenceService,
+    admit_deployment_paid,
+    describe_port_error,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mail import Mailer
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -117,7 +146,11 @@ from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
-from gateway.services.pricing_service import RequestPrices, model_context_window
+from gateway.services.pricing_service import (
+    RequestPrices,
+    model_context_window,
+    resolve_tool_rate,
+)
 from gateway.services.providers import (
     HostedCatalogUpdate,
     HostedProviderService,
@@ -158,6 +191,11 @@ from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
 from gateway.services.tool_settings_service import load_overrides, stage_override
 from gateway.services.tools import (
+    DirectCaller,
+    DirectToolCall,
+    DirectToolLedger,
+    DirectToolService,
+    DirectToolUsage,
     SearchToolService,
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
@@ -168,7 +206,11 @@ from gateway.services.tools import (
 from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
-from gateway.services.workspace_scope import default_workspace_id
+from gateway.services.workspace_scope import (
+    default_workspace_id,
+    organization_for_key_id,
+    workspace_for_key_id,
+)
 from gateway.types.traces import (
     ContentCapture,
     ContentReader,
@@ -2441,6 +2483,187 @@ async def get_feedback_service(
     return FeedbackService()
 
 
+class _DirectToolAccounts:
+    """The direct tool service's accounts: the api-keys rules for who a call bills, and the budgets service."""
+
+    def __init__(self, config: GatewayConfig, api_keys: ApiKeyService, budgets: BudgetService) -> None:
+        self._config = config
+        self._api_keys = api_keys
+        self._budgets = budgets
+
+    def names_end_user(self, caller: DirectCaller) -> bool:
+        return names_end_user(caller.api_key, caller.user)
+
+    def billed_user(self, caller: DirectCaller) -> str:
+        return resolve_user_id(
+            user_id_from_request=caller.user,
+            api_key=caller.api_key,
+            is_master_key=caller.is_master_key,
+            master_key_error=DirectToolCallError(
+                MASTER_KEY_USER_REQUIRED_DETAIL, status_code=status.HTTP_400_BAD_REQUEST
+            ),
+            no_api_key_error=DirectToolCallError(
+                API_KEY_VALIDATION_FAILED_DETAIL, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            no_user_error=DirectToolCallError(
+                API_KEY_NO_USER_DETAIL, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            forbidden_user_error=DirectToolCallError(USER_MISMATCH_DETAIL, status_code=status.HTTP_403_FORBIDDEN),
+            reject_mismatch=self._config.reject_user_mismatch,
+        )
+
+    async def end_user(
+        self, api_key: APIKey, external_id: str, *, requested_budget_id: str | None
+    ) -> tuple[str, str | None]:
+        resolved = await self._budgets.resolve_end_user(
+            api_key=api_key, external_id=external_id, requested_budget_id=requested_budget_id
+        )
+        return resolved.user_id, resolved.budget_id
+
+    async def tool_refusal(self, api_key: APIKey | None, *, provider: str, tool: str) -> str | None:
+        return await self._api_keys.search_tool_refusal(self._config, api_key, provider=provider, tool=tool)
+
+
+def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) -> DirectToolLedger:
+    """The direct tool service's ledger: the budget, pricing and funding functions that take the request's session.
+
+    Its methods close over that session.
+    """
+
+    class Ledger:
+        async def workspace_of(self, api_key_id: str | None) -> uuid.UUID:
+            return await workspace_for_key_id(db, api_key_id)
+
+        async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
+            return await organization_for_key_id(db, api_key_id)
+
+        async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
+            rate = await resolve_tool_rate(
+                db,
+                call.rate_keys,
+                label=call.label,
+                deployment_paid=call.deployment_paid,
+                organization_id=organization_id,
+            )
+            return rate.unit_rate if rate is not None else None
+
+        async def hold(
+            self, user_id: str, amount: Decimal, *, api_key: APIKey | None, provider: str, counts_toward_budget: bool
+        ) -> object:
+            return await reserve_budget(
+                db,
+                user_id,
+                amount,
+                # Not the pricing key: ``model`` only drives reserve_budget's free-model
+                # shortcut through any-llm, which a tool is not, and a tool named like an
+                # any-llm provider could skip the reservation through it.
+                model=None,
+                strategy=config.budget_strategy,
+                counts_toward_budget=counts_toward_budget,
+                # A tool is not a model, but it is billed to a workspace like one, so
+                # the scope carries the tool's provider as the narrowing axis.
+                scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider),
+            )
+
+        async def refund(self, hold: object) -> None:
+            await refund_reservation(db, cast(ReservationHandle, hold))
+
+        async def settle(self, hold: object, cost: Decimal) -> None:
+            await reconcile_reservation(db, cast(ReservationHandle, hold), cost)
+
+        async def admit_funding(
+            self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
+        ) -> object | None:
+            try:
+                return await admit_deployment_paid(
+                    billing,
+                    deployment_paid=True,
+                    organization_id=organization_id,
+                    api_key_id=api_key_id,
+                    user_id=user_id,
+                    request_id=request_id,
+                )
+            except InsufficientFundsError:
+                raise
+            except Exception as exc:
+                # Ends the transaction the port may have left failed, rolling it back
+                # when it cannot commit, so the refund that follows has a usable session.
+                await release_session(db)
+                raise FundsCheckFailedError(describe_port_error(exc)) from exc
+
+        async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
+            await cast(DeploymentCharge, funding).settle(
+                cost, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
+            )
+
+        async def release(self) -> bool:
+            return await release_session(db)
+
+    return Ledger()
+
+
+class _DirectToolGates:
+    """The direct tool service's gates: the request's rate limits and in-flight entry, and the usage log writer."""
+
+    def __init__(self, request: Request, config: GatewayConfig, budgets: BudgetService, log_writer: LogWriter) -> None:
+        self._request = request
+        self._config = config
+        self._budgets = budgets
+        self._log_writer = log_writer
+
+    async def check_rate_limit(self, user_id: str) -> dict[str, str]:
+        info = await check_rate_limit(self._request, user_id)
+        return rate_limit_headers(info) if info else {}
+
+    async def admit_rules(
+        self, *, api_key_id: str | None, user_id: str, budget_exempt: bool, provider: str, tool: str
+    ) -> None:
+        grant = await admit_rate_limit_rules(
+            self._request,
+            key_id=api_key_id,
+            user_id=user_id,
+            estimated_tokens=0,
+            budget_limits=None
+            if budget_exempt
+            else await self._budgets.minute_limits(user_id, strategy=self._config.budget_strategy),
+        )
+        if grant is not None:
+            # A `per: model` rule names a tool by its pricing key, <provider>:<tool>.
+            await grant.admit_model(provider, tool)
+
+    def track(self, *, endpoint: str, model: str, provider: str, user_id: str, api_key_id: str | None) -> None:
+        track_request(
+            self._request, endpoint=endpoint, model=model, provider=provider, user_id=user_id, api_key_id=api_key_id
+        )
+
+    async def record(self, usage: DirectToolUsage) -> None:
+        await self._log_writer.put(new_usage_row(**vars(usage)))
+
+
+def get_direct_tool_service(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    budgets: Annotated[BudgetService, Depends(get_budget_service)],
+    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    policies: WorkspaceWebSearchPoliciesDep,
+    billing: BillingPortDep,
+    web_client: WebProviderClientDep,
+) -> DirectToolService:
+    """Build the request's direct tool service; its ledger and its billing port share the request's session."""
+    return DirectToolService(
+        config=config,
+        accounts=_DirectToolAccounts(config, api_keys, budgets),
+        ledger=_ledger_on(db, config, billing),
+        gates=_DirectToolGates(request, config, budgets, log_writer),
+        policies=policies,
+        web_client=web_client,
+    )
+
+
+DirectToolServiceDep = Annotated[DirectToolService, Depends(get_direct_tool_service)]
+
 __all__ = [
     "AgentModelRecommenderPortDep",
     "BillingPortDep",
@@ -2498,4 +2721,6 @@ __all__ = [
     "verify_api_key_or_master_key",
     "verify_catalog_reader",
     "verify_master_key",
+    "DirectToolServiceDep",
+    "get_direct_tool_service",
 ]
