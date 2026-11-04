@@ -212,8 +212,8 @@ from gateway.services.budgets import (
     EstimateInputs,
     PricingLookup,
     ReservationHandle,
+    estimate_abandoned_stream_usage,
     estimate_cost,
-    estimate_output_tokens,
     estimate_tokens,
     get_budget_state,
     hold_tool_call,
@@ -6080,13 +6080,13 @@ def build_streaming_response(
         # bill: reported usage, tool work, or, under the 'estimate' policy, the
         # request and the text streamed so far.
         has_tool_work = tool_tally is not None and not tool_tally.is_empty()
-        estimated: CompletionUsage | None = None
-        if reported_usage is None and prompt_chars is not None and config.stream_missing_usage_policy == "estimate":
-            prompt_tokens = estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0)
-            output_tokens = estimate_output_tokens(streamed_chars)
-            estimated = CompletionUsage(
-                prompt_tokens=prompt_tokens, completion_tokens=output_tokens, total_tokens=prompt_tokens + output_tokens
+        estimated = (
+            None
+            if reported_usage is not None
+            else estimate_abandoned_stream_usage(
+                policy=config.stream_missing_usage_policy, prompt_chars=prompt_chars, streamed_chars=streamed_chars
             )
+        )
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(reported_usage or estimated))
         if reservation is None:

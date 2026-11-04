@@ -69,7 +69,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig, WebTool
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.rate_limit import RateLimitInfo
-from gateway.services.budgets import ReservationHandle, estimate_output_tokens
+from gateway.services.budgets import ReservationHandle, estimate_abandoned_stream_usage, estimate_output_tokens
 from gateway.services.inference import DeploymentCharge
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
@@ -2861,3 +2861,11 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
     assert all(health.active == 0 for health in router.health.values())
 
     assert bool(router.affinities) is (outcome in {"on_complete", "on_no_usage"})
+
+
+def test_abandoned_stream_usage_is_estimated_only_under_the_estimate_policy() -> None:
+    usage = estimate_abandoned_stream_usage(policy="estimate", prompt_chars=400, streamed_chars=10)
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (100, 3, 103)
+    assert estimate_abandoned_stream_usage(policy="ignore", prompt_chars=400, streamed_chars=10) is None
+    assert estimate_abandoned_stream_usage(policy="estimate", prompt_chars=None, streamed_chars=10) is None

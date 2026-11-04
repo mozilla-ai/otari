@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
+from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -429,6 +430,22 @@ def estimate_tokens(
 def estimate_output_tokens(streamed_chars: int) -> int:
     """Tokens for ``streamed_chars`` of output text, at the same ``chars / 4`` as the prompt estimate."""
     return (max(streamed_chars, 0) + 3) // 4
+
+
+def estimate_abandoned_stream_usage(
+    *, policy: str, prompt_chars: int | None, streamed_chars: int
+) -> CompletionUsage | None:
+    """Usage to bill for a stream the client abandoned before the provider reported any.
+
+    Only the ``estimate`` policy bills one, and only when the request's size is known.
+    """
+    if policy != "estimate" or prompt_chars is None:
+        return None
+    prompt_tokens = estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0)
+    output_tokens = estimate_output_tokens(streamed_chars)
+    return CompletionUsage(
+        prompt_tokens=prompt_tokens, completion_tokens=output_tokens, total_tokens=prompt_tokens + output_tokens
+    )
 
 
 def estimate_cost(
