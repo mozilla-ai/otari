@@ -9,7 +9,8 @@ from starlette.datastructures import FormData
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.types import Message, Receive, Scope
 
-from gateway.api.routes._request_body import bounded_request, form_field
+from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._request_body import form_field
 
 
 def _request(receive: Receive, content_length: str | None = None) -> Request:
@@ -33,7 +34,7 @@ async def test_received_bytes_are_limited_without_trusting_content_length(conten
         return message
 
     request = _request(receive, content_length)
-    limited = bounded_request(request, max_bytes=4, detail="too large")
+    limited = bounded_body(request, 4, "too large")
 
     with pytest.raises(HTTPException) as raised:
         await limited.body()
@@ -51,7 +52,7 @@ def test_declared_oversize_is_rejected_without_receiving_the_body() -> None:
         return {"type": "http.request", "body": b"12345", "more_body": False}
 
     with pytest.raises(HTTPException) as raised:
-        bounded_request(_request(receive, "5"), max_bytes=4, detail="too large")
+        bounded_body(_request(receive, "5"), 4, "too large")
 
     assert raised.value.status_code == 413
     assert receive_count == 0

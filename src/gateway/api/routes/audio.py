@@ -18,8 +18,9 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_api_key_or_master_key_for_upload,
 )
+from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._passthrough import run_passthrough
-from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, bounded_request, form_field
+from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -114,10 +115,10 @@ async def create_transcription(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
     """
-    async with bounded_request(
+    async with bounded_body(
         raw_request,
-        max_bytes=_MAX_AUDIO_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES,
-        detail=f"Audio upload request exceeds the maximum size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        _MAX_AUDIO_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES,
+        f"Audio upload request exceeds the maximum size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB.",
     ).form() as form:
         file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
         model = form_field(form, "model", _STRING_ADAPTER, required=True)

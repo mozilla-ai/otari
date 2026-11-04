@@ -68,7 +68,8 @@ from gateway.api.deps import (
     get_unit_of_work,
     verify_master_key,
 )
-from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, bounded_request, form_field
+from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.api.routes.chat import ChatCompletionRequest, run_chat_completion
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
@@ -327,10 +328,10 @@ async def upload_playground_file(
     # Commits the spend row the principal may have staged, which the file row's
     # foreign key needs, and frees the connection while the bytes stream in.
     await release_session(db)
-    async with bounded_request(
+    async with bounded_body(
         raw_request,
-        max_bytes=config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
-        detail="File upload request exceeds the configured maximum size.",
+        config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
+        "File upload request exceeds the configured maximum size.",
     ).form() as form:
         file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
         record = await files.store(

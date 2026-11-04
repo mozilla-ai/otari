@@ -118,13 +118,20 @@ def bounded_body(request: Request, max_bytes: int, too_large: str) -> Request:
     """``request``, refusing its body with 413 once more than ``max_bytes`` arrive, whatever ``Content-Length`` says.
 
     For a route that reads its own multipart form after its auth check: FastAPI
-    parses ``File`` parameters before any dependency runs.
+    parses ``File`` parameters before any dependency runs. A declared length over
+    the limit is refused before any byte is read, and a client that disconnects
+    mid-upload gets 400 rather than surfacing as a server error.
     """
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > max_bytes:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, too_large)
     received = 0
 
     async def receive() -> Message:
         nonlocal received
         message = await request.receive()
+        if message["type"] == "http.disconnect":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.")
         received += len(message.get("body", b""))
         if received > max_bytes:
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, too_large)

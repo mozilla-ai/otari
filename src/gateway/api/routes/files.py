@@ -36,8 +36,8 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_api_key_or_master_key_for_upload,
 )
-from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, bounded_request, form_field
+from gateway.api.routes._helpers import bounded_body, resolve_user_id
+from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import FilesDisabledError
 from gateway.models.api_keys import APIKey
@@ -232,10 +232,10 @@ async def create_file(
     files: FileServiceDep,
 ) -> OpenAIFileObject | AnthropicFileMetadata:
     """Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers."""
-    async with bounded_request(
+    async with bounded_body(
         raw_request,
-        max_bytes=config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
-        detail="File upload request exceeds the configured maximum size.",
+        config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
+        "File upload request exceeds the configured maximum size.",
     ).form() as form:
         file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
         purpose = form_field(form, "purpose", _STRING_ADAPTER, default=_DEFAULT_PURPOSE)
