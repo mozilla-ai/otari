@@ -12,13 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.adapters import feedback_delivery_adapter
+from gateway import container as container_module
+from gateway.adapters.feedback_delivery_adapter import ReceiverFeedbackDeliveryAdapter
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.feedback_exceptions import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL
 from gateway.models.tenancy import DashboardSession, User
 from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.feedback import FeedbackService
 
 from .conftest import build_test_client, declared_test_providers, shared_test_config
 
@@ -36,16 +36,16 @@ def _never_the_real_receiver(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(request: httpx.Request) -> httpx.Response:
         raise AssertionError(f"a test reached the real feedback receiver at {request.url}")
 
-    original = FeedbackService.__init__
+    original = ReceiverFeedbackDeliveryAdapter.__init__
 
-    def guarded(self: FeedbackService, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def guarded(self: ReceiverFeedbackDeliveryAdapter, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         original(self, transport=transport or httpx.MockTransport(refuse))
 
-    monkeypatch.setattr(FeedbackService, "__init__", guarded)
+    monkeypatch.setattr(ReceiverFeedbackDeliveryAdapter, "__init__", guarded)
 
 
 def test_an_unstubbed_receiver_is_refused_locally() -> None:
-    assert isinstance(FeedbackService()._transport, httpx.MockTransport)
+    assert isinstance(ReceiverFeedbackDeliveryAdapter()._transport, httpx.MockTransport)
 
 
 @pytest.fixture
@@ -57,7 +57,9 @@ def deliveries(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
         return httpx.Response(204)
 
     monkeypatch.setattr(
-        feedback_delivery_adapter, "FeedbackService", partial(FeedbackService, transport=httpx.MockTransport(receive))
+        container_module,
+        "ReceiverFeedbackDeliveryAdapter",
+        partial(ReceiverFeedbackDeliveryAdapter, transport=httpx.MockTransport(receive)),
     )
     return calls
 
@@ -202,7 +204,9 @@ def test_a_receiver_that_refuses_the_address_is_explained(
         return httpx.Response(422 if "reply_to" in json.loads(request.content) else 204)
 
     monkeypatch.setattr(
-        feedback_delivery_adapter, "FeedbackService", partial(FeedbackService, transport=httpx.MockTransport(receive))
+        container_module,
+        "ReceiverFeedbackDeliveryAdapter",
+        partial(ReceiverFeedbackDeliveryAdapter, transport=httpx.MockTransport(receive)),
     )
     user = _sign_in_member(client, db_session, master_key_header)
     ticked = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": user.email})
