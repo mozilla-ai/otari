@@ -42,6 +42,7 @@ import {
   useWorkspaces,
 } from "@/shared/api/workspaces"
 import { formatDate } from "@/shared/helpers/format"
+import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 // Workspaces are the unit inside an organization that work is scoped to. This
 // page lists the ones the caller can see, and opening a row reveals its roster:
@@ -511,9 +512,11 @@ export function CreateWorkspaceForm({
 }
 
 function EditWorkspaceForm({
+  isOpen,
   workspace,
   onClose,
 }: {
+  isOpen: boolean
   workspace: Workspace
   onClose: () => void
 }) {
@@ -609,7 +612,7 @@ function EditWorkspaceForm({
 
   return (
     <FormDialog
-      isOpen
+      isOpen={isOpen}
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
@@ -767,7 +770,10 @@ export function WorkspacesPage() {
   const holdsProviderKeys = [...providerKeys.data.values()].some(
     (rows) => rows.length > 0,
   )
-  const editingWorkspace = rows.find((row) => row.id === editing)
+  const editingTarget = useHeldDialogTarget(
+    rows.find((row) => row.id === editing),
+  )
+  const editingWorkspace = editingTarget.held
   // Not gated on `creating`: unmounting the empty state when the dialog opens
   // takes away the node react-aria restores focus to, so closing drops focus to
   // `<body>`. `PageIntro`'s action is ungated for the same reason.
@@ -932,11 +938,13 @@ export function WorkspacesPage() {
         returnFocusRef={createButtonRef}
       />
 
-      {/* Keyed on the workspace: its fields seed from `workspace` on mount
-          only, so the next Edit has to arrive at a fresh form. */}
+      {/* Keyed on the workspace and the opening: its fields seed from
+          `workspace` on mount only, so the next Edit has to arrive at a fresh
+          form. Kept mounted through the exit, which `isOpen` plays. */}
       {editingWorkspace ? (
         <EditWorkspaceForm
-          key={editingWorkspace.id}
+          key={`${editingWorkspace.id}:${editingTarget.generation}`}
+          isOpen={editingTarget.isOpen}
           workspace={editingWorkspace}
           onClose={() => setEditing(undefined)}
         />
