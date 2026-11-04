@@ -277,8 +277,9 @@ class _ResponsesAdapter:
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        # The chat-completions bridge emits a terminal event whatever its upstream
-        # sent, so this catches a cut native stream and not a cut bridged one.
+        # A cut native stream ends without a terminal event. The chat-completions
+        # bridge raises on a stream that never reported a finish_reason, so a cut
+        # bridged one reaches the error path too.
         return _ends_a_response
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
