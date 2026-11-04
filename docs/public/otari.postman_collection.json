@@ -3615,6 +3615,26 @@
     {
       "item": [
         {
+          "name": "Edit Image",
+          "request": {
+            "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "images",
+                "edits"
+              ],
+              "raw": "{{baseUrl}}/api/v1/images/edits"
+            }
+          }
+        },
+        {
           "name": "Create Image",
           "request": {
             "body": {

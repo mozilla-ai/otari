@@ -2092,6 +2092,31 @@ export interface paths {
         patch: operations["hosted-providers-update_hosted_model"];
         trace?: never;
     };
+    "/api/v1/images/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Image
+         * @description OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.
+         *
+         *     Authentication modes:
+         *     - Master key + user field: Use specified user (must exist)
+         *     - API key + user field: Use specified user (must exist)
+         *     - API key without user field: Use the shared "default" user
+         */
+        post: operations["images-edit_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/images/generations": {
         parameters: {
             query?: never;
@@ -8707,6 +8732,35 @@ export interface components {
              * @default user_data
              */
             purpose: string;
+            /** User */
+            user?: string | null;
+        };
+        /** Body_images-edit_image */
+        "Body_images-edit_image": {
+            /**
+             * Image
+             * @description The image or images to edit.
+             */
+            image?: string[] | null;
+            /**
+             * Image[]
+             * @description Same as image.
+             */
+            "image[]"?: string[] | null;
+            /** Mask */
+            mask?: string | null;
+            /** Model */
+            model: string;
+            /** N */
+            n?: number | null;
+            /** Prompt */
+            prompt: string;
+            /** Quality */
+            quality?: string | null;
+            /** Response Format */
+            response_format?: string | null;
+            /** Size */
+            size?: string | null;
             /** User */
             user?: string | null;
         };
@@ -23146,6 +23200,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostedModelPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "images-edit_image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_images-edit_image"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

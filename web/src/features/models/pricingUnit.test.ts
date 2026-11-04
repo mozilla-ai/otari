@@ -36,6 +36,7 @@ describe("pricingUnit", () => {
   it("picks the unit an endpoint is billed in", () => {
     expect(pricingUnitForEndpoint("/v1/rerank")).toBe("request")
     expect(pricingUnitForEndpoint("/v1/images/generations")).toBe("image")
+    expect(pricingUnitForEndpoint("/v1/images/edits")).toBe("image")
     expect(pricingUnitForEndpoint("/v1/audio/transcriptions")).toBe("request")
     expect(pricingUnitForEndpoint("/v1/audio/speech")).toBe("request")
     expect(pricingUnitForEndpoint("/v1/moderations")).toBe("request")

@@ -64,6 +64,7 @@ DELETE /api/v1/pricing/{model_key}
 GET /api/v1/usage
 # Images
 POST /api/v1/images/generations
+POST /api/v1/images/edits
 # Audio
 POST /api/v1/audio/speech
 POST /api/v1/audio/transcriptions

@@ -553,3 +553,19 @@ def test_only_the_operators_override_prices_a_search_on_the_legacy_settings(
         resp = _in_loop(strict_pricing_client, "otari_web_search", provider)
 
     assert (resp.status_code != 402) is served, resp.text
+
+
+def test_unpriced_image_edit_is_pricing_required(strict_pricing_client: TestClient) -> None:
+    """The multipart edit route is gated like generation, and the provider is never called."""
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    with patch("gateway.api.routes.images.aimage_edit", new_callable=AsyncMock) as mock:
+        resp = c.post(
+            f"{API_ROOT}/images/edits",
+            data={"model": "openai:gpt-image-1", "prompt": "make it green", "user": "priced-user"},
+            files={"image": ("cat.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+            headers=_MASTER_HEADER,
+        )
+    assert resp.status_code == 402, resp.text
+    assert resp.headers["Otari-Error-Code"] == "pricing_required"
+    mock.assert_not_called()
