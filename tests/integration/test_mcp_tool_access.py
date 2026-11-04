@@ -318,7 +318,7 @@ def test_the_connection_check_leaves_out_a_tool_named_like_a_pattern(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A tool the server names ``*`` or ``search*`` would be stored as a wildcard once a manager ticked it."""
-    monkeypatch.setattr(sys.modules[__name__], "TOOL_NAMES", ("list_issues", "*", "search*", "@read"))
+    monkeypatch.setattr(sys.modules[__name__], "TOOL_NAMES", ("list_issues", "*", "search*", "@read", " @read"))
     key = _new_key(client, master_key_header)
     row = _store(test_db, _workspace_id(test_db, key), "github")
 
@@ -326,6 +326,25 @@ def test_the_connection_check_leaves_out_a_tool_named_like_a_pattern(
 
     assert checked.status_code == 200, checked.text
     assert checked.json()["health"]["tools"] == ["list_issues"]
+
+
+def test_a_catalog_stored_before_the_screen_is_read_back_without_pattern_names(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github")
+    row.health = {
+        "status": "healthy",
+        "checked_at": "2026-01-01T00:00:00+00:00",
+        "tools": ["list_issues", "*", " @read"],
+        "read_only_hinted_tools": ["list_issues", " @read"],
+    }
+    test_db.commit()
+
+    stored = client.get(f"{_servers(row.workspace_id)}/{row.id}", headers=master_key_header).json()
+
+    assert stored["health"]["tools"] == ["list_issues"]
+    assert stored["health"]["read_only_hinted_tools"] == ["list_issues"]
 
 
 @pytest.mark.parametrize("read_tools", [["list_*"], ["@read"], [""], None])

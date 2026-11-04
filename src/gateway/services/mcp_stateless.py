@@ -285,13 +285,14 @@ def _walk(schema: dict[str, Any]) -> tuple[int, int, bool]:
 
 
 def reads_as_pattern(name: str) -> bool:
-    """Whether a tool name would read as a pattern in an access rule: a wildcard, or a preset such as ``@read``.
+    """Whether a tool name would mean something else in an access rule: a wildcard, a preset, or either once trimmed.
 
-    A server's tool names are untrusted, and one named ``*`` or ``search*`` that a manager ticks would be stored as a
-    wildcard reaching tools the server adds later. MCP's tool-name charset has neither character, so such a tool is
-    left out of discovery and of the checked catalog rather than offered.
+    A server's tool names are untrusted, and one named ``*``, ``search*`` or `` @read`` that a manager ticks would be
+    stored, trimmed, as a wildcard or a preset reaching tools the server never named. MCP's tool-name charset has
+    none of these characters or spaces, so such a tool is left out of discovery and of the checked catalog rather
+    than offered.
     """
-    return "*" in name or name.startswith("@")
+    return name != name.strip() or "*" in name or name.startswith("@")
 
 
 def screen_tool(tool: MCPTool) -> str | None:

@@ -10,6 +10,7 @@ import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { McpAccessTest } from "@/features/tools/McpAccessTest"
 import { McpGrantDialog } from "@/features/tools/McpGrantDialog"
 import { McpGrantsTable } from "@/features/tools/McpGrantsTable"
+import { isLiteralToolName } from "@/features/tools/mcpAccess"
 import {
   grantSubject,
   grantUsers,
@@ -75,7 +76,9 @@ export function McpServerAcl({
     (access.error instanceof ApiError && access.error.status === 403)
   // What a rule can usefully name: the tools the server exposes, which is its
   // allow-list where it has one and what its last check listed otherwise.
-  const tools = server.allowed_tools ?? server.health?.tools ?? []
+  const tools = (server.allowed_tools ?? server.health?.tools ?? []).filter(
+    isLiteralToolName,
+  )
   const grants = access.data?.grants ?? []
 
   // The workspace's members join the key owners as users who can be granted,

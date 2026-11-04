@@ -40,7 +40,7 @@ from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -66,7 +66,7 @@ from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
 # The module as well as the names, so the check is looked up at call time and a
 # test can stand in for the network.
 from gateway.services import mcp_stateless
-from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
+from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck, reads_as_pattern
 from gateway.services.model_access import (
     expand_mcp_tool_patterns,
     is_mcp_tool_allowed,
@@ -228,6 +228,12 @@ class WorkspaceMcpServerHealth(BaseModel):
         description="Those of tools the server annotates readOnlyHint: untrusted, a suggestion for labeling "
         "read_tools and never applied as one",
     )
+
+    @field_validator("tools", "read_only_hinted_tools")
+    @classmethod
+    def _literal_names(cls, names: list[str]) -> list[str]:
+        """Drop a name a rule would read as a pattern, from a fresh check and from one stored before this screen."""
+        return [name for name in names if not reads_as_pattern(name)]
 
 
 class WorkspaceMcpServerCheckRequest(BaseModel):

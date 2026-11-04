@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   accessMode,
   defaultPolicySummary,
+  isLiteralToolName,
   keyAccessLabel,
   patternMatches,
   ruleAction,
@@ -102,4 +103,17 @@ describe("mcpAccess", () => {
       ),
     ).toBe("DENY, the server is disabled")
   })
+})
+
+describe("isLiteralToolName", () => {
+  it("offers a name that means only itself", () => {
+    expect(isLiteralToolName("list_issues")).toBe(true)
+  })
+
+  it.each(["*", "search*", "@read", " @read", "list_issues "])(
+    "keeps %j out of the choices, since a rule would read it as a pattern",
+    (name) => {
+      expect(isLiteralToolName(name)).toBe(false)
+    },
+  )
 })

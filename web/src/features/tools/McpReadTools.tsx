@@ -4,6 +4,7 @@ import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { isLiteralToolName } from "@/features/tools/mcpAccess"
 import { ToolChecklist } from "@/features/tools/ToolChecklist"
 import { useUpdateWorkspaceMcpServer } from "@/shared/api/tools"
 
@@ -28,7 +29,9 @@ export function McpReadTools({
   const update = useUpdateWorkspaceMcpServer()
   const stored = server.read_tools
   const hinted = server.health?.read_only_hinted_tools ?? []
-  const tools = server.allowed_tools ?? server.health?.tools ?? []
+  const tools = (server.allowed_tools ?? server.health?.tools ?? []).filter(
+    isLiteralToolName,
+  )
   const [isEditing, setEditing] = useState(false)
   const [picked, setPicked] = useState<string[]>([...stored])
   const isChanged = picked.join() !== stored.join()

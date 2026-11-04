@@ -12,6 +12,15 @@ import type {
 export const ALL_TOOLS = "*"
 export const READ_TOOLS = "@read"
 
+/**
+ * Whether a server's tool name means only itself in a rule. A name that is a
+ * wildcard or a preset, even once trimmed, would be saved as one, so it is
+ * never offered as a choice; a manager types a pattern on purpose instead.
+ */
+export function isLiteralToolName(name: string): boolean {
+  return name === name.trim() && !name.includes("*") && !name.startsWith("@")
+}
+
 /** The four answers a rule can give, as the page offers them. */
 export type AccessMode = "all" | "read" | "none" | "some"
 

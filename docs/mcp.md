@@ -387,9 +387,11 @@ one with a `$ref` pointing outside itself:
 
 A tool name outside the 1–256-character execution limit is omitted with
 `mcp_tool_name_unsupported`, so every tool returned by discovery can be sent
-back to the execution endpoint. So is a name containing `*` or starting with
-`@`, which an access rule would read as a pattern rather than a name; such a
-tool is also left out of the tools a connection check lists.
+back to the execution endpoint. So is a name containing `*`, starting with
+`@`, or with a leading or trailing space, which an access rule would read as a
+pattern (or, trimmed, as `@read`) rather than a name; such a tool is also left
+out of the tools a connection check lists, including a list stored before this
+rule.
 
 Otari does not validate an `inputSchema` against a JSON Schema dialect, and never
 truncates, rewrites, or drops a keyword. It bounds the size, depth and property
