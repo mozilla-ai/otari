@@ -12,6 +12,7 @@ import pytest
 from any_llm.exceptions import ModelNotFoundError
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import build_hosted_provider_service
@@ -655,6 +656,35 @@ async def test_a_model_its_provider_refuses_is_switched_off_by_the_run(
     assert "non-serverless model llama" in outbox.sent[0][1].text
     status = await service.get_status()
     assert "deepinfra:llama" not in {result.selector for result in status.results}
+
+
+@pytest.mark.asyncio
+async def test_a_switch_off_that_fails_leaves_the_model_in_the_runs_alert(
+    async_db: AsyncSession, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mail_on(test_config, monkeypatch)
+
+    class _Unwritable(_Roster):
+        async def switch_off_unavailable(self, provider: str, model: str) -> bool:
+            msg = "database went away"
+            raise SQLAlchemyError(msg)
+
+    service = _service(async_db, test_config, _Clock(), _Unwritable())
+    await service.update_settings(HealthCheckSettingsUpdate(alert_emails=["ops@example.com"]))
+    outbox = _Outbox()
+
+    async def llama_refused(*, model: str, **_kwargs: Any) -> object:
+        if model == "llama":
+            msg = f"Unable to access non-serverless model {model}. Please visit the console to create an endpoint."
+            raise _StatusError(msg, 400)
+        return object()
+
+    await _run_with(service, llama_refused, outbox)
+
+    assert outbox.subjects == ["Otari health on otari.example.com: 1 model on deepinfra stopped answering"]
+    status = await service.get_status()
+    assert status.last_run is not None
+    assert "deepinfra:llama" in {result.selector for result in status.results if result.status == "fail"}
 
 
 @pytest.mark.asyncio

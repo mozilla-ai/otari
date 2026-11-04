@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.models.health_checks import HealthCheckResult, HealthCheckRun, HealthCheckSettings
@@ -294,12 +295,7 @@ class HealthCheckService:
             await self._prune(finished)
             public = _run_public(run)
 
-        # Every offering is reached on the deployment's own credential, so a refusal of the model itself
-        # switches it off as it would on a request, and it leaves this run's alert with nothing to fix.
-        refused = {o.target.selector for o in outcomes if o.refusal is not None}
-        for outcome in outcomes:
-            if outcome.refusal is not None:
-                await self.switch_off_unavailable(outcome.target.provider, outcome.target.model, outcome.refusal)
+        refused = await self._switch_off_refused(outcomes)
         await self._alert(
             run_id,
             [o for o in outcomes if o.target.selector not in refused],
@@ -307,6 +303,27 @@ class HealthCheckService:
             finished,
         )
         return public
+
+    async def _switch_off_refused(self, outcomes: Sequence[ProbeOutcome]) -> set[str]:
+        """Switch off each model its provider refused this run, as a request meeting the refusal would.
+
+        Every offering is reached on the deployment's own credential, so the refusal counts. Returns the selectors
+        now off, which leave the run's alert with nothing to fix. One that could not be switched off stays in it,
+        and the next run tries again.
+        """
+        off: set[str] = set()
+        for outcome in outcomes:
+            if outcome.refusal is None:
+                continue
+            selector = outcome.target.selector
+            try:
+                await self.switch_off_unavailable(outcome.target.provider, outcome.target.model, outcome.refusal)
+            except DATABASE_ERRORS as exc:
+                # codeql[py/clear-text-logging-sensitive-data]
+                logger.warning("Could not switch off unavailable model %s (%s)", selector, describe_database_error(exc))
+                continue
+            off.add(selector)
+        return off
 
     async def switch_off_unavailable(self, provider: str, model: str, refusal: str) -> bool:
         """Switch ``provider:model`` off because its provider refused to serve it, and email the alert list.
