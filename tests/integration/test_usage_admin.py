@@ -496,6 +496,65 @@ def test_set_price_with_cache_rates(client: TestClient, master_key_header: dict[
     assert row.cost == Decimal("0.00615")
 
 
+def _reprice_cache_write_row(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    *,
+    log_id: str,
+    provider: str,
+    model: str,
+) -> UsageLog:
+    log = _make_log(
+        db_session,
+        log_id=log_id,
+        counts_toward_budget=False,
+        provider=provider,
+        model=model,
+        prompt_tokens=1000,
+        completion_tokens=0,
+        cache_write_tokens=1_000_000,
+        cache_tokens_in_prompt=False,
+    )
+    log.cache_write_1h_tokens = 1_000_000
+    db_session.commit()
+
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={
+            "ids": [log_id],
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "cache_write_price_per_million": 3.75,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    row = _get(db_session, log_id)
+    assert row is not None
+    return row
+
+
+def test_set_price_bills_a_claude_1h_cache_write_at_the_1h_rate(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    row = _reprice_cache_write_row(
+        client, master_key_header, db_session, log_id="imp-claude-1h", provider="anthropic", model="claude-sonnet-4-5"
+    )
+    # 1000 * 3/1M + 1M 1h writes at twice the input rate (6/M), not the 3.75/M 5-minute rate.
+    assert row.cost == Decimal("6.003")
+
+
+def test_set_price_bills_a_non_claude_cache_write_at_the_cache_write_rate(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    row = _reprice_cache_write_row(
+        client, master_key_header, db_session, log_id="imp-gpt-write", provider="openai", model="gpt-4"
+    )
+    assert row.cost == Decimal("3.753")
+
+
 def test_set_price_recovers_the_inclusive_shape_from_the_stored_meters(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
