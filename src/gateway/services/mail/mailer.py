@@ -98,8 +98,8 @@ class Mailer:
         """Where this deployment's dashboard serves its static files, or ``None`` if its address is unknown."""
         return self._config.effective_ui_base_url.partition("?")[0].rstrip("/") or None
 
-    async def send(self, *, to: str, message: MailMessage) -> MailDelivery:
-        """Deliver one rendered message. Never raises.
+    async def send(self, *, to: str, message: MailMessage, reply_to: str | None = None) -> MailDelivery:
+        """Deliver one rendered message, with ``reply_to`` as its Reply-To when given. Never raises.
 
         A mail failure must not fail the request that triggered it: creating an
         invitation still succeeds when only the notification did not go out. The
@@ -117,6 +117,7 @@ class Mailer:
             sender_email=self._config.mail_from_email or _FALLBACK_SENDER,
             sender_name=self._config.mail_from_name,
             message=message,
+            reply_to=reply_to,
         )
         try:
             # deliver() is synchronous socket I/O, and each SMTP step carries its
