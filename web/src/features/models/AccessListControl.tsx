@@ -135,7 +135,7 @@ export function AccessListControl({
       ) : null}
 
       {mode === "only" ? (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 pointer-coarse:gap-3">
           <div className="flex flex-wrap gap-1.5 pointer-coarse:gap-y-5">
             {entries.length === 0 ? (
               <span className="text-caption">{copy.pickPrompt}</span>
