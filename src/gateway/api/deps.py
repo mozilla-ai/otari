@@ -13,7 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
 from gateway.container import Container
-from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    TRACE_CONTENT_HEADER,
+    TRACE_CONTENT_KEEP,
+    X_API_KEY_HEADER,
+    GatewayConfig,
+)
 from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db, release_session
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
@@ -162,7 +169,14 @@ from gateway.services.traces import SpanContent, TraceMembershipListener, TraceS
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
 from gateway.services.workspace_scope import default_workspace_id
-from gateway.types.traces import ContentReader, SessionOwners, ShareAudience, TraceScope
+from gateway.types.traces import (
+    ContentCapture,
+    ContentReader,
+    SessionOwners,
+    ShareAudience,
+    TraceScope,
+    WorkspaceContent,
+)
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -1956,6 +1970,14 @@ class DatabaseSessionOwners:
     async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
         return await workspace_members(self._db, pairs)
 
+    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
+        workspace = await WorkspaceRepository(self._db).get(workspace_id)
+        if workspace is None or not workspace.trace_content_enabled:
+            return WorkspaceContent()
+        if not await is_workspace_member(self._db, workspace_id, user_id, workspace):
+            return WorkspaceContent()
+        return WorkspaceContent(keeps=True, tool_output=workspace.trace_content_tool_output)
+
 
 class NoSessionOwners:
     """:class:`SessionOwners` for work that never opens a share: nobody is anybody's member."""
@@ -1965,6 +1987,9 @@ class NoSessionOwners:
 
     async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
         return set()
+
+    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
+        return WorkspaceContent()
 
 
 async def workspace_keeps_trace_content(
@@ -1983,17 +2008,57 @@ async def workspace_keeps_trace_content(
     if not config.trace_content_enabled:
         return False
     try:
-        workspace = await WorkspaceRepository(db).get(workspace_id)
-        keeps = (
-            workspace is not None
-            and workspace.trace_content_enabled
-            and await is_workspace_member(db, workspace_id, user_id, workspace)
-        )
+        keeps = (await DatabaseSessionOwners(db).content_kept(workspace_id, user_id)).keeps
         await release_session(db)
     except DATABASE_ERRORS as exc:
         logger.warning("Could not read whether a workspace keeps trace content (%s)", describe_database_error(exc))
         return False
     return keeps
+
+
+TRACE_CONTENT_HEADER_INVALID_DETAIL = f"{TRACE_CONTENT_HEADER} must be {TRACE_CONTENT_KEEP!r}, or be left out"
+
+
+def asks_to_keep_trace_content(request: Request) -> bool:
+    """Whether the request asks for its content to be kept, refusing a value it cannot mean.
+
+    A misspelled header is a caller mistake to report, as ``Otari-Code-Execution``'s
+    is: otherwise ``Otari-Trace-Content: true`` would keep nothing and say nothing.
+    """
+    value = request.headers.get(TRACE_CONTENT_HEADER)
+    if value is None or not value.strip():
+        return False
+    if value.strip().lower() != TRACE_CONTENT_KEEP:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=TRACE_CONTENT_HEADER_INVALID_DETAIL)
+    return True
+
+
+async def routed_trace_content(
+    request: Request,
+    uow: UnitOfWork,
+    db: AsyncSession,
+    config: GatewayConfig,
+    workspace_id: uuid.UUID,
+    user_id: str | None,
+) -> ContentCapture | None:
+    """What a routed request that asks for it (``Otari-Trace-Content: keep``) keeps of its content, or None.
+
+    The deployment has to be able to seal content, and then the traces service
+    applies the workspace's rule, on the request's own Unit of Work. Fails closed:
+    a read that fails keeps no content, and the request is served without it.
+    """
+    if not config.trace_content_enabled:
+        return None
+    content: SpanContent | None = getattr(request.app.state, "trace_content", None)
+    if content is None or not content.sealing:
+        return None
+    try:
+        return await get_trace_service(uow, request, db).routed_content(
+            workspace_id, user_id, tool_output=config.trace_content_tool_output
+        )
+    except DATABASE_ERRORS as exc:
+        logger.warning("Could not read whether a routed request keeps its content (%s)", describe_database_error(exc))
+        return None
 
 
 def get_trace_service(

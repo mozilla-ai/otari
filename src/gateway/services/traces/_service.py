@@ -6,7 +6,7 @@ import dataclasses
 import math
 import uuid
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -42,6 +42,7 @@ from gateway.types.traces import (
     BreakGlassKind,
     BreakGlassRead,
     ContentAccess,
+    ContentCapture,
     ContentRead,
     ContentReader,
     ContentShare,
@@ -197,20 +198,22 @@ class TraceService:
         async with self._uow:
             return await self._barriers.generation(workspace_id)
 
-    async def turn_content_off[T](
-        self, workspace_id: uuid.UUID, *, authorize: Callable[[], Awaitable[None]], switch: Callable[[], Awaitable[T]]
-    ) -> T:
-        """Turn a workspace's content off with ``switch``, so nothing taken in before it is stored after it.
+    async def routed_content(
+        self, workspace_id: uuid.UUID, user_id: str | None, *, tool_output: bool
+    ) -> ContentCapture | None:
+        """What a request routed through the gateway keeps of its content, or None where it keeps none.
 
-        The order is the rule: ``authorize`` first, so only a manager ends the
-        generation; the generation ends before the switch, so a failure there changes
-        nothing; and again after it, for an export that read the switch on in between.
+        The rule an export is held to: the workspace keeps content for this user, read
+        after the generation, so a workspace that turns it off meanwhile keeps nothing.
+        Tool output only where the deployment (``tool_output``) and the workspace both
+        keep it. In a savepoint, so a failed read raises without undoing the request's step.
         """
-        await authorize()
-        await self.stop_content(workspace_id)
-        result = await switch()
-        await self.stop_content(workspace_id)
-        return result
+        async with self._uow.savepoint():
+            generation = await self._barriers.generation(workspace_id)
+            kept = await self._owners.content_kept(workspace_id, user_id)
+        if not kept.keeps:
+            return None
+        return ContentCapture(generation=generation, tool_output=tool_output and kept.tool_output)
 
     async def stop_content(self, workspace_id: uuid.UUID) -> None:
         """Keep none of the content already captured in the workspace that is not stored yet, on any replica."""

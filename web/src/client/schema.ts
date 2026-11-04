@@ -6836,9 +6836,9 @@ export interface paths {
         head?: never;
         /**
          * Update Workspace
-         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.
          *
-         *     Turning content off keeps nothing new from the next export on; what is already
+         *     Turning either off keeps nothing new of it from the next export on; what is already
          *     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
          */
         patch: operations["workspaces-update_workspace"];
@@ -17602,7 +17602,7 @@ export interface components {
             cache_write_tokens: number | null;
             /**
              * Content
-             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, tool.output), only where the workspace keeps content, the client sent it or Otari ran the tool that produced it, and the reader may open it. Empty otherwise.
              */
             content: {
                 [key: string]: string;
@@ -18082,6 +18082,11 @@ export interface components {
              * @description Days after it started that a session is deleted, however active it still is.
              */
             session_max_age_days: number;
+            /**
+             * Tool Output
+             * @description Whether content also keeps what each tool returned, on a request routed through the gateway. Never true where content_available is false.
+             */
+            tool_output: boolean;
         };
         /** TraceCountPublic */
         TraceCountPublic: {
@@ -19748,6 +19753,12 @@ export interface components {
              * @default false
              */
             trace_content_enabled: boolean;
+            /**
+             * Trace Content Tool Output
+             * @description Whether this workspace also keeps what each tool returned, where it keeps content and the deployment keeps tool output.
+             * @default true
+             */
+            trace_content_tool_output: boolean;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -19762,6 +19773,11 @@ export interface components {
              * @description Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.
              */
             trace_content_enabled?: boolean | null;
+            /**
+             * Trace Content Tool Output
+             * @description Also keep what each tool returned, where this workspace keeps content and the deployment keeps tool output. Turning it off keeps none from the next request on, whatever the deployment allows.
+             */
+            trace_content_tool_output?: boolean | null;
         };
         /**
          * WorkspaceWebSearchConfigPublic

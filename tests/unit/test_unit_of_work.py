@@ -214,6 +214,29 @@ async def test_a_rolled_back_step_names_the_inner_failure_as_its_cause(notes_dat
 
 
 @pytest.mark.asyncio
+async def test_a_failed_savepoint_undoes_only_itself_and_the_step_around_it_commits(notes_database: None) -> None:
+    async with create_unit_of_work() as uow:
+        async with uow:
+            await _write(session_for(uow), "outer")
+            with pytest.raises(ValueError, match="optional read failed"):
+                async with uow.savepoint():
+                    await _write(session_for(uow), "undone")
+                    async with uow:
+                        raise ValueError("optional read failed")
+
+        assert await _committed_bodies() == ["outer"]
+
+
+@pytest.mark.asyncio
+async def test_an_outermost_savepoint_commits_when_it_ends(notes_database: None) -> None:
+    async with create_unit_of_work() as uow:
+        async with uow.savepoint():
+            await _write(session_for(uow), "kept")
+
+        assert await _committed_bodies() == ["kept"]
+
+
+@pytest.mark.asyncio
 async def test_the_session_is_unavailable_outside_a_block(notes_database: None) -> None:
     async with create_unit_of_work() as uow:
         with pytest.raises(OutsideUnitOfWorkError):

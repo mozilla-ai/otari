@@ -69,6 +69,11 @@ ROUTER_HEADER = "Otari-Router"
 # Stable per-conversation id: the trace session a request belongs to, and what
 # automatic routing keeps a conversation on.
 CONVERSATION_HEADER = "Otari-Conversation-Id"
+# Request header a client sends as ``keep`` to have the content of a request it
+# routes kept on its session's trace, where the deployment and the workspace keep
+# content. The client answers for its users' consent. See docs/traces.md.
+TRACE_CONTENT_HEADER = "Otari-Trace-Content"
+TRACE_CONTENT_KEEP = "keep"
 # Response header naming one inference request, minted by the gateway. Clients use
 # it to correlate a response with its usage record.
 REQUEST_ID_HEADER = "Otari-Request-ID"

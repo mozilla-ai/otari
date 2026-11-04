@@ -68,6 +68,7 @@ from sqlalchemy import (
     false,
     func,
     text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlmodel import Field, SQLModel
@@ -939,6 +940,13 @@ class WorkspaceUpdate(SQLModel):
             "report. Only where the deployment keeps content at all."
         ),
     )
+    trace_content_tool_output: bool | None = Field(
+        default=None,
+        description=(
+            "Also keep what each tool returned, where this workspace keeps content and the deployment keeps tool "
+            "output. Turning it off keeps none from the next request on, whatever the deployment allows."
+        ),
+    )
 
 
 class WorkspacePublic(WorkspaceBase):
@@ -947,6 +955,13 @@ class WorkspacePublic(WorkspaceBase):
     created_by_user_id: uuid.UUID | None = None
     trace_content_enabled: bool = Field(
         default=False, description="Whether this workspace keeps what its agent sessions were about."
+    )
+    trace_content_tool_output: bool = Field(
+        default=True,
+        description=(
+            "Whether this workspace also keeps what each tool returned, where it keeps content and the deployment "
+            "keeps tool output."
+        ),
     )
     created_at: datetime
     updated_at: datetime | None = None
@@ -983,6 +998,8 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     # Off until a workspace's managers turn it on. Read by the OTLP receiver,
     # under the deployment's own ``trace_content_enabled``.
     trace_content_enabled: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+    # A workspace may narrow the deployment's ``trace_content_tool_output``, never widen it, so on by default.
+    trace_content_tool_output: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
 
 
 class WorkspaceMemberBase(SQLModel):
