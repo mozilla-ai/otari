@@ -559,7 +559,10 @@ def test_unpriced_image_edit_is_pricing_required(strict_pricing_client: TestClie
     """The multipart edit route is gated like generation, and the provider is never called."""
     c = strict_pricing_client
     c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
-    with patch("gateway.api.routes.images.aimage_edit", new_callable=AsyncMock) as mock:
+    with (
+        patch("gateway.api.routes.images._upload_part", new_callable=AsyncMock) as read,
+        patch("gateway.api.routes.images.aimage_edit", new_callable=AsyncMock) as mock,
+    ):
         resp = c.post(
             f"{API_ROOT}/images/edits",
             data={"model": "openai:gpt-image-1", "prompt": "make it green", "user": "priced-user"},
@@ -568,4 +571,5 @@ def test_unpriced_image_edit_is_pricing_required(strict_pricing_client: TestClie
         )
     assert resp.status_code == 402, resp.text
     assert resp.headers["Otari-Error-Code"] == "pricing_required"
+    read.assert_not_called()
     mock.assert_not_called()

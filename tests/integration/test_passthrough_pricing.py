@@ -7,8 +7,7 @@ row and wrong on the budget is still a billing bug.
 """
 
 import time
-from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Generator
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -26,9 +25,8 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
-from gateway.services.budgets import reserve_budget
 
-from .conftest import build_test_client
+from .conftest import build_test_client, held_reservations
 
 USER_ID = "passthrough-pricing-user"
 
@@ -52,19 +50,6 @@ def _user_key(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
     key = client.post(f"{API_ROOT}/keys", json={"key_name": "pricing", "user_id": USER_ID}, headers=headers)
     assert key.status_code == 200, key.text
     return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
-
-
-@contextmanager
-def _held() -> Iterator[list[Decimal]]:
-    """Every amount the request reserved before calling the provider."""
-    held: list[Decimal] = []
-
-    async def capture(*args: Any, **kwargs: Any) -> Any:
-        held.append(Decimal(str(args[2])))
-        return await reserve_budget(*args, **kwargs)
-
-    with patch("gateway.api.routes._passthrough.reserve_budget", side_effect=capture):
-        yield held
 
 
 def _row(make_session: Callable[[], Session], *, timeout: float = 3.0) -> UsageLog:
@@ -107,7 +92,7 @@ def test_an_images_rate_holds_the_requested_images_and_settles_the_returned_ones
     _price(client, master_key_header, "openai:dall-e-3", unit="image", rate=40000.0)
     headers = _user_key(client, master_key_header)
 
-    with _held() as held:
+    with held_reservations() as held:
         response = _generate(client, headers, _images(2), n=3)
 
     assert response.status_code == 200, response.text
@@ -133,7 +118,7 @@ def test_a_token_rate_on_images_keeps_its_per_image_reading_and_records_the_toke
         input_tokens_details=UsageInputTokensDetails(image_tokens=0, text_tokens=50),
     )
 
-    with _held() as held:
+    with held_reservations() as held:
         response = _generate(client, headers, _images(1, usage), n=1)
 
     assert response.status_code == 200, response.text
@@ -152,7 +137,7 @@ def test_a_requests_rate_on_images_bills_one_request_not_its_rate_per_image(
     _price(client, master_key_header, "openai:dall-e-3", unit="request", rate=2000.0)
     headers = _user_key(client, master_key_header)
 
-    with _held() as held:
+    with held_reservations() as held:
         response = _generate(client, headers, _images(2), n=2)
 
     assert response.status_code == 200, response.text
@@ -184,7 +169,7 @@ def test_rerank_holds_the_search_units_its_documents_imply_and_settles_the_bille
         meta=RerankMeta(billed_units={"search_units": 3}),
     )
 
-    with _held() as held:
+    with held_reservations() as held:
         response = _rerank(client, headers, result, ["short document"] * 250)
 
     assert response.status_code == 200, response.text

@@ -2638,124 +2638,6 @@
         "title": "Body_files-create_file",
         "type": "object"
       },
-      "Body_images-edit_image": {
-        "properties": {
-          "image": {
-            "anyOf": [
-              {
-                "items": {
-                  "contentMediaType": "application/octet-stream",
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The image or images to edit.",
-            "title": "Image"
-          },
-          "image[]": {
-            "anyOf": [
-              {
-                "items": {
-                  "contentMediaType": "application/octet-stream",
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Same as image.",
-            "title": "Image[]"
-          },
-          "mask": {
-            "anyOf": [
-              {
-                "contentMediaType": "application/octet-stream",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mask"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "n": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "N"
-          },
-          "prompt": {
-            "title": "Prompt",
-            "type": "string"
-          },
-          "quality": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quality"
-          },
-          "response_format": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Response Format"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Size"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User"
-          }
-        },
-        "required": [
-          "model",
-          "prompt"
-        ],
-        "title": "Body_images-edit_image",
-        "type": "object"
-      },
       "Body_playground-upload_playground_file": {
         "properties": {
           "file": {
@@ -33590,7 +33472,99 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_images-edit_image"
+                "properties": {
+                  "image": {
+                    "description": "The image or images to edit.",
+                    "items": {
+                      "contentMediaType": "application/octet-stream",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "image[]": {
+                    "description": "Same as image.",
+                    "items": {
+                      "contentMediaType": "application/octet-stream",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "mask": {
+                    "contentMediaType": "application/octet-stream",
+                    "description": "Where to edit: the transparent areas of this PNG.",
+                    "type": "string"
+                  },
+                  "model": {
+                    "title": "Model",
+                    "type": "string"
+                  },
+                  "n": {
+                    "anyOf": [
+                      {
+                        "minimum": 1.0,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "N"
+                  },
+                  "prompt": {
+                    "title": "Prompt",
+                    "type": "string"
+                  },
+                  "quality": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Quality"
+                  },
+                  "response_format": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Response Format"
+                  },
+                  "size": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Size"
+                  },
+                  "user": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "User"
+                  }
+                },
+                "required": [
+                  "model",
+                  "prompt",
+                  "image"
+                ],
+                "type": "object"
               }
             }
           },
@@ -33605,15 +33579,11 @@
             },
             "description": "Successful Response"
           },
+          "413": {
+            "description": "The upload is larger than 50 MB."
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "A required field is missing, or a field is the wrong type."
           }
         },
         "security": [

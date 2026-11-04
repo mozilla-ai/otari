@@ -8735,35 +8735,6 @@ export interface components {
             /** User */
             user?: string | null;
         };
-        /** Body_images-edit_image */
-        "Body_images-edit_image": {
-            /**
-             * Image
-             * @description The image or images to edit.
-             */
-            image?: string[] | null;
-            /**
-             * Image[]
-             * @description Same as image.
-             */
-            "image[]"?: string[] | null;
-            /** Mask */
-            mask?: string | null;
-            /** Model */
-            model: string;
-            /** N */
-            n?: number | null;
-            /** Prompt */
-            prompt: string;
-            /** Quality */
-            quality?: string | null;
-            /** Response Format */
-            response_format?: string | null;
-            /** Size */
-            size?: string | null;
-            /** User */
-            user?: string | null;
-        };
         /** Body_playground-upload_playground_file */
         "Body_playground-upload_playground_file": {
             /** File */
@@ -23222,7 +23193,28 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_images-edit_image"];
+                "multipart/form-data": {
+                    /** @description The image or images to edit. */
+                    image: string[];
+                    /** @description Same as image. */
+                    "image[]"?: string[];
+                    /** @description Where to edit: the transparent areas of this PNG. */
+                    mask?: string;
+                    /** Model */
+                    model: string;
+                    /** N */
+                    n?: number | null;
+                    /** Prompt */
+                    prompt: string;
+                    /** Quality */
+                    quality?: string | null;
+                    /** Response Format */
+                    response_format?: string | null;
+                    /** Size */
+                    size?: string | null;
+                    /** User */
+                    user?: string | null;
+                };
             };
         };
         responses: {
@@ -23235,14 +23227,19 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Validation Error */
+            /** @description The upload is larger than 50 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A required field is missing, or a field is the wrong type. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };

@@ -5,11 +5,15 @@ from typing import Annotated, Any
 
 from any_llm import aimage_edit, aimage_generation
 from any_llm.types.image import ImageGenerationParams, ImagesResponse, sniff_image_format
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import FormData, UploadFile
+from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -27,9 +31,14 @@ router = APIRouter(tags=["images"])
 USAGE_ENDPOINT = "/v1/images/generations"
 USAGE_ENDPOINT_EDITS = "/v1/images/edits"
 
-# OpenAI's limits for gpt-image edits: at most 16 images, each under 50 MB.
+# OpenAI's limits for gpt-image edits: at most 16 images, each under 50 MB. The
+# whole upload is held to one image's limit, so an edit can never hold more than
+# that in memory, however many files it sends.
 _MAX_EDIT_IMAGES = 16
-_MAX_EDIT_IMAGE_BYTES = 50 * 1024 * 1024
+_MAX_EDIT_UPLOAD_BYTES = 50 * 1024 * 1024
+# Room for the multipart framing and the text fields around the files.
+_MAX_EDIT_BODY_BYTES = _MAX_EDIT_UPLOAD_BYTES + 1024 * 1024
+_EDIT_TOO_LARGE = f"The upload is larger than {_MAX_EDIT_UPLOAD_BYTES // (1024 * 1024)} MB"
 
 
 class ImageGenerationRequest(derive_request_base(ImageGenerationParams)):  # type: ignore[misc]
@@ -111,6 +120,86 @@ async def create_image(
     return outcome.result.model_dump()
 
 
+class ImageEditForm(BaseModel):
+    """The text fields of an image edit request.
+
+    Declared by hand: ``derive_request_base`` cannot build a model from
+    ``ImageEditParams``, whose ``image`` is a file type pydantic has no schema
+    for. ``test_edit_form_accepts_every_image_edit_param`` fails when any-llm
+    adds a field this route does not accept.
+    """
+
+    model: str
+    prompt: str
+    n: int | None = Field(default=None, ge=1)
+    size: str | None = None
+    quality: str | None = None
+    # any-llm types this as a ``Literal['url', 'b64_json']``; keep the permissive
+    # ``str`` the generation route accepts.
+    response_format: str | None = None
+    user: str | None = None
+
+
+# ``image[]`` is how OpenAI's SDKs send several images.
+EDIT_IMAGE_FIELDS = ("image", "image[]")
+EDIT_FILE_FIELDS = (*EDIT_IMAGE_FIELDS, "mask")
+
+_FILE_SCHEMA = {"type": "string", "contentMediaType": "application/octet-stream"}
+_EDIT_FORM_SCHEMA = ImageEditForm.model_json_schema()
+_EDIT_UPLOAD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        **_EDIT_FORM_SCHEMA["properties"],
+        "image": {"type": "array", "items": _FILE_SCHEMA, "description": "The image or images to edit."},
+        "image[]": {"type": "array", "items": _FILE_SCHEMA, "description": "Same as image."},
+        "mask": {**_FILE_SCHEMA, "description": "Where to edit: the transparent areas of this PNG."},
+    },
+    "required": [*_EDIT_FORM_SCHEMA["required"], "image"],
+}
+
+
+def _invalid(field: str, msg: str, error_type: str = "value_error") -> RequestValidationError:
+    return RequestValidationError([{"type": error_type, "loc": ("body", field), "msg": msg}])
+
+
+def _edit_fields(form: FormData) -> ImageEditForm:
+    """The text fields, refused the way FastAPI refuses a body it cannot validate."""
+    values = {name: form.get(name) for name in ImageEditForm.model_fields if name in form}
+    for name, value in values.items():
+        if not isinstance(value, str):
+            raise _invalid(name, "Expected a text field, not a file")
+    try:
+        return ImageEditForm.model_validate(values)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{"type": e["type"], "loc": ("body", *e["loc"]), "msg": e["msg"]} for e in exc.errors()]
+        ) from exc
+
+
+def _edit_files(form: FormData) -> tuple[list[UploadFile], UploadFile | None]:
+    """The images and the mask, each refused when sent as text.
+
+    A text ``image`` must never reach any-llm, which reads a string image as a
+    path on this server.
+    """
+    uploads: list[UploadFile] = []
+    for name in EDIT_IMAGE_FIELDS:
+        for value in form.getlist(name):
+            if not isinstance(value, UploadFile):
+                raise _invalid("image", "Expected a file, not a text field")
+            uploads.append(value)
+    if not uploads:
+        raise _invalid("image", "Field required", "missing")
+    if len(uploads) > _MAX_EDIT_IMAGES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"At most {_MAX_EDIT_IMAGES} images can be edited in one request"
+        )
+    mask = form.get("mask")
+    if mask is not None and not isinstance(mask, UploadFile):
+        raise _invalid("mask", "Expected a file, not a text field")
+    return uploads, mask
+
+
 async def _upload_part(upload: UploadFile, field: str) -> tuple[str, bytes, str | None]:
     """Read one uploaded file into the ``(filename, content, content_type)`` tuple any-llm takes.
 
@@ -120,13 +209,7 @@ async def _upload_part(upload: UploadFile, field: str) -> tuple[str, bytes, str 
     Gemini needs the type.
     """
     await upload.seek(0)
-    # One byte past the limit is enough to know it is over, without holding a larger file in memory.
-    data = await upload.read(_MAX_EDIT_IMAGE_BYTES + 1)
-    if len(data) > _MAX_EDIT_IMAGE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"{field} exceeds the maximum size of {_MAX_EDIT_IMAGE_BYTES // (1024 * 1024)} MB",
-        )
+    data = await upload.read()
     content_type = upload.content_type
     if not content_type or content_type == "application/octet-stream":
         sniffed = sniff_image_format(data)
@@ -134,11 +217,17 @@ async def _upload_part(upload: UploadFile, field: str) -> tuple[str, bytes, str 
     return upload.filename or field, data, content_type
 
 
-# The form fields are declared by hand: ``derive_request_base`` cannot build a
-# model from ``ImageEditParams``, whose ``image`` is a file type pydantic has no
-# schema for. ``test_edit_form_accepts_every_image_edit_param`` fails when
-# any-llm adds a field this route does not accept.
-@router.post("/images/edits", response_model=None)
+@router.post(
+    "/images/edits",
+    response_model=None,
+    responses={
+        413: {"description": f"The upload is larger than {_MAX_EDIT_UPLOAD_BYTES // (1024 * 1024)} MB."},
+        422: {"description": "A required field is missing, or a field is the wrong type."},
+    },
+    openapi_extra={
+        "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": _EDIT_UPLOAD_SCHEMA}}}
+    },
+)
 async def edit_image(
     raw_request: Request,
     response: Response,
@@ -146,17 +235,6 @@ async def edit_image(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    model: Annotated[str, Form()],
-    prompt: Annotated[str, Form()],
-    image: Annotated[list[UploadFile] | None, File(description="The image or images to edit.")] = None,
-    # OpenAI's SDKs send several images as ``image[]``.
-    image_list: Annotated[list[UploadFile] | None, File(alias="image[]", description="Same as image.")] = None,
-    mask: Annotated[UploadFile | None, File()] = None,
-    n: Annotated[int | None, Form(ge=1)] = None,
-    size: Annotated[str | None, Form()] = None,
-    quality: Annotated[str | None, Form()] = None,
-    response_format: Annotated[str | None, Form()] = None,
-    user: Annotated[str | None, Form()] = None,
 ) -> dict[str, Any]:
     """OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.
 
@@ -165,20 +243,34 @@ async def edit_image(
     - API key: usage and spend go to the key's own user. A ``user`` naming a
       different user is refused with 403, or ignored when mismatch rejection is off.
     """
-    uploads = [*(image or []), *(image_list or [])]
-    if not uploads:
-        raise RequestValidationError([{"type": "missing", "loc": ("body", "image"), "msg": "Field required"}])
-    if len(uploads) > _MAX_EDIT_IMAGES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"At most {_MAX_EDIT_IMAGES} images can be edited in one request",
-        )
+    # Read here rather than as File parameters, which FastAPI parses before the
+    # auth check runs, and through a capped body, so nobody can make the gateway
+    # store more than one upload's limit.
+    try:
+        async with bounded_body(raw_request, _MAX_EDIT_BODY_BYTES, _EDIT_TOO_LARGE).form(
+            max_files=_MAX_EDIT_IMAGES + 1, max_fields=len(ImageEditForm.model_fields) + 16
+        ) as form:
+            return await _run_edit(raw_request, response, auth_result, db, config, log_writer, form)
+    except ClientDisconnect:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.") from None
 
-    form = {"n": n, "size": size, "quality": quality, "response_format": response_format, "user": user}
-    set_fields: dict[str, Any] = {name: value for name, value in form.items() if value is not None}
+
+async def _run_edit(
+    raw_request: Request,
+    response: Response,
+    auth_result: tuple[APIKey | None, bool],
+    db: AsyncSession,
+    config: GatewayConfig,
+    log_writer: LogWriter,
+    form: FormData,
+) -> dict[str, Any]:
+    fields = _edit_fields(form)
+    uploads, mask = _edit_files(form)
+
+    set_fields = fields.model_dump(exclude_unset=True, exclude={"model", "prompt"})
     forward = _strip_gateway_fields(dict(set_fields))
     request_params = {*set_fields, *(("mask",) if mask is not None else ())}
-    requested_images = n if n is not None else 1
+    requested_images = fields.n if fields.n is not None else 1
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return count_estimate(pricing, meter="images", count=requested_images)
@@ -196,7 +288,7 @@ async def edit_image(
             **mask_part,
             # One image goes as one, not a one-item list, as a direct any-llm call would send it.
             "image": images[0] if len(images) == 1 else images,
-            "prompt": prompt,
+            "prompt": fields.prompt,
         }
         return await aimage_edit(**edit_kwargs)
 
@@ -210,8 +302,8 @@ async def edit_image(
         db=db,
         config=config,
         log_writer=log_writer,
-        model=model,
-        user=user,
+        model=fields.model,
+        user=fields.user,
         call_provider=call_provider,
         request_params=request_params,
         pricing_use_defaults=False,

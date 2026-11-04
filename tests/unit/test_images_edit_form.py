@@ -1,16 +1,14 @@
 """The image edit route declares its form fields by hand, so it must keep up with any-llm's."""
 
 from any_llm.types.image import ImageEditParams
-from fastapi.routing import APIRoute
 
 from gateway.api.routes import images
 from gateway.api.routes._schema_derive import PARAM_FIELD_RENAMES
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 
 
-def _edit_route() -> APIRoute:
-    [route] = [r for r in images.router.routes if isinstance(r, APIRoute) and r.path == "/images/edits"]
-    return route
+def _accepted() -> set[str]:
+    return {*images.ImageEditForm.model_fields, *images.EDIT_FILE_FIELDS}
 
 
 def test_edit_form_accepts_every_image_edit_param() -> None:
@@ -20,10 +18,13 @@ def test_edit_form_accepts_every_image_edit_param() -> None:
         for name in ImageEditParams.model_fields
         if name not in SENSITIVE_PARAM_FIELDS
     }
-    accepted = {param.alias for param in _edit_route().dependant.body_params}
-    assert expected <= accepted, f"images/edits does not accept: {sorted(expected - accepted)}"
+    assert expected <= _accepted(), f"images/edits does not accept: {sorted(expected - _accepted())}"
 
 
 def test_edit_form_takes_the_openai_multi_image_spelling() -> None:
-    accepted = {param.alias for param in _edit_route().dependant.body_params}
-    assert {"image", "image[]", "mask"} <= accepted
+    assert {"image", "image[]", "mask"} <= _accepted()
+
+
+def test_edit_schema_names_every_accepted_field() -> None:
+    """The OpenAPI body is written by hand too, so it must list what the route reads."""
+    assert set(images._EDIT_UPLOAD_SCHEMA["properties"]) == _accepted()

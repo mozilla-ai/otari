@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
+from starlette.types import Message
 
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
@@ -111,6 +112,25 @@ def resolve_user_id(
         raise forbidden_user_error
 
     return key_user_id
+
+
+def bounded_body(request: Request, max_bytes: int, too_large: str) -> Request:
+    """``request``, refusing its body with 413 once more than ``max_bytes`` arrive, whatever ``Content-Length`` says.
+
+    For a route that reads its own multipart form after its auth check: FastAPI
+    parses ``File`` parameters before any dependency runs.
+    """
+    received = 0
+
+    async def receive() -> Message:
+        nonlocal received
+        message = await request.receive()
+        received += len(message.get("body", b""))
+        if received > max_bytes:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, too_large)
+        return message
+
+    return Request(request.scope, receive)
 
 
 def text_from_content(content: Any) -> str:

@@ -10,9 +10,9 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from starlette.datastructures import UploadFile
 from starlette.requests import ClientDisconnect
-from starlette.types import Message
 
 from gateway.api.deps import InferenceServiceDep, require_deployment_operator
+from gateway.api.routes._helpers import bounded_body
 from gateway.schemas.inference import CountryDatabaseStatus
 
 router = APIRouter(
@@ -43,21 +43,6 @@ async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
         yield chunk
 
 
-def _bounded(request: Request) -> Request:
-    """``request``, refusing its body once more than ``_MAX_BODY_BYTES`` arrive, whatever ``Content-Length`` says."""
-    received = 0
-
-    async def receive() -> Message:
-        nonlocal received
-        message = await request.receive()
-        received += len(message.get("body", b""))
-        if received > _MAX_BODY_BYTES:
-            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, _TOO_LARGE)
-        return message
-
-    return Request(request.scope, receive)
-
-
 @router.get("")
 async def get_country_database(service: InferenceServiceDep) -> CountryDatabaseStatus:
     """Describe the stored country file, and say whether ``client_country_database`` is read instead."""
@@ -81,7 +66,7 @@ async def upload_country_database(request: Request, service: InferenceServiceDep
     """
     # Read here rather than as a File parameter, which FastAPI parses before the operator gate runs.
     try:
-        async with _bounded(request).form(max_files=1, max_fields=0) as form:
+        async with bounded_body(request, _MAX_BODY_BYTES, _TOO_LARGE).form(max_files=1, max_fields=0) as form:
             file = form.get("file")
             if not isinstance(file, UploadFile):
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Send the country file in the field 'file'.")

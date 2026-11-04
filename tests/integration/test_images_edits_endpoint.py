@@ -1,15 +1,19 @@
 """Tests for the POST /api/v1/images/edits endpoint."""
 
+from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from any_llm.exceptions import UnsupportedParameterError
 from any_llm.types.image import Image, ImagesResponse
 from fastapi.testclient import TestClient
 from openai.types.images_response import Usage, UsageInputTokensDetails
+from starlette.requests import ClientDisconnect
 
 from gateway.core.config import API_ROOT
+
+from .conftest import held_reservations
 
 _PATCH_TARGET = "gateway.api.routes.images.aimage_edit"
 _EDITS_URL = f"{API_ROOT}/images/edits"
@@ -189,15 +193,61 @@ def test_edits_refuses_too_many_images(client: TestClient, api_key_header: dict[
 
 
 @pytest.mark.parametrize("field", ["image", "mask"])
-def test_edits_refuses_an_oversized_file(client: TestClient, api_key_header: dict[str, str], field: str) -> None:
-    files = {"image": ("cat.png", _PNG, "image/png"), field: (f"{field}.png", _PNG + b"\x00", "image/png")}
+def test_edits_refuses_an_upload_over_the_cap(client: TestClient, api_key_header: dict[str, str], field: str) -> None:
+    """The cap is on the whole body, so a large mask counts as much as a large image."""
+    files = {"image": ("cat.png", _PNG, "image/png"), field: (f"{field}.png", b"\x00" * 4096, "image/png")}
     with (
-        patch("gateway.api.routes.images._MAX_EDIT_IMAGE_BYTES", len(_PNG)),
+        patch("gateway.api.routes.images._MAX_EDIT_BODY_BYTES", 2048),
         patch(_PATCH_TARGET, new_callable=AsyncMock) as mock,
     ):
         resp = client.post(_EDITS_URL, data=_form(), files=files, headers=api_key_header)
     assert resp.status_code == 413
-    assert field in resp.json()["detail"]
+    assert "larger than" in resp.json()["detail"]
+    mock.assert_not_called()
+
+
+def test_edits_parses_no_upload_without_credentials(client: TestClient) -> None:
+    """The auth check answers before the body is read, so an anonymous upload is never stored."""
+    with patch("gateway.api.routes.images.bounded_body") as bounded:
+        resp = client.post(_EDITS_URL, data=_form(), files={"image": ("cat.png", b"\x00" * 4096, "image/png")})
+    assert resp.status_code == 401
+    bounded.assert_not_called()
+
+
+def test_edits_interrupted_upload(client: TestClient, api_key_header: dict[str, str]) -> None:
+    body = MagicMock(form=MagicMock(side_effect=ClientDisconnect()))
+    with patch("gateway.api.routes.images.bounded_body", return_value=body):
+        resp = client.post(
+            _EDITS_URL, data=_form(), files={"image": ("cat.png", _PNG, "image/png")}, headers=api_key_header
+        )
+    assert resp.status_code == 400
+    assert "interrupted" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("field", ["prompt", "model"])
+def test_edits_refuses_a_text_field_sent_as_a_file(
+    client: TestClient, api_key_header: dict[str, str], field: str
+) -> None:
+    form = _form()
+    del form[field]
+    files = [("image", ("cat.png", _PNG, "image/png")), (field, ("x.txt", b"hi", "text/plain"))]
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock:
+        resp = client.post(_EDITS_URL, data=form, files=files, headers=api_key_header)
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", field]
+    mock.assert_not_called()
+
+
+def test_edits_refuses_a_mask_sent_as_text(client: TestClient, api_key_header: dict[str, str]) -> None:
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock:
+        resp = client.post(
+            _EDITS_URL,
+            data=_form(mask="/etc/passwd"),
+            files={"image": ("cat.png", _PNG, "image/png")},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "mask"]
     mock.assert_not_called()
 
 
@@ -242,16 +292,42 @@ def test_edits_refuses_zero_images(client: TestClient, api_key_header: dict[str,
     mock.assert_not_called()
 
 
-def test_edits_reads_no_file_for_a_refused_request(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """A request refused before the provider call (here, a master key without ``user``) never reads its files."""
+def _blocked_user(client: TestClient, headers: dict[str, str]) -> str:
+    assert client.post(f"{API_ROOT}/users", json={"user_id": "edit-user", "blocked": True}, headers=headers).is_success
+    return "edit-user"
+
+
+def _over_budget_user(client: TestClient, headers: dict[str, str]) -> str:
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0}, headers=headers).json()
+    created = client.post(
+        f"{API_ROOT}/users", json={"user_id": "edit-user", "budget_id": budget["budget_id"]}, headers=headers
+    )
+    assert created.is_success
+    return "edit-user"
+
+
+@pytest.mark.parametrize(
+    ("make_user", "status_code"),
+    [
+        pytest.param(lambda _client, _headers: None, 400, id="master-key-without-user"),
+        pytest.param(_blocked_user, 403, id="blocked-user"),
+        pytest.param(_over_budget_user, 403, id="over-budget-user"),
+    ],
+)
+def test_edits_reads_no_file_for_a_refused_request(
+    client: TestClient, master_key_header: dict[str, str], make_user: Any, status_code: int
+) -> None:
+    """A request the gateway refuses before the provider call never loads its files."""
+    user = make_user(client, master_key_header)
+    form = _form() if user is None else _form(user=user)
     with (
         patch("gateway.api.routes.images._upload_part", new_callable=AsyncMock) as read,
         patch(_PATCH_TARGET, new_callable=AsyncMock) as mock,
     ):
         resp = client.post(
-            _EDITS_URL, data=_form(), files={"image": ("cat.png", _PNG, "image/png")}, headers=master_key_header
+            _EDITS_URL, data=form, files={"image": ("cat.png", _PNG, "image/png")}, headers=master_key_header
         )
-    assert resp.status_code == 400
+    assert resp.status_code == status_code, resp.text
     read.assert_not_called()
     mock.assert_not_called()
 
@@ -266,7 +342,10 @@ def test_edits_bills_per_image_and_logs_usage(
         output_tokens=1751,
         total_tokens=2883,
     )
-    with patch(_PATCH_TARGET, new_callable=AsyncMock, return_value=_edit_response(n=2, usage=usage)):
+    with (
+        held_reservations() as held,
+        patch(_PATCH_TARGET, new_callable=AsyncMock, return_value=_edit_response(n=2, usage=usage)),
+    ):
         resp = client.post(
             _EDITS_URL,
             data=_form(n="3"),
@@ -274,6 +353,8 @@ def test_edits_bills_per_image_and_logs_usage(
             headers=api_key_header,
         )
     assert resp.status_code == 200, resp.text
+    # Three images held before the call, two billed after it.
+    assert held == [Decimal("0.12")]
 
     [row] = client.get(f"{API_ROOT}/usage", params={"endpoint": "/v1/images/edits"}, headers=master_key_header).json()
     assert row["status"] == "success"
