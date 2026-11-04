@@ -430,6 +430,7 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/budgets/_scoped_enforcement.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
+    "gateway/services/identity/_connection_clients.py",
     "gateway/services/maintenance_mode_service.py",
     "gateway/services/master_key_service.py",
     "gateway/services/merged_catalog_service.py",
