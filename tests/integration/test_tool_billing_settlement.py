@@ -525,6 +525,8 @@ async def test_a_search_whose_provider_reports_its_cost_is_billed_that_cost(
     [line] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls"]
     assert (line["label"], line["units"]) == (f"fake:{_FAKE_SEARCH}", 1)
     assert line["cost"] == pytest.approx(0.005)
+    [pages] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_fetch_calls"]
+    assert pages["label"] == f"fake:{_FAKE_FETCH}"
 
 
 @pytest.mark.asyncio

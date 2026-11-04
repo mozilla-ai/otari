@@ -270,8 +270,9 @@ backend runs (the legacy settings, or a Tavily, Brave or SearXNG organization
 key) reads its pages on the built-in fetcher and records no fetch, until that
 backend is removed. With `require_pricing` on, a search whose pages would be
 read through a fetch instance with no price is refused with `402` before it
-runs, the detail naming that instance's row; `web_search_extract: false` turns
-the reading of pages off.
+runs, the detail naming that instance's row; a search the older backend runs
+is not, since it records no fetch. `web_search_extract: false` turns the
+reading of pages off.
 
 ### Searches a provider runs itself
 
