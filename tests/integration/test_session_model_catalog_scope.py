@@ -758,6 +758,37 @@ def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient,
     assert credentials[_OPENAI_MODEL] == "organization"
 
 
+def test_an_organization_key_declared_zero_data_retention_marks_its_offerings(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The declaration on Alpha's key reaches its offerings and nobody else's."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    session = db_session_factory()
+    try:
+        key = session.get(OrgProviderKey, world.keys["alpha_openai"])
+        assert key is not None
+        key.zero_data_retention = True
+        session.commit()
+    finally:
+        session.close()
+
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    flags: dict[str, bool] = {}
+    try:
+        listing = client.get(f"{API_ROOT}/catalog/models", params={"zero_data_retention": True})
+        assert listing.status_code == status.HTTP_200_OK, listing.text
+        for model in listing.json()["models"]:
+            assert model["zero_data_retention_providers"] == ["openai"]
+            detail = client.get(f"{API_ROOT}/catalog/models/{model['id']}")
+            for offering in detail.json()["offerings"]:
+                flags[offering["selector"]] = offering["zero_data_retention"]
+    finally:
+        client.cookies.clear()
+
+    assert flags[_OPENAI_MODEL] is True
+    assert _MISTRAL_MODEL not in flags
+
+
 def test_the_grouped_catalog_labels_a_hosted_offering_hosted_for_an_operator(client: TestClient, world: _World) -> None:
     """The operator may price a hosted model, but its key is still the deployment's, not their organization's."""
     bind_model_provider(client, HostedModelProvider("mistral"))

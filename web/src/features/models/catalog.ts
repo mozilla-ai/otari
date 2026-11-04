@@ -139,6 +139,8 @@ export interface CatalogFilters {
   maxInput: number
   pricing: string
   source: string
+  /** Only models a provider declared to keep no prompt or completion data offers. */
+  zeroDataRetention: boolean
   /** Days back from `now` a release must fall within; 0 for any. */
   releasedWithinDays: number
 }
@@ -154,6 +156,7 @@ export const EMPTY_FILTERS: CatalogFilters = {
   maxInput: 0,
   pricing: "all",
   source: "all",
+  zeroDataRetention: false,
   releasedWithinDays: 0,
 }
 
@@ -169,6 +172,7 @@ export function activeFilterCount(filters: CatalogFilters): number {
     (filters.maxInput > 0 ? 1 : 0) +
     (filters.pricing !== "all" ? 1 : 0) +
     (filters.source !== "all" ? 1 : 0) +
+    (filters.zeroDataRetention ? 1 : 0) +
     (filters.releasedWithinDays > 0 ? 1 : 0)
   )
 }
@@ -262,6 +266,7 @@ export const CATALOG_URL_DEFAULTS = {
   max_input: "0",
   pricing: "all",
   source: "all",
+  zdr: "",
   released: "0",
   sort: "newest",
   column: "name",
@@ -310,6 +315,7 @@ export function catalogListFromUrl(
       maxInput: Number(offered(PRICE_OPTIONS, "max_input")),
       pricing: offered(PRICING_OPTIONS, "pricing"),
       source: offered(SOURCE_OPTIONS, "source"),
+      zeroDataRetention: url.get("zdr") === "1",
       releasedWithinDays: Number(offered(RELEASE_OPTIONS, "released")),
     },
     sort: offered(SORT_OPTIONS, "sort"),
@@ -372,6 +378,7 @@ export function catalogListToUrl(
     max_input: filters.maxInput,
     pricing: filters.pricing,
     source: filters.source,
+    zdr: filters.zeroDataRetention ? "1" : "",
     released: filters.releasedWithinDays,
     sort: list.sort,
     column: list.tableSort.column,
@@ -448,6 +455,7 @@ export function catalogRequest(
     max_input: filters.maxInput || undefined,
     pricing: filters.pricing as CatalogQueryParams["pricing"],
     source: filters.source as CatalogQueryParams["source"],
+    zero_data_retention: filters.zeroDataRetention || undefined,
     released_within_days: filters.releasedWithinDays || undefined,
     sort: column,
     direction,

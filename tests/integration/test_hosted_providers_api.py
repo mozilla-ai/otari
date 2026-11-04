@@ -343,6 +343,24 @@ def test_an_edit_keeps_closes_and_lifts_the_supported_countries(
     assert patch({"supported_countries": None}) is None
 
 
+def test_a_provider_keeps_its_zero_data_retention_declaration(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    assert _create(client, master_key_header)["zero_data_retention"] is False
+    client.delete(f"{PATH}/openai", headers=master_key_header)
+    assert _create(client, master_key_header, zero_data_retention=True)["zero_data_retention"] is True
+
+    def patch(body: dict[str, Any]) -> Any:
+        response = client.patch(f"{PATH}/openai", json=body, headers=master_key_header)
+        assert response.status_code == 200, response.text
+        return response.json()["zero_data_retention"]
+
+    assert patch({"enabled": False}) is True
+    assert patch({"zero_data_retention": False}) is False
+    [listed] = client.get(PATH, headers=master_key_header).json()["data"]
+    assert listed["zero_data_retention"] is False
+
+
 @pytest.mark.parametrize("code", ["USA", "1A", "", "XX"])
 def test_a_value_that_is_no_country_code_is_refused(
     client: TestClient, master_key_header: dict[str, str], code: str

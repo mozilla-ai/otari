@@ -47,6 +47,7 @@ class _HostedProviderEntryShape(BaseModel):
     restricted_to_organization_id: uuid.UUID | None = None
     models: list[str] | None = None
     supported_countries: list[str] | None = None
+    zero_data_retention: bool = False
 
     @field_validator("supported_countries")
     @classmethod
@@ -69,6 +70,8 @@ class HostedProviderEntry:
     models: tuple[str, ...]
     # The countries whose requests it serves, or None for every country.
     supported_countries: tuple[str, ...] | None = None
+    # The operator's declaration that the upstream keeps no prompt or completion data.
+    zero_data_retention: bool = False
 
 
 def _entry_error(name: str, exc: ValidationError) -> ValueError:
@@ -121,6 +124,7 @@ def parse_hosted_providers(raw: Mapping[str, Any]) -> dict[str, HostedProviderEn
             restricted_to_organization_id=shape.restricted_to_organization_id,
             models=tuple(shape.models or ()),
             supported_countries=tuple(shape.supported_countries) if shape.supported_countries is not None else None,
+            zero_data_retention=shape.zero_data_retention,
         )
     return entries
 

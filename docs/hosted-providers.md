@@ -38,6 +38,26 @@ The models a key serves, its serving switches and what a refusal on that path
 returns are described in
 [Who is shown which models](models.md#who-is-shown-which-models).
 
+### Zero data retention
+
+A hosted provider and an organization's provider key can each be declared
+zero data retention (`zero_data_retention`): the account the key belongs to
+keeps no prompts or completions. Otari cannot check this and enforces nothing
+on it. It records what the operator or the organization says about their
+agreement with the provider, and the Models page shows it beside each
+offering and filters on it (see
+[Browsing the grouped catalog](models.md#browsing-the-grouped-catalog)).
+
+Whose declaration counts depends on whose key serves the offering:
+
+- A `hosted` offering takes the hosted provider's declaration.
+- An offering on the organization's own key counts as zero data retention
+  only while every usable key the organization holds for that provider is
+  declared. Which key a workspace calls on depends on its defaults and
+  overrides, so one undeclared key means a request may reach an account that
+  keeps data.
+- A `providers:` instance from `config.yml` is never declared.
+
 ### Hosted provider names
 
 A hosted provider is named after its provider by default. A name of its own,
@@ -224,6 +244,7 @@ hosted_providers:
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
 | `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](configuration.md#supported-countries). |
+| `zero_data_retention` | `true` declares that the provider keeps no prompts or completions. Defaults to `false`. See [Zero data retention](#zero-data-retention). |
 
 A key may be left out for the self-hosted backends `vllm`, `ollama`,
 `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`; for `vertexai` and
@@ -324,6 +345,10 @@ menu, and is listed only for a deployment operator.
   stores.
 - **Serve models not on its list**, in both dialogs, sets
   `serves_unlisted_models`.
+- **Zero data retention**, in both dialogs, sets `zero_data_retention`, and a
+  provider declared so carries a badge saying it. The same box is on each
+  key's dialog on the organization's Providers page. See
+  [Zero data retention](#zero-data-retention).
 - **Models** carry a serving switch and a price, set per million tokens or per
   1,000 requests or images; a model nothing prices arrives switched off.
 - **Refresh models** asks one provider again. **Update catalog** fetches the

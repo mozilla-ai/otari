@@ -24,6 +24,7 @@ import {
   ProviderCredentialFields,
   parseClientArgs,
 } from "@/features/providers/providerFields"
+import { ZeroDataRetentionField } from "@/features/providers/ZeroDataRetentionField"
 import {
   useCreateHostedProvider,
   useTestHostedProvider,
@@ -56,6 +57,7 @@ interface ProviderDraft {
   clientArgs: string
   servesUnlistedModels: boolean
   supportedCountries: string
+  zeroDataRetention: boolean
 }
 
 const EMPTY_DRAFT: ProviderDraft = {
@@ -67,6 +69,7 @@ const EMPTY_DRAFT: ProviderDraft = {
   clientArgs: "",
   servesUnlistedModels: false,
   supportedCountries: "",
+  zeroDataRetention: false,
 }
 
 export function AddHostedProviderForm({
@@ -136,6 +139,7 @@ export function AddHostedProviderForm({
       {
         ...payload,
         serves_unlisted_models: draft.servesUnlistedModels,
+        zero_data_retention: draft.zeroDataRetention,
         ...(countries.value === null
           ? {}
           : { supported_countries: countries.value }),
@@ -222,6 +226,12 @@ export function AddHostedProviderForm({
         isSelected={draft.servesUnlistedModels}
         onChange={(servesUnlistedModels) =>
           setDraft({ ...draft, servesUnlistedModels })
+        }
+      />
+      <ZeroDataRetentionField
+        isSelected={draft.zeroDataRetention}
+        onChange={(zeroDataRetention) =>
+          setDraft({ ...draft, zeroDataRetention })
         }
       />
       <SupportedCountriesField
