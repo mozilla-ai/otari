@@ -222,7 +222,8 @@ class HealthCheckService:
     async def run_if_due(self, list_offerings: ListOfferings) -> HealthCheckRunPublic | None:
         """Claim a due run and carry it out, or return None when none is due or another replica claimed it.
 
-        The probes run outside any transaction, because a run takes up to a minute per offering.
+        The probes run outside any transaction, because a run takes up to a minute per offering. A model its
+        provider refuses to serve is switched off, as a request meeting that refusal would.
         """
         now = self._clock()
         async with self._uow:
@@ -293,7 +294,18 @@ class HealthCheckService:
             await self._prune(finished)
             public = _run_public(run)
 
-        await self._alert(run_id, outcomes, {offering.selector for offering in offerings}, finished)
+        # Every offering is reached on the deployment's own credential, so a refusal of the model itself
+        # switches it off as it would on a request, and it leaves this run's alert with nothing to fix.
+        refused = {o.target.selector for o in outcomes if o.refusal is not None}
+        for outcome in outcomes:
+            if outcome.refusal is not None:
+                await self.switch_off_unavailable(outcome.target.provider, outcome.target.model, outcome.refusal)
+        await self._alert(
+            run_id,
+            [o for o in outcomes if o.target.selector not in refused],
+            {offering.selector for offering in offerings} - refused,
+            finished,
+        )
         return public
 
     async def switch_off_unavailable(self, provider: str, model: str, refusal: str) -> bool:

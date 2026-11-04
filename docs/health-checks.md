@@ -86,7 +86,9 @@ host, so mail from several deployments says which one it is about.
 
 The same list is emailed when a hosted model is switched off because its
 provider refused to serve it (see
-[Hosted providers](hosted-providers.md)), once per model.
+[Hosted providers](hosted-providers.md)), once per model. A run that meets
+that refusal switches the model off itself, and the model is then left out of
+the run's alert.
 
 Alerts need outgoing mail; see [Configuration](configuration.md) for the
 `smtp_*` settings, `mail_from_email` and `public_base_url`. When no address

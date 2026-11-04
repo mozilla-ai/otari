@@ -625,6 +625,38 @@ async def test_disable_all_switches_off_the_failing_models_and_they_leave_the_li
     assert await service.disable_failing() == 0
 
 
+class _StatusError(Exception):
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@pytest.mark.asyncio
+async def test_a_model_its_provider_refuses_is_switched_off_by_the_run(
+    async_db: AsyncSession, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mail_on(test_config, monkeypatch)
+    roster = _Roster()
+    service = _service(async_db, test_config, _Clock(), roster)
+    await service.update_settings(HealthCheckSettingsUpdate(alert_emails=["ops@example.com"]))
+    outbox = _Outbox()
+
+    async def llama_refused(*, model: str, **_kwargs: Any) -> object:
+        if model == "llama":
+            msg = f"Unable to access non-serverless model {model}. Please visit the console to create an endpoint."
+            raise _StatusError(msg, 400)
+        return object()
+
+    await _run_with(service, llama_refused, outbox)
+
+    assert roster.switched_off == [{"deepinfra": {"llama"}}]
+    # Told once that it was switched off, and not again as a model that is down.
+    assert outbox.subjects == ["Otari on otari.example.com: deepinfra:llama switched off"]
+    assert "non-serverless model llama" in outbox.sent[0][1].text
+    status = await service.get_status()
+    assert "deepinfra:llama" not in {result.selector for result in status.results}
+
+
 @pytest.mark.asyncio
 async def test_an_outage_that_ends_is_kept_on_record(async_db: AsyncSession, test_config: GatewayConfig) -> None:
     """A model that answers again leaves the failing list; how long it was down is kept past the results."""
