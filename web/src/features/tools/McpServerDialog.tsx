@@ -10,7 +10,7 @@ import { Field } from "@/design-system/forms/Field"
 import { RadioGroup, type RadioOption } from "@/design-system/forms/RadioGroup"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
-import { ALL_TOOLS } from "@/features/tools/mcpAccess"
+import { ALL_TOOLS, isLiteralToolName } from "@/features/tools/mcpAccess"
 import { parseAllowedTools, urlProblem } from "@/features/tools/mcpServerForm"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
 import { useTestWorkspaceMcpServerConnection } from "@/shared/api/tools"
@@ -279,7 +279,7 @@ export function McpServerDialog({
         ) : null}
         {listed ? (
           <ToolPicker
-            tools={listed.tools ?? []}
+            tools={(listed.tools ?? []).filter(isLiteralToolName)}
             allowed={allowed}
             onToggle={toggleTool}
           />

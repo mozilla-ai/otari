@@ -26,7 +26,13 @@ from gateway.models.budgets import Budget
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
+from gateway.repositories.users_repository import (
+    UserFilter,
+    count_users,
+    in_organization,
+    lock_live_users,
+    page_users,
+)
 from gateway.services.budgets import budget_window
 from gateway.services.model_access import revoke_user_mcp_grants, validate_allowed_models, validate_allowed_tools
 from gateway.services.organizations import AccessLists
@@ -432,6 +438,8 @@ async def delete_user(
 ) -> None:
     """Delete a user in the caller's organization, and erase their telemetry and agent traces."""
     user = await _load_user_in_organization(db, user_id, organization_id)
+    # Before anything is erased, so a grant to this user committing meanwhile waits and is then refused.
+    await lock_live_users(db, [user_id])
 
     # Explicit erasure, not a database ON DELETE cascade: this endpoint
     # soft-deletes the user (deleted_at), so the users row is never hard-deleted

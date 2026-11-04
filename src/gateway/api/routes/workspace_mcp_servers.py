@@ -163,9 +163,10 @@ async def add_workspace_mcp_server_grants(
     Organization owners/admins or this workspace's owners/admins.
 
     A key or user that already has a grant on the server gets these tools instead. A key must
-    belong to this workspace, and a user must own a key in it or be an active member of it, named
-    by their identity's id; either is otherwise refused with a 400. Answers with the server's whole
-    access list.
+    belong to this workspace, and a user must own a key in it or be someone the Playground lets in
+    (a member of the workspace, or an owner or admin of its organization), named by their
+    identity's canonical id; a deleted user, or anyone else, is refused with a 400. Answers with the
+    server's whole access list.
     """
     return await service.add_grants(user=current_identity, workspace_id=workspace_id, server_id=server_id, request=body)
 

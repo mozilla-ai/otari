@@ -307,6 +307,43 @@ describe("McpServerDetailPage, Access", () => {
     ).toBeVisible()
   })
 
+  it("offers an organization admin outside the workspace, whom the Playground lets in", async () => {
+    mockMcpServerApi({
+      server: SERVER,
+      members: [
+        ...MEMBERS,
+        organizationMember({
+          organization_member_id: "m-dana",
+          user_id: "identity-dana",
+          attribution_user_id: null,
+          full_name: "Dana",
+          role: "admin",
+        }),
+        organizationMember({
+          organization_member_id: "m-eve",
+          user_id: "identity-eve",
+          attribution_user_id: null,
+          full_name: "Eve",
+          role: "member",
+        }),
+      ],
+      workspaceMemberIds: ["identity-bo", "identity-alice"],
+      keys: [BO_LAPTOP],
+    })
+    const user = userEvent.setup()
+    await openPage()
+
+    await user.click(await screen.findByRole("button", { name: "Add rule" }))
+    const dialog = await screen.findByRole("dialog", { name: "Add rule" })
+
+    expect(
+      await within(dialog).findByRole("checkbox", { name: /^Dana/ }),
+    ).toBeVisible()
+    expect(
+      within(dialog).queryByRole("checkbox", { name: /^Eve/ }),
+    ).not.toBeInTheDocument()
+  })
+
   it("edits one rule", async () => {
     const calls = mockMcpServerApi({
       server: SERVER,

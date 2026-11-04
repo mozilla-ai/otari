@@ -6,6 +6,7 @@ request-server switch run against the real database. URLs are public IP literals
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
 import uuid
@@ -18,24 +19,27 @@ import pytest
 from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent, ToolAnnotations
 from mcp.types import Tool as MCPTool
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, CONVERSATION_HEADER
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
+from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
 from gateway.models.tenancy import User as Identity
-from gateway.models.tenancy import Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
 from gateway.models.traces import Trace, TraceSpan
 from gateway.models.users import User as BillingUser
 from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
+from gateway.repositories.users_repository import lock_live_users
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CODE_SERVER_NOT_FOUND, CODE_TOOL_NOT_ALLOWED
 from gateway.services.model_access import resolve_request_mcp_access
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import workspace_mcp_server_service
+
+from .conftest import _to_async_url
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 CLIENT_EXECUTION_ID = "6e51b3bc-6f48-4c68-a61e-0786bc80cd67"
@@ -324,7 +328,7 @@ def test_the_connection_check_leaves_out_a_tool_named_like_a_pattern(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A tool the server names ``*`` or ``search*`` would be stored as a wildcard once a manager ticked it."""
-    monkeypatch.setattr(sys.modules[__name__], "TOOL_NAMES", ("list_issues", "*", "search*", "@read", " @read"))
+    monkeypatch.setattr(sys.modules[__name__], "TOOL_NAMES", ("list_issues", "*", "search*", "@read", " @read", ","))
     key = _new_key(client, master_key_header)
     row = _store(test_db, _workspace_id(test_db, key), "github")
 
@@ -362,7 +366,7 @@ def test_a_catalog_stored_before_the_screen_is_read_back_without_pattern_names(
     row.health = {
         "status": "healthy",
         "checked_at": "2026-01-01T00:00:00+00:00",
-        "tools": ["list_issues", "*", " @read"],
+        "tools": ["list_issues", "*", " @read", "get_issue,delete_issue"],
         "read_only_hinted_tools": ["list_issues", " @read"],
     }
     test_db.commit()
@@ -646,6 +650,88 @@ def test_a_member_without_a_key_can_be_given_a_rule_and_an_outsider_cannot(
     assert refused.status_code == 400, refused.text
 
 
+def test_a_member_named_by_another_spelling_of_their_id_is_refused(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """Their Playground binds the canonical spelling, so a rule under another one would restrict nobody."""
+    key = _new_key(client, master_key_header)
+    workspace = _workspace_id(test_db, key)
+    row = _store(test_db, workspace, "github")
+    home = test_db.get(Workspace, workspace)
+    assert home is not None
+    member = Identity(email="upper@example.test", full_name="Upper", active_organization_id=home.organization_id)
+    test_db.add(member)
+    test_db.commit()
+    test_db.add(WorkspaceMember(workspace_id=workspace, user_id=member.id, role="member", status="active"))
+    test_db.commit()
+
+    refused = client.post(
+        f"{_servers(workspace)}/{row.id}/access/grants",
+        json={"user_ids": [str(member.id).upper()], "tools": []},
+        headers=master_key_header,
+    )
+
+    assert refused.status_code == 400, refused.text
+
+
+def test_an_organization_admin_with_no_workspace_row_can_be_given_a_rule(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """The Playground lets an organization owner or admin into every workspace, so a rule can name them too."""
+    key = _new_key(client, master_key_header)
+    workspace = _workspace_id(test_db, key)
+    row = _store(test_db, workspace, "github")
+    home = test_db.get(Workspace, workspace)
+    assert home is not None
+    admin = Identity(email="admin@example.test", full_name="Admin", active_organization_id=home.organization_id)
+    plain = Identity(email="plain@example.test", full_name="Plain", active_organization_id=home.organization_id)
+    test_db.add_all([admin, plain])
+    test_db.commit()
+    test_db.add_all(
+        [
+            OrganizationMember(organization_id=home.organization_id, user_id=admin.id, role="admin", status="active"),
+            OrganizationMember(organization_id=home.organization_id, user_id=plain.id, role="member", status="active"),
+        ]
+    )
+    test_db.commit()
+
+    granted = _grant(client, master_key_header, row, [], users=[str(admin.id)])
+    refused = client.post(
+        f"{_servers(workspace)}/{row.id}/access/grants",
+        json={"user_ids": [str(plain.id)], "tools": []},
+        headers=master_key_header,
+    )
+
+    assert [grant["user_id"] for grant in granted["grants"]] == [str(admin.id)]
+    assert refused.status_code == 400, refused.text
+
+
+@pytest.mark.asyncio
+async def test_a_grant_and_the_user_s_deletion_cannot_interleave(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session], postgres_url: str
+) -> None:
+    """Both lock the user's row first, so a grant waiting on a deletion sees the user deleted once it commits."""
+    created = client.post(f"{API_ROOT}/users", json={"user_id": "racer"}, headers=master_key_header)
+    assert created.status_code in (200, 201), created.text
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as deleting, sessions() as granting:
+            assert await lock_live_users(deleting, ["racer"]) == {"racer"}
+            await deleting.execute(
+                update(BillingUser).where(BillingUser.user_id == "racer").values(deleted_at=func.now())
+            )
+
+            waiting = asyncio.ensure_future(lock_live_users(granting, ["racer"]))
+            await asyncio.sleep(0.3)
+            assert not waiting.done()
+            await deleting.commit()
+
+            assert await asyncio.wait_for(waiting, timeout=10) == set()
+    finally:
+        await engine.dispose()
+
+
 def test_a_deleted_user_s_grants_do_not_come_back_with_a_user_recreated_under_its_id(
     client: TestClient, master_key_header: dict[str, str], test_db: Session
 ) -> None:
@@ -752,6 +838,35 @@ def test_the_switch_also_refuses_an_mcp_server_the_provider_would_dial(
 
     with patch("gateway.api.routes.responses.aresponses") as provider:
         refused = client.post(f"{API_ROOT}/responses", json=body, headers=api_key_header)
+
+    assert refused.status_code == 400, refused.text
+    assert "does not let a request name MCP servers" in refused.text
+    provider.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["mcp_servers", "mcpServers"])
+def test_the_switch_also_refuses_mcp_servers_handed_to_gemini(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    field: str,
+) -> None:
+    """Gemini takes MCP servers on a tool entry, in either spelling its SDK accepts, and dials them itself."""
+    workspace = _workspace_id(test_db, api_key_obj)
+    switched = client.patch(
+        f"{API_ROOT}/workspaces/{workspace}", json={"request_mcp_servers_allowed": False}, headers=master_key_header
+    )
+    assert switched.status_code == 200, switched.text
+    body = {
+        "model": "gemini:gemini-2.5-flash",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [{field: [{"name": "external", "streamable_http_transport": {"url": PUBLIC_URL}}]}],
+    }
+
+    with patch("gateway.api.routes.chat.acompletion") as provider:
+        refused = client.post(f"{API_ROOT}/chat/completions", json=body, headers=api_key_header)
 
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text

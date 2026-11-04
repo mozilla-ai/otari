@@ -132,6 +132,23 @@ async def live_attribution_user_ids(db: AsyncSession, user_ids: Sequence[str]) -
     return set(rows.scalars().all())
 
 
+async def lock_live_users(db: AsyncSession, user_ids: Sequence[str]) -> set[str]:
+    """Lock the request-plane rows of ``user_ids`` until the caller commits, and return which are not deleted.
+
+    What serializes a user's deletion against anything granting that user access: each takes this lock first, so
+    whichever commits second sees the other's write. Rows are locked in id order, so two callers cannot deadlock.
+    """
+    if not user_ids:
+        return set()
+    rows = await db.execute(
+        select(User.user_id, User.deleted_at)
+        .where(User.user_id.in_(list(user_ids)))
+        .order_by(User.user_id)
+        .with_for_update()
+    )
+    return {user_id for user_id, deleted in rows.tuples().all() if deleted is None}
+
+
 async def provision_attribution_users(db: AsyncSession, user_ids: Sequence[str]) -> set[str]:
     """Mint a request-plane row for each of ``user_ids`` that has none, and return the ids that are usable.
 

@@ -220,7 +220,8 @@ read-only.
   `request_mcp_servers_allowed` with `PATCH /api/v1/workspaces/{workspace_id}` refuses
   such a request with a `400`, so that a workspace's ACLs cannot be stepped around.
   The switch covers a provider's own remote MCP too: a Responses tool of
-  `type: "mcp"` asks the provider to dial a server, so it is refused the same way.
+  `type: "mcp"`, or a Gemini tool carrying `mcp_servers` (`mcpServers`), asks the
+  provider to dial a server, so it is refused the same way.
   The master key may still name servers; a dashboard session may not.
 
 The ACL is managed under
@@ -231,7 +232,7 @@ owners/admins or the workspace's owners/admins:
 |---|---|
 | `PATCH /` with `everyone_tools` | change the default policy |
 | `GET /access` | the default policy and every rule, each naming its key (with its name, owner and whether it is active) or its user |
-| `POST /access/grants` | add the same rule for several `api_key_ids` and `user_ids`; a key or user that already has a rule gets this one instead. A key must belong to the workspace, and a user must own a key in it or be an active member of it, named by their identity's id, so a manager can restrict a member's Playground before they hold any key |
+| `POST /access/grants` | add the same rule for several `api_key_ids` and `user_ids`; a key or user that already has a rule gets this one instead. A key must belong to the workspace, and a user must own a key in it, or be someone the Playground lets in (an active member of the workspace, or an owner or admin of its organization) named by their identity's id in its canonical lowercase form, so a manager can restrict a member's Playground before they hold any key. A deleted user is refused |
 | `PATCH /access/grants/{grant_id}` | change one rule's `tools` |
 | `DELETE /access/grants/{grant_id}` | delete one rule, so its key or user matches the next rule down |
 | `GET /access/check?api_key_id=&tool=` | trace one call: whether a key may call a tool, and what matched (`key`, `user`, `everyone` for the default policy, or `server` when the server is disabled or does not expose the tool) |
@@ -387,9 +388,10 @@ one with a `$ref` pointing outside itself:
 
 A tool name outside the 1–256-character execution limit is omitted with
 `mcp_tool_name_unsupported`, so every tool returned by discovery can be sent
-back to the execution endpoint. So is a name containing `*`, starting with
-`@`, or with a leading or trailing space, which an access rule would read as a
-pattern (or, trimmed, as `@read`) rather than a name; such a tool is also left
+back to the execution endpoint. So is a name containing `*` or `,`, starting
+with `@`, or with a leading or trailing space, which an access rule would read
+as a pattern (or, trimmed, as `@read`) and the dashboard's allow-list field would
+split, rather than as one name; such a tool is also left
 out of the tools a connection check lists, including a list stored before this
 rule.
 

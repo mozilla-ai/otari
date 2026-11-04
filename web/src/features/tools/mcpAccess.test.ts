@@ -140,7 +140,15 @@ describe("isLiteralToolName", () => {
     expect(isLiteralToolName("list_issues")).toBe(true)
   })
 
-  it.each(["*", "search*", "@read", " @read", "list_issues "])(
+  it.each([
+    "*",
+    "search*",
+    "@read",
+    " @read",
+    "list_issues ",
+    ",",
+    "get_issue,delete_issue",
+  ])(
     "keeps %j out of the choices, since a rule would read it as a pattern",
     (name) => {
       expect(isLiteralToolName(name)).toBe(false)

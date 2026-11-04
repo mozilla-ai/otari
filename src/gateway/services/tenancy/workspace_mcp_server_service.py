@@ -59,11 +59,11 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
-from gateway.models.tenancy import User
+from gateway.models.tenancy import MANAGEMENT_ROLES, User
 from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
-from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.repositories.tenancy import OrganizationMemberRepository, WorkspaceMemberRepository, WorkspaceRepository
 from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
-from gateway.repositories.users_repository import provision_attribution_users
+from gateway.repositories.users_repository import lock_live_users, provision_attribution_users
 
 # The module as well as the names, so the check is looked up at call time and a
 # test can stand in for the network.
@@ -967,19 +967,32 @@ class WorkspaceMcpServerService:
         return WorkspaceMcpServerAccess(everyone_tools=everyone_tools, grants=public)
 
     async def _members_by_attribution(self, workspace_id: uuid.UUID, user_ids: list[str]) -> set[str]:
-        """Which of ``user_ids`` are the request-plane ids of the workspace's active members, minting missing rows.
+        """Which of ``user_ids`` name someone the Playground lets into the workspace, minting missing rows.
 
-        A member's request-plane id is their identity's UUID as a string, as the Playground and member keys use it.
+        That is an active member of the workspace, or an owner or admin of its organization, who needs no workspace
+        row. Their request-plane id is their identity's UUID as a string, as the Playground and member keys write it,
+        so only that canonical spelling is accepted: a rule under another spelling would bind nobody.
         """
         identities: dict[uuid.UUID, str] = {}
         for user_id in user_ids:
             try:
-                identities[uuid.UUID(user_id)] = user_id
+                identity = uuid.UUID(user_id)
             except ValueError:
                 continue
+            if str(identity) == user_id:
+                identities[identity] = user_id
+        if not identities:
+            return set()
+        workspace = await WorkspaceRepository(self.db).get(workspace_id)
         pairs = await WorkspaceMemberRepository(self.db).get_active_pairs([workspace_id], list(identities))
-        members = [identities[identity] for _, identity in pairs]
-        return await provision_attribution_users(self.db, members)
+        eligible = {identity for _, identity in pairs}
+        if workspace is not None:
+            members = OrganizationMemberRepository(self.db)
+            for identity in identities.keys() - eligible:
+                membership = await members.get_active_by_organization_and_user(workspace.organization_id, identity)
+                if membership is not None and membership.role in MANAGEMENT_ROLES:
+                    eligible.add(identity)
+        return await provision_attribution_users(self.db, [identities[identity] for identity in eligible])
 
     async def add_grants(
         self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, request: WorkspaceMcpServerGrantsCreate
@@ -1018,6 +1031,12 @@ class WorkspaceMcpServerService:
         server = await self.db.get(WorkspaceMcpServer, server_id, with_for_update=True)
         if server is None:
             raise WorkspaceMcpServerNotFoundError(server_id)
+        # Locked as a user's deletion locks it, so a grant and the deletion that removes the user's grants cannot
+        # interleave: whichever commits second sees the other, and a deleted user is refused here.
+        live = await lock_live_users(self.db, request.user_ids)
+        gone = [user_id for user_id in request.user_ids if user_id not in live]
+        if gone:
+            raise WorkspaceMcpServerGrantSubjectError(f"'{gone[0]}' has been deleted")
         held = {(grant.api_key_id, grant.user_id) for grant in await repository.for_server(server.id)}
         added = sum(1 for key_id in request.api_key_ids if (key_id, None) not in held) + sum(
             1 for user_id in request.user_ids if (None, user_id) not in held

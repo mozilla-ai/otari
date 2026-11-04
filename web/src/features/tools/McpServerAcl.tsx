@@ -84,15 +84,21 @@ export function McpServerAcl({
   )
   const grants = access.data?.grants ?? []
 
-  // The workspace's members join the key owners as users who can be granted,
-  // through the roster's join from an identity to the id its keys bill to.
+  // Everyone the Playground lets into the workspace joins the key owners as a
+  // user who can be granted: its members, and the organization's owners and
+  // admins, who need no workspace row. The roster joins each identity to the id
+  // its keys and sessions bill to.
   const memberIds = new Set(
     (workspaceMembers.data ?? []).map((member) => member.user_id),
   )
   const userIdsInWorkspace = (organizationMembers.data ?? []).flatMap(
     (member) => {
       const id = attributionId(member)
-      return member.user_id && memberIds.has(member.user_id) && id ? [id] : []
+      const entersWorkspace =
+        (member.user_id && memberIds.has(member.user_id)) ||
+        (member.status === "active" &&
+          (member.role === "owner" || member.role === "admin"))
+      return entersWorkspace && id ? [id] : []
     },
   )
   const users = grantUsers(keys.data ?? [], userIdsInWorkspace, labels)

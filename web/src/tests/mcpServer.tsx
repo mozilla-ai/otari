@@ -38,6 +38,7 @@ export function mockMcpServerApi({
   check,
   keys = [],
   members = [],
+  workspaceMemberIds,
   role = "owner",
   workspaceRole = "admin",
   accessStatus,
@@ -51,6 +52,8 @@ export function mockMcpServerApi({
   keys?: ApiKey[]
   /** The organization roster, which names users and joins them to their keys. */
   members?: OrganizationMember[]
+  /** Which of `members` belong to the workspace; all of them when left out. */
+  workspaceMemberIds?: readonly string[]
   role?: OrganizationContext["role"]
   workspaceRole?: string
   /** A refusal of the access list, as a viewer earns. */
@@ -90,12 +93,18 @@ export function mockMcpServerApi({
       if (url.includes("/organizations/me/members")) {
         return Response.json({ data: members, count: members.length })
       }
-      const rows = members.map((member) =>
-        workspaceMember({
-          user_id: member.user_id ?? "",
-          workspace_id: WORKSPACE,
-        }),
-      )
+      const rows = members
+        .filter(
+          (member) =>
+            !workspaceMemberIds ||
+            workspaceMemberIds.includes(member.user_id ?? ""),
+        )
+        .map((member) =>
+          workspaceMember({
+            user_id: member.user_id ?? "",
+            workspace_id: WORKSPACE,
+          }),
+        )
       return Response.json({ data: rows, count: rows.length })
     }
     if (url.includes("/keys")) return Response.json(keys)

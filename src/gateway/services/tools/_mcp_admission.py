@@ -89,13 +89,22 @@ async def _validate_mcp_server_urls(
         raise McpServerConfigurationError(MCP_SERVER_URL_UNSAFE_DETAIL) from exc
 
 
-def declares_provider_mcp(tools: Sequence[object] | None) -> bool:
-    """Whether a request's tools ask its provider to connect to an MCP server itself (a ``type: "mcp"`` tool).
+# Tool fields through which a provider is handed MCP servers to dial itself: Gemini's ``Tool.mcp_servers``, in
+# either of the spellings its SDK accepts.
+_PROVIDER_MCP_FIELDS = frozenset({"mcp_servers", "mcpServers"})
 
-    That is a server named by the request as surely as an ``mcp_servers`` entry is, only one the provider dials
-    rather than Otari, so the workspace's request-server switch covers it too.
+
+def declares_provider_mcp(tools: Sequence[object] | None) -> bool:
+    """Whether a request's tools ask its provider to connect to an MCP server itself.
+
+    An OpenAI Responses tool of ``type: "mcp"``, or a Gemini tool carrying MCP servers. Either names a server as
+    surely as an ``mcp_servers`` entry does, only one the provider dials rather than Otari, so the workspace's
+    request-server switch covers it too.
     """
-    return any(isinstance(tool, dict) and tool.get("type") == "mcp" for tool in tools or ())
+    return any(
+        isinstance(tool, dict) and (tool.get("type") == "mcp" or not _PROVIDER_MCP_FIELDS.isdisjoint(tool))
+        for tool in tools or ()
+    )
 
 
 async def admit_mcp_servers(
