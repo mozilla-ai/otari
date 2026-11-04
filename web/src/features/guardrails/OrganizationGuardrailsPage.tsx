@@ -360,7 +360,7 @@ export function OrganizationGuardrailsPage() {
                   maxLength={SEARCH_MAX_LENGTH}
                   onChange={search.onChange}
                   resultCount={
-                    search.isSettled && !isLoading
+                    search.isSettled && definitions.isSuccess
                       ? shownDefined.length
                       : undefined
                   }

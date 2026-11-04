@@ -937,6 +937,36 @@ describe("HostedProvidersPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("says nothing matches only once the hosted providers have answered too", async () => {
+    mockApi({ configured: [providerInfo("eu-gateway")] })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const { pathname } = new URL(String(input), "http://localhost")
+      if (
+        pathname.endsWith("/hosted-providers") &&
+        (init?.method ?? "GET") === "GET"
+      ) {
+        return jsonResponse({ detail: "Hosted providers are unavailable" }, 500)
+      }
+      return answer(input, init)
+    })
+    await renderPage()
+    const user = userEvent.setup()
+    await user.type(
+      await screen.findByRole("searchbox", { name: "Search providers" }),
+      "nothing-like-this",
+    )
+
+    expect(
+      await screen.findByText(/Hosted providers are unavailable/),
+    ).toBeInTheDocument()
+    // Past the pause before a term is used, so a count or a no-match line
+    // would be on screen by now if either were going to be.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(screen.queryByText("No providers match this search.")).toBeNull()
+    expect(screen.queryByText(/^\d+ match(es)?$/)).toBeNull()
+  })
+
   it("says nothing matches only once the configured providers have answered", async () => {
     mockApi({ providers: [hostedProvider({ name: "openai-eu" })] })
     const answer = vi.mocked(globalThis.fetch).getMockImplementation()!

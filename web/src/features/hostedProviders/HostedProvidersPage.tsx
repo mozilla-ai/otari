@@ -686,7 +686,7 @@ export function HostedProvidersPage() {
               maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={
-                search.isSettled && !providers.isPending && configured.isSuccess
+                search.isSettled && providers.isSuccess && configured.isSuccess
                   ? shownRows.length
                   : undefined
               }
@@ -698,10 +698,10 @@ export function HostedProvidersPage() {
               ariaLabel="Hosted providers"
               columns={columns}
               rows={shownRows}
-              // Only once both halves are in: without the configured ones,
-              // "no match" can be wrong about a provider config.yml defines.
+              // Only once both halves are in: without either, "no match" can be
+              // wrong about a provider the missing half holds.
               emptyContent={
-                search.term && configured.isSuccess
+                search.term && providers.isSuccess && configured.isSuccess
                   ? "No providers match this search."
                   : undefined
               }
