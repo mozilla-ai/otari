@@ -198,7 +198,13 @@ take the request past a limit is not run: the model is told it was refused
 Completions' `otari_tool_calls`), it is recorded as a failed call and not
 charged, and the request goes on. A call priced only by the cost its provider
 reports, with no rate, holds nothing, since that cost is known only once it
-returns. A request on a free model whose budgets and ceilings cap only dollars
+returns. The pages a search reads to enrich its results are one hold, taken
+once the search returns, for the pages it will read at the rate their fetch is
+billed at (the fetch instance's own, or `otari:web_fetch` on an organization
+fetch key); when it does not fit, no page is read, the results show their
+snippets, and the search itself is billed as usual. The hold stays until the
+request settles, as the model call's does. A request on a
+free model whose budgets and ceilings cap only dollars
 holds nothing for its model call, and its tool calls are not held either: they
 are charged at settlement, and that request can still end past the cap.
 
@@ -223,9 +229,8 @@ unpriced, as a model with no price is. A tool's own row and a model's
 never share a key, so a search provider named like a model provider, such as
 DeepSeek, cannot price its models. The `otari:<tool>` rows of gateway-run tools
 stay model-kind rows. An organization key's calls take the `otari:` row only,
-since the deployment cannot price the organization's own account. A search also
-adds what its enrichment fetches reported. The line's `unit_rate` is its cost
-over its calls.
+since the deployment cannot price the organization's own account. The line's
+`unit_rate` is its cost over its calls.
 
 Whose account runs a call decides whose prices count, as it does for a model
 call. A call on the deployment's account takes only the deployment's price, or
@@ -251,13 +256,19 @@ SearXNG organization key, which the older backend still runs, is labeled
 `otari:web_search`. Searches a model's provider runs itself carry the provider's
 label, as the next section says.
 
-A search's enrichment adds only what its fetcher reported, even when the fetch
-instance has a rate of its own, which prices fetch tool calls only. Exa reports
-what a fetch costs; Tabstack and the built-in fetcher report nothing. So hits
-enriched through Tabstack cost the caller nothing more, while the deployment pays
-Tabstack for each page, up to one per hit. Price that into the search instance's
-rate, or keep the instance's enrichment on the built-in fetcher with
-`fetch_tool: builtin_fetch`.
+The pages a search reads to enrich its results are fetches on the fetch
+instance that read them, `builtin_fetch` included: each page that comes back is
+a `web_fetch` call under that instance's label, at the cost the provider
+reported or else the instance's rate, on a `web_fetch_calls` line of its own,
+and the instance's account pays for it whoever's account ran the search. Exa
+reports what a page costs; Tabstack and the built-in fetcher report nothing, so
+their pages cost the instance's rate, up to one page per result. A page that
+cannot be read is neither billed nor counted. Pages read on an
+[organization fetch key](#organization-search-keys) are labeled
+`org:<provider>` and priced under `otari:web_fetch`. A search the older
+backend runs (the legacy settings, or a Tavily, Brave or SearXNG organization
+key) reads its pages on the built-in fetcher and records no fetch, until that
+backend is removed.
 
 ### Searches a provider runs itself
 
@@ -771,7 +782,10 @@ each shows its date as an ISO date, or date and time when the provider gives one
 A result that comes without page text is enriched through the fetch instance the
 search instance names in `fetch_tool`, else `web_fetch_default_tool`, else the
 built-in fetcher, for the first 20 such results of a search; the rest show their
-snippets. The built-in fetcher's page replaces the result's snippet, as
+snippets. Each page read is billed as a fetch on that instance, and the pages of
+one search are held against the caller's budgets together before any is read
+(see [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). The built-in
+fetcher's page replaces the result's snippet, as
 on the legacy settings below. A [fetch instance](#fetch-providers) is asked for
 at most the 1,500 characters a result shows, within the fetch instance's
 `timeout`, and its page follows the snippet rather than replacing it, because a
