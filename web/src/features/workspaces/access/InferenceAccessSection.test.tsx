@@ -365,8 +365,12 @@ describe("InferenceAccessSection: the organization's own keys", () => {
     ).toBeInTheDocument()
     await user.clear(field)
     // A colon inside a model's own name is not a provider prefix.
-    await user.type(field, "llama3:8b")
-    await user.click(screen.getByRole("button", { name: "Add" }))
+    // Enter adds the name; it neither saves nor closes the dialog.
+    await user.type(field, "llama3:8b{Enter}")
+    expect(
+      screen.getByRole("button", { name: "Remove llama3:8b" }),
+    ).toBeInTheDocument()
+    expect(requests.filter((request) => request.method === "POST")).toEqual([])
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     await vi.waitFor(() =>

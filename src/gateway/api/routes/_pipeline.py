@@ -276,6 +276,7 @@ from gateway.services.model_access import (
     key_model_refusal,
     model_not_allowed_detail,
     organization_key_refusal,
+    owned_endpoint_refusal,
     resolve_request_allowlist,
     unresolvable_model_detail,
     unresolved_model_refusal,
@@ -2974,20 +2975,21 @@ async def resolve_request_context(
 
     # Organization-scoped model restriction (otari#643): the org key
     # resolved for this workspace+provider may narrow which models it
-    # serves. The caller's own endpoint never reaches one.
-    if (
-        gate_instance is not None
-        and gate_impl is not None
-        and (resolved_provider is None or resolved_provider.owned_endpoint is None)
-    ):
-        refusal = organization_key_refusal(
-            config,
-            workspace_id,
-            gate_instance,
-            gate_impl.value,
-            gate_model,
-            selector=model,
-            through_alias=resolved_provider is not None and resolved_provider.alias is not None,
+    # serves. The caller's own endpoint never reaches one, and is held only to
+    # the workspace's zero data retention requirement.
+    if gate_instance is not None and gate_impl is not None:
+        refusal = (
+            owned_endpoint_refusal(workspace_id, selector=model)
+            if resolved_provider is not None and resolved_provider.owned_endpoint is not None
+            else organization_key_refusal(
+                config,
+                workspace_id,
+                gate_instance,
+                gate_impl.value,
+                gate_model,
+                selector=model,
+                through_alias=resolved_provider is not None and resolved_provider.alias is not None,
+            )
         )
         if refusal is not None:
             await log_gateway_rejection(

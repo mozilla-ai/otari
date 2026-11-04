@@ -276,7 +276,7 @@ export function InferenceAccessSection({
       <SettingsGroup isBounded>
         <SettingRow
           label="Require zero data retention"
-          help="Only providers declared to keep no prompt or completion data serve this workspace. Providers configured in config.yml cannot be declared, so they are blocked too."
+          help="Only providers declared to keep no prompt or completion data serve this workspace. Providers configured in config.yml and endpoints this workspace registered cannot be declared, so they are blocked too."
           control={
             <Toggle
               label="Require zero data retention"

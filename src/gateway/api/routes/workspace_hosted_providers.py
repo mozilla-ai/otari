@@ -101,6 +101,7 @@ async def set_workspace_provider_policy(
     An organization owner/admin, or an owner/admin of this workspace, may write
     it. Required, a request is refused with 403 on an organization key or a
     hosted provider not declared zero data retention, and on any provider
-    configured in config.yml, which cannot be declared.
+    configured in config.yml or endpoint the workspace or its users own,
+    neither of which can be declared.
     """
     return await service.set_policy(user=current_identity, workspace_id=workspace_id, request=body)

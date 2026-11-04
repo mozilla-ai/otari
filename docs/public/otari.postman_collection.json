@@ -13701,7 +13701,7 @@
               },
               "raw": "{\n  \"require_zero_data_retention\": false\n}"
             },
-            "description": "Require zero data retention of every provider serving this workspace, or stop requiring it.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. Required, a request is refused with 403 on an organization key or a\nhosted provider not declared zero data retention, and on any provider\nconfigured in config.yml, which cannot be declared.",
+            "description": "Require zero data retention of every provider serving this workspace, or stop requiring it.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. Required, a request is refused with 403 on an organization key or a\nhosted provider not declared zero data retention, and on any provider\nconfigured in config.yml or endpoint the workspace or its users own,\nneither of which can be declared.",
             "header": [
               {
                 "key": "Content-Type",

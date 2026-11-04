@@ -58,8 +58,9 @@ opens to show each of them. Past eight providers, a search and an **All**,
 providers declared to keep no prompts or completions
 ([Zero data retention](hosted-providers.md#zero-data-retention)). With it on,
 a request is refused with `403` on an organization key or a hosted provider
-that is not declared, and on any provider configured in `config.yml`, which
-cannot be declared. The rows it blocks say so, and **Models** lists only
+that is not declared, and on any provider configured in `config.yml` or
+endpoint the workspace or its users registered, neither of which can be
+declared. The rows it blocks say so, and **Models** lists only
 declared offerings for the workspace.
 
 A new workspace starts with every row as the organization decides, so a

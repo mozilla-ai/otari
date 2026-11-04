@@ -7352,7 +7352,8 @@ export interface paths {
          *     An organization owner/admin, or an owner/admin of this workspace, may write
          *     it. Required, a request is refused with 403 on an organization key or a
          *     hosted provider not declared zero data retention, and on any provider
-         *     configured in config.yml, which cannot be declared.
+         *     configured in config.yml or endpoint the workspace or its users own,
+         *     neither of which can be declared.
          */
         put: operations["workspace-hosted-providers-set_workspace_provider_policy"];
         post?: never;
@@ -20068,7 +20069,7 @@ export interface components {
         WorkspaceProviderPolicyRequest: {
             /**
              * Require Zero Data Retention
-             * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml.
+             * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns.
              */
             require_zero_data_retention: boolean;
         };

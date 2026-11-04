@@ -456,6 +456,27 @@ def organization_key_refusal(
     return org_model_refusal(workspace_id, provider, model, selector=selector, through_alias=through_alias)
 
 
+def owned_endpoint_refusal(workspace_id: uuid.UUID | None, *, selector: str) -> ModelRefusal | None:
+    """Why an endpoint the workspace or its user owns is refused, or ``None`` when it is not.
+
+    Its owner, not the organization or the deployment, holds the account it
+    reaches, so nothing can declare it zero data retention, and a workspace
+    requiring it is refused it as it is refused a configured instance.
+    """
+    if workspace_id is None:
+        return None
+    # Imported here: the providers package imports this module through model discovery.
+    from gateway.services.providers import workspace_requires_zero_data_retention
+
+    if not workspace_requires_zero_data_retention(workspace_id):
+        return None
+    return ModelRefusal(
+        code=MODEL_NOT_ALLOWED,
+        status_code=HTTPStatus.FORBIDDEN,
+        detail=f"Model '{selector}' is not served with zero data retention, which this workspace requires.",
+    )
+
+
 def workspace_serves_target(config: GatewayConfig, workspace_id: uuid.UUID, target: str) -> bool:
     """Whether the workspace's own narrowing lets a request billed to it reach ``target`` (``instance:model``).
 

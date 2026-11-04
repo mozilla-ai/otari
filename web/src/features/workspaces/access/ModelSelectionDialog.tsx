@@ -102,6 +102,11 @@ export function ModelSelectionDialog({
       : picked.has(trimmed)
         ? "This model is already in the list."
         : validateEntry(trimmed)
+  const addDraft = () => {
+    if (trimmed === "" || entryProblem !== undefined) return
+    setMany([trimmed], true)
+    setDraft("")
+  }
 
   return (
     <FormDialog
@@ -152,7 +157,18 @@ export function ModelSelectionDialog({
               ))}
             </ul>
           ) : null}
-          <div className="flex items-start gap-2">
+          {/* Enter here means Add, not Save: the dialog is a real form, and
+              its implicit submission would save without the typed name. */}
+          <fieldset
+            aria-label="Add a model"
+            className="flex min-w-0 items-start gap-2"
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.metaKey || event.ctrlKey)
+                return
+              event.preventDefault()
+              addDraft()
+            }}
+          >
             <Field
               label="Model name"
               value={draft}
@@ -165,14 +181,11 @@ export function ModelSelectionDialog({
             <Button
               className="mt-7"
               isDisabled={trimmed === "" || entryProblem !== undefined}
-              onPress={() => {
-                setMany([trimmed], true)
-                setDraft("")
-              }}
+              onPress={addDraft}
             >
               Add
             </Button>
-          </div>
+          </fieldset>
         </div>
       ) : null}
       {mode === "only" && models !== null ? (

@@ -1011,7 +1011,7 @@ class WorkspaceProviderPolicyRequest(SQLModel):
     require_zero_data_retention: bool = Field(
         description=(
             "Refuse every provider not declared zero data retention: an organization key or a hosted provider "
-            "nobody declared, and every provider configured in config.yml."
+            "nobody declared, and every provider configured in config.yml or endpoint the workspace owns."
         )
     )
 
