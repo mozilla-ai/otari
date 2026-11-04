@@ -18,7 +18,7 @@ No backfill. Absence of a row is the "inherit everything" state, so a deployment
 upgrading onto this revision keeps behaving exactly as it did.
 
 Revision ID: d8a3c5e7f9b1
-Revises: e7c2a4f6b8d0
+Revises: b7e3c9d2f4a1
 Create Date: 2026-11-04
 """
 
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d8a3c5e7f9b1"
-down_revision: str | Sequence[str] | None = "e7c2a4f6b8d0"
+down_revision: str | Sequence[str] | None = "b7e3c9d2f4a1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
