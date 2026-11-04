@@ -849,15 +849,23 @@ def priced_requests(
     spans: list[OtlpSpan],
     event_spans: Mapping[tuple[str, str], tuple[str, str]],
 ) -> list[PricedRequest]:
-    """Each priced event in the session of the span it was read from, or else the session it names."""
+    """Each priced event in the session of the span it was read from, or else the session it names.
+
+    Those read off a span the export stores come first, so a cap on what one export
+    records never leaves a stored span without its cost.
+    """
     sessions = otlp_sessions(spans)
     by_key = {(span.trace_id, span.span_id): span for span in spans}
+    stored = {(span.trace_id, span.span_id) for span in spans[:MAX_SPANS_PER_EXPORT]}
     requests: list[PricedRequest] = []
+    on_stored: set[int] = set()
     for e in priced:
         key = event_spans.get((e.source, e.source_event_id))
         session = sessions.get(key) if key is not None else None
         if session is not None and key is not None:
             harness = otlp_harness(by_key[key])
+            if key in stored:
+                on_stored.add(len(requests))
             requests.append(
                 PricedRequest(
                     e.source_event_id, session.key, e.timestamp, e.cost, e.source, e.rates, traced=True, harness=harness
@@ -865,7 +873,7 @@ def priced_requests(
             )
         elif e.session_label:
             requests.append(PricedRequest(e.source_event_id, e.session_label, e.timestamp, e.cost, e.source, e.rates))
-    return requests
+    return [requests[i] for i in sorted(range(len(requests)), key=lambda i: i not in on_stored)]
 
 
 def record_priced_requests(

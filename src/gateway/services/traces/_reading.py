@@ -263,6 +263,8 @@ def counted_once(llm: list[SpanRecord]) -> list[SpanRecord]:
 
 
 def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -> tuple[TurnView, ...]:
+    # Over the whole session, so a call whose two spans fall in two turns counts in one.
+    counted = {span.span_id for span in counted_once([span for span in spans if span.kind == "llm"])}
     steps = sorted((span for span in spans if span.kind == "step"), key=_moment)
     turns: list[_Turn] = []
     owner: dict[str, _Turn] = {}
@@ -292,7 +294,7 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
         else:
             state = "completed"
         llm = [span for span in turn.children if span.kind == "llm"]
-        calls = counted_once(llm)
+        calls = [span for span in llm if span.span_id in counted]
         views.append(
             TurnView(
                 index=index,

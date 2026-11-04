@@ -13,6 +13,7 @@ from gateway.core.config import GatewayConfig
 from gateway.services.external_usage_service import (
     CLAUDE_SOURCE,
     ExternalUsageEvent,
+    PricedEvent,
     ReadUsage,
     one_booking_per_response,
 )
@@ -25,7 +26,13 @@ from gateway.services.traces import (
     record_otlp_export,
 )
 from gateway.services.traces._collector import call_id_digest
-from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, otlp_sessions, record_priced_requests
+from gateway.services.traces._otlp import (
+    MAX_TRACES_PER_EXPORT,
+    PricedRequest,
+    otlp_sessions,
+    priced_requests,
+    record_priced_requests,
+)
 from gateway.services.traces._reading import _gate_summaries
 from gateway.services.traces._service import _growth
 from gateway.types.traces import TraceWrite, is_identifier
@@ -1090,3 +1097,49 @@ def test_a_session_whose_calls_were_exported_is_never_the_one_the_session_cap_dr
 
     [write] = writer.writes
     assert write.trace_id == SessionRef(source="otlp", key="conv-1").trace_id(_WORKSPACE, None, "k")
+
+
+def test_a_response_whose_input_counts_its_cache_is_ranked_by_its_input_alone() -> None:
+    inclusive = _usage("msg_1", input_tokens=100, output_tokens=10, cache_read_tokens=80)
+    inclusive = inclusive.model_copy(update={"cache_tokens_in_prompt": True})
+    pairs, _ = one_booking_per_response(
+        [
+            ReadUsage("agent-a", inclusive, ("t", "a")),
+            ReadUsage("agent-b", _usage("msg_1", input_tokens=150, output_tokens=10), ("t", "b")),
+        ]
+    )
+
+    assert [source for source, _ in pairs] == ["agent-b"]
+
+
+def test_a_claude_response_reported_twice_keeps_the_report_that_splits_its_1h_cache_writes() -> None:
+    streamed = _usage("msg_1", input_tokens=1000, cache_write_tokens=100)
+    served = streamed.model_copy(update={"cache_write_1h_tokens": 40})
+    pairs, event_spans = one_booking_per_response(
+        [
+            ReadUsage(CLAUDE_SOURCE, streamed, ("t", "sdk")),
+            ReadUsage(CLAUDE_SOURCE, served, ("t", "api")),
+        ]
+    )
+
+    assert [event.cache_write_1h_tokens for _, event in pairs] == [40]
+    # The cost still reaches the span the response was first read from.
+    assert event_spans == {(CLAUDE_SOURCE, "msg_1"): ("t", "sdk")}
+
+
+def test_a_priced_call_on_a_stored_span_comes_before_one_past_the_export_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gateway.services.traces._otlp.MAX_SPANS_PER_EXPORT", 1)
+    at = datetime.now(UTC)
+
+    def priced(event_id: str) -> PricedEvent:
+        return PricedEvent(event_id, None, at, Decimal("0.01"), "otel", {})
+
+    requests = priced_requests(
+        [priced("msg_late"), priced("msg_kept")],
+        [_span("kept", attrs={"gen_ai.conversation.id": "c"}), _span("late", attrs={"gen_ai.conversation.id": "c"})],
+        {("otel", "msg_kept"): ("t" * 32, "kept"), ("otel", "msg_late"): ("t" * 32, "late")},
+    )
+
+    assert [request.request_id for request in requests] == ["msg_kept", "msg_late"]

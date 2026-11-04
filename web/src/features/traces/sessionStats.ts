@@ -114,7 +114,8 @@ function rates(
 /**
  * The model requests whose tokens count: one per call an agent exported. Two
  * instrumentations of one process can each describe the same call, sharing its
- * response id, and the span reporting the most tokens is counted. A gateway
+ * response id, and the span reporting the most tokens is counted, carrying the
+ * rates its call was priced at from whichever span holds them. A gateway
  * request's spans share its request id across calls, and a span's own id stands
  * in where it carried no response id, so neither is matched.
  */
@@ -134,17 +135,39 @@ export function countedOnce(llm: readonly TraceSpan[]): TraceSpan[] {
     return index >= 0 && x[index] > y[index]
   }
   const richest = new Map<string, TraceSpan>()
+  const priced = new Map<string, TraceSpan>()
   for (const span of llm) {
     if (!shared(span) || !span.request_id) continue
     const kept = richest.get(span.request_id)
     if (!kept || heavier(span, kept)) richest.set(span.request_id, span)
+    if (rates(span)) priced.set(span.request_id, span)
   }
-  return llm.filter(
-    (span) =>
-      !shared(span) ||
-      !span.request_id ||
-      richest.get(span.request_id) === span,
-  )
+  const counted: TraceSpan[] = []
+  for (const span of llm) {
+    if (!shared(span) || !span.request_id) {
+      counted.push(span)
+      continue
+    }
+    if (richest.get(span.request_id) !== span) continue
+    const rated = priced.get(span.request_id)
+    counted.push(
+      rated && !rates(span)
+        ? {
+            ...span,
+            attributes: {
+              ...span.attributes,
+              ...Object.fromEntries(
+                METERS.map((meter) => [
+                  `otari.llm.rate.${meter}`,
+                  rated.attributes[`otari.llm.rate.${meter}`],
+                ]),
+              ),
+            },
+          }
+        : span,
+    )
+  }
+  return counted
 }
 
 /** Whether a span of these ran inside a subagent: under a tool call that started one. */

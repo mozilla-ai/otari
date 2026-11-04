@@ -430,4 +430,26 @@ describe("sessionStats", () => {
     })
     expect(stats.models).toEqual([{ model: "sonnet", requests: 3, cost: 0.25 }])
   })
+
+  it("prices a call reported twice at the rates its unpriced, counted span lacks", () => {
+    const call = (span_id: string, input: number, attributes = {}) =>
+      traceSpan({
+        span_id,
+        kind: "llm",
+        origin: "otlp",
+        model: "sonnet",
+        request_id: "msg_1",
+        otel_span_id: span_id,
+        input_tokens: input,
+        output_tokens: 0,
+        attributes,
+      })
+    const spans = [call("priced", 100, RATES), call("fuller", 1_000)]
+
+    const stats = sessionStats(traceSummary(), traceDetail({ spans }))
+
+    expect(stats.pricedRequests).toBe(1)
+    expect(stats.tokens.input).toBe(1_000)
+    expect(stats.cost?.input).toBeCloseTo(1_000 * (3 / 1_000_000))
+  })
 })

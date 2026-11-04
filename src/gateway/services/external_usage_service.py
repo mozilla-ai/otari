@@ -316,34 +316,46 @@ def one_booking_per_response(
 ) -> tuple[list[tuple[str, ExternalUsageEvent]], dict[tuple[str, str], tuple[str, str]]]:
     """The usage events to book, one per response, and each one's span, keyed by its source and id.
 
-    Spans of one response under different sources would each book it: a Claude SDK span's
-    booking is kept, and otherwise the one reporting the most tokens. An event whose id is
-    not a response's is never merged. A booking's span is the one it was read from, so its
-    cost reaches that span's session.
+    Spans of one response would each book it. A Claude SDK or Claude API span's booking is
+    kept over any other, the one that splits out its 1-hour cache writes first; among the
+    rest, the one reporting the most tokens. An event whose id is not a response's is never
+    merged. A booking's span is the one it was read from, or for a Claude response the
+    first span it was read from, so its cost reaches that span's session.
     """
 
     def tokens(event: ExternalUsageEvent) -> int:
-        return event.input_tokens + event.output_tokens + event.cache_read_tokens + event.cache_write_tokens
+        cache = 0 if event.cache_tokens_in_prompt else event.cache_read_tokens + event.cache_write_tokens
+        return event.input_tokens + event.output_tokens + cache
+
+    def rank(usage: ReadUsage) -> tuple[int, int]:
+        claude = usage.source == CLAUDE_SOURCE
+        return (usage.event.cache_write_1h_tokens if claude else 0, tokens(usage.event))
 
     claude = {usage.event.source_event_id for usage in read if usage.source == CLAUDE_SOURCE}
-    richest: dict[str, int] = {}
+    best: dict[tuple[bool, str], int] = {}
+    first: dict[tuple[bool, str], tuple[str, str]] = {}
     for index, usage in enumerate(read):
         event_id = usage.event.source_event_id
-        if usage.source == CLAUDE_SOURCE or not usage.names_response or event_id in claude:
+        from_claude = usage.source == CLAUDE_SOURCE
+        if not usage.names_response or (not from_claude and event_id in claude):
             continue
-        kept = richest.get(event_id)
-        if kept is None or tokens(usage.event) > tokens(read[kept].event):
-            richest[event_id] = index
+        group = (from_claude, event_id)
+        first.setdefault(group, usage.span_key)
+        kept = best.get(group)
+        if kept is None or rank(usage) > rank(read[kept]):
+            best[group] = index
     pairs: list[tuple[str, ExternalUsageEvent]] = []
     event_spans: dict[tuple[str, str], tuple[str, str]] = {}
     for index, usage in enumerate(read):
-        if (
-            usage.source == CLAUDE_SOURCE
-            or not usage.names_response
-            or richest.get(usage.event.source_event_id) == index
-        ):
-            pairs.append((usage.source, usage.event))
-            event_spans.setdefault((usage.source, usage.event.source_event_id), usage.span_key)
+        group = (usage.source == CLAUDE_SOURCE, usage.event.source_event_id)
+        if not usage.names_response:
+            span_key = usage.span_key
+        elif best.get(group) == index:
+            span_key = first[group] if group[0] else usage.span_key
+        else:
+            continue
+        pairs.append((usage.source, usage.event))
+        event_spans.setdefault((usage.source, usage.event.source_event_id), span_key)
     return pairs, event_spans
 
 

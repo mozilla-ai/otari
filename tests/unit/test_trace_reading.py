@@ -341,3 +341,20 @@ def test_two_calls_whose_only_id_is_their_own_span_id_both_count_in_their_turn()
     [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
 
     assert (turn.llm_calls, turn.input_tokens) == (2, 1000)
+
+
+def test_a_call_whose_two_spans_fall_in_two_turns_counts_in_one() -> None:
+    call = {"request_id": "msg_1", "input_tokens": 500, "output_tokens": 20}
+    first = _span("turn-1", "step", opens_turn=True)
+    second = replace(_span("turn-2", "step", opens_turn=True), start_time=_T0 + timedelta(seconds=5))
+    spans = [
+        first,
+        second,
+        replace(_span("sdk", "llm", "turn-1", **call), origin="otlp"),
+        replace(_span("openllmetry", "llm", "turn-2", **call), origin="otlp"),
+    ]
+
+    turns = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert sum(turn.input_tokens for turn in turns) == 500
+    assert sum(turn.llm_calls for turn in turns) == 1
