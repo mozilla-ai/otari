@@ -32,12 +32,14 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Select } from "@/design-system/forms/Select"
 import { TextArea } from "@/design-system/forms/TextArea"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { Disclosure } from "@/design-system/navigation/Disclosure"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
@@ -78,6 +80,7 @@ import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { SEARCH_MAX_LENGTH, useListSearch } from "@/shared/hooks/useListSearch"
 
 import {
   asMembershipRole,
@@ -850,7 +853,17 @@ export function OrganizationMembersPage() {
   const context = useOrganizationContext()
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const members = useOrganizationMembersPage(page, pageSize)
+  const search = useListSearch()
+  // Page 1 for every new term, however it changed: typed, or by Back and
+  // Forward, which move `q` without passing through the field.
+  const [pagedFor, setPagedFor] = useState(search.term)
+  if (pagedFor !== search.term) {
+    setPagedFor(search.term)
+    setPage(0)
+  }
+  // Searched by the endpoint, so a match on a later page is found and the
+  // pager's total is the number that matched.
+  const members = useOrganizationMembersPage(page, pageSize, search.term)
   const update = useUpdateOrganizationMember()
   const remove = useRemoveOrganizationMember()
   const revoke = useRevokeOrganizationMemberInvitation()
@@ -894,6 +907,15 @@ export function OrganizationMembersPage() {
   const budgets = isOperator ? deploymentBudgets : organizationBudgets
 
   const rows = useMemo(() => members.data?.data ?? [], [members.data])
+  // Only a page holding the whole roster can say who the last owner is: not a
+  // searched one, not a previous term's rows held while the next are asked
+  // for, and not one page of several. Otherwise that is left to the server.
+  const ownersInView =
+    !search.term &&
+    !members.isPlaceholderData &&
+    members.data?.count === rows.length
+      ? rows
+      : undefined
 
   // Removing the last member on a page leaves it empty while earlier pages
   // still hold rows. Adjusted during render, the way `TablePagination` adjusts
@@ -1012,7 +1034,7 @@ export function OrganizationMembersPage() {
           const blocked = membershipChangeBlockedReason({
             member,
             context: activeContext,
-            members: rows,
+            members: ownersInView,
           })
           return (
             // `title` reaches a mouse; the reason is folded into the control's
@@ -1142,7 +1164,7 @@ export function OrganizationMembersPage() {
           const blocked = membershipChangeBlockedReason({
             member,
             context: activeContext,
-            members: rows,
+            members: ownersInView,
           })
           // An invited row's actions are about its link, expired or not: Reissue
           // sends a new one (the way back for a lost link), Revoke withdraws
@@ -1223,7 +1245,7 @@ export function OrganizationMembersPage() {
     )
   }, [
     activeContext,
-    rows,
+    ownersInView,
     update.isPending,
     update.mutate,
     manages,
@@ -1354,6 +1376,24 @@ export function OrganizationMembersPage() {
         />
       ) : null}
 
+      <Toolbar className="pb-3">
+        <SearchField
+          label="Search members"
+          placeholder="Search by name or email"
+          value={search.value}
+          maxLength={SEARCH_MAX_LENGTH}
+          onChange={search.onChange}
+          // Not a previous term's total, held as placeholder data while the
+          // new one is asked for.
+          resultCount={
+            search.isSettled && !members.isPlaceholderData
+              ? members.data?.count
+              : undefined
+          }
+          className="w-full md:w-96"
+        />
+      </Toolbar>
+
       <TableScrollFrame className="otari-members-table">
         <DataTable
           mobileLayout="cards"
@@ -1362,7 +1402,9 @@ export function OrganizationMembersPage() {
           rows={rows}
           getRowKey={memberRowKey}
           isLoading={members.isLoading}
-          emptyContent="No members yet."
+          emptyContent={
+            search.term ? "No members match this search." : "No members yet."
+          }
         />
       </TableScrollFrame>
       <TablePagination

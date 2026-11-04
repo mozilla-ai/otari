@@ -261,8 +261,17 @@ function mockApi(
       })
     }
     if (url.includes("/models")) {
-      if (method === "PATCH") return jsonResponse({ ...models[0], ...body })
-      return jsonResponse({ data: models, count: models.length })
+      if (method === "PATCH" || method === "POST") {
+        return jsonResponse({ ...models[0], ...body })
+      }
+      // Narrowed the way the route narrows a search: by name, ignoring case.
+      const term = (
+        new URL(url, "http://localhost").searchParams.get("search") ?? ""
+      ).toLowerCase()
+      const matched = models.filter((model) =>
+        model.model.toLowerCase().includes(term),
+      )
+      return jsonResponse({ data: matched, count: matched.length })
     }
     if (url.includes(hosted)) {
       if (method === "GET") {
@@ -882,6 +891,69 @@ describe("HostedProvidersPage", () => {
     expect(hostedRequests(requests, "DELETE")[0].url).toContain(
       "/hosted-providers/openai",
     )
+  })
+
+  it("searches a provider's models through the endpoint", async () => {
+    const requests = mockApi({
+      models: [hostedModel(), hostedModel({ id: "m2", model: "o9-preview" })],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+    await user.click(
+      await screen.findByRole("button", { name: "Models on openai" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on openai",
+    })
+    await within(panel).findByText("gpt-4o")
+
+    await user.type(
+      within(panel).getByRole("searchbox", {
+        name: "Search models on openai",
+      }),
+      "o9",
+    )
+    await waitFor(() =>
+      expect(within(panel).queryByText("gpt-4o")).not.toBeInTheDocument(),
+    )
+    expect(within(panel).getByText("o9-preview")).toBeInTheDocument()
+    expect(
+      hostedRequests(requests, "GET").some((request) =>
+        request.url.includes("/models?skip=0&limit=25&search=o9"),
+      ),
+    ).toBe(true)
+  })
+
+  it("ends a provider's models search once a model is added", async () => {
+    mockApi({ models: [hostedModel()] })
+    const user = userEvent.setup()
+    await renderPage()
+    await user.click(
+      await screen.findByRole("button", { name: "Models on openai" }),
+    )
+    const panel = await screen.findByRole("region", {
+      name: "Models on openai",
+    })
+    const search = await within(panel).findByRole("searchbox", {
+      name: "Search models on openai",
+    })
+    await user.type(search, "zzz")
+    expect(
+      await within(panel).findByText("No models match this search."),
+    ).toBeInTheDocument()
+
+    await user.click(within(panel).getByRole("button", { name: "Add model" }))
+    const dialog = await screen.findByRole("dialog")
+    const field = within(dialog).getByRole("combobox", { name: /^Model/ })
+    await user.type(field, "o9-preview")
+    // An open popover hides the rest of the dialog; see OfferModelDialog.test.
+    if (field.getAttribute("aria-expanded") === "true") {
+      await user.keyboard("{Escape}")
+    }
+    await user.click(within(dialog).getByRole("button", { name: "Add model" }))
+
+    await waitFor(() => expect(search).toHaveValue(""))
+    expect(await within(panel).findByText("gpt-4o")).toBeInTheDocument()
   })
 
   it("opens a provider's models with their price source and a serving switch", async () => {

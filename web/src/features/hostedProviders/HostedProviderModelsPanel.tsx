@@ -12,9 +12,11 @@ import {
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
 import {
   useHostedModels,
@@ -22,6 +24,7 @@ import {
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
 import { formatRate } from "@/shared/helpers/format"
+import { SEARCH_MAX_LENGTH, useSearchTerm } from "@/shared/hooks/useListSearch"
 
 import { HostedModelForm } from "./HostedModelForm"
 import { refreshOutcome } from "./refreshOutcome"
@@ -81,7 +84,11 @@ export function HostedProviderModelsPanel({
 }) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
-  const models = useHostedModels(provider.name, page, pageSize)
+  // In component state, not the URL, like the page and the open provider it
+  // belongs to: a term in the URL would outlive the panel on a reload.
+  const [query, setQuery] = useState("")
+  const { term, isSettled } = useSearchTerm(query)
+  const models = useHostedModels(provider.name, page, pageSize, term)
   const update = useUpdateHostedModel(provider.name)
   const refresh = useRefreshHostedModels(provider.name)
 
@@ -97,6 +104,16 @@ export function HostedProviderModelsPanel({
   }
 
   const rows = models.data?.data ?? []
+  // A removal can leave the panel past the last page of what matches, where
+  // the table would say nothing matches beside a positive count. Adjusted
+  // during render, the way `TablePagination` adjusts its own page box.
+  const lastPage = Math.max(
+    0,
+    Math.ceil((models.data?.count ?? 0) / pageSize) - 1,
+  )
+  if (page > lastPage && models.data && !models.isFetching) {
+    setPage(lastPage)
+  }
   const editing = rows.find((row) => row.id === editingId)
   // The last refresh's outcome, worth a sentence either way: silence after a
   // press reads as a button that did nothing. Cleared by the next change made
@@ -229,7 +246,13 @@ export function HostedProviderModelsPanel({
       ) : null}
 
       {/* A failed list is not an empty one. */}
-      {!models.error && rows.length === 0 ? (
+      {/* Not while the rows are a previous search's held as placeholder data:
+          clearing a search that matched nothing would otherwise flash this
+          panel, and take the field being typed in with it. */}
+      {!models.error &&
+      rows.length === 0 &&
+      !term &&
+      !models.isPlaceholderData ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what the provider lists, or add a model to say what this provider serves and at what price."
@@ -239,13 +262,41 @@ export function HostedProviderModelsPanel({
         />
       ) : (
         <>
+          <Toolbar>
+            <SearchField
+              label={`Search models on ${provider.name}`}
+              placeholder="Search by model name"
+              value={query}
+              maxLength={SEARCH_MAX_LENGTH}
+              onChange={(next) => {
+                setQuery(next)
+                setPage(0)
+              }}
+              resultCount={
+                isSettled && !models.isPlaceholderData
+                  ? models.data?.count
+                  : undefined
+              }
+              className="w-full md:w-96"
+            />
+          </Toolbar>
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${provider.name}`}
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}
-              isLoading={models.isLoading}
+              // Empty rows that are not yet the typed term's answer: the last
+              // term's, held as placeholder data or waiting out the pause.
+              isLoading={
+                models.isLoading ||
+                (rows.length === 0 && (models.isPlaceholderData || !isSettled))
+              }
+              // Not over a failed read: the banner above says what happened,
+              // and "no match" would read as a search that ran and found none.
+              emptyContent={
+                models.error ? undefined : "No models match this search."
+              }
             />
           </TableScrollFrame>
           <TablePagination
@@ -270,7 +321,12 @@ export function HostedProviderModelsPanel({
         editing={undefined}
         isOpen={isAdding}
         onClose={() => setIsAdding(false)}
-        onSaved={() => refresh.reset()}
+        onSaved={() => {
+          refresh.reset()
+          // A new model the search does not match would vanish with the form.
+          setQuery("")
+          setPage(0)
+        }}
       />
       {editing ? (
         // Remounted per row, so a second row's editor cannot open with the

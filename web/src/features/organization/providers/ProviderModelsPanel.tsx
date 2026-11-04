@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   FiEdit2,
   FiPlus,
@@ -17,9 +17,11 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { SearchField } from "@/design-system/forms/SearchField"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
 import {
   useOrgProviderModels,
@@ -30,6 +32,7 @@ import {
 } from "@/shared/api/organizations"
 import { useDeleteOrganizationPricing } from "@/shared/api/pricing"
 import { formatRate } from "@/shared/helpers/format"
+import { SEARCH_MAX_LENGTH, useListSearch } from "@/shared/hooks/useListSearch"
 
 import { OfferModelDialog } from "./OfferModelDialog"
 import { refreshOutcome } from "./refreshOutcome"
@@ -126,7 +129,17 @@ export function ProviderModelsPanel({
   onPageChange: (page: number) => void
   onPageSizeChange: (size: number) => void
 }) {
-  const models = useOrgProviderModels(providerKey.id, page, pageSize)
+  // Its own param and pager beside the page's: the key list above has `q`.
+  const search = useListSearch({
+    param: "models_q",
+    pageParam: "models_page",
+  })
+  const models = useOrgProviderModels(
+    providerKey.id,
+    page,
+    pageSize,
+    search.term,
+  )
   const setEnabled = useSetOrgProviderModelEnabled(providerKey.id)
   const withdraw = useWithdrawOrgProviderModel(providerKey.id)
   const clearRate = useDeleteOrganizationPricing()
@@ -145,6 +158,17 @@ export function ProviderModelsPanel({
   }
 
   const rows = models.data?.data ?? []
+  // A shared link or Back can land on a page past the last of what matches,
+  // where the table would say nothing matches beside a positive count. The
+  // page is the parent's, in its URL, so it is moved after render.
+  const lastPage = Math.max(
+    0,
+    Math.ceil((models.data?.count ?? 0) / pageSize) - 1,
+  )
+  const isPastEnd = page > lastPage && !!models.data && !models.isFetching
+  useEffect(() => {
+    if (isPastEnd) onPageChange(lastPage)
+  }, [isPastEnd, lastPage, onPageChange])
   // The last refresh's outcome, worth a sentence either way: silence after a
   // press reads as a button that did nothing. Cleared by the next change made
   // here, so it never describes a list that has moved on.
@@ -342,7 +366,13 @@ export function ProviderModelsPanel({
 
       {/* A failed list is not an empty one: with a settled error, rendering
           "no models yet" would tell an admin their catalog is gone. */}
-      {!models.error && rows.length === 0 ? (
+      {/* Not while the rows are a previous search's held as placeholder data:
+          clearing a search that matched nothing would otherwise flash this
+          panel, and take the field being typed in with it. */}
+      {!models.error &&
+      rows.length === 0 &&
+      !search.term &&
+      !models.isPlaceholderData ? (
         <EmptyState
           title="No models offered yet"
           description="Refresh to offer what this provider lists, or add a model by name for a backend that publishes no list."
@@ -352,13 +382,39 @@ export function ProviderModelsPanel({
         />
       ) : (
         <>
+          <Toolbar>
+            <SearchField
+              label={`Search models on ${providerKey.name}`}
+              placeholder="Search by model name"
+              value={search.value}
+              maxLength={SEARCH_MAX_LENGTH}
+              onChange={search.onChange}
+              resultCount={
+                search.isSettled && !models.isPlaceholderData
+                  ? models.data?.count
+                  : undefined
+              }
+              className="w-full md:w-96"
+            />
+          </Toolbar>
           <TableScrollFrame className="otari-offered-models-table">
             <DataTable
               ariaLabel={`Models on ${providerKey.name}`}
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}
-              isLoading={models.isLoading}
+              // Empty rows that are not yet the typed term's answer: the last
+              // term's, held as placeholder data or waiting out the pause.
+              isLoading={
+                models.isLoading ||
+                (rows.length === 0 &&
+                  (models.isPlaceholderData || !search.isSettled))
+              }
+              // Not over a failed read: the banner above says what happened,
+              // and "no match" would read as a search that ran and found none.
+              emptyContent={
+                models.error ? undefined : "No models match this search."
+              }
             />
           </TableScrollFrame>
           <TablePagination
@@ -384,6 +440,8 @@ export function ProviderModelsPanel({
         onOffered={() => {
           clearOutcome()
           setIsOffering(false)
+          // A new model the search does not match would vanish with the dialog.
+          search.onChange("")
         }}
       />
 
