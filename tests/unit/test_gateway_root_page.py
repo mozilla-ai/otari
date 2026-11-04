@@ -40,9 +40,9 @@ def test_welcome_tutorial_page_is_available(tmp_path: Path) -> None:
     assert "from openai import OpenAI" in response.text
     assert "YOUR_BOOTSTRAP_OTARI_KEY" in response.text
     assert "through the Otari router" in response.text
-    assert 'model="deepseek/deepseek-v4-pro-0813"' in response.text
-    assert "GET /api/v1/models" in response.text
-    assert "provider:model" not in response.text
+    assert 'model="openai/gpt-4o-mini"' in response.text
+    assert "http://localhost:8000/api/v1/models" in response.text
+    assert "falls back to the next offering when one fails" in response.text
     assert "openai:gpt-4o" not in response.text
     assert "https://github.com/mozilla-ai/otari/blob/main/docs/self-hosted-quickstart.md" in response.text
     assert "mozilla-ai.github.io/otari/gateway/quickstart" not in response.text
