@@ -1043,7 +1043,7 @@ function AppShellChrome() {
               divider that stops short of the edge reads as a box's top border
               rather than as a division of the rail. */}
             <div
-              className={`-mx-3 flex flex-col gap-1 px-3 pt-1 pb-[env(safe-area-inset-bottom)] ${
+              className={`-mx-3 flex flex-col gap-1 px-3 pt-1 ${
                 footerHasRowAboveBand ? "border-t border-border" : ""
               }`}
             >
