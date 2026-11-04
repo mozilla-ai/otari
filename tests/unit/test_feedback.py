@@ -2,14 +2,15 @@
 
 import json
 import logging
+import uuid
 from collections.abc import Iterator
 
 import httpx
 import pytest
 
+from gateway.adapters.feedback_delivery_adapter import ReceiverFeedbackDeliveryAdapter
 from gateway.exceptions.feedback_exceptions import FeedbackDeliveryError
 from gateway.log_config import logger as gateway_logger
-from gateway.services.feedback import FeedbackService
 
 
 @pytest.fixture
@@ -38,12 +39,12 @@ async def test_receiver_statuses(upstream: int, expected: int | None, gateway_lo
             headers={"Retry-After": "999999", "Location": "https://elsewhere.test"},
         )
 
-    service = FeedbackService(transport=httpx.MockTransport(receive))
+    service = ReceiverFeedbackDeliveryAdapter(transport=httpx.MockTransport(receive))
     if expected is None:
-        await service.submit("PRIVATE feedback")
+        await service.deliver(message="PRIVATE feedback", reply_to=None, sender_id=None)
     else:
         with pytest.raises(FeedbackDeliveryError) as error:
-            await service.submit("PRIVATE feedback")
+            await service.deliver(message="PRIVATE feedback", reply_to=None, sender_id=None)
         assert error.value.status_code == expected
         assert error.value.retry_after == (3600 if expected == 429 else None)
         assert f"Feedback receiver answered {upstream}" in gateway_logs.text
@@ -54,11 +55,11 @@ async def test_receiver_statuses(upstream: int, expected: int | None, gateway_lo
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retry_after", ["-1", "Wed, 21 Oct 2015 07:28:00 GMT", "1" * 1000, ""])
 async def test_untrusted_retry_header(retry_after: str) -> None:
-    service = FeedbackService(
+    service = ReceiverFeedbackDeliveryAdapter(
         transport=httpx.MockTransport(lambda request: httpx.Response(429, headers={"Retry-After": retry_after}))
     )
     with pytest.raises(FeedbackDeliveryError) as error:
-        await service.submit("Idea")
+        await service.deliver(message="Idea", reply_to=None, sender_id=None)
     assert error.value.retry_after is None
 
 
@@ -72,7 +73,8 @@ async def test_timeout_has_no_automatic_retry() -> None:
         raise httpx.ReadTimeout("private upstream details", request=request)
 
     with pytest.raises(FeedbackDeliveryError) as error:
-        await FeedbackService(transport=httpx.MockTransport(receive)).submit("Idea")
+        adapter = ReceiverFeedbackDeliveryAdapter(transport=httpx.MockTransport(receive))
+        await adapter.deliver(message="Idea", reply_to=None, sender_id=None)
     assert error.value.status_code == 503
     assert calls == 1
 
@@ -85,9 +87,9 @@ async def test_only_the_named_fields_are_forwarded(gateway_logs: pytest.LogCaptu
         calls.append(request)
         return httpx.Response(204)
 
-    service = FeedbackService(transport=httpx.MockTransport(receive))
-    await service.submit("Idea", "private@example.com")
-    await service.submit("Idea")
+    service = ReceiverFeedbackDeliveryAdapter(transport=httpx.MockTransport(receive))
+    await service.deliver(message="Idea", reply_to="private@example.com", sender_id=uuid.uuid4())
+    await service.deliver(message="Idea", reply_to=None, sender_id=None)
     assert [json.loads(request.content) for request in calls] == [
         {"message": "Idea", "reply_to": "private@example.com"},
         {"message": "Idea"},
