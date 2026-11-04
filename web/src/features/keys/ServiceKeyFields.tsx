@@ -2,7 +2,7 @@ import type { ApiKey } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Select } from "@/design-system/forms/Select"
 import {
   budgetLabeler,
   type LabelableBudget,
@@ -67,6 +67,10 @@ export function useServiceKeyReady(
 }
 
 const NO_BUDGETS: readonly LabelableBudget[] = []
+
+// The "no default" choice, under a value that is not an id. `Select` reads an
+// empty value as nothing chosen and would show its placeholder, not this label.
+const NO_DEFAULT_BUDGET = "__none__"
 
 /**
  * The budgets a service key in this scope may start end users on. The
@@ -196,21 +200,28 @@ export function ServiceKeyFields({
               </div>
             )}
           </fieldset>
-          <FilterSelect
-            id="key-end-user-default-budget"
+          <Select
             label="Default end-user budget"
-            value={value.defaultBudgetId}
-            onChange={(defaultBudgetId) =>
-              onChange({ ...value, defaultBudgetId })
+            value={value.defaultBudgetId || NO_DEFAULT_BUDGET}
+            onChange={(next) =>
+              onChange({
+                ...value,
+                defaultBudgetId: next === NO_DEFAULT_BUDGET ? "" : next,
+              })
             }
+            // Nothing to say beside it and nothing that can be invalid, so no
+            // message line to hold open under it.
+            shouldReserveMessage={false}
             options={[
-              { value: "", label: "None: uncapped unless a request names one" },
+              {
+                value: NO_DEFAULT_BUDGET,
+                label: "None: uncapped unless a request names one",
+              },
               ...value.budgetIds.map((budgetId) => ({
                 value: budgetId,
                 label: labelOf(budgetId),
               })),
             ]}
-            fullWidth
           />
         </>
       ) : null}
