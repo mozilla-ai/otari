@@ -15,6 +15,8 @@ import type {
   CatalogResponse,
   DeploymentBootstrap,
   DeploymentUser,
+  OidcConnection,
+  OidcConnectionDomain,
   Organization,
   OrganizationContext,
   OrganizationDomain,
@@ -23,6 +25,7 @@ import type {
   OrganizationMember,
   OrganizationPricingOverride,
   OrganizationSpendCeiling,
+  OrganizationSso,
   OrgProviderKey,
   OrgProviderModel,
   PendingOrganizationInvitation,
@@ -685,6 +688,59 @@ export function organizationDomain(
     proof_expires_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+/** One of the organization's email domains, as its own SSO connection reports it. */
+export function oidcConnectionDomain(
+  overrides: Partial<OidcConnectionDomain> = {},
+): OidcConnectionDomain {
+  return {
+    domain: "acme.example",
+    enabled: true,
+    proof_expires_at: "2099-01-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/**
+ * An organization's own bring-your-own OIDC connection, as its admins see it.
+ *
+ * Carries only the last four characters of the client secret, which the
+ * connection never serves back.
+ */
+export function oidcConnection(
+  overrides: Partial<OidcConnection> = {},
+): OidcConnection {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    issuer: "https://idp.acme.example",
+    resolved_issuer: "https://idp.acme.example",
+    client_id: "acme-dashboard",
+    client_secret_last4: "wxyz",
+    display_name: "Acme Okta",
+    default_role: "member",
+    enabled: true,
+    discovered_at: "2026-08-24T00:00:00+00:00",
+    domains: [oidcConnectionDomain()],
+    ...overrides,
+  }
+}
+
+/**
+ * What `GET`/`PUT`/`POST /organizations/me/sso` answer with.
+ *
+ * `connection` defaults to null, the state before an organization has saved
+ * one, so a test about a configured connection passes it explicitly rather
+ * than inheriting the happy path by accident.
+ */
+export function organizationSso(
+  overrides: Partial<OrganizationSso> = {},
+): OrganizationSso {
+  return {
+    connection: null,
+    redirect_uri: "https://otari.example.com/auth/sso/callback",
     ...overrides,
   }
 }
