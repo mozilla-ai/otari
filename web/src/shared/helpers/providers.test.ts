@@ -70,6 +70,7 @@ describe("providerCatalogName", () => {
       "Vertex AI Anthropic",
     )
     expect(providerCatalogName("typesafe", "typesafe")).toBe("TypeSafe")
+    expect(providerCatalogName(" AZURE ", "Azure")).toBe("Azure AI Foundry")
     expect(providerCatalogName("brand-new", "Brand New")).toBe("Brand New")
     expect(providerCatalogName("brand-new", undefined)).toBe("brand-new")
   })
