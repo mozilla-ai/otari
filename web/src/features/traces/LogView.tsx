@@ -17,6 +17,7 @@ import { Tooltip } from "@/design-system/overlays/Tooltip"
 import { formatDuration, formatRelativeTime } from "./format"
 import { type Format, IOBlock } from "./IOBlock"
 import { LevelChip } from "./LevelChip"
+import { NoInputNote } from "./NoInputNote"
 import { TypeMark } from "./observationTypes"
 import { matchesSearch } from "./search"
 import { buildTree, flattenTreeOrder } from "./tree"
@@ -204,8 +205,8 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
               </button>
               {isOpen ? (
                 <div className="flex flex-col gap-4 border-t border-border bg-surface-alt px-4 py-3">
-                  {obs.input == null && obs.output == null ? (
-                    <span className="text-caption">No input or output</span>
+                  {obs.input == null && obs.output == null && obs.noInput ? (
+                    <NoInputNote noInput={obs.noInput} />
                   ) : null}
                   {obs.input != null ? (
                     <IOBlock label="Input" value={obs.input} format={format} />

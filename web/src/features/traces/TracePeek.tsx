@@ -13,6 +13,7 @@ import { PeekPanel, ResizeHandle } from "@/shared/components/PeekPanel"
 import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
 import { CostCard } from "./CostCard"
 import { ExplainCard } from "./ExplainCard"
+import type { NoInput } from "./explain"
 import {
   formatDuration,
   formatRelativeTime,
@@ -25,6 +26,7 @@ import { GatewayPanel } from "./GatewayPanel"
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { NavHeader, type NavView } from "./NavHeader"
+import { NoInputNote } from "./NoInputNote"
 import { TypeMark } from "./observationTypes"
 import type { SessionStats } from "./sessionStats"
 import { TraceTimelineView } from "./TraceTimelineView"
@@ -91,19 +93,20 @@ const STATUS_TONE: Record<Observation["level"], string> = {
 function PreviewBody({
   input,
   output,
+  noInput,
   statusMessage,
   level,
   format,
 }: {
   input: unknown
   output: unknown
+  noInput?: NoInput
   statusMessage?: string
   level: Observation["level"]
   format: Format
 }) {
-  if (input == null && output == null && !statusMessage) {
-    return <span className="text-caption text-subtle">No input or output</span>
-  }
+  const empty = input == null && output == null
+  if (empty && !statusMessage && !noInput) return null
   return (
     <>
       {statusMessage ? (
@@ -115,6 +118,9 @@ function PreviewBody({
             {statusMessage}
           </p>
         </section>
+      ) : null}
+      {empty && noInput ? (
+        <NoInputNote noInput={noInput} className="text-subtle" />
       ) : null}
       <IOBlock label="Input" value={input} format={format} />
       <IOBlock label="Output" value={output} format={format} />
@@ -704,18 +710,14 @@ export function TracePeek({
                   {observation.estimate ? (
                     <CostCard cost={observation.estimate} />
                   ) : null}
-                  {observation.explain &&
-                  observation.input == null &&
-                  observation.output == null &&
-                  !observation.statusMessage ? null : (
-                    <PreviewBody
-                      input={observation.input}
-                      output={observation.output}
-                      statusMessage={observation.statusMessage}
-                      level={observation.level}
-                      format={format}
-                    />
-                  )}
+                  <PreviewBody
+                    input={observation.input}
+                    output={observation.output}
+                    noInput={observation.noInput}
+                    statusMessage={observation.statusMessage}
+                    level={observation.level}
+                    format={format}
+                  />
                 </>
               ) : null}
             </div>
