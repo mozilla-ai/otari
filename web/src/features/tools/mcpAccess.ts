@@ -5,17 +5,25 @@ import type {
 
 // A stored MCP server's access list, in words. The grammar is the gateway's
 // (`services/tools/_mcp_admission.py`): a rule is a list of tool patterns,
-// where `*` is every tool, `prefix*` every tool starting so, any other entry
-// one tool by name, and `[]` denies.
+// where `*` is every tool, `prefix*` every tool starting so, `@read` the tools
+// a manager labeled read on that server, any other entry one tool by name, and
+// `[]` denies.
 
 export const ALL_TOOLS = "*"
+export const READ_TOOLS = "@read"
 
-/** The three answers a rule can give, as the page offers them. */
-export type AccessMode = "all" | "none" | "some"
+/** The four answers a rule can give, as the page offers them. */
+export type AccessMode = "all" | "read" | "none" | "some"
 
 export function accessMode(tools: readonly string[]): AccessMode {
   if (tools.includes(ALL_TOOLS)) return "all"
+  if (tools.length === 1 && tools[0] === READ_TOOLS) return "read"
   return tools.length === 0 ? "none" : "some"
+}
+
+/** One pattern as the page names it: `@read` reads "read tools". */
+function patternLabel(pattern: string): string {
+  return pattern === READ_TOOLS ? "read tools" : pattern
 }
 
 /** The patterns a mode stands for; `picked` is what "some" allows. */
@@ -24,6 +32,7 @@ export function toolsFor(
   picked: readonly string[],
 ): string[] {
   if (mode === "all") return [ALL_TOOLS]
+  if (mode === "read") return [READ_TOOLS]
   if (mode === "none") return []
   return [...picked]
 }
@@ -52,27 +61,32 @@ export function ruleAction(tools: readonly string[]): "ALLOW" | "DENY" {
 
 /** The tools a rule matches, as the ACL table reads them. */
 export function ruleTools(tools: readonly string[]): string {
-  return accessMode(tools) === "some" ? tools.join(", ") : "Any"
+  const mode = accessMode(tools)
+  if (mode === "read") return "Read tools"
+  return mode === "some" ? tools.map(patternLabel).join(", ") : "Any"
 }
 
 /** A rule in one phrase: "allow any tool", "deny", "allow get_issue". */
 export function ruleSummary(tools: readonly string[]): string {
   const mode = accessMode(tools)
   if (mode === "all") return "allow any tool"
+  if (mode === "read") return "allow read tools"
   if (mode === "none") return "deny"
-  return `allow ${tools.join(", ")}`
+  return `allow ${tools.map(patternLabel).join(", ")}`
 }
 
 /** The list page's summary of a server's default policy, uppercase like its cells. */
 export function defaultPolicySummary(tools: readonly string[]): string {
   const mode = accessMode(tools)
   if (mode === "all") return "DEFAULT: ALLOW"
+  if (mode === "read") return "DEFAULT: READ TOOLS"
   if (mode === "none") return "DEFAULT: DENY"
   return `DEFAULT: ALLOW ${tools.length} ${tools.length === 1 ? "TOOL" : "TOOLS"}`
 }
 
 /** Whether one pattern admits a tool name. */
 export function patternMatches(pattern: string, tool: string): boolean {
+  if (pattern === READ_TOOLS) return false
   if (pattern === ALL_TOOLS) return true
   if (pattern.endsWith("*")) return tool.startsWith(pattern.slice(0, -1))
   return pattern === tool
@@ -86,6 +100,8 @@ export function patternMatches(pattern: string, tool: string): boolean {
 export function keyAccessLabel(access: WorkspaceMcpServerKeyAccess): string {
   const mode = accessMode(access.tools)
   if (mode === "none") return "No access"
+  // The key-access answer does not carry the server's labels, so the preset is named rather than listed.
+  if (mode === "read") return "Read tools"
   const ceiling = access.allowed_tools
   if (mode === "all") {
     return ceiling === null ? "All tools" : ceiling.join(", ") || "No access"

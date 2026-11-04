@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent
+from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent, ToolAnnotations
 from mcp.types import Tool as MCPTool
 from sqlalchemy.orm import Session
 
@@ -43,7 +43,16 @@ class _FakeSession:
 
     async def list_tools(self, *, params: PaginatedRequestParams | None = None) -> ListToolsResult:
         return ListToolsResult(
-            tools=[MCPTool(name=name, description=name, input_schema={"type": "object"}) for name in TOOL_NAMES]
+            tools=[
+                MCPTool(
+                    name=name,
+                    description=name,
+                    input_schema={"type": "object"},
+                    # The server claims both list and delete are read-only; only one of them is.
+                    annotations=ToolAnnotations(read_only_hint=True) if name != "create_issue" else None,
+                )
+                for name in TOOL_NAMES
+            ]
         )
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
@@ -77,6 +86,7 @@ def _store(
     everyone: list[str] | None = None,
     enabled: bool = True,
     allowed_tools: list[str] | None = None,
+    read_tools: list[str] | None = None,
 ) -> WorkspaceMcpServer:
     row = WorkspaceMcpServer(
         workspace_id=workspace_id,
@@ -86,6 +96,7 @@ def _store(
         enabled=enabled,
         everyone_tools=["*"] if everyone is None else everyone,
         allowed_tools=allowed_tools,
+        read_tools=read_tools or [],
         purpose_hint=f"{name} hint",
     )
     test_db.add(row)
@@ -251,6 +262,74 @@ def test_a_tool_outside_the_rule_is_refused_with_the_ceilings_code(
     assert refused.json()["execution_state"] == "not_started"
     assert allowed.status_code == 200, allowed.text
     assert session.calls == ["list_issues"]
+
+
+def test_a_read_rule_reaches_only_the_tools_a_manager_labeled_read(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, session: _FakeSession
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=[])
+    _grant(client, master_key_header, row, ["@read"], keys=[key])
+
+    assert _listed(client, key) == []
+
+    labeled = client.patch(
+        f"{_servers(row.workspace_id)}/{row.id}", json={"read_tools": ["list_issues"]}, headers=master_key_header
+    )
+    assert labeled.status_code == 200, labeled.text
+    assert labeled.json()["read_tools"] == ["list_issues"]
+
+    discovered = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(key))
+    hinted = client.post(f"{API_ROOT}/mcp/execute", headers=_bearer(key), json=_execute_body(row, "delete_issue"))
+    allowed = client.post(f"{API_ROOT}/mcp/execute", headers=_bearer(key), json=_execute_body(row, "list_issues"))
+
+    assert _listed(client, key) == ["github"]
+    assert [tool["name"] for tool in discovered.json()["tools"]] == ["list_issues"]
+    assert hinted.status_code == 403
+    assert hinted.json()["code"] == CODE_TOOL_NOT_ALLOWED
+    assert allowed.status_code == 200, allowed.text
+    assert session.calls == ["list_issues"]
+
+
+def test_the_connection_check_suggests_read_tools_without_labeling_them(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, session: _FakeSession
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github")
+
+    checked = client.post(f"{_servers(row.workspace_id)}/{row.id}/check", headers=master_key_header)
+
+    assert checked.status_code == 200, checked.text
+    stored = client.get(f"{_servers(row.workspace_id)}/{row.id}", headers=master_key_header).json()
+    assert stored["health"]["read_only_hinted_tools"] == ["list_issues", "delete_issue"]
+    assert stored["read_tools"] == []
+
+
+@pytest.mark.parametrize("read_tools", [["list_*"], ["@read"], [""], None])
+def test_read_tools_name_tools_exactly(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, read_tools: Any
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github")
+
+    response = client.patch(
+        f"{_servers(row.workspace_id)}/{row.id}", json={"read_tools": read_tools}, headers=master_key_header
+    )
+
+    assert response.status_code == 422
+
+
+def test_an_unknown_preset_is_refused(client: TestClient, master_key_header: dict[str, str], test_db: Session) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github")
+
+    response = client.post(
+        f"{_servers(row.workspace_id)}/{row.id}/access/grants",
+        json={"api_key_ids": [key["id"]], "user_ids": [], "tools": ["@write"]},
+        headers=master_key_header,
+    )
+
+    assert response.status_code in (400, 422)
 
 
 def test_a_server_that_denies_the_key_is_as_missing_as_a_disabled_one(

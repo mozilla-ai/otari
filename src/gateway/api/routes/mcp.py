@@ -395,7 +395,7 @@ async def _resolve_server(
 
 def _caller_patterns(principal: _Principal, server: ResolvedMcpServer) -> list[str]:
     """The tool patterns the authenticated key holds on a stored server; empty means it cannot reach it."""
-    return principal.mcp_access.patterns_for(server.id, server.everyone_tools)
+    return principal.mcp_access.patterns_for(server.id, server.everyone_tools, server.read_tools)
 
 
 def _require_caller_allowed(patterns: list[str], tool_name: str) -> None:

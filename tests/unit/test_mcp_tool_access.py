@@ -10,7 +10,9 @@ from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.model_access import (
     MAX_MCP_TOOL_PATTERNS,
     McpAccess,
+    expand_mcp_tool_patterns,
     is_mcp_tool_allowed,
+    validate_mcp_read_tools,
     validate_mcp_tool_patterns,
 )
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
@@ -45,6 +47,33 @@ def test_validation_refuses_a_bad_list(patterns: Any) -> None:
         validate_mcp_tool_patterns(patterns)
 
 
+def test_read_preset_stands_for_the_servers_read_tools_and_only_them() -> None:
+    assert expand_mcp_tool_patterns(["@read"], ["get_issue", "list_issues"]) == ["get_issue", "list_issues"]
+    assert expand_mcp_tool_patterns(["@read", "get_issue"], ["get_issue", "search"]) == ["get_issue", "search"]
+    assert expand_mcp_tool_patterns(["get_*"], ["search"]) == ["get_*"]
+    assert not is_mcp_tool_allowed(["@read"], "@read")
+
+
+def test_read_preset_with_nothing_labeled_reaches_nothing() -> None:
+    access = McpAccess(key_grants={GITHUB: ("@read",)})
+    assert access.decide(GITHUB, ["*"]) == ("key", ["@read"])
+    assert access.patterns_for(GITHUB, ["*"], ()) == []
+    assert access.patterns_for(GITHUB, ["*"], ("get_issue",)) == ["get_issue"]
+
+
+def test_validation_accepts_the_read_preset_and_refuses_any_other() -> None:
+    assert validate_mcp_tool_patterns(["@read", "@read", "create_issue"]) == ["@read", "create_issue"]
+    with pytest.raises(ValueError, match="only preset"):
+        validate_mcp_tool_patterns(["@write"])
+
+
+def test_read_tools_are_exact_names() -> None:
+    assert validate_mcp_read_tools([" get_issue ", "get_issue", "list_issues"]) == ["get_issue", "list_issues"]
+    for bad in (["get_*"], ["*"], ["@read"], [""], "get_issue", ["x"] * (MAX_MCP_TOOL_PATTERNS + 1)):
+        with pytest.raises(ValueError):
+            validate_mcp_read_tools(bad)
+
+
 def test_a_caller_without_grants_gets_each_servers_everyone_rule() -> None:
     access = McpAccess()
     assert access.decide(GITHUB, ["*"]) == ("everyone", ["*"])
@@ -55,16 +84,16 @@ def test_a_keys_grant_decides_over_its_owners_and_both_over_everyone() -> None:
     access = McpAccess(key_grants={GITHUB: ("get_issue",)}, user_grants={GITHUB: ("*",), JIRA: ()})
     assert access.decide(GITHUB, ["*"]) == ("key", ["get_issue"])
     assert access.decide(JIRA, ["*"]) == ("user", [])
-    assert access.patterns_for(uuid.UUID(int=3), ["list_*"]) == ["list_*"]
+    assert access.patterns_for(uuid.UUID(int=3), ["list_*"], ()) == ["list_*"]
 
 
 def test_a_grant_can_allow_what_everyone_is_denied() -> None:
-    assert McpAccess(user_grants={GITHUB: ("*",)}).patterns_for(GITHUB, []) == ["*"]
+    assert McpAccess(user_grants={GITHUB: ("*",)}).patterns_for(GITHUB, [], ()) == ["*"]
 
 
 def test_an_unrestricted_caller_reaches_everything() -> None:
     access = McpAccess(unrestricted=True, key_grants={GITHUB: ()})
-    assert access.patterns_for(GITHUB, []) == ["*"]
+    assert access.patterns_for(GITHUB, [], ()) == ["*"]
     assert access.may_declare_servers
 
 

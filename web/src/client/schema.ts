@@ -7136,8 +7136,9 @@ export interface paths {
          *
          *     `everyone_tools` is what every key of the workspace may call. Each grant overrides it for one
          *     key, or for one user and so every key they own; a key's own grant decides over its owner's.
-         *     Tool patterns are names, `*` or `prefix*`, and `[]` denies. The server's `allowed_tools` is a
-         *     ceiling over all of them. A server holds at most 1000 grants, returned oldest first.
+         *     Tool patterns are names, `*`, `prefix*`, or `@read` for the tools the server's `read_tools`
+         *     labels read, and `[]` denies. The server's `allowed_tools` is a ceiling over all of them. A
+         *     server holds at most 1000 grants, returned oldest first.
          */
         get: operations["mcp-servers-get_workspace_mcp_server_access"];
         put?: never;
@@ -19843,7 +19844,7 @@ export interface components {
             enabled: boolean;
             /**
              * Everyone Tools
-             * @description What every key of the workspace may call on this server: tool names, '*' for every tool, or 'prefix*'; [] denies everyone. A grant for a key or its owner overrides it
+             * @description What every key of the workspace may call on this server: tool names, '*' for every tool, or 'prefix*', or '@read' for read_tools; [] denies everyone. A grant for a key or its owner overrides it
              */
             everyone_tools?: string[];
             /**
@@ -19856,6 +19857,11 @@ export interface components {
              * @description Hint prepended to the system message to help the model choose
              */
             purpose_hint?: string | null;
+            /**
+             * Read Tools
+             * @description The tool names a manager labeled read, which '@read' in an access rule stands for. The server's own readOnlyHint is never read as one
+             */
+            read_tools?: string[];
             /**
              * Url
              * @description Streamable HTTP MCP endpoint
@@ -19893,7 +19899,7 @@ export interface components {
             subject: "key" | "user";
             /**
              * Tools
-             * @description Tool patterns: names, '*' or 'prefix*'; [] denies
+             * @description Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies
              */
             tools: string[];
             /** Updated At */
@@ -19911,7 +19917,7 @@ export interface components {
         WorkspaceMcpServerGrantUpdate: {
             /**
              * Tools
-             * @description Tool patterns: names, '*' or 'prefix*'; [] denies
+             * @description Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies
              */
             tools: string[];
         };
@@ -19924,7 +19930,7 @@ export interface components {
             api_key_ids?: string[];
             /**
              * Tools
-             * @description Tool patterns: names, '*' or 'prefix*'; [] denies
+             * @description Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies
              */
             tools: string[];
             /** User Ids */
@@ -19953,6 +19959,11 @@ export interface components {
              * @description Allow-listed names the server did not offer
              */
             missing_allowed_tools?: string[];
+            /**
+             * Read Only Hinted Tools
+             * @description Those of tools the server annotates readOnlyHint: untrusted, a suggestion for labeling read_tools and never applied as one
+             */
+            read_only_hinted_tools?: string[];
             /**
              * Status
              * @enum {string}
@@ -20035,6 +20046,11 @@ export interface components {
             name: string;
             /** Purpose Hint */
             purpose_hint: string | null;
+            /**
+             * Read Tools
+             * @description The tool names a manager labeled read, which '@read' stands for
+             */
+            read_tools: string[];
             /** Updated At */
             updated_at: string;
             /** Url */
@@ -20069,6 +20085,8 @@ export interface components {
             name?: string;
             /** Purpose Hint */
             purpose_hint?: string | null;
+            /** Read Tools */
+            read_tools?: string[];
             /** Url */
             url?: string;
         };

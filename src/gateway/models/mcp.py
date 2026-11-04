@@ -75,6 +75,7 @@ class ResolvedMcpServer(BaseModel):
     enabled: StrictBool = True
     # Not part of the revision: who may reach a server is the caller's concern, not its configuration.
     everyone_tools: list[str] = Field(default_factory=lambda: ["*"])
+    read_tools: list[str] = Field(default_factory=list)
     purpose_hint: str | None = Field(default=None, max_length=2000)
     allowed_tools: list[str] | None = None
 

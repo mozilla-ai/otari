@@ -126,7 +126,8 @@ an owner/admin of that workspace.
   the response. A URL sent in the request body is yours to fix and still fails
   with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
-- `everyone_tools` (default `["*"]`) is the server's default policy; see
+- `everyone_tools` (default `["*"]`) is the server's default policy, and
+  `read_tools` (default `[]`) the tools labeled read; see
   [Server access](#server-access).
 - `GET /{server_id}` reads one server, for any member who can see the workspace.
 
@@ -180,9 +181,25 @@ source:
   allow these keys" and "allow by default, except this key" are both a policy and a
   rule.
 
-A tool pattern is a tool name, `*` for every tool, or a name prefix ending in `*`
-(`get_*`); a pattern with `*` anywhere else is refused. The master key and a
-dashboard session, which the Playground runs as, are not bound by any ACL.
+A tool pattern is a tool name, `*` for every tool, a name prefix ending in `*`
+(`get_*`), or `@read` for the server's read tools; a pattern with `*` anywhere
+else, or any other `@` preset, is refused. The master key and a dashboard
+session, which the Playground runs as, are not bound by any ACL.
+
+#### Read tools
+
+`read_tools` on a server lists the tools a manager labeled read, and `@read` in a
+rule or the default policy stands for exactly those, so "this key may only read"
+is one rule that keeps meaning that as the labels change. A tool nobody labeled
+counts as write: a server starts with none labeled, and an `@read` rule allows
+nothing until it has some. Set them with `PATCH` on the server; they are exact
+tool names, not patterns.
+
+The labels are never read off the server. MCP lets a tool declare `readOnlyHint`,
+and a connection check reports the tools that do as
+`health.read_only_hinted_tools`, which the dashboard uses to tick a first draft.
+Nothing becomes read until a manager saves it, because a server can call any tool
+read-only.
 
 - **A server's own `allowed_tools` is a ceiling.** It decides which of the server's
   tools Otari exposes at all, beneath every rule and the default policy. A disabled

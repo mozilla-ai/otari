@@ -189,6 +189,7 @@ export function McpServerAcl({
         onOpenChange={setAdding}
         users={users}
         tools={tools}
+        readTools={server.read_tools}
         isPending={addGrants.isPending}
         error={addGrants.error}
         onSubmit={(draft) =>
@@ -211,6 +212,7 @@ export function McpServerAcl({
             tools: editing.tools,
           }}
           tools={tools}
+          readTools={server.read_tools}
           isPending={updateGrant.isPending}
           error={updateGrant.error}
           onSubmit={(draft) =>
@@ -231,6 +233,7 @@ export function McpServerAcl({
           users={[]}
           editing={{ name: "the default policy", tools: server.everyone_tools }}
           tools={tools}
+          readTools={server.read_tools}
           isPending={updateServer.isPending}
           error={updateServer.error}
           onSubmit={(draft) =>

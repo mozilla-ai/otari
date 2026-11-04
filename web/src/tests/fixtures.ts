@@ -885,6 +885,7 @@ export function workspaceMcpServer(
     // What every key of the workspace may call: everything, as a create
     // defaults to.
     everyone_tools: ["*"],
+    read_tools: [],
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
     // Never checked, which is how a row stored before checks existed reads.

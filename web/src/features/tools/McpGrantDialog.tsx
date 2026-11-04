@@ -34,6 +34,7 @@ export function McpGrantDialog({
   users,
   editing,
   tools,
+  readTools,
   isPending,
   error,
   onSubmit,
@@ -46,6 +47,8 @@ export function McpGrantDialog({
   editing?: { name: string; tools: string[] }
   /** What the server's last check listed, to tick from. */
   tools: readonly string[]
+  /** The tools a manager labeled read, which "Read tools only" allows. */
+  readTools: readonly string[]
   isPending: boolean
   error: unknown
   onSubmit: (draft: GrantDraft) => void
@@ -166,6 +169,7 @@ export function McpGrantDialog({
         mode={mode}
         picked={picked}
         tools={tools}
+        readTools={readTools}
         onChange={(nextMode, nextPicked) => {
           setMode(nextMode)
           setPicked(nextPicked)

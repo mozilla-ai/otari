@@ -2,14 +2,25 @@ import { RadioGroup, type RadioOption } from "@/design-system/forms/RadioGroup"
 import type { AccessMode } from "@/features/tools/mcpAccess"
 import { ToolChecklist } from "@/features/tools/ToolChecklist"
 
-const OPTIONS: RadioOption[] = [
-  { value: "all", label: "Allow any tool" },
-  { value: "some", label: "Allow specific tools…" },
-  { value: "none", label: "Deny" },
-]
+function options(readTools: readonly string[]): RadioOption[] {
+  return [
+    { value: "all", label: "Allow any tool" },
+    {
+      value: "read",
+      label: "Read tools only",
+      description:
+        readTools.length > 0
+          ? `The tools labeled read on this server, now ${readTools.join(", ")}`
+          : "No tool is labeled read on this server yet, so this allows nothing until one is.",
+    },
+    { value: "some", label: "Allow specific tools…" },
+    { value: "none", label: "Deny" },
+  ]
+}
 
 /**
- * One rule's action as a choice: allow any tool, allow the ones ticked, or deny.
+ * One rule's action as a choice: allow any tool, allow the tools labeled read,
+ * allow the ones ticked, or deny.
  *
  * Controlled on the mode and the ticked tools rather than on the rule's
  * patterns, because "some" with nothing ticked yet is `[]` on the wire, which
@@ -21,6 +32,7 @@ export function AccessChooser({
   picked,
   onChange,
   tools,
+  readTools,
   isDisabled = false,
 }: {
   label: string
@@ -29,6 +41,8 @@ export function AccessChooser({
   onChange: (mode: AccessMode, picked: string[]) => void
   /** What the server's last check listed, to tick from. */
   tools: readonly string[]
+  /** The tools labeled read on the server, which "read" stands for. */
+  readTools: readonly string[]
   isDisabled?: boolean
 }) {
   return (
@@ -37,7 +51,7 @@ export function AccessChooser({
         label={label}
         value={mode}
         onChange={(next) => onChange(next as AccessMode, [...picked])}
-        options={OPTIONS}
+        options={options(readTools)}
         isDisabled={isDisabled}
       />
       {mode === "some" ? (

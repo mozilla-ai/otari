@@ -3,7 +3,9 @@
 ``everyone_tools`` on workspace_mcp_servers defaults to every tool, and
 ``request_mcp_servers_allowed`` on workspace defaults true, so every stored
 server stays reachable by every key of its workspace, and a request may still
-name its own servers, as before. ``workspace_mcp_server_grants`` starts empty.
+name its own servers, as before. ``workspace_mcp_server_grants`` starts empty,
+and so does ``read_tools``, so an ``@read`` rule allows nothing until a
+manager labels a server's read tools.
 
 Revision ID: a7d3c9e1f5b2
 Revises: b7e3c9d2f4a1
@@ -26,6 +28,7 @@ def upgrade() -> None:
         "workspace_mcp_servers",
         sa.Column("everyone_tools", sa.JSON(), nullable=False, server_default='["*"]'),
     )
+    op.add_column("workspace_mcp_servers", sa.Column("read_tools", sa.JSON(), nullable=False, server_default="[]"))
     op.add_column(
         "workspace",
         sa.Column("request_mcp_servers_allowed", sa.Boolean(), nullable=False, server_default=sa.true()),
@@ -60,4 +63,5 @@ def downgrade() -> None:
     op.drop_index("ix_workspace_mcp_server_grants_api_key_id", table_name="workspace_mcp_server_grants")
     op.drop_table("workspace_mcp_server_grants")
     op.drop_column("workspace", "request_mcp_servers_allowed")
+    op.drop_column("workspace_mcp_servers", "read_tools")
     op.drop_column("workspace_mcp_servers", "everyone_tools")

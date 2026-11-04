@@ -143,8 +143,9 @@ async def get_workspace_mcp_server_access(
 
     `everyone_tools` is what every key of the workspace may call. Each grant overrides it for one
     key, or for one user and so every key they own; a key's own grant decides over its owner's.
-    Tool patterns are names, `*` or `prefix*`, and `[]` denies. The server's `allowed_tools` is a
-    ceiling over all of them. A server holds at most 1000 grants, returned oldest first.
+    Tool patterns are names, `*`, `prefix*`, or `@read` for the tools the server's `read_tools`
+    labels read, and `[]` denies. The server's `allowed_tools` is a ceiling over all of them. A
+    server holds at most 1000 grants, returned oldest first.
     """
     return await service.access(user=current_identity, workspace_id=workspace_id, server_id=server_id)
 

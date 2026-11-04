@@ -20,7 +20,7 @@ import asyncio
 import json
 import ssl
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from time import monotonic
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -666,12 +666,14 @@ class ServerCheck:
 
     ``tool_names`` lists the server's whole live catalog, whatever the stored
     allowlist admits, and is empty on a failure. ``http_status`` is set when
-    the server refused with one.
+    the server refused with one. ``read_only_hinted`` are the tools the server
+    annotates ``readOnlyHint``, a suggestion for a manager and never a label.
     """
 
     tool_names: list[str]
     failure: CheckFailure | None = None
     http_status: int | None = None
+    read_only_hinted: list[str] = field(default_factory=list)
 
 
 class _UnusableAnswer(Exception):
@@ -808,7 +810,12 @@ async def _check_once(server: ResolvedMcpServer) -> ServerCheck:
     try:
         session = await stack.enter_async_context(open_session(server, screen_answers=True))
         listed = await collect_tools(session, allowed_tools=None)
-        return ServerCheck(tool_names=[tool.name for tool in listed])
+        return ServerCheck(
+            tool_names=[tool.name for tool in listed],
+            read_only_hinted=[
+                tool.name for tool in listed if tool.annotations is not None and tool.annotations.read_only_hint is True
+            ],
+        )
     finally:
         await _close_bounded(stack)
 

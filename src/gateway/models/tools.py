@@ -130,11 +130,15 @@ class WorkspaceMcpServer(Base):
     purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
-    # What every key of the workspace may call, as tool patterns ('*', a name, or
-    # 'prefix*'); [] denies everyone. A grant for a key or its owner overrides it.
+    # What every key of the workspace may call, as tool patterns ('*', a name,
+    # 'prefix*', or '@read' for read_tools); [] denies everyone. A grant for a
+    # key or its owner overrides it.
     everyone_tools: Mapped[list[str]] = mapped_column(
         JSON, default=lambda: ["*"], server_default='["*"]', nullable=False
     )
+    # The tools a manager labeled read, which an access rule's '@read' stands for.
+    # Empty until labeled, so a tool nobody labeled is never read.
+    read_tools: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]", nullable=False)
     # The last connection check, in the shape ``WorkspaceMcpServerHealth``
     # publishes; null until one has run, and cleared when the URL, the token or
     # the allow-list changes, since it described the old ones.

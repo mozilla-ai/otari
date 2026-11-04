@@ -21,6 +21,19 @@ describe("mcpAccess", () => {
     expect(toolsFor("some", ["x"])).toEqual(["x"])
   })
 
+  it("reads a rule of the read preset as its own answer", () => {
+    expect(accessMode(["@read"])).toBe("read")
+    expect(accessMode(["@read", "create_issue"])).toBe("some")
+    expect(toolsFor("read", ["x"])).toEqual(["@read"])
+    expect(ruleTools(["@read"])).toBe("Read tools")
+    expect(ruleTools(["@read", "create_issue"])).toBe(
+      "read tools, create_issue",
+    )
+    expect(defaultPolicySummary(["@read"])).toBe("DEFAULT: READ TOOLS")
+    // The preset is the server's labels, which a name cannot match by spelling.
+    expect(patternMatches("@read", "@read")).toBe(false)
+  })
+
   it("reads a rule as its tools and action, and the default policy for the list", () => {
     expect([ruleTools(["*"]), ruleAction(["*"])]).toEqual(["Any", "ALLOW"])
     expect([ruleTools([]), ruleAction([])]).toEqual(["Any", "DENY"])

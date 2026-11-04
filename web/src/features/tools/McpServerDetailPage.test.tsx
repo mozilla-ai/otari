@@ -120,6 +120,33 @@ describe("McpServerDetailPage, Access", () => {
     )
   })
 
+  it("sets the default policy to the tools labeled read", async () => {
+    const calls = mockMcpServerApi({ server: SERVER })
+    const user = userEvent.setup()
+    await openPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit the default policy" }),
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit the default policy",
+    })
+    // Nothing is labeled on this server, which the choice says before it is made.
+    expect(
+      within(dialog).getByText(/No tool is labeled read on this server yet/),
+    ).toBeVisible()
+    await user.click(
+      within(dialog).getByRole("radio", { name: /Read tools only/ }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.method === "PATCH")?.body,
+      ).toEqual({ everyone_tools: ["@read"] }),
+    )
+  })
+
   it("sets a default deny policy with an empty list", async () => {
     const calls = mockMcpServerApi({ server: SERVER })
     const user = userEvent.setup()

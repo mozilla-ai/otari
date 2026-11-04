@@ -67,7 +67,12 @@ from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
 # test can stand in for the network.
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
-from gateway.services.model_access import is_mcp_tool_allowed, validate_mcp_tool_patterns
+from gateway.services.model_access import (
+    expand_mcp_tool_patterns,
+    is_mcp_tool_allowed,
+    validate_mcp_read_tools,
+    validate_mcp_tool_patterns,
+)
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -128,12 +133,18 @@ class WorkspaceMcpServerCreate(BaseModel):
     everyone_tools: list[str] = Field(
         default_factory=lambda: ["*"],
         description="What every key of the workspace may call on this server: tool names, '*' for every tool, or "
-        "'prefix*'; [] denies everyone. A grant for a key or its owner overrides it",
+        "'prefix*', or '@read' for read_tools; [] denies everyone. A grant for a key or its owner overrides it",
+    )
+    read_tools: list[str] = Field(
+        default_factory=list,
+        description="The tool names a manager labeled read, which '@read' in an access rule stands for. "
+        "The server's own readOnlyHint is never read as one",
     )
 
     @model_validator(mode="after")
-    def _check_everyone_tools(self) -> WorkspaceMcpServerCreate:
+    def _check_tool_patterns(self) -> WorkspaceMcpServerCreate:
         self.everyone_tools = validate_mcp_tool_patterns(self.everyone_tools)
+        self.read_tools = validate_mcp_read_tools(self.read_tools)
         return self
 
 
@@ -162,6 +173,7 @@ class WorkspaceMcpServerUpdate(BaseModel):
     )
     enabled: bool | SkipJsonSchema[None] = None
     everyone_tools: list[str] | SkipJsonSchema[None] = None
+    read_tools: list[str] | SkipJsonSchema[None] = None
 
     @model_validator(mode="after")
     def _reject_explicit_nulls(self) -> WorkspaceMcpServerUpdate:
@@ -177,13 +189,15 @@ class WorkspaceMcpServerUpdate(BaseModel):
         """
         nulled = [
             field
-            for field in ("name", "url", "enabled", "everyone_tools")
+            for field in ("name", "url", "enabled", "everyone_tools", "read_tools")
             if field in self.model_fields_set and getattr(self, field) is None
         ]
         if nulled:
             raise ValueError(f"{', '.join(nulled)} cannot be null; omit the field to leave it unchanged")
         if self.everyone_tools is not None:
             self.everyone_tools = validate_mcp_tool_patterns(self.everyone_tools)
+        if self.read_tools is not None:
+            self.read_tools = validate_mcp_read_tools(self.read_tools)
         return self
 
 
@@ -208,6 +222,11 @@ class WorkspaceMcpServerHealth(BaseModel):
     tools: list[str] = Field(
         default_factory=list,
         description=f"Every tool name the server offers, allowed or not, up to {MAX_ALLOWED_TOOLS}; empty on a failure",
+    )
+    read_only_hinted_tools: list[str] = Field(
+        default_factory=list,
+        description="Those of tools the server annotates readOnlyHint: untrusted, a suggestion for labeling "
+        "read_tools and never applied as one",
     )
 
 
@@ -246,6 +265,7 @@ class WorkspaceMcpServerPublic(BaseModel):
     allowed_tools: list[str] | None
     enabled: bool
     everyone_tools: list[str] = Field(description="What every key of the workspace may call; [] denies everyone")
+    read_tools: list[str] = Field(description="The tool names a manager labeled read, which '@read' stands for")
     has_token: bool
     health: WorkspaceMcpServerHealth | None = Field(description="The last connection check; null until one has run")
     created_at: str
@@ -272,6 +292,7 @@ class WorkspaceMcpServerPublic(BaseModel):
             allowed_tools=server.allowed_tools,
             enabled=server.enabled,
             everyone_tools=server.everyone_tools,
+            read_tools=server.read_tools,
             has_token=server.encrypted_token is not None,
             health=WorkspaceMcpServerHealth.model_validate(server.health) if server.health is not None else None,
             created_at=server.created_at.isoformat(),
@@ -299,7 +320,9 @@ class WorkspaceMcpServerGrantPublic(BaseModel):
     key_name: str | None = None
     key_active: bool | None = Field(default=None, description="Whether a key grant's key is active")
     user_id: str | None = Field(description="The user a grant names, or the owner of a key grant's key")
-    tools: list[str] = Field(description="Tool patterns: names, '*' or 'prefix*'; [] denies")
+    tools: list[str] = Field(
+        description="Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies"
+    )
     created_at: str
     updated_at: str
 
@@ -320,7 +343,9 @@ class WorkspaceMcpServerGrantsCreate(BaseModel):
 
     api_key_ids: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(default_factory=list, max_length=500)
     user_ids: list[Annotated[str, Field(min_length=1, max_length=255)]] = Field(default_factory=list, max_length=500)
-    tools: list[str] = Field(description="Tool patterns: names, '*' or 'prefix*'; [] denies")
+    tools: list[str] = Field(
+        description="Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies"
+    )
 
     @model_validator(mode="after")
     def _check(self) -> WorkspaceMcpServerGrantsCreate:
@@ -335,7 +360,9 @@ class WorkspaceMcpServerGrantsCreate(BaseModel):
 class WorkspaceMcpServerGrantUpdate(BaseModel):
     """New tools for one grant."""
 
-    tools: list[str] = Field(description="Tool patterns: names, '*' or 'prefix*'; [] denies")
+    tools: list[str] = Field(
+        description="Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies"
+    )
 
     @model_validator(mode="after")
     def _check(self) -> WorkspaceMcpServerGrantUpdate:
@@ -448,6 +475,9 @@ def _health(allowed_tools: list[str] | None, check: ServerCheck) -> WorkspaceMcp
         tool_count=None if failed else len(offered) if allowed is None else len(set(allowed) & set(offered)),
         missing_allowed_tools=[] if failed or allowed is None else [name for name in allowed if name not in offered],
         tools=offered[:MAX_ALLOWED_TOOLS],
+        read_only_hinted_tools=[name for name in dict.fromkeys(check.read_only_hinted) if name in offered][
+            :MAX_ALLOWED_TOOLS
+        ],
     )
 
 
@@ -495,7 +525,7 @@ async def resolve_workspace_mcp_servers(
     )
     by_id = {row.id: row for row in rows}
 
-    patterns = {row.id: access.patterns_for(row.id, row.everyone_tools) for row in rows}
+    patterns = {row.id: access.patterns_for(row.id, row.everyone_tools, row.read_tools) for row in rows}
     missing = [server_id for server_id in ordered_ids if server_id not in by_id or not patterns[server_id]]
     if missing:
         raise WorkspaceMcpServerNotFoundError(missing[0])
@@ -560,6 +590,7 @@ async def resolve_workspace_mcp_server(
         authorization_token=decrypt_secret(row.encrypted_token) if row.encrypted_token else None,
         enabled=row.enabled,
         everyone_tools=row.everyone_tools,
+        read_tools=row.read_tools,
         purpose_hint=row.purpose_hint,
         allowed_tools=row.allowed_tools,
     )
@@ -583,7 +614,7 @@ async def list_reachable_mcp_servers(
     return [
         McpServerSummary(id=row.id, name=row.name, purpose_hint=row.purpose_hint)
         for row in rows
-        if access.patterns_for(row.id, row.everyone_tools)
+        if access.patterns_for(row.id, row.everyone_tools, row.read_tools)
     ]
 
 
@@ -770,6 +801,7 @@ class WorkspaceMcpServerService:
             allowed_tools=request.allowed_tools,
             enabled=request.enabled,
             everyone_tools=request.everyone_tools,
+            read_tools=request.read_tools,
         )
         self.db.add(server)
         # The unique index is the arbiter, not a preceding existence check: two
@@ -1008,7 +1040,10 @@ class WorkspaceMcpServerService:
                 allowed=False, decided_by="server", grant_id=None, tools=list(server.allowed_tools)
             )
         return WorkspaceMcpServerAccessCheck(
-            allowed=is_mcp_tool_allowed(patterns, tool), decided_by=decided, grant_id=grant_id, tools=patterns
+            allowed=is_mcp_tool_allowed(expand_mcp_tool_patterns(patterns, server.read_tools), tool),
+            decided_by=decided,
+            grant_id=grant_id,
+            tools=patterns,
         )
 
     async def _decide_for_key(

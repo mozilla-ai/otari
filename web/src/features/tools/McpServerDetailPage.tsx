@@ -13,6 +13,7 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { McpExposedTools } from "@/features/tools/McpExposedTools"
+import { McpReadTools } from "@/features/tools/McpReadTools"
 import { McpServerAcl } from "@/features/tools/McpServerAcl"
 import { McpServerConnection } from "@/features/tools/McpServerConnection"
 import { useOrganizationContext } from "@/shared/api/organizations"
@@ -25,7 +26,8 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /**
  * One stored MCP server of the selected workspace, on one page in the order a
- * call meets it: the tools it exposes, its ACL, then how otari reaches it.
+ * call meets it: the tools it exposes, which of them are read, its ACL, then
+ * how otari reaches it.
  *
  * Takes the id as a prop rather than reading the router, so a test can hand it
  * one without a route tree.
@@ -127,6 +129,12 @@ export function McpServerDetailPage({ serverId }: { serverId: string }) {
       <div className="flex flex-col gap-8">
         <McpExposedTools
           key={JSON.stringify(server.allowed_tools)}
+          workspaceId={server.workspace_id}
+          server={server}
+          canManage={canManage}
+        />
+        <McpReadTools
+          key={server.read_tools.join()}
           workspaceId={server.workspace_id}
           server={server}
           canManage={canManage}

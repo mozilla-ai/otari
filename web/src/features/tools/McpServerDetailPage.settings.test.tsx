@@ -178,6 +178,37 @@ describe("McpServerDetailPage, exposed tools and connection", () => {
     expect(await patchBody(calls)).toEqual({ allowed_tools: ["get_issue"] })
   })
 
+  it("labels read tools, ticked first from the server's own hints", async () => {
+    const calls = mockMcpServerApi({
+      server: workspaceMcpServer({
+        workspace_id: WORKSPACE,
+        health: health({
+          tools: ["list_issues", "get_issue", "delete_issue"],
+          read_only_hinted_tools: ["list_issues", "delete_issue"],
+        }),
+      }),
+    })
+    const user = userEvent.setup()
+    await openPage()
+
+    expect(screen.getByText(/None labeled/)).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Edit read tools" }))
+    const list = screen.getByRole("list", { name: "Read tools" })
+    expect(
+      within(list).getByRole("checkbox", { name: "list_issues" }),
+    ).toBeChecked()
+    // The server calls delete_issue read-only; the manager is who decides.
+    await user.click(
+      within(list).getByRole("checkbox", { name: "delete_issue" }),
+    )
+    await user.click(within(list).getByRole("checkbox", { name: "get_issue" }))
+    await user.click(screen.getByRole("button", { name: "Save read tools" }))
+
+    expect(await patchBody(calls)).toEqual({
+      read_tools: ["list_issues", "get_issue"],
+    })
+  })
+
   it("checks the connection beside the exposed tools", async () => {
     const calls = mockMcpServerApi({ server: SERVER })
     const user = userEvent.setup()

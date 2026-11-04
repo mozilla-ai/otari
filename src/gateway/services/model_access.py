@@ -258,16 +258,34 @@ MAX_MCP_TOOL_PATTERNS = 256
 
 McpAccessSource = Literal["key", "user", "everyone"]
 
+MCP_READ_PRESET = "@read"
+"""The tool pattern naming a server's read tools: the ones its managers labeled read, never the server's own hints."""
+
 
 def is_mcp_tool_allowed(patterns: Sequence[str], tool: str) -> bool:
-    """Whether a tool name matches one of a rule's tool patterns: ``*``, ``prefix*`` or an exact name."""
-    return any(pattern == tool or (pattern.endswith("*") and tool.startswith(pattern[:-1])) for pattern in patterns)
+    """Whether a tool name matches one of a rule's tool patterns: ``*``, ``prefix*`` or an exact name.
+
+    ``@read`` matches nothing here; :func:`expand_mcp_tool_patterns` swaps it for the server's read tools first.
+    """
+    return any(
+        pattern != MCP_READ_PRESET and (pattern == tool or (pattern.endswith("*") and tool.startswith(pattern[:-1])))
+        for pattern in patterns
+    )
+
+
+def expand_mcp_tool_patterns(patterns: Sequence[str], read_tools: Sequence[str]) -> list[str]:
+    """A rule's tool patterns on one server, with ``@read`` replaced by that server's read tools."""
+    if MCP_READ_PRESET not in patterns:
+        return list(patterns)
+    expanded = [pattern for pattern in patterns if pattern != MCP_READ_PRESET]
+    return expanded + [name for name in read_tools if name not in expanded]
 
 
 def validate_mcp_tool_patterns(patterns: object) -> list[str]:
     """Validate an MCP access rule's tool patterns; ``[]`` denies. Raises ``ValueError`` (a 400 or 422 at the caller).
 
-    A pattern is a tool name, ``*`` for every tool, or a name prefix ending in ``*``. Duplicates collapse.
+    A pattern is a tool name, ``*`` for every tool, a name prefix ending in ``*``, or ``@read`` for the
+    server's read tools. Duplicates collapse.
     """
     if not isinstance(patterns, list):
         raise ValueError("tools must be a list of tool names or patterns, [] to deny")
@@ -280,9 +298,31 @@ def validate_mcp_tool_patterns(patterns: object) -> list[str]:
         name = pattern.strip()
         if "*" in name[:-1]:
             raise ValueError(f"'{name}' is not a tool pattern; '*' may only end one, as in 'get_*'")
+        if name.startswith("@") and name != MCP_READ_PRESET:
+            raise ValueError(f"'{name}' is not a tool pattern; the only preset is '{MCP_READ_PRESET}'")
         if name not in checked:
             checked.append(name)
     return ["*"] if "*" in checked else checked
+
+
+def validate_mcp_read_tools(names: object) -> list[str]:
+    """Validate a server's read tools: exact tool names, since ``@read`` must not widen past what was labeled.
+
+    Raises ``ValueError`` (a 422 at the caller). Duplicates collapse.
+    """
+    if not isinstance(names, list):
+        raise ValueError("read_tools must be a list of tool names")
+    if len(names) > MAX_MCP_TOOL_PATTERNS:
+        raise ValueError(f"read_tools holds at most {MAX_MCP_TOOL_PATTERNS} entries")
+    checked: list[str] = []
+    for name in names:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("read_tools entries must be non-empty strings")
+        if "*" in name or name.strip().startswith("@"):
+            raise ValueError(f"'{name}' is not a tool name; read_tools names tools exactly")
+        if name.strip() not in checked:
+            checked.append(name.strip())
+    return checked
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,7 +340,7 @@ class McpAccess:
     request_servers_allowed: bool = True
 
     def decide(self, server_id: uuid.UUID, everyone_tools: Sequence[str]) -> tuple[McpAccessSource, list[str]]:
-        """Which rule decides this caller's access to a stored server, and the tool patterns it grants."""
+        """Which rule decides this caller's access to a stored server, and the tool patterns it grants, unexpanded."""
         if self.unrestricted:
             return "everyone", ["*"]
         if server_id in self.key_grants:
@@ -309,9 +349,9 @@ class McpAccess:
             return "user", list(self.user_grants[server_id])
         return "everyone", list(everyone_tools)
 
-    def patterns_for(self, server_id: uuid.UUID, everyone_tools: Sequence[str]) -> list[str]:
-        """The tool patterns this caller holds on a stored server; empty means it cannot reach it."""
-        return self.decide(server_id, everyone_tools)[1]
+    def patterns_for(self, server_id: uuid.UUID, everyone_tools: Sequence[str], read_tools: Sequence[str]) -> list[str]:
+        """The tool patterns this caller holds on a server, ``@read`` expanded; empty means it cannot reach it."""
+        return expand_mcp_tool_patterns(self.decide(server_id, everyone_tools)[1], read_tools)
 
     @property
     def may_declare_servers(self) -> bool:
