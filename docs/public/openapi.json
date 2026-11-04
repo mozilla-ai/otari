@@ -53387,7 +53387,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/grants": {
       "post": {
-        "description": "Give keys and users the same tools on a server.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nA key or user that already has a grant on the server gets these tools instead. A key must\nbelong to this workspace, and a user must own a key in it; either is otherwise refused with\na 400. Answers with the server's whole access list.",
+        "description": "Give keys and users the same tools on a server.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nA key or user that already has a grant on the server gets these tools instead. A key must\nbelong to this workspace, and a user must own a key in it or be an active member of it, named\nby their identity's id; either is otherwise refused with a 400. Answers with the server's whole\naccess list.",
         "operationId": "mcp-servers-add_workspace_mcp_server_grants",
         "parameters": [
           {

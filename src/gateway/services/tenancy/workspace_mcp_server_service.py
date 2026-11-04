@@ -60,8 +60,9 @@ from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import User
 from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
-from gateway.repositories.tenancy import WorkspaceRepository
+from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
+from gateway.repositories.users_repository import provision_attribution_users
 
 # The module as well as the names, so the check is looked up at call time and a
 # test can stand in for the network.
@@ -944,12 +945,29 @@ class WorkspaceMcpServerService:
             )
         return WorkspaceMcpServerAccess(everyone_tools=everyone_tools, grants=public)
 
+    async def _members_by_attribution(self, workspace_id: uuid.UUID, user_ids: list[str]) -> set[str]:
+        """Which of ``user_ids`` are the request-plane ids of the workspace's active members, minting missing rows.
+
+        A member's request-plane id is their identity's UUID as a string, as the Playground and member keys use it.
+        """
+        identities: dict[uuid.UUID, str] = {}
+        for user_id in user_ids:
+            try:
+                identities[uuid.UUID(user_id)] = user_id
+            except ValueError:
+                continue
+        pairs = await WorkspaceMemberRepository(self.db).get_active_pairs([workspace_id], list(identities))
+        members = [identities[identity] for _, identity in pairs]
+        return await provision_attribution_users(self.db, members)
+
     async def add_grants(
         self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, request: WorkspaceMcpServerGrantsCreate
     ) -> WorkspaceMcpServerAccess:
         """Give keys and users the same tools on a server, replacing what any of them held.
 
-        A key must belong to the server's workspace, and a user must own a key in it.
+        A key must belong to the server's workspace. A user must own a key in it, or be an active member of it,
+        whom the Playground binds as their user before they hold any key; such a member's request-plane row is
+        minted here if they have none yet.
 
         Raises:
             WorkspaceMcpServerGrantSubjectError: a key or user is not of this workspace, or the server
@@ -965,10 +983,13 @@ class WorkspaceMcpServerService:
                 raise WorkspaceMcpServerGrantSubjectError(f"Key '{unknown[0]}' is not a key of this workspace")
         if request.user_ids:
             owners = await keys.owners_in_workspace(resolved_workspace_id, request.user_ids)
-            strangers = [user_id for user_id in request.user_ids if user_id not in owners]
+            members = await self._members_by_attribution(
+                resolved_workspace_id, [user_id for user_id in request.user_ids if user_id not in owners]
+            )
+            strangers = [user_id for user_id in request.user_ids if user_id not in owners and user_id not in members]
             if strangers:
                 raise WorkspaceMcpServerGrantSubjectError(
-                    f"'{strangers[0]}' owns no key in this workspace, so a grant to them would reach nothing"
+                    f"'{strangers[0]}' is not a member of this workspace and owns no key in it"
                 )
         repository = WorkspaceMcpServerGrantRepository(self.db)
         # The key reads above end in commits; the server is read again here, locked, so two

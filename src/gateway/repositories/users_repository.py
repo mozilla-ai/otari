@@ -132,6 +132,24 @@ async def live_attribution_user_ids(db: AsyncSession, user_ids: Sequence[str]) -
     return set(rows.scalars().all())
 
 
+async def provision_attribution_users(db: AsyncSession, user_ids: Sequence[str]) -> set[str]:
+    """Mint a request-plane row for each of ``user_ids`` that has none, and return the ids that are usable.
+
+    For a member who has neither a key nor a Playground request yet, so something can name them before they
+    first act. Unlike :func:`get_or_create_attribution_user`, a soft-deleted row is left deleted and its id is
+    not returned: deleting a user is an operator's revocation, which this must not undo. The caller owns the commit.
+    """
+    if not user_ids:
+        return set()
+    rows = await db.execute(select(User.user_id, User.deleted_at).where(User.user_id.in_(list(user_ids))))
+    deleted_at = {user_id: deleted for user_id, deleted in rows.tuples().all()}
+    for user_id in dict.fromkeys(user_ids):
+        if user_id not in deleted_at:
+            await get_or_create_attribution_user(db, user_id=user_id, alias=None)
+            deleted_at[user_id] = None
+    return {user_id for user_id, deleted in deleted_at.items() if deleted is None}
+
+
 async def attribution_spend(db: AsyncSession, user_ids: Sequence[str]) -> dict[str, User]:
     """The request-plane rows behind these ids, by id.
 

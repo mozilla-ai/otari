@@ -6,7 +6,10 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import {
+  attributionId,
+  useMemberAttributionLabels,
+} from "@/features/organization/attribution"
 import { McpAccessTest } from "@/features/tools/McpAccessTest"
 import { McpGrantDialog } from "@/features/tools/McpGrantDialog"
 import { McpGrantsTable } from "@/features/tools/McpGrantsTable"
@@ -87,12 +90,10 @@ export function McpServerAcl({
     (workspaceMembers.data ?? []).map((member) => member.user_id),
   )
   const userIdsInWorkspace = (organizationMembers.data ?? []).flatMap(
-    (member) =>
-      member.user_id &&
-      memberIds.has(member.user_id) &&
-      member.attribution_user_id
-        ? [member.attribution_user_id]
-        : [],
+    (member) => {
+      const id = attributionId(member)
+      return member.user_id && memberIds.has(member.user_id) && id ? [id] : []
+    },
   )
   const users = grantUsers(keys.data ?? [], userIdsInWorkspace, labels)
 

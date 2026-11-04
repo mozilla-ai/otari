@@ -24,8 +24,11 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_KEY_HEADER, API_ROOT, CONVERSATION_HEADER
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
+from gateway.models.tenancy import User as Identity
+from gateway.models.tenancy import Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceMcpServer
 from gateway.models.traces import Trace, TraceSpan
+from gateway.models.users import User as BillingUser
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CODE_SERVER_NOT_FOUND, CODE_TOOL_NOT_ALLOWED
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -585,6 +588,36 @@ def test_a_keys_summary_covers_every_server_of_its_workspace(
     assert client.get(f"{_servers(workspace)}/keys/no-such-key/access", headers=master_key_header).status_code == 400
 
 
+def test_a_member_without_a_key_can_be_given_a_rule_and_an_outsider_cannot(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """The Playground binds a member as their user before they hold any key, so a manager can restrict them first."""
+    key = _new_key(client, master_key_header)
+    workspace = _workspace_id(test_db, key)
+    row = _store(test_db, workspace, "github")
+    home = test_db.get(Workspace, workspace)
+    assert home is not None
+    member = Identity(email="keyless@example.test", full_name="Keyless", active_organization_id=home.organization_id)
+    outsider = Identity(
+        email="outsider@example.test", full_name="Outsider", active_organization_id=home.organization_id
+    )
+    test_db.add_all([member, outsider])
+    test_db.commit()
+    test_db.add(WorkspaceMember(workspace_id=workspace, user_id=member.id, role="member", status="active"))
+    test_db.commit()
+
+    granted = _grant(client, master_key_header, row, [], users=[str(member.id)])
+    refused = client.post(
+        f"{_servers(workspace)}/{row.id}/access/grants",
+        json={"user_ids": [str(outsider.id)], "tools": []},
+        headers=master_key_header,
+    )
+
+    assert [grant["user_id"] for grant in granted["grants"]] == [str(member.id)]
+    assert test_db.get(BillingUser, str(member.id)) is not None
+    assert refused.status_code == 400, refused.text
+
+
 def test_a_deleted_user_s_grants_do_not_come_back_with_a_user_recreated_under_its_id(
     client: TestClient, master_key_header: dict[str, str], test_db: Session
 ) -> None:
@@ -642,7 +675,6 @@ def test_a_workspace_can_refuse_servers_a_request_names_itself(
     assert "does not let a request name MCP servers" in refused.text
 
 
-
 def test_the_switch_also_refuses_an_mcp_server_the_provider_would_dial(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -668,6 +700,7 @@ def test_the_switch_also_refuses_an_mcp_server_the_provider_would_dial(
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
     provider.assert_not_called()
+
 
 # --------------------------------------------------------------------------- #
 # Traces of POST /mcp/execute

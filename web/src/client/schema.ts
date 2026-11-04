@@ -7191,8 +7191,9 @@ export interface paths {
          *     Organization owners/admins or this workspace's owners/admins.
          *
          *     A key or user that already has a grant on the server gets these tools instead. A key must
-         *     belong to this workspace, and a user must own a key in it; either is otherwise refused with
-         *     a 400. Answers with the server's whole access list.
+         *     belong to this workspace, and a user must own a key in it or be an active member of it, named
+         *     by their identity's id; either is otherwise refused with a 400. Answers with the server's whole
+         *     access list.
          */
         post: operations["mcp-servers-add_workspace_mcp_server_grants"];
         delete?: never;

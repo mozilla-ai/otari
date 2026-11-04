@@ -231,7 +231,7 @@ owners/admins or the workspace's owners/admins:
 |---|---|
 | `PATCH /` with `everyone_tools` | change the default policy |
 | `GET /access` | the default policy and every rule, each naming its key (with its name, owner and whether it is active) or its user |
-| `POST /access/grants` | add the same rule for several `api_key_ids` and `user_ids`; a key or user that already has a rule gets this one instead. A key must belong to the workspace and a user must own a key in it |
+| `POST /access/grants` | add the same rule for several `api_key_ids` and `user_ids`; a key or user that already has a rule gets this one instead. A key must belong to the workspace, and a user must own a key in it or be an active member of it, named by their identity's id, so a manager can restrict a member's Playground before they hold any key |
 | `PATCH /access/grants/{grant_id}` | change one rule's `tools` |
 | `DELETE /access/grants/{grant_id}` | delete one rule, so its key or user matches the next rule down |
 | `GET /access/check?api_key_id=&tool=` | trace one call: whether a key may call a tool, and what matched (`key`, `user`, `everyone` for the default policy, or `server` when the server is disabled or does not expose the tool) |
