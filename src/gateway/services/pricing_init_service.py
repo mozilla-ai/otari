@@ -233,6 +233,7 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             cache_write_price_per_million=cache_write_price,
             pricing_tiers=pricing_tiers,
             unit=pricing_config.unit,
+            rates=None if pricing_config.rates is None else pricing_config.rates.document(),
             origin="config",
         )
         db.add(new_pricing)

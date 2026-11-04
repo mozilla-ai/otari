@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.types.price_rates import MODALITIES, RATES_DESCRIPTION, RatesDocument, columns_from_rates
 from gateway.types.price_unit import AcceptedPriceUnit, current_unit_name
 
 PRICING_REFRESH_POLICIES: tuple[str, ...] = ("manual", "review", "auto")
@@ -97,6 +98,58 @@ def price_per_request_shorthand(data: Any) -> Any:
     }
 
 
+# The fields ``rates`` carries, so a body that gives it gives none of them.
+_RATES_REPLACES = (
+    "input_price_per_million",
+    "output_price_per_million",
+    "cache_read_price_per_million",
+    "cache_write_price_per_million",
+    "pricing_tiers",
+    "unit",
+    "price_per_request",
+)
+
+
+def rates_shorthand(data: Any) -> Any:
+    """Read the per-million fields out of ``rates``, refusing a mix of the two.
+
+    A body that gives ``rates`` gives every price there, so the six fields are
+    written from it: the unit, the two rates, the cache rates (``None`` where
+    the block has none, so an earlier version's are not inherited) and the
+    tiers. A block no column can hold is refused with its reason.
+    """
+    if not isinstance(data, dict) or data.get("rates") is None:
+        return data
+    mixed = [name for name in _RATES_REPLACES if data.get(name) not in (None, [])]
+    if mixed:
+        raise ValueError(f"rates carries every price; remove {', '.join(mixed)}")
+    if isinstance(data["rates"], dict):
+        unknown = [key for key in data["rates"] if key not in (*MODALITIES, "web_search", "multipliers")]
+        if unknown:
+            raise ValueError(
+                f"rates price a modality not known here: {', '.join(unknown)}; one of {', '.join(MODALITIES)}"
+            )
+    try:
+        # The strict shape first, so a typo or a negative price is named as such before the columns are read.
+        RatesDocument.model_validate(data["rates"])
+        columns = columns_from_rates(data["rates"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(str(exc)) from None
+    return {
+        **data,
+        "unit": columns.unit,
+        "input_price_per_million": float(columns.input_price_per_million),
+        "output_price_per_million": float(columns.output_price_per_million),
+        "cache_read_price_per_million": _float_or_none(columns.cache_read_price_per_million),
+        "cache_write_price_per_million": _float_or_none(columns.cache_write_price_per_million),
+        "pricing_tiers": [dict(tier) for tier in columns.pricing_tiers],
+    }
+
+
+def _float_or_none(value: Decimal | None) -> float | None:
+    return None if value is None else float(value)
+
+
 class PricingConfig(BaseModel):
     """Model pricing configuration."""
 
@@ -124,11 +177,12 @@ class PricingConfig(BaseModel):
     price_per_request: float | None = Field(
         default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
     )
+    rates: RatesDocument | None = Field(default=None, description=RATES_DESCRIPTION)
 
     @model_validator(mode="before")
     @classmethod
-    def _expand_price_per_request(cls, data: Any) -> Any:
-        return price_per_request_shorthand(data)
+    def _expand_shorthands(cls, data: Any) -> Any:
+        return price_per_request_shorthand(rates_shorthand(data))
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "PricingConfig":

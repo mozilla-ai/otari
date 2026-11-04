@@ -21,7 +21,7 @@ order (override, deployment row, models.dev catalog) is
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
@@ -32,8 +32,9 @@ from gateway.api.deps import CurrentIdentity, RequestSessionModelProviderPortDep
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.settings.pricing import rates_shorthand
 from gateway.models.money import as_float
-from gateway.models.pricing import MODEL_KIND, OrganizationModelPricing, PricingKind
+from gateway.models.pricing import MODEL_KIND, OrganizationModelPricing, PricingKind, rates_of
 
 # The tier shape comes from the deployment pricing route rather than a second
 # copy here. An override resolves into a transient ``ModelPricing`` and is read by
@@ -45,6 +46,7 @@ from gateway.services.organization_pricing_service import (
     PricingOverrideInput,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument
 from gateway.types.price_unit import AcceptedPriceUnit
 
 # Master key on the router, as every management router declares it.
@@ -109,6 +111,12 @@ class OrganizationModelPricingRates(BaseModel):
             "and prices nothing. The plural names tokens, requests and images are still read for one release."
         ),
     )
+    rates: RatesDocument | None = Field(default=None, description=RATES_DESCRIPTION)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_rates(cls, data: Any) -> Any:
+        return rates_shorthand(data)
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "OrganizationModelPricingRates":
@@ -179,6 +187,7 @@ class OrganizationModelPricingPublic(BaseModel):
     cache_write_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str
+    rates: RatesDocument = Field(description=RATES_DESCRIPTION)
     effective_from: datetime
     effective_to: datetime | None
     created_at: datetime
@@ -200,6 +209,7 @@ class OrganizationModelPricingPublic(BaseModel):
             cache_write_price_per_million=as_float(override.cache_write_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
             unit=override.unit or "token",
+            rates=RatesDocument.model_validate(rates_of(override)),
             effective_from=override.effective_from,
             effective_to=override.effective_to,
             created_at=override.created_at,
@@ -248,6 +258,7 @@ def _to_input(body: OrganizationModelPricingRates) -> PricingOverrideInput:
         effective_from=body.effective_from or datetime.now(tz=UTC),
         effective_to=body.effective_to,
         unit=body.unit,
+        rates=None if body.rates is None else body.rates.document(),
     )
 
 

@@ -23,11 +23,12 @@ from gateway.core.settings.pricing import (
     PRICE_PER_REQUEST_DESCRIPTION,
     PRICE_UNIT_DESCRIPTION,
     price_per_request_shorthand,
+    rates_shorthand,
 )
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float, to_usd, to_usd_or_none
-from gateway.models.pricing import API_ORIGIN, MODEL_KIND, ModelPricing, PricingKind
+from gateway.models.pricing import API_ORIGIN, MODEL_KIND, ModelPricing, PricingKind, rates_of
 from gateway.models.pricing_schemas import PRICING_KIND_DESCRIPTION, PricedKind, PricingTier
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
@@ -57,6 +58,7 @@ from gateway.services.pricing_service import (
     rates_in_force,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
+from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument
 from gateway.types.price_unit import AcceptedPriceUnit
 
 # Two routers under one prefix, one per authorization rule, so that adding a
@@ -151,11 +153,12 @@ class SetPricingRequest(PricedKind):
     price_per_request: float | None = Field(
         default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
     )
+    rates: RatesDocument | None = Field(default=None, description=RATES_DESCRIPTION)
 
     @model_validator(mode="before")
     @classmethod
-    def _expand_price_per_request(cls, data: Any) -> Any:
-        return price_per_request_shorthand(data)
+    def _expand_shorthands(cls, data: Any) -> Any:
+        return price_per_request_shorthand(rates_shorthand(data))
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "SetPricingRequest":
@@ -183,6 +186,7 @@ class PricingResponse(BaseModel):
     price_per_request: float | None = Field(
         default=None, description="USD for each request, for a rate per request; null for any other unit."
     )
+    rates: RatesDocument = Field(description=RATES_DESCRIPTION)
     origin: str | None = Field(
         description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
     )
@@ -205,6 +209,7 @@ class PricingResponse(BaseModel):
             price_per_request=(
                 float(Decimal(str(pricing.input_price_per_million)) / 1_000_000) if pricing.unit == "request" else None
             ),
+            rates=RatesDocument.model_validate(rates_of(pricing)),
             origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),
@@ -553,6 +558,8 @@ async def set_pricing(
         pricing.pricing_tiers = pricing_tiers
         pricing.unit = request.unit
         pricing.origin = API_ORIGIN
+        if request.rates is not None:
+            pricing.rates = request.rates.document()
     else:
         pricing = ModelPricing(
             kind=request.row_kind,
@@ -565,6 +572,7 @@ async def set_pricing(
             pricing_tiers=pricing_tiers,
             unit=request.unit,
             origin=API_ORIGIN,
+            rates=None if request.rates is None else request.rates.document(),
         )
         db.add(pricing)
 
