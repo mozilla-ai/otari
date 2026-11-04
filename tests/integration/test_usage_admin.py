@@ -39,7 +39,7 @@ def _make_log(
     user_id: str = "u",
     source: str = "claude_code",
     source_label: str | None = None,
-    provider: str = "openai",
+    provider: str | None = "openai",
     model: str = "openai/gpt-4",
     prompt_tokens: int | None = 1000,
     completion_tokens: int | None = 500,
@@ -502,7 +502,7 @@ def _reprice_cache_write_row(
     db_session: Session,
     *,
     log_id: str,
-    provider: str,
+    provider: str | None,
     model: str,
 ) -> UsageLog:
     log = _make_log(
@@ -543,6 +543,20 @@ def test_set_price_bills_a_claude_1h_cache_write_at_the_1h_rate(
         client, master_key_header, db_session, log_id="imp-claude-1h", provider="anthropic", model="claude-sonnet-4-5"
     )
     # 1000 * 3/1M + 1M 1h writes at twice the input rate (6/M), not the 3.75/M 5-minute rate.
+    assert row.cost == Decimal("6.003")
+
+
+def test_set_price_keeps_the_claude_rule_for_a_row_without_a_provider(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    row = _reprice_cache_write_row(
+        client,
+        master_key_header,
+        db_session,
+        log_id="imp-claude-bare",
+        provider=None,
+        model="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+    )
     assert row.cost == Decimal("6.003")
 
 

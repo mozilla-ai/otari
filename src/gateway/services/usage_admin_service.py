@@ -285,10 +285,12 @@ def _manual_pricing(request: UsageSetPriceRequest, row: UsageLog) -> ModelPricin
     """Transient pricing for ``row`` from the manual rates, under the row's own model key.
 
     The key matters: rules keyed on the model (the Claude 1h cache-write multiple)
-    read it from the pricing object, so a synthetic key would drop them.
+    read it from the pricing object, so a synthetic key would drop them. It is
+    always qualified, even without a provider, so a model id that itself contains
+    a colon is not split as if its prefix were the provider.
     """
     return ModelPricing(
-        model_key=f"{row.provider}:{row.model}" if row.provider else row.model,
+        model_key=f"{row.provider or ''}:{row.model}",
         input_price_per_million=request.input_price_per_million,
         output_price_per_million=request.output_price_per_million,
         cache_read_price_per_million=request.cache_read_price_per_million,
