@@ -1125,7 +1125,9 @@ class WorkspaceMcpServerService:
             .all()
         )
         by_server: dict[uuid.UUID, list[WorkspaceMcpServerGrant]] = {}
-        for grant in await WorkspaceMcpServerGrantRepository(self.db).for_caller(key.id, key.user_id):
+        for grant in await WorkspaceMcpServerGrantRepository(self.db).for_caller(
+            key.id, key.user_id, [server.id for server in servers]
+        ):
             by_server.setdefault(grant.server_id, []).append(grant)
         result: list[WorkspaceMcpServerKeyAccess] = []
         for server in servers:

@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent, ToolAnnotations
 from mcp.types import Tool as MCPTool
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, CONVERSATION_HEADER
@@ -26,11 +27,13 @@ from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import User as Identity
 from gateway.models.tenancy import Workspace, WorkspaceMember
-from gateway.models.tools import WorkspaceMcpServer
+from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
 from gateway.models.traces import Trace, TraceSpan
 from gateway.models.users import User as BillingUser
+from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CODE_SERVER_NOT_FOUND, CODE_TOOL_NOT_ALLOWED
+from gateway.services.model_access import resolve_request_mcp_access
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import workspace_mcp_server_service
 
@@ -370,7 +373,7 @@ def test_a_catalog_stored_before_the_screen_is_read_back_without_pattern_names(
     assert stored["health"]["read_only_hinted_tools"] == ["list_issues"]
 
 
-@pytest.mark.parametrize("read_tools", [["list_*"], ["@read"], [""], None])
+@pytest.mark.parametrize("read_tools", [["list_*"], ["@read"], [""], None, ["x" * 257]])
 def test_read_tools_name_tools_exactly(
     client: TestClient, master_key_header: dict[str, str], test_db: Session, read_tools: Any
 ) -> None:
@@ -384,13 +387,16 @@ def test_read_tools_name_tools_exactly(
     assert response.status_code == 422
 
 
-def test_an_unknown_preset_is_refused(client: TestClient, master_key_header: dict[str, str], test_db: Session) -> None:
+@pytest.mark.parametrize("tools", [["@write"], ["x" * 257]])
+def test_an_unknown_preset_or_an_overlong_pattern_is_refused(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, tools: list[str]
+) -> None:
     key = _new_key(client, master_key_header)
     row = _store(test_db, _workspace_id(test_db, key), "github")
 
     response = client.post(
         f"{_servers(row.workspace_id)}/{row.id}/access/grants",
-        json={"api_key_ids": [key["id"]], "user_ids": [], "tools": ["@write"]},
+        json={"api_key_ids": [key["id"]], "user_ids": [], "tools": tools},
         headers=master_key_header,
     )
 
@@ -655,6 +661,34 @@ def test_a_deleted_user_s_grants_do_not_come_back_with_a_user_recreated_under_it
     assert deleted.status_code in (200, 204), deleted.text
     assert recreated.status_code in (200, 201), recreated.text
     assert _listed(client, fresh) == []
+
+
+@pytest.mark.asyncio
+async def test_a_request_reads_only_its_own_workspace_s_grants(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, async_db: AsyncSession
+) -> None:
+    """A user shared across workspaces, as ``default`` is, costs a request in one only that one's grants."""
+    created = client.post(f"{API_ROOT}/users", json={"user_id": "shared"}, headers=master_key_header)
+    assert created.status_code in (200, 201), created.text
+    key = _new_key(client, master_key_header, user_id="shared")
+    here = _workspace_id(test_db, key)
+    home = test_db.get(Workspace, here)
+    assert home is not None
+    elsewhere = Workspace(name="Elsewhere", organization_id=home.organization_id)
+    test_db.add(elsewhere)
+    test_db.commit()
+    mine = _store(test_db, here, "github", everyone=[])
+    theirs = _store(test_db, elsewhere.id, "jira", everyone=[])
+    test_db.add_all(
+        [WorkspaceMcpServerGrant(server_id=server.id, user_id="shared", tools=["*"]) for server in (mine, theirs)]
+    )
+    test_db.commit()
+
+    access = await resolve_request_mcp_access(async_db, await async_db.get(APIKey, key["id"]), here)
+    grants = await WorkspaceMcpServerGrantRepository(async_db).for_caller(key["id"], "shared", [mine.id])
+
+    assert [grant.server_id for grant in grants] == [mine.id]
+    assert set(access.user_grants) == {mine.id}
 
 
 def test_renaming_a_server_keeps_its_grants(

@@ -37,7 +37,7 @@ from gateway.core.settings.tools import ALL_SEARCH_TOOLS, ToolKind, effective_fe
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.repositories.tenancy import WorkspaceRepository
-from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
+from gateway.repositories.tools import WorkspaceMcpServerGrantRepository, WorkspaceMcpServerRepository
 from gateway.services.alias_service import all_alias_names
 from gateway.services.catalog import dated_builds
 from gateway.services.provider_kwargs import reaches_organization_key, split_selector
@@ -255,6 +255,8 @@ def validate_allowed_tools(config: GatewayConfig, entries: list[str] | None) -> 
 
 MAX_MCP_TOOL_PATTERNS = 256
 """Most tool patterns one access rule (a server's ``everyone_tools`` or one grant) may hold."""
+MAX_MCP_TOOL_PATTERN_LENGTH = 256
+"""Longest one tool pattern may be: the longest tool name execution accepts."""
 
 McpAccessSource = Literal["key", "user", "everyone"]
 
@@ -296,6 +298,8 @@ def validate_mcp_tool_patterns(patterns: object) -> list[str]:
         if not isinstance(pattern, str) or not pattern.strip():
             raise ValueError("tools entries must be non-empty strings")
         name = pattern.strip()
+        if len(name) > MAX_MCP_TOOL_PATTERN_LENGTH:
+            raise ValueError(f"tools entries are at most {MAX_MCP_TOOL_PATTERN_LENGTH} characters")
         if "*" in name[:-1]:
             raise ValueError(f"'{name}' is not a tool pattern; '*' may only end one, as in 'get_*'")
         if name.startswith("@") and name != MCP_READ_PRESET:
@@ -318,6 +322,8 @@ def validate_mcp_read_tools(names: object) -> list[str]:
     for name in names:
         if not isinstance(name, str) or not name.strip():
             raise ValueError("read_tools entries must be non-empty strings")
+        if len(name.strip()) > MAX_MCP_TOOL_PATTERN_LENGTH:
+            raise ValueError(f"read_tools entries are at most {MAX_MCP_TOOL_PATTERN_LENGTH} characters")
         if "*" in name or name.strip().startswith("@"):
             raise ValueError(f"'{name}' is not a tool name; read_tools names tools exactly")
         if name.strip() not in checked:
@@ -377,7 +383,8 @@ async def resolve_request_mcp_access(
     key_id, user_id = (api_key.id, api_key.user_id) if api_key is not None else (None, session_user_id)
     key_grants: dict[uuid.UUID, tuple[str, ...]] = {}
     user_grants: dict[uuid.UUID, tuple[str, ...]] = {}
-    for grant in await WorkspaceMcpServerGrantRepository(db).for_caller(key_id, user_id):
+    server_ids = await WorkspaceMcpServerRepository(db).ids_in_workspace(workspace_id) if workspace_id else None
+    for grant in await WorkspaceMcpServerGrantRepository(db).for_caller(key_id, user_id, server_ids):
         (key_grants if grant.api_key_id is not None else user_grants)[grant.server_id] = tuple(grant.tools)
     workspace = await WorkspaceRepository(db).get(workspace_id) if workspace_id is not None else None
     return McpAccess(

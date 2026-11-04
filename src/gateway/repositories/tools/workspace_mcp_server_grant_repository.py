@@ -22,16 +22,25 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
     def __init__(self, db: AsyncSession | UnitOfWork) -> None:
         super().__init__(db, WorkspaceMcpServerGrant)
 
-    async def for_caller(self, api_key_id: str | None, user_id: str | None) -> list[WorkspaceMcpServerGrant]:
-        """Every grant naming this key or this user, on any server; a session passes no key."""
+    async def for_caller(
+        self, api_key_id: str | None, user_id: str | None, server_ids: Collection[uuid.UUID] | None
+    ) -> list[WorkspaceMcpServerGrant]:
+        """Every grant naming this key or this user, on these servers; a session passes no key.
+
+        A request passes its workspace's servers, so a user every keyless key shares (``default``) holding grants in
+        many workspaces costs a request in one of them only that one's grants. ``None`` reads every server.
+        """
         subjects = []
         if api_key_id is not None:
             subjects.append(WorkspaceMcpServerGrant.api_key_id == api_key_id)
         if user_id is not None:
             subjects.append(WorkspaceMcpServerGrant.user_id == user_id)
-        if not subjects:
+        if not subjects or (server_ids is not None and not server_ids):
             return []
-        return list((await self.db.execute(select(WorkspaceMcpServerGrant).where(or_(*subjects)))).scalars().all())
+        query = select(WorkspaceMcpServerGrant).where(or_(*subjects))
+        if server_ids is not None:
+            query = query.where(WorkspaceMcpServerGrant.server_id.in_(list(server_ids)))
+        return list((await self.db.execute(query)).scalars().all())
 
     async def for_server(self, server_id: uuid.UUID) -> list[WorkspaceMcpServerGrant]:
         """A server's grants, oldest first."""
