@@ -248,7 +248,7 @@ one question; a form is a place to work.
     value={name}
     onChange={setName}
     description="Lowercase, hyphens, no spaces."
-    reserveMessage
+    shouldReserveMessage
   />
 </FormDialog>
 
@@ -269,11 +269,11 @@ dialog compiles, lints, ships and loses. `Dialog` shares the family.
 **A field reserves its message line only where it has a description**, which is
 [forms.md](forms.md)'s rule and not a dialog rule: the reserved line exists so an
 error can replace a description rather than push the footer down, so a field with
-nothing to say under it holds nothing. Spell that as `reserveMessage={false}`
-rather than by leaving the prop off, which currently reserves anyway: forms.md
-says the prop defaults to off and it does not, because `FieldMessages` defaults
-its own `reserve` to true and the four controls forward an undefined prop into
-it. Measured, a bare field in a dialog is 83px against the 60px it should be.
+nothing to say under it holds nothing. Spell that as `shouldReserveMessage={false}`
+rather than by leaving the prop off, which reserves because the prop defaults to
+on: `FieldMessages` defaults its own `shouldReserve` to true and the four controls
+forward an undefined prop into it. Measured, a bare field in a dialog is 83px
+against the 60px it should be.
 The first field takes `autoFocus`.
 
 **Fields fill the dialog.** `Field` and `SecretField` cap themselves at 448px,
