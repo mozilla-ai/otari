@@ -232,6 +232,30 @@ def test_edits_unsupported_parameter_is_the_callers_400(client: TestClient, api_
     assert "response_format" in resp.json()["detail"]
 
 
+def test_edits_refuses_zero_images(client: TestClient, api_key_header: dict[str, str]) -> None:
+    with patch(_PATCH_TARGET, new_callable=AsyncMock) as mock:
+        resp = client.post(
+            _EDITS_URL, data=_form(n="0"), files={"image": ("cat.png", _PNG, "image/png")}, headers=api_key_header
+        )
+    assert resp.status_code == 422
+    assert ["body", "n"] in [error["loc"] for error in resp.json()["detail"]]
+    mock.assert_not_called()
+
+
+def test_edits_reads_no_file_for_a_refused_request(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A request refused before the provider call (here, a master key without ``user``) never reads its files."""
+    with (
+        patch("gateway.api.routes.images._upload_part", new_callable=AsyncMock) as read,
+        patch(_PATCH_TARGET, new_callable=AsyncMock) as mock,
+    ):
+        resp = client.post(
+            _EDITS_URL, data=_form(), files={"image": ("cat.png", _PNG, "image/png")}, headers=master_key_header
+        )
+    assert resp.status_code == 400
+    read.assert_not_called()
+    mock.assert_not_called()
+
+
 def test_edits_bills_per_image_and_logs_usage(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
@@ -245,7 +269,7 @@ def test_edits_bills_per_image_and_logs_usage(
     with patch(_PATCH_TARGET, new_callable=AsyncMock, return_value=_edit_response(n=2, usage=usage)):
         resp = client.post(
             _EDITS_URL,
-            data=_form(n="2"),
+            data=_form(n="3"),
             files={"image": ("cat.png", _PNG, "image/png")},
             headers=api_key_header,
         )

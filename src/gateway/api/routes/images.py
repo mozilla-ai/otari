@@ -119,7 +119,9 @@ async def _upload_part(upload: UploadFile, field: str) -> tuple[str, bytes, str 
     show, because OpenAI rejects ``application/octet-stream`` image parts and
     Gemini needs the type.
     """
-    data = await upload.read()
+    await upload.seek(0)
+    # One byte past the limit is enough to know it is over, without holding a larger file in memory.
+    data = await upload.read(_MAX_EDIT_IMAGE_BYTES + 1)
     if len(data) > _MAX_EDIT_IMAGE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -150,7 +152,7 @@ async def edit_image(
     # OpenAI's SDKs send several images as ``image[]``.
     image_list: Annotated[list[UploadFile] | None, File(alias="image[]", description="Same as image.")] = None,
     mask: Annotated[UploadFile | None, File()] = None,
-    n: Annotated[int | None, Form()] = None,
+    n: Annotated[int | None, Form(ge=1)] = None,
     size: Annotated[str | None, Form()] = None,
     quality: Annotated[str | None, Form()] = None,
     response_format: Annotated[str | None, Form()] = None,
@@ -159,9 +161,9 @@ async def edit_image(
     """OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.
 
     Authentication modes:
-    - Master key + user field: Use specified user (must exist)
-    - API key + user field: Use specified user (must exist)
-    - API key without user field: Use the shared "default" user
+    - Master key: the ``user`` field is required and names an existing user.
+    - API key: usage and spend go to the key's own user. A ``user`` naming a
+      different user is refused with 403, or ignored when mismatch rejection is off.
     """
     uploads = [*(image or []), *(image_list or [])]
     if not uploads:
@@ -171,25 +173,27 @@ async def edit_image(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"At most {_MAX_EDIT_IMAGES} images can be edited in one request",
         )
-    images = [await _upload_part(upload, "image") for upload in uploads]
-    mask_part = await _upload_part(mask, "mask") if mask is not None else None
 
     form = {"n": n, "size": size, "quality": quality, "response_format": response_format, "user": user}
     set_fields: dict[str, Any] = {name: value for name, value in form.items() if value is not None}
-    if mask_part is not None:
-        set_fields["mask"] = mask_part
     forward = _strip_gateway_fields(dict(set_fields))
+    request_params = {*set_fields, *(("mask",) if mask is not None else ())}
     requested_images = n if n is not None else 1
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return count_estimate(pricing, meter="images", count=requested_images)
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
+        # Read here, after the rate limit, budget and pricing gates, so a refused
+        # request never loads its files into memory.
+        images = [await _upload_part(upload, "image") for upload in uploads]
+        mask_part = {"mask": await _upload_part(mask, "mask")} if mask is not None else {}
         edit_kwargs: dict[str, Any] = {
             "model": resolved.model,
             "provider": resolved.provider,
             **resolved.kwargs,
             **forward,
+            **mask_part,
             # One image goes as one, not a one-item list, as a direct any-llm call would send it.
             "image": images[0] if len(images) == 1 else images,
             "prompt": prompt,
@@ -209,7 +213,7 @@ async def edit_image(
         model=model,
         user=user,
         call_provider=call_provider,
-        request_params=set_fields.keys(),
+        request_params=request_params,
         pricing_use_defaults=False,
         estimate=estimate,
         enforce_require_pricing=True,

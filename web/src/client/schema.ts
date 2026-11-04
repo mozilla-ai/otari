@@ -2106,9 +2106,9 @@ export interface paths {
          * @description OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.
          *
          *     Authentication modes:
-         *     - Master key + user field: Use specified user (must exist)
-         *     - API key + user field: Use specified user (must exist)
-         *     - API key without user field: Use the shared "default" user
+         *     - Master key: the ``user`` field is required and names an existing user.
+         *     - API key: usage and spend go to the key's own user. A ``user`` naming a
+         *       different user is refused with 403, or ignored when mismatch rejection is off.
          */
         post: operations["images-edit_image"];
         delete?: never;
