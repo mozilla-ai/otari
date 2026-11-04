@@ -5,7 +5,7 @@ only where it keeps content and the deployment's ``trace_content_tool_output``
 allows it, so the switch can only narrow what the deployment keeps.
 
 Revision ID: b3e5f7a9c1d4
-Revises: a79a97473478
+Revises: d1145eb686f8
 Create Date: 2026-11-03
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b3e5f7a9c1d4"
-down_revision: str | Sequence[str] | None = "a79a97473478"
+down_revision: str | Sequence[str] | None = "d1145eb686f8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
