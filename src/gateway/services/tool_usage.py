@@ -147,11 +147,7 @@ class ToolUsageTally:
         cost: Decimal | None = None,
         deployment_paid: bool | None = None,
     ) -> None:
-        """Record a call that returned, classifying it on the sentinel.
-
-        A successful call is recorded as :meth:`record_success` records one. A
-        failed call is counted and its cost dropped, since it is never billed.
-        """
+        """Record a call that returned. A failed call is never billed, so the cost it reported is dropped."""
         if is_tool_error(text):
             self._record(tool, failed=True)
             return
