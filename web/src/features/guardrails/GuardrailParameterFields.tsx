@@ -19,7 +19,7 @@ import {
 // its profiles take.
 
 /** The blank choice of an enum, under a value no choice can be named. */
-const UNSET_CHOICE = "\u0000unset"
+const UNSET_CHOICE = "__unset__"
 
 /** What a field shows when it is left blank, which is the profile's own default. */
 function placeholderFor(spec: GuardrailParameterSpec): string | undefined {
@@ -97,7 +97,7 @@ function ParameterControl({
         value={String(value ?? "") || UNSET_CHOICE}
         isDisabled={disabled}
         onChange={(next) => onChange(next === UNSET_CHOICE ? "" : next)}
-        description={description}
+        description={error ? undefined : description}
         isInvalid={Boolean(error)}
         errorMessage={error}
         shouldReserveMessage

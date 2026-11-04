@@ -110,5 +110,29 @@ describe("GuardrailParameterFields", () => {
       await user.click(screen.getByRole("option", { name: "Default" }))
       expect(onChange).toHaveBeenLastCalledWith("mode", "")
     })
+
+    it("shows an error in place of the description, not beside it", () => {
+      render(
+        <GuardrailParameterFields
+          specs={[
+            spec({
+              name: "mode",
+              type: "enum",
+              required: true,
+              choices: ["strict"],
+              description: "How hard it checks.",
+            }),
+          ]}
+          scopeName="alinia"
+          values={{}}
+          errors={{ mode: "Choose a value." }}
+          disabled={false}
+          onChange={() => {}}
+        />,
+      )
+
+      expect(screen.getByText("Choose a value.")).toBeVisible()
+      expect(screen.queryByText("How hard it checks.")).toBeNull()
+    })
   })
 })
