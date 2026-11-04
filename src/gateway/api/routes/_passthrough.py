@@ -169,7 +169,7 @@ from gateway.services.providers import (
     serve_on_hosted_provider,
     unpriced_model_refusal,
 )
-from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
+from gateway.services.tenancy import WorkspaceWebSearchPolicies
 from gateway.services.tools import web_access_disabled_refusal
 from gateway.services.workspace_scope import (
     organization_for_key_id,
