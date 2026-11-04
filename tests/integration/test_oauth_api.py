@@ -1820,7 +1820,7 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
     store gave back, unless ``id_token_nonce`` names another.
     """
     endpoint = _TokenEndpoint()
-    consume = oauth_service._DatabaseStateStore.consume
+    consume = oauth_service.DatabaseStateStore.consume
 
     async def _consume(self: Any, state_key: str) -> Any:
         pending = await consume(self, state_key)
@@ -1842,7 +1842,7 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
         endpoint.revoked.append(token)
         return True
 
-    monkeypatch.setattr(oauth_service._DatabaseStateStore, "consume", _consume)
+    monkeypatch.setattr(oauth_service.DatabaseStateStore, "consume", _consume)
     monkeypatch.setattr(StoredStateClient, "_token_request", _token_request)
     monkeypatch.setattr(StoredStateClient, "fetch_identity", _fetch_identity)
     monkeypatch.setattr(StoredStateClient, "revoke_token", _revoke_token)

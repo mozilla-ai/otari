@@ -646,7 +646,7 @@ class TestDatabaseStateStore:
     @pytest.mark.asyncio
     async def test_database_state_store_refuses_carried_state(self) -> None:
         """A pending state carrying apron-auth context is refused, because no column holds it."""
-        store = oauth_service._DatabaseStateStore(fake_db(), "google")
+        store = oauth_service.DatabaseStateStore(fake_db(), "google")
         state = PendingState(
             state="s",
             redirect_uri="https://otari.example.com/auth/google/callback",
