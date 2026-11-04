@@ -226,6 +226,7 @@ from gateway.services.budgets import (
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
+    settle_abandoned_stream,
 )
 from gateway.services.catalog import not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
@@ -2235,8 +2236,10 @@ class RoutingAttribution:
     absorbed: bool = False
 
 
-def _row_status(*, error: str | None, attribution: RoutingAttribution | None) -> str:
-    """The status to record: ``success``, ``error``, or ``absorbed``.
+def _row_status(*, error: str | None, attribution: RoutingAttribution | None, incomplete: bool = False) -> str:
+    """The status to record: ``success``, ``error``, ``absorbed``, or ``incomplete``.
+
+    ``incomplete`` is a stream the client abandoned before the provider reported usage, billed on an estimate.
 
     A failed attempt that a policy recovered from is ``absorbed``, never ``error``.
     Every error metric in the product counts ``status == "error"`` exactly, so
@@ -2245,7 +2248,7 @@ def _row_status(*, error: str | None, attribution: RoutingAttribution | None) ->
     activity timeline would show red where the gateway in fact did its job.
     """
     if error is None:
-        return "success"
+        return "incomplete" if incomplete else "success"
     if attribution is not None and attribution.absorbed:
         return "absorbed"
     return "error"
@@ -4824,6 +4827,7 @@ async def record_usage(
     source_label: str | None = None,
     safety_identifier: str | None = None,
     upstream_attempt: bool = True,
+    incomplete: bool = False,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -4908,7 +4912,7 @@ async def record_usage(
         model=model,
         provider=provider,
         endpoint=endpoint,
-        status=_row_status(error=error, attribution=attribution),
+        status=_row_status(error=error, attribution=attribution, incomplete=incomplete),
         error_message=_stored_error_message(error),
         status_code=status_code,
         latency_ms=latency_ms,
@@ -4952,8 +4956,9 @@ async def record_usage(
     # A model priced per request owes its flat rate for a successful call whether
     # or not the provider reported usage, and nothing for a failed one, so the
     # rate is resolved for a success even without usage. A model priced per token
-    # is priced only from reported usage, as it always has been.
-    succeeded = error is None
+    # is priced only from reported usage, as it always has been. An incomplete
+    # row did not finish, so it is billed on its estimated tokens alone.
+    succeeded = error is None and not incomplete
     resolved: ResolvedPricing | None = None
     if usage_data or succeeded or cost_override is not None:
         # The organization comes off the key, via the workspace already resolved
@@ -5031,7 +5036,7 @@ async def record_usage(
         record_attempt(
             str(provider or ""),
             model,
-            failed=error is not None,
+            failed=error is not None or incomplete,
             status_code=status_code,
             fallback=attribution is not None and attribution.position > 1,
             latency_ms=latency_ms,
@@ -5746,6 +5751,17 @@ async def open_stream(
 # ---------------------------------------------------------------------------
 
 
+def _streamed_text_chars(chunk: Any) -> int:
+    """Characters of output text a Chat chunk or a Responses event carries."""
+    if choices := getattr(chunk, "choices", None):
+        text = getattr(getattr(choices[0], "delta", None), "content", None)
+    elif str(getattr(chunk, "type", "")).endswith("output_text.delta"):
+        text = getattr(chunk, "delta", None)
+    else:
+        return 0
+    return len(text) if isinstance(text, str) else 0
+
+
 def build_streaming_response(
     *,
     adapter: FormatAdapter[Any, ChunkT],
@@ -5775,6 +5791,7 @@ def build_streaming_response(
     source_label: str | None = None,
     safety_identifier: str | None = None,
     automatic_observation: AutomaticObservation | None = None,
+    prompt_chars: int | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -5831,6 +5848,7 @@ def build_streaming_response(
     # Usage the provider reported before the stream ended, whether or not it ended
     # cleanly. The generator hands only a completed stream's usage to a callback.
     reported_usage: CompletionUsage | None = None
+    streamed_chars = 0
 
     def _on_first_chunk() -> None:
         nonlocal first_chunk_at
@@ -5839,7 +5857,8 @@ def build_streaming_response(
             automatic_observation.first_response()
 
     def _extract_usage(chunk: ChunkT) -> CompletionUsage | None:
-        nonlocal reported_usage
+        nonlocal reported_usage, streamed_chars
+        streamed_chars += _streamed_text_chars(chunk)
         chunk_usage = adapter.extract_stream_usage(chunk)
         if chunk_usage:
             reported_usage = chunk_usage if reported_usage is None else merge_stream_usage(reported_usage, chunk_usage)
@@ -6062,14 +6081,20 @@ def build_streaming_response(
         # owed. Without this, disconnecting after the searches have run is an
         # unlimited supply of unbilled, unrecorded searches, which is the abuse this
         # metering exists to close. A row is written only when there is something to
-        # bill, so an abandoned stream that reported nothing and ran no tools leaves
-        # no trace.
+        # bill: reported usage, tool work, or, under the 'estimate' policy, the
+        # request and the text streamed so far.
+        row = settle_abandoned_stream(
+            policy=config.stream_missing_usage_policy,
+            prompt_chars=prompt_chars,
+            streamed_chars=streamed_chars,
+            reported_usage=reported_usage,
+            has_tool_work=tool_tally is not None and not tool_tally.is_empty(),
+        )
         if rate_limit_grant is not None:
-            await rate_limit_grant.settle(_settled_tokens(reported_usage))
+            await rate_limit_grant.settle(_settled_tokens(row.usage if row else None))
         if reservation is None:
             return
-        has_tool_work = tool_tally is not None and not tool_tally.is_empty()
-        if has_tool_work or reported_usage is not None:
+        if row is not None:
             logged = await record_usage(
                 db=db,
                 log_writer=log_writer,
@@ -6078,24 +6103,25 @@ def build_streaming_response(
                 provider=provider,
                 endpoint=adapter.endpoint,
                 user_id=user_id,
-                usage_override=reported_usage,
-                error="client disconnected before the stream completed",
+                usage_override=row.usage,
+                error=row.error,
+                incomplete=row.incomplete,
                 latency_ms=_elapsed_ms(started_at),
                 ttft_ms=_ttft_ms(started_at, first_chunk_at),
                 counts_toward_budget=_handle_counts_toward_budget(reservation),
+                attribution=attribution,
                 tool_tally=tool_tally,
                 workspace_id=workspace_id,
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
                 safety_identifier=safety_identifier,
+                prices=prices,
                 deployment_paid=deployment_paid,
             )
-            await _charge(logged, expects_cost=reported_usage is not None)
+            await _charge(logged, expects_cost=row.usage is not None)
             if abandoned_cost := logged.cost:
-                await reconcile_reservation(
-                    db, reservation, abandoned_cost, actual_tokens=_settled_tokens(reported_usage)
-                )
+                await reconcile_reservation(db, reservation, abandoned_cost, actual_tokens=_settled_tokens(row.usage))
                 return
         await refund_reservation(db, reservation)
 
@@ -6478,6 +6504,9 @@ async def run_single_attempt_stream(
         deployment_charge=ctx.deployment_charge,
         tool_funding=ctx.tool_funding,
         automatic_observation=observation,
+        prompt_chars=None
+        if served_tools.use_tool_loop or ctx.estimate_inputs is None
+        else ctx.estimate_inputs.prompt_chars,
     )
 
 
