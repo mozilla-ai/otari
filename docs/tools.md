@@ -718,9 +718,11 @@ names a provider for `otari_web_fetch` and for enriching search results.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
 that enriches search results, so setting it moves enrichment too. A workspace
 whose organization has a [fetch key](#organization-search-keys) runs both on
-that key instead, and a search instance that names its own `fetch_tool` is
-enriched by that instance whatever the key or the default say. `POST
-/api/v1/search-tools/{name}/test` with a `url` tries an instance.
+that key instead. A search instance whose `fetch_tool` names a fetch instance
+the gateway serves is enriched by that instance whatever the key or the default
+say; when the name matches none, or any-fetch no longer serves its provider,
+enrichment falls back to the key, then the default, then the built-in fetcher.
+`POST /api/v1/search-tools/{name}/test` with a `url` tries an instance.
 
 On a fetch instance, the provider fetches the page and follows its redirects on
 its own side. Otari checks the requested URL before the call, and the URL the
