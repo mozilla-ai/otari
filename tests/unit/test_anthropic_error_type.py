@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import anthropic
 import httpx
+import httpx2
 import pytest
 from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeoutError
 from fastapi import HTTPException, status
@@ -135,7 +136,7 @@ def _stream_error(exc: BaseException) -> dict[str, Any]:
 def _mid_stream_error(error_type: str) -> anthropic.APIStatusError:
     """What the Anthropic SDK raises for an SSE ``error`` event: the stream's 200, the event as body."""
     body = {"type": "error", "error": {"type": error_type, "message": "raw provider text"}, "request_id": "req_x"}
-    response = httpx.Response(200, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+    response = httpx2.Response(200, request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"))
     return anthropic.APIStatusError(str(body), response=response, body=body)
 
 

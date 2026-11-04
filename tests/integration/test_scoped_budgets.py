@@ -339,6 +339,31 @@ async def test_several_tool_calls_that_do_not_fit_together_hold_nothing(
 
 
 @pytest.mark.asyncio
+async def test_several_tool_calls_a_later_ceiling_refuses_give_the_earlier_ones_growth_back(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """The member cap has room for one call at 0.5 and not for three, so after the organization cap grew
+    for the three, it is given its growth back and the handle keeps the reservation's 1.0."""
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
+    member_cap = await _scoped(
+        async_db, scope_type="workspace_member", scope_id=str(tenancy.workspace_member_id), max_budget=2.0
+    )
+    async_db.add(org_cap)
+    async_db.add(member_cap)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update", calls=3) is None
+
+    assert await _counters(async_db, org_cap.id) == (0.0, 1.0)
+    assert await _counters(async_db, member_cap.id) == (0.0, 1.0)
+    assert handle.scoped_estimate == Decimal("1.0")
+    assert await hold_tool_call(async_db, handle, Decimal("0.5"), strategy="for_update") == Decimal("0.5")
+
+
+@pytest.mark.asyncio
 async def test_a_tool_call_the_user_budget_refuses_gives_the_ceilings_growth_back(
     async_db: AsyncSession, tenancy: Fixture
 ) -> None:
@@ -1605,7 +1630,7 @@ async def move(db: AsyncSession, handle: ReservationHandle, provider: str, *, co
             model_key=f"{instance}:{model}",
             input_price_per_million=Decimal(str(cost)) * 1_000_000 / _FALLBACK_TOKENS,
             output_price_per_million=Decimal(0),
-            unit="tokens",
+            unit="token",
             pricing_tiers=[],
         )
 

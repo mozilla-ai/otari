@@ -23,7 +23,7 @@ function model(overrides: Partial<HostedModel> = {}): HostedModel {
     output_price_per_million: 0,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    unit: "tokens",
+    unit: "token",
     price_source: "deployment",
     enabled: true,
     created_at: "2026-10-13T00:00:00Z",
@@ -105,14 +105,14 @@ describe("HostedModelForm", () => {
         output_price_per_million: 0,
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
-        unit: "requests",
+        unit: "request",
       },
     ])
   })
 
   it("opens a per-image price per thousand images", async () => {
     mockApi()
-    await renderForm(model({ unit: "images", input_price_per_million: 40_000 }))
+    await renderForm(model({ unit: "image", input_price_per_million: 40_000 }))
     expect(screen.getByRole("radio", { name: "Images" })).toBeChecked()
     expect(screen.getByLabelText(/Price per 1,000 images/)).toHaveValue("40")
   })

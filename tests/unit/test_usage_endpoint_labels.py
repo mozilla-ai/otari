@@ -29,5 +29,6 @@ def test_labels_keep_their_historical_values() -> None:
     assert rerank.USAGE_ENDPOINT == "/v1/rerank"
     assert moderations.USAGE_ENDPOINT == "/v1/moderations"
     assert images.USAGE_ENDPOINT == "/v1/images/generations"
+    assert images.USAGE_ENDPOINT_EDITS == "/v1/images/edits"
     assert batches.USAGE_ENDPOINT == "/v1/batches"
     assert batches.USAGE_ENDPOINT_RESULTS == "/v1/batches/results"

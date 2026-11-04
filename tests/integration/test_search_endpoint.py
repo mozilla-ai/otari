@@ -983,7 +983,7 @@ def test_a_search_tools_own_row_prices_it_ahead_of_its_old_key(
         headers=master_key_header,
     )
     assert own.status_code == 200, own.text
-    assert (own.json()["kind"], own.json()["unit"]) == ("search", "requests")
+    assert (own.json()["kind"], own.json()["unit"]) == ("search", "request")
     # The two kinds are two rows: the tool's is not read as a model's, nor the other way round.
     assert client.get(f"{API_ROOT}/pricing/fake-fast", headers=master_key_header).status_code == 404
     assert client.get(f"{API_ROOT}/pricing/fake-fast?kind=search", headers=master_key_header).status_code == 200

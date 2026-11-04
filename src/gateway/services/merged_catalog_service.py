@@ -108,7 +108,7 @@ class ModelPricingInfo(BaseModel):
     # and a reader that assumed tokens would be wrong by the whole unit; the
     # catalog never lists one, but the field travels with the price so a caller
     # reading one model is told too.
-    unit: PriceUnit = "tokens"
+    unit: PriceUnit = "token"
 
 
 def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
@@ -121,7 +121,7 @@ def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
         pricing_tiers=pricing.pricing_tiers or [],
         # A transient row (a default, an override) is built without the column
         # default that an insert would apply, so it reads back None here.
-        unit=pricing.unit or "tokens",
+        unit=pricing.unit or "token",
     )
 
 

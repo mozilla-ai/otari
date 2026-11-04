@@ -3615,6 +3615,26 @@
     {
       "item": [
         {
+          "name": "Edit Image",
+          "request": {
+            "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names an existing user.\n- API key: usage and spend go to the key's own user. A ``user`` naming a\n  different user is refused with 403, or ignored when mismatch rejection is off.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "images",
+                "edits"
+              ],
+              "raw": "{{baseUrl}}/api/v1/images/edits"
+            }
+          }
+        },
+        {
           "name": "Create Image",
           "request": {
             "body": {
@@ -10443,7 +10463,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"query\": \"string\",\n  \"documents\": [\n    \"string\"\n  ]\n}"
             },
-            "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: requests``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\n``usage`` carries what the gateway metered: the provider's tokens, the\nsearch units billed when the model is priced per request, and, when the\nrequest was priced, ``cost_usd`` and ``pricing_source`` as a completion's\nusage does. ``meta`` is the provider's own billing report, unchanged.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: request``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\n``usage`` carries what the gateway metered: the provider's tokens, the\nsearch units billed when the model is priced per request, and, when the\nrequest was priced, ``cost_usd`` and ``pricing_source`` as a completion's\nusage does. ``meta`` is the provider's own billing report, unchanged.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",
@@ -13066,9 +13086,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\",\n  \"trace_content_enabled\": false\n}"
+              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\",\n  \"trace_content_enabled\": false,\n  \"trace_content_tool_output\": false\n}"
             },
-            "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.\n\nTurning content off keeps nothing new from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
+            "description": "Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.\n\nTurning either off keeps nothing new of it from the next export on; what is already\nstored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.",
             "header": [
               {
                 "key": "Content-Type",

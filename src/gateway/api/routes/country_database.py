@@ -12,7 +12,7 @@ from starlette.datastructures import UploadFile
 from starlette.requests import ClientDisconnect
 
 from gateway.api.deps import InferenceServiceDep, require_deployment_operator
-from gateway.api.routes._request_body import bounded_request
+from gateway.api.routes._helpers import bounded_body
 from gateway.schemas.inference import CountryDatabaseStatus
 
 router = APIRouter(
@@ -43,11 +43,6 @@ async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
         yield chunk
 
 
-def _bounded(request: Request) -> Request:
-    """Refuse the country database body beyond its multipart allowance."""
-    return bounded_request(request, max_bytes=_MAX_BODY_BYTES, detail=_TOO_LARGE)
-
-
 @router.get("")
 async def get_country_database(service: InferenceServiceDep) -> CountryDatabaseStatus:
     """Describe the stored country file, and say whether ``client_country_database`` is read instead."""
@@ -71,7 +66,7 @@ async def upload_country_database(request: Request, service: InferenceServiceDep
     """
     # Read here rather than as a File parameter, which FastAPI parses before the operator gate runs.
     try:
-        async with _bounded(request).form(max_files=1, max_fields=0) as form:
+        async with bounded_body(request, _MAX_BODY_BYTES, _TOO_LARGE).form(max_files=1, max_fields=0) as form:
             file = form.get("file")
             if not isinstance(file, UploadFile):
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Send the country file in the field 'file'.")

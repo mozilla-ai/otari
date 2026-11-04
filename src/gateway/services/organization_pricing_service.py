@@ -100,7 +100,7 @@ class PricingOverrideInput:
     pricing_tiers: list[dict[str, object]]
     effective_from: datetime
     effective_to: datetime | None
-    unit: PriceUnit = "tokens"
+    unit: PriceUnit = "token"
 
 
 def _describe_period(effective_from: datetime, effective_to: datetime | None) -> str:
@@ -654,9 +654,9 @@ def validate_rates(override: PricingOverrideInput) -> None:
 
 
 def validate_unit(kind: PricingKind, unit: str) -> None:
-    """Refuse a search or fetch rate in any unit but ``requests``, since it is charged per call."""
-    if kind != MODEL_KIND and unit != "requests":
-        raise TenancyValidationError(f"a {kind} rate is per call, so its unit is 'requests'")
+    """Refuse a search or fetch rate in any unit but ``request``, since it is charged per call."""
+    if kind != MODEL_KIND and unit != "request":
+        raise TenancyValidationError(f"a {kind} rate is per call, so its unit is 'request'")
 
 
 def validate_period(effective_from: datetime, effective_to: datetime | None) -> None:

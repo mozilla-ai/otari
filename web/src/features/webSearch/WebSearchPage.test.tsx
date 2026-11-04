@@ -143,7 +143,7 @@ const rate = (modelKey: string, dollars: number, kind = "model") =>
     model_key: modelKey,
     kind,
     input_price_per_million: dollars * 1_000_000,
-    unit: "requests",
+    unit: "request",
   })
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -467,7 +467,7 @@ describe("WebSearchPage", () => {
       model_key: "exa-2",
       input_price_per_million: 4000,
       output_price_per_million: 0,
-      unit: "requests",
+      unit: "request",
     })
     expect(
       screen.getByText(/web_search_default_tool is now 'exa'/),
@@ -794,7 +794,7 @@ describe("WebSearchPage", () => {
         // Rounded: 0.07 * 1e6 is 70000.00000000001 in binary floating point.
         input_price_per_million: 70000,
         output_price_per_million: 0,
-        unit: "requests",
+        unit: "request",
       }),
     )
   })
@@ -806,7 +806,7 @@ describe("WebSearchPage", () => {
           model_key: "local",
           kind: "search",
           input_price_per_million: 3000,
-          unit: "requests",
+          unit: "request",
           origin: "config",
         }),
       },

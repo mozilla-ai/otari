@@ -15,6 +15,7 @@ ModelEndpoint = Literal[
     "/responses",
     "/messages",
     "/images/generations",
+    "/images/edits",
     "/embeddings",
     "/audio/speech",
     "/audio/transcriptions",
@@ -27,22 +28,23 @@ ModelEndpoint = Literal[
 # models.dev's v2 ``api`` protocols. ``decisions`` and ``systemone`` are one handler
 # under two paths, and each is named, so a client gets the path its SDK expects.
 # Both take only a ``decision_providers`` selector, so they name the route a
-# protocol maps to, not one every selector of the model is served on.
-_MODELS_DEV_PROTOCOLS: dict[str, ModelEndpoint] = {
-    "chat-completions": "/chat/completions",
-    "responses": "/responses",
-    "messages": "/messages",
-    "images": "/images/generations",
-    "embeddings": "/embeddings",
-    "speech": "/audio/speech",
-    "transcriptions": "/audio/transcriptions",
-    "systemone": "/systemone",
-    "rerank": "/rerank",
-    "decisions": "/decisions",
-    "moderations": "/moderations",
+# protocol maps to, not one every selector of the model is served on. ``images``
+# names both image routes: models.dev does not say which image models can edit.
+_MODELS_DEV_PROTOCOLS: dict[str, tuple[ModelEndpoint, ...]] = {
+    "chat-completions": ("/chat/completions",),
+    "responses": ("/responses",),
+    "messages": ("/messages",),
+    "images": ("/images/generations", "/images/edits"),
+    "embeddings": ("/embeddings",),
+    "speech": ("/audio/speech",),
+    "transcriptions": ("/audio/transcriptions",),
+    "systemone": ("/systemone",),
+    "rerank": ("/rerank",),
+    "decisions": ("/decisions",),
+    "moderations": ("/moderations",),
 }
 
 
 def models_dev_endpoints(protocols: Iterable[str]) -> tuple[ModelEndpoint, ...]:
     """The routes that serve ``protocols``, in their order, each once."""
-    return tuple(dict.fromkeys(_MODELS_DEV_PROTOCOLS[p] for p in protocols if p in _MODELS_DEV_PROTOCOLS))
+    return tuple(dict.fromkeys(route for p in protocols for route in _MODELS_DEV_PROTOCOLS.get(p, ())))

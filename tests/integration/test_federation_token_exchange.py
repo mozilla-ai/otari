@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import anthropic
 import httpx
+import httpx2
 import jwt
 import pytest
 from anthropic.lib.credentials import WorkloadIdentityCredentials, WorkloadIdentityError
@@ -526,23 +527,23 @@ def test_an_expired_key_stops_its_access_tokens(
 # The Anthropic SDK, end to end
 
 
-class _ThroughTestClient(httpx.BaseTransport):
+class _ThroughTestClient(httpx2.BaseTransport):
     """Hands each request the SDK makes to the test client, which serves it from the app in process."""
 
     def __init__(self, client: TestClient) -> None:
         self._client = client
         self.seen: list[tuple[str, str, str]] = []
 
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
+    def handle_request(self, request: httpx2.Request) -> httpx2.Response:
         self.seen.append((request.method, request.url.path, request.headers.get("Authorization", "")[:18]))
         served = self._client.request(request.method, str(request.url), headers=request.headers, content=request.read())
         headers = [(name, value) for name, value in served.headers.multi_items() if name.lower() != "content-encoding"]
-        return httpx.Response(served.status_code, headers=headers, content=served.content)
+        return httpx2.Response(served.status_code, headers=headers, content=served.content)
 
 
-def _sdk_http(transport: _ThroughTestClient) -> httpx.Client:
-    """A plain httpx client, which the SDK insists on, served by the test app."""
-    return httpx.Client(transport=transport)
+def _sdk_http(transport: _ThroughTestClient) -> httpx2.Client:
+    """An httpx2 client, which the SDK insists on, served by the test app."""
+    return httpx2.Client(transport=transport)
 
 
 def test_the_anthropic_sdk_exchanges_and_calls_messages(client: TestClient, federated: _Federated) -> None:

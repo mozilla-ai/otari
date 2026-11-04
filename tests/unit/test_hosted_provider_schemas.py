@@ -66,12 +66,23 @@ def test_a_cache_rate_needs_the_pair_beside_it(shape: type[SQLModel]) -> None:
 
 @pytest.mark.parametrize("shape", [schemas.HostedModelCreateRequest, schemas.HostedModelUpdateRequest])
 def test_a_unit_needs_the_pair_beside_it(shape: type[SQLModel]) -> None:
-    body = {"model": "gpt-4o", "unit": "requests"}
+    body = {"model": "gpt-4o", "unit": "request"}
     if shape is schemas.HostedModelUpdateRequest:
         body.pop("model")
 
     with pytest.raises(ValidationError, match="cache rates and unit need"):
         shape.model_validate(body)
+
+
+@pytest.mark.parametrize("shape", [schemas.HostedModelCreateRequest, schemas.HostedModelUpdateRequest])
+def test_a_retired_unit_name_is_read_as_the_current_one(
+    shape: type[schemas.HostedModelCreateRequest] | type[schemas.HostedModelUpdateRequest],
+) -> None:
+    body = {"model": "gpt-4o", "input_price_per_million": 2000, "output_price_per_million": 0, "unit": "requests"}
+    if shape is schemas.HostedModelUpdateRequest:
+        body.pop("model")
+
+    assert shape.model_validate(body).unit == "request"
 
 
 def test_an_unknown_unit_is_refused() -> None:

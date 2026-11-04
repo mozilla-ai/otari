@@ -65,7 +65,7 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]
             input_price_per_million=Decimal(input_rate),
             output_price_per_million=Decimal(output_rate),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
         )
 
     monkeypatch.setattr(DATASET, _stub)
@@ -235,7 +235,7 @@ async def test_the_cleanup_removes_a_price_nothing_serves_only_when_asked(
             input_price_per_million=Decimal("1"),
             output_price_per_million=Decimal("2"),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
             origin="config",
         )
     )

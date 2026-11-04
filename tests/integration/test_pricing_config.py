@@ -268,7 +268,7 @@ def test_a_tools_price_per_call_is_stored_under_its_kind_and_name(postgres_url: 
 
     rows = {(row.kind, row.model_key): row for row in test_db.query(ModelPricing).all()}
     assert rows[("search", "exa")].input_price_per_million == 5000
-    assert rows[("search", "exa")].unit == "requests"
+    assert rows[("search", "exa")].unit == "request"
     assert rows[("fetch", "exa-fetch")].input_price_per_million == 1000
     assert rows[("model", "exa:exa")].input_price_per_million == 1
     assert test_db.query(ModelPricing).filter(ModelPricing.kind == "search").count() == 1

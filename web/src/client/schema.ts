@@ -2092,6 +2092,31 @@ export interface paths {
         patch: operations["hosted-providers-update_hosted_model"];
         trace?: never;
     };
+    "/api/v1/images/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Image
+         * @description OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and names an existing user.
+         *     - API key: usage and spend go to the key's own user. A ``user`` naming a
+         *       different user is refused with 403, or ignored when mismatch rejection is off.
+         */
+        post: operations["images-edit_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/images/generations": {
         parameters: {
             query?: never;
@@ -5322,7 +5347,7 @@ export interface paths {
          * Create Rerank
          * @description Rerank documents by relevance to a query.
          *
-         *     Billing: a model priced per request (``unit: requests``) is charged per
+         *     Billing: a model priced per request (``unit: request``) is charged per
          *     search unit the provider reports, or for one unit when it reports none. A
          *     model priced per token is charged on the input tokens the provider reports.
          *
@@ -6811,9 +6836,9 @@ export interface paths {
         head?: never;
         /**
          * Update Workspace
-         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content on or off.
+         * @description Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.
          *
-         *     Turning content off keeps nothing new from the next export on; what is already
+         *     Turning either off keeps nothing new of it from the next export on; what is already
          *     stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
          */
         patch: operations["workspaces-update_workspace"];
@@ -9404,7 +9429,7 @@ export interface components {
              * Endpoints
              * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
              */
-            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
+            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/images/edits" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /**
@@ -9513,13 +9538,12 @@ export interface components {
          *     The completion-param fields are derived from any-llm's ``CompletionParams``
          *     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
          *     forwards. Fields below either tighten a derived field (``messages``,
-         *     ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-         *     not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
-         *     gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
-         *     ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-         *     before the request is forwarded upstream, or restate a derived field
-         *     unchanged to document it (``max_completion_tokens``), which is only worth
-         *     doing where the wire contract is not guessable from the field itself.
+         *     ``response_format``), add gateway-internal behavior (``mcp_servers``,
+         *     ``mcp_server_ids``, ``guardrails``, ``tools_header``,
+         *     ``max_tool_iterations``) that is stripped before the request is forwarded
+         *     upstream, or restate a derived field unchanged to document it
+         *     (``max_completion_tokens``), which is only worth doing where the wire
+         *     contract is not guessable from the field itself.
          */
         ChatCompletionRequest: {
             /** Frequency Penalty */
@@ -12212,7 +12236,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
+            unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelPublic
@@ -12288,7 +12312,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Unit */
-            unit?: ("tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
+            unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * HostedModelsPublic
@@ -13542,10 +13566,10 @@ export interface components {
             })[];
             /**
              * Unit
-             * @default tokens
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * ModerationRequest
@@ -13866,8 +13890,8 @@ export interface components {
          *     ``deployment`` for the deployment's own price list, and None when nothing
          *     prices the model yet. ``pricing_id`` names the organization's own row where
          *     there is one, so a client can edit that rate without re-deriving the key.
-         *     ``unit`` says what the rates are per, as on a pricing row: tokens, requests
-         *     or images, so a per-request rate is not read as a per-token one.
+         *     ``unit`` says what the rates are per, as on a pricing row: token, request
+         *     or image, so a per-request rate is not read as a per-token one.
          */
         OrgProviderKeyModelPublic: {
             /** Cache Read Price Per Million */
@@ -13903,10 +13927,10 @@ export interface components {
             pricing_id?: string | null;
             /**
              * Unit
-             * @default tokens
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
             /** Updated At */
             updated_at?: string | null;
         };
@@ -14874,7 +14898,7 @@ export interface components {
             model_key: string;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens; unused by a rate in requests or images
+             * @description Price per 1M output tokens; unused by a rate per request or per image
              */
             output_price_per_million: number;
             /**
@@ -14884,11 +14908,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
-             * @default tokens
+             * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingPublic
@@ -14993,7 +15017,7 @@ export interface components {
             input_price_per_million: number;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens; unused by a rate in requests or images
+             * @description Price per 1M output tokens; unused by a rate per request or per image
              */
             output_price_per_million: number;
             /**
@@ -15003,11 +15027,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
-             * @default tokens
+             * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * OrganizationModelPricingsPublic
@@ -15892,14 +15916,14 @@ export interface components {
             output_price_per_million: number;
             /**
              * Price Per Request
-             * @description USD for each request, for a rate in requests; null for any other unit.
+             * @description USD for each request, for a rate per request; null for any other unit.
              */
             price_per_request?: number | null;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
             /**
              * Unit
-             * @description What the rates are per: tokens, requests, or images.
+             * @description What the rates are per: token for a model, request or image for a non-token endpoint.
              */
             unit: string;
             /** Updated At */
@@ -17458,12 +17482,12 @@ export interface components {
             model_key: string;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens; unused by a rate in requests or images
+             * @description Price per 1M output tokens; unused by a rate per request or per image
              */
             output_price_per_million?: number;
             /**
              * Price Per Request
-             * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not combined with token prices.
+             * @description USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's answers. Shorthand for unit 'request' with input_price_per_million at a million times this; not combined with token prices.
              */
             price_per_request?: number | null;
             /**
@@ -17473,11 +17497,11 @@ export interface components {
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
             /**
              * Unit
-             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.
-             * @default tokens
+             * @description What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.
+             * @default token
              * @enum {string}
              */
-            unit: "tokens" | "requests" | "images" | "character" | "megapixel" | "second" | "minute" | "web_search";
+            unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
         };
         /**
          * SignupRequest
@@ -17543,7 +17567,7 @@ export interface components {
             cache_write_tokens: number | null;
             /**
              * Content
-             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail), only where the workspace keeps content, the agent sent it, and the reader may open it. Empty otherwise.
+             * @description What the span was about (prompt, command, file_path, gate.evidence, gate.detail, tool.input, tool.output), only where the workspace keeps content, the client sent it or Otari ran the tool that produced it, and the reader may open it. Empty otherwise.
              */
             content: {
                 [key: string]: string;
@@ -18023,6 +18047,11 @@ export interface components {
              * @description Days after it started that a session is deleted, however active it still is.
              */
             session_max_age_days: number;
+            /**
+             * Tool Output
+             * @description Whether content also keeps what each tool returned, on a request routed through the gateway. Never true where content_available is false.
+             */
+            tool_output: boolean;
         };
         /** TraceCountPublic */
         TraceCountPublic: {
@@ -19689,6 +19718,12 @@ export interface components {
              * @default false
              */
             trace_content_enabled: boolean;
+            /**
+             * Trace Content Tool Output
+             * @description Whether this workspace also keeps what each tool returned, where it keeps content and the deployment keeps tool output.
+             * @default true
+             */
+            trace_content_tool_output: boolean;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -19703,6 +19738,11 @@ export interface components {
              * @description Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents report. Only where the deployment keeps content at all.
              */
             trace_content_enabled?: boolean | null;
+            /**
+             * Trace Content Tool Output
+             * @description Also keep what each tool returned, where this workspace keeps content and the deployment keeps tool output. Turning it off keeps none from the next request on, whatever the deployment allows.
+             */
+            trace_content_tool_output?: boolean | null;
         };
         /**
          * WorkspaceWebSearchConfigPublic
@@ -23161,6 +23201,65 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "images-edit_image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description The image or images to edit. */
+                    image?: string[];
+                    /** @description Same as image. */
+                    "image[]"?: string[];
+                    /** @description Where to edit: the transparent areas of this PNG. */
+                    mask?: string;
+                    /** Model */
+                    model: string;
+                    /** N */
+                    n?: number | null;
+                    /** Prompt */
+                    prompt: string;
+                    /** Quality */
+                    quality?: string | null;
+                    /** Response Format */
+                    response_format?: string | null;
+                    /** Size */
+                    size?: string | null;
+                    /** User */
+                    user?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description The upload is larger than 50 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A required field is missing, or a field is the wrong type. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

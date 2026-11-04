@@ -107,7 +107,8 @@ the corresponding startup value after the database is available.
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `provider_request_timeout_seconds` | How long a non-streaming provider call may take, in seconds. Defaults to 600. Connecting stays capped at 5 seconds for providers whose SDK separates the two (Anthropic, OpenAI and OpenAI-compatible, Groq, Cerebras, Together); Bedrock, Gemini, Vertex AI, Mistral and Cohere apply the value as a whole. Without it, Anthropic's SDK refuses a non-streaming request with a large `max_tokens`. Providers with no per-request timeout, and a provider whose `client_args` sets its own `timeout`, keep their client's timeout. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
-| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths. Defaults to `false`. See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about). |
+| `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about). |
+| `trace_content_tool_output` | Also keep what each tool returned, on a request routed through Otari that keeps content. A workspace can still turn it off for itself. Defaults to `false`. |
 | `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](traces.md#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](traces.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
@@ -976,7 +977,7 @@ the default it shadows, so a config-file price that has fallen behind the
 provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
-Each stored rate also carries its `unit` (`tokens`, `requests` or `images`, or
+Each stored rate also carries its `unit` (`token`, `request` or `image`, or
 one of the units under
 [Per-request pricing](#per-request-pricing-audio-moderations-rerank-and-completion-models))
 and its `origin` (`config` or `api`), so a rate the config file re-seeds on
@@ -1031,9 +1032,9 @@ accepted shape.
 
 ### Per-request pricing (audio, moderations, rerank, and completion models)
 
-A rate's `unit` decides what it bills. A rate in `tokens` bills the tokens the
-provider reports, a rate in `images` bills each image returned, and a rate in
-`requests` bills each request (or each search unit, for rerank). The rate reuses
+A rate's `unit` decides what it bills. A rate in `token` bills the tokens the
+provider reports, a rate in `image` bills each image returned, and a rate in
+`request` bills each request (or each search unit, for rerank). The rate reuses
 `input_price_per_million`, always per million: USD per million tokens, requests
 or images. A $0.04 image is `input_price_per_million: 40000`. A rate never bills
 a count of another unit, so a per-request price is never read as a price per
@@ -1041,18 +1042,24 @@ image.
 
 | Endpoint | What it reports | Rates that price it |
 |---|---|---|
-| Embeddings | Input tokens | `tokens`; `requests` bills one request |
-| Rerank | Search units, and tokens where the provider reports them | `requests` per search unit, or `tokens` |
-| Image generation | Images returned, and tokens for a token-billed model such as `gpt-image-1` | `images` per image, `requests` per request, or `tokens` |
-| Audio transcription | One request, and tokens for a token-billed model such as `gpt-4o-transcribe` | `requests`, or `tokens` |
-| Audio speech, moderations | One request | `requests` |
+| Embeddings | Input tokens | `token`; `request` bills one request |
+| Rerank | Search units, and tokens where the provider reports them | `request` per search unit, or `token` |
+| Image generation | Images returned, and tokens for a token-billed model such as `gpt-image-1` | `image` per image, `request` per request, or `token` |
+| Audio transcription | One request, and tokens for a token-billed model such as `gpt-4o-transcribe` | `request`, or `token` |
+| Audio speech, moderations | One request | `request` |
 
-A rate in `tokens` on image generation, audio or moderations is read in that
+The unit names are singular, as models.dev writes them. Otari's earlier names,
+`tokens`, `requests` and `images`, are still read for one release, in this file
+and on the pricing API, and read as `token`, `request` and `image`: a rate sent
+as `unit: requests` is stored and served as `unit: request`. The next release
+refuses the old names; see [Upgrading](#upgrading).
+
+A rate in `token` on image generation, audio or moderations is read in that
 endpoint's per-call unit (raw USD per image, or USD per million requests) and
-logs a warning once per model. Set `unit: images` or `unit: requests` on those
-rates: a later release reads a `tokens` rate there strictly, as tokens. A
+logs a warning once per model. Set `unit: image` or `unit: request` on those
+rates: a later release reads a `token` rate there strictly, as tokens. A
 token-billed model (`gpt-image-1`, `gpt-4o-transcribe`) can be priced in
-`tokens`, because its tokens are recorded on the usage row.
+`token`, because its tokens are recorded on the usage row.
 
 A flat per-image or per-request rate cannot follow what the caller chooses: an
 image's size and quality, or an audio file's length. Set it at the dearest
@@ -1070,7 +1077,7 @@ never billed as tokens. A later release gives each unit a meter.
 An unpriced request on audio or moderations is served at zero cost. Image
 generation, embeddings, rerank and direct search are subject to
 `require_pricing`, which also refuses a rate that cannot price the endpoint,
-such as an `images` rate on embeddings, rather than serving it unpriced.
+such as an `image` rate on embeddings, rather than serving it unpriced.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:
@@ -1121,16 +1128,16 @@ release stops reading it; startup names every such row and how to replace it. A 
 tool's provider that names no configured tool is a model's price like any
 other, never a tool's.
 
-Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
+Rerank accepts either unit. A rerank model priced `unit: token` is charged
 on the input tokens the provider reports. Providers that bill reranking per
 search unit (one query over up to 100 documents, a long document counting as
-several) report that count and no tokens, so give such a model `unit: requests`
+several) report that count and no tokens, so give such a model `unit: request`
 and it is charged the reported units at `input_price_per_million / 1,000,000`
 each, or one unit when the provider reports none. The budget reservation holds
 the units the documents imply, from their count and length, and settles at the
 reported count. The default-pricing dataset carries no rerank rates, so a rerank
 model needs its own pricing row, for example `cohere:rerank-v3.5` at
-`input_price_per_million: 2000` (USD 2 per 1,000 searches) with `unit: requests`.
+`input_price_per_million: 2000` (USD 2 per 1,000 searches) with `unit: request`.
 
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or
@@ -1143,13 +1150,13 @@ pricing:
     price_per_request: 0.005
 ```
 
-`price_per_request` is the readable form of `unit: requests`: Otari stores it as
-`unit: requests` with `input_price_per_million` a million times the price
+`price_per_request` is the readable form of `unit: request`: Otari stores it as
+`unit: request` with `input_price_per_million` a million times the price
 (`5000` here), and `GET /api/v1/pricing` reports both. `POST /api/v1/pricing`
 takes it too. It replaces the token prices rather than adding to them, so it
 is refused beside an `input_price_per_million` that differs, an
 `output_price_per_million`, a cache price, `pricing_tiers` or another `unit`.
-Writing the rate in full as `unit: requests` still works.
+Writing the rate in full as `unit: request` still works.
 
 Such a model is charged its price per request for each
 successful call, streamed or not, whatever tokens it reports. The token counts
@@ -1164,12 +1171,12 @@ model needs its own pricing row.
 
 ### Per-image pricing (image generation)
 
-An `images` rate is USD per million images, like a request rate: $0.04 an image
+An `image` rate is USD per million images, like a request rate: $0.04 an image
 is `input_price_per_million: 40000`, which is what the dashboard stores when you
 enter $40 per 1,000 images.
 
 Image generation reserves the requested image count before dispatch at an
-`images` rate, then settles on the images the provider returned. Audio holds
+`image` rate, then settles on the images the provider returned. Audio holds
 nothing before dispatch, so a priced audio request can exceed a budget by one
 request's price.
 
@@ -1222,7 +1229,9 @@ Rules for instances:
 
 - `builtin_fetch`, the built-in fetcher, is a fetch instance that always exists and
   cannot be declared. A search instance's `fetch_tool` names the fetch instance that
-  enriches its results; without one, `web_fetch_default_tool` does.
+  enriches its results; without one, `web_fetch_default_tool` does. Each page it
+  reads is billed as a fetch on that instance, at the cost its provider reports, or
+  else at the instance's price.
 - A name contains no `/` or `:`, is not `builtin_fetch` or `none` in any case
   (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
 - `options` are checked against the provider's options. A search instance may also
@@ -1537,7 +1546,13 @@ after an unconfirmed delivery can produce a duplicate.
 
 ## Upgrading
 
-- **Image rates.** An `images` rate is USD per million images. A rate written in
+- **Price unit names.** A stored rate's `unit` is singular (`token`, `request`,
+  `image`). The migration renames every stored rate on the first start of this
+  release, and the old names are still read for one release. Upgrade every
+  instance together: an instance still running the previous release reads a
+  renamed rate as a unit it does not know, so it refuses a priced request on it
+  under `require_pricing`.
+- **Image rates.** An `image` rate is USD per million images. A rate written in
   `config.yml` as raw USD per image (for example `0.04`) bills a millionth of
   what it meant; multiply it by 1,000,000.
 - **Declared budgets and keys.** The first start of a version that records a

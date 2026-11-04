@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import pytest
 from any_llm.types.messages import MessageResponse, TextBlock
 from fastapi.testclient import TestClient
@@ -49,20 +49,20 @@ class _StubAnthropicFiles:
         self.accepting = True
         self.dropped: set[str] = set()
 
-    def handle(self, request: httpx.Request) -> httpx.Response:
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
         if request.method == "GET" and "/v1/files/" in request.url.path:
             file_id = request.url.path.rsplit("/", 1)[-1]
             if file_id in self.dropped:
-                return httpx.Response(
+                return httpx2.Response(
                     404, json={"type": "error", "error": {"type": "not_found_error", "message": "File not found"}}
                 )
-            return httpx.Response(200, json=self._metadata(file_id))
+            return httpx2.Response(200, json=self._metadata(file_id))
         if request.method != "POST" or not request.url.path.endswith("/v1/files"):
-            return httpx.Response(404)
+            return httpx2.Response(404)
         if not self.accepting:
-            return httpx.Response(500, json={"type": "error", "error": {"type": "api_error", "message": "nope"}})
+            return httpx2.Response(500, json={"type": "error", "error": {"type": "api_error", "message": "nope"}})
         self.uploads.append(request.content)
-        return httpx.Response(200, json=self._metadata(_PROVIDER_FILE_ID))
+        return httpx2.Response(200, json=self._metadata(_PROVIDER_FILE_ID))
 
     @staticmethod
     def _metadata(file_id: str) -> dict[str, Any]:
@@ -84,13 +84,13 @@ def anthropic_files(monkeypatch: pytest.MonkeyPatch) -> _StubAnthropicFiles:
     """A deployment credentialed for Anthropic by the SDK's own variable, whose Files API is stubbed."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     stub = _StubAnthropicFiles()
-    original_init = httpx.AsyncClient.__init__
+    original_init = httpx2.AsyncClient.__init__
 
-    def patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
-        kwargs["transport"] = httpx.MockTransport(stub.handle)
+    def patched_init(self: httpx2.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        kwargs["transport"] = httpx2.MockTransport(stub.handle)
         original_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+    monkeypatch.setattr(httpx2.AsyncClient, "__init__", patched_init)
     return stub
 
 

@@ -109,14 +109,14 @@ export function SetPriceDialog({
   collectModelKey = false,
   initialModelKey = "",
   chooseUnit = false,
-  initialUnit = "tokens",
+  initialUnit = "token",
 }: SetPriceDialogProps) {
   // Seeded on mount only, because the caller remounts this on each open.
   // Reopening for a different selection must not inherit the last rates, which
   // is a real footgun when the values set money.
   const [modelKey, setModelKey] = useState(initialModelKey)
   const [unit, setUnit] = useState<PricingUnit>(
-    chooseUnit ? initialUnit : "tokens",
+    chooseUnit ? initialUnit : "token",
   )
   // Switching the unit swaps the rate fields, and a remounted field must not
   // pull focus out of the radio group the operator is still in.
@@ -144,7 +144,7 @@ export function SetPriceDialog({
 
   const keyInvalid = collectModelKey && !isValidModelKey(modelKey)
   // A request or image price is one rate: there is no output, and no cache.
-  const isTokens = unit === "tokens"
+  const isTokens = unit === "token"
 
   const isInvalid =
     keyInvalid ||

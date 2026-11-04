@@ -58,6 +58,7 @@ from functools import partial, reduce
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
 
 import httpx
+import httpx2
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import (
     AnyLLMError,
@@ -66,6 +67,7 @@ from any_llm.exceptions import (
     MissingApiKeyError,
     UnsupportedParameterError,
 )
+from any_llm.providers.anthropic.base import BaseAnthropicProvider
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -81,9 +83,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ToolPorts,
+    asks_to_keep_trace_content,
     get_automatic_router,
     get_budget_service,
     get_request_prices,
+    routed_trace_content,
     verify_api_key_or_master_key,
 )
 from gateway.api.request_id import set_request_id
@@ -289,7 +293,6 @@ from gateway.services.pricing_service import (
     pricing_required_but_missing,
     resolve_model_pricing,
     resolve_tool_rate,
-    tool_unit_rate,
 )
 from gateway.services.provider_kwargs import (
     MissingCredential,
@@ -311,7 +314,7 @@ from gateway.services.providers import (
     ensure_provider_country,
     hosted_credential_for,
     hosted_models_for,
-    owned_endpoint_http_client,
+    owned_endpoint_sdk_client,
     serve_on_hosted_provider,
     unpriced_model_refusal,
 )
@@ -397,6 +400,7 @@ from gateway.services.traces import (
     context_of,
     harness_of,
     is_subagent,
+    read_turn_content,
     resolve_session,
 )
 from gateway.services.upstream_redaction import redact_upstream_message
@@ -1564,7 +1568,7 @@ async def _prepare_for_dispatch(
     if resolved.owned_endpoint is not None:
         # The client re-checks and pins the endpoint's address on every request
         # and follows no redirect; see ``services/providers``.
-        client_args = {"http_client": owned_endpoint_http_client()}
+        client_args = {"http_client": owned_endpoint_sdk_client(resolved.provider)}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
     served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
     ctx.deployment_paid = served.deployment_paid
@@ -2438,10 +2442,15 @@ class ReservationToolGate:
         return True
 
     async def _unit_cost(self, call: LabelCalls) -> Decimal:
-        """What one call under ``call``'s label costs with no reported cost, looked up once per label."""
+        """What one call under ``call``'s label costs with no reported cost, looked up once per label.
+
+        The charge's unit rate is its cost over its calls with no rounding, so a
+        hold of several calls is their exact total.
+        """
         key = (call.tool, call.label, call.rate_keys, call.deployment_paid)
         if key not in self._unit_costs:
-            self._unit_costs[key] = await tool_unit_rate(self._ctx.db, call, organization_id=self._ctx.organization_id)
+            charges = await price_tool_calls(self._ctx.db, [call], organization_id=self._ctx.organization_id)
+            self._unit_costs[key] = charges.unit_rates.get(call.tool, ZERO)
             # The lookup's connection must not be held across the next provider call either.
             await release_session(self._ctx.db)
         return self._unit_costs[key]
@@ -2768,6 +2777,9 @@ async def resolve_request_context(
     ``(prompt_chars, vision_usage)``; any vision describe side-call it made is
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
+
+    ``turn`` is also where the content of a request that keeps it is read from
+    (``Otari-Trace-Content``): the prompt and the answered tool calls.
 
     ``safety_identifier`` is the caller's tag for the end user, which wins over
     ``user_id_from_request`` as the tag in the provider's end-user identifier.
@@ -3127,6 +3139,16 @@ async def resolve_request_context(
     budget_exempt = (api_key is not None and api_key.exclude_from_budget) or (
         resolved_provider is not None and resolved_provider.owned_endpoint is not None
     )
+    # Before the rate limit and the reservation, so a read that fails or never finishes holds nothing to give back,
+    # and before normalization, so the content is what the client sent and not an attachment rendered as text.
+    capture = (
+        await routed_trace_content(raw_request, uow, db, config, workspace_id, user_id)
+        if turn is not None and asks_to_keep_trace_content(raw_request) and config.trace_capture_enabled
+        else None
+    )
+    content = (
+        read_turn_content(turn, tool_output=capture.tool_output) if turn is not None and capture is not None else None
+    )
     # Before the reservation, so a request the rules refuse holds no budget to refund.
     rate_limit_grant = await admit_rate_limit_rules(
         raw_request,
@@ -3465,6 +3487,9 @@ async def resolve_request_context(
             harness=harness_of(raw_request.headers),
             turn=turn,
             context=context_of(context),
+            content=content,
+            content_generation=capture.generation if capture is not None else None,
+            keep_tool_output=capture is not None and capture.tool_output,
             subagent=is_subagent(raw_request.headers),
             request_id=request_id,
             workspace_id=workspace_id,
@@ -4355,7 +4380,10 @@ async def _admit_claims(
     if (unpriced := await _unpriced_tool(ctx, priced)) is not None:
         # The model gate's kind and code, so both no-pricing refusals have one wire shape per format.
         error = domain_error(
-            adapter, GatewayToolPricingRequiredError(unpriced_tool_detail(unpriced.name, unpriced.rate_keys[0]))
+            adapter,
+            GatewayToolPricingRequiredError(
+                unpriced_tool_detail(unpriced.name, unpriced.rate_keys[0], enrichment=unpriced.enrichment)
+            ),
         )
         return _ToolRefusal(error, unpriced_tool=unpriced)
     return _AdmittedTools(code=admitted, web=web, web_access=web_access)
@@ -4654,7 +4682,7 @@ async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: Re
         model=model,
         provider=provider,
         endpoint=adapter.endpoint,
-        detail=unpriced_tool_detail(tool.name, rate_key),
+        detail=unpriced_tool_detail(tool.name, rate_key, enrichment=tool.enrichment),
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         started_at=ctx.started_at,
         request_id=ctx.request_id,
@@ -5537,18 +5565,23 @@ async def _open_tool_backends(
 # The connect timeout the anthropic and openai SDKs default to. Only the response
 # needs the long budget; a short connect keeps failover off a dead provider fast.
 _PROVIDER_CONNECT_TIMEOUT_S = 5.0
+# Providers whose one set of call kwargs reaches both OpenAI's SDK (httpx) and
+# Anthropic's (httpx2). Neither SDK accepts the other's ``Timeout``, so they get
+# plain seconds, and a long connect with it.
+_BOTH_SDK_PROVIDERS = frozenset({LLMProvider.DEEPSEEK, LLMProvider.META})
 
 
 def _with_provider_timeout(kwargs: dict[str, Any], config: GatewayConfig) -> dict[str, Any]:
     """``kwargs`` with ``provider_request_timeout_seconds``, when the provider takes a per-request timeout.
 
     Without one the anthropic SDK refuses a non-streaming call whose ``max_tokens``
-    could outlast its default limit. A ``native`` provider's SDK takes an
-    ``httpx.Timeout``, so its connect stays short; a ``mapped`` one converts a
-    float into its own setting. any-llm rejects any timeout for an
-    ``unsupported`` provider, and for a pre-built client it cannot rebuild
-    (Bedrock's bearer-token shape), so those keep their client's own timeout,
-    as does a client the operator gave a ``timeout`` in ``client_args``.
+    could outlast its default limit. A ``native`` provider's SDK takes a
+    ``Timeout`` (httpx2's for Anthropic's SDK, httpx's otherwise), so its
+    connect stays short; a ``mapped`` one converts a float into its own
+    setting. any-llm rejects any timeout for an ``unsupported`` provider, and
+    for a pre-built client it cannot rebuild (Bedrock's bearer-token shape), so
+    those keep their client's own timeout, as does a client the operator gave a
+    ``timeout`` in ``client_args``.
     """
     client_args = kwargs.get("client_args") or {}
     if "timeout" in client_args or "client" in client_args:
@@ -5557,14 +5590,18 @@ def _with_provider_timeout(kwargs: dict[str, Any], config: GatewayConfig) -> dic
     try:
         if provider is None:
             provider, _ = AnyLLM.split_model_provider(kwargs["model"])
-        support = AnyLLM.get_provider_class(provider).TIMEOUT_SUPPORT
+        provider_class = AnyLLM.get_provider_class(provider)
+        support = provider_class.TIMEOUT_SUPPORT
     except (KeyError, TypeError, ValueError, ImportError, AttributeError, AnyLLMError):
         # Unresolvable here means unresolvable in any-llm too, which reports it.
         return kwargs
     seconds = config.provider_request_timeout_seconds
-    if support == "native":
-        return {**kwargs, "timeout": httpx.Timeout(seconds, connect=min(seconds, _PROVIDER_CONNECT_TIMEOUT_S))}
-    if support == "mapped":
+    connect = min(seconds, _PROVIDER_CONNECT_TIMEOUT_S)
+    if support == "native" and issubclass(provider_class, BaseAnthropicProvider):
+        return {**kwargs, "timeout": httpx2.Timeout(seconds, connect=connect)}
+    if support == "native" and LLMProvider(provider) not in _BOTH_SDK_PROVIDERS:
+        return {**kwargs, "timeout": httpx.Timeout(seconds, connect=connect)}
+    if support in ("native", "mapped"):
         return {**kwargs, "timeout": seconds}
     return kwargs
 

@@ -915,3 +915,59 @@ def test_a_fetch_key_serves_the_fetch_tool(
     line = _tool_line(db_session_factory, api_key_obj["user_id"], "web_fetch_calls")
     assert (line["label"], line["units"]) == ("org:tabstack", 1)
     assert line["cost"] == pytest.approx(0.001)
+
+
+def test_a_search_keys_pages_are_read_on_the_fetch_key_and_billed_as_the_organizations(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    no_search_of_its_own: None,
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """A hit without text is read through the organization's fetch key, so the page is the organization's fetch."""
+    monkeypatch.setattr(test_config, "web_search_extract", True)
+    _add_key(
+        client, master_key_header, provider="exa", name="search", api_key="exa-org-secret", kind="search", default=True
+    )
+    _add_key(
+        client,
+        master_key_header,
+        provider="tabstack",
+        name="pages",
+        api_key="tbs-org-secret",
+        kind="fetch",
+        default=True,
+    )
+    _price(client, master_key_header, "otari:web_search", 0.01)
+    _price(client, master_key_header, "otari:web_fetch", 0.001)
+    hosts: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        hosts.append(request.url.host)
+        if request.url.host == "api.exa.ai":
+            return httpx.Response(200, json={"results": [{"url": "https://a.example", "title": "A"}]})
+        page = {"url": "https://a.example", "content": "Page A.", "metadata": {"title": "A"}}
+        return httpx.Response(200, json=page)
+
+    _answer_provider_calls(client, answer)
+    with _scripted(_call("web_search", '{"query": "q"}'), _call("", "")):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "q"}],
+                "tools": [{"type": "otari_web_search"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    assert hosts == ["api.exa.ai", "api.tabstack.ai"]
+    search = _tool_line(db_session_factory, api_key_obj["user_id"], "web_search_calls")
+    pages = _tool_line(db_session_factory, api_key_obj["user_id"], "web_fetch_calls")
+    assert (search["label"], search["deployment_paid"]) == ("org:exa", False)
+    assert (pages["label"], pages["units"], pages["deployment_paid"]) == ("org:tabstack", 1, False)
+    assert pages["cost"] == pytest.approx(0.001)

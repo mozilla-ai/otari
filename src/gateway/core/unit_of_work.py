@@ -75,6 +75,32 @@ class UnitOfWork:
             await self._roll_back()
             raise
 
+    @asynccontextmanager
+    async def savepoint(self) -> AsyncIterator[Self]:
+        """A block whose failure undoes only its own work, for a step the caller can do without.
+
+        The error still reaches the caller, but the transaction around the block, and
+        what the session already loaded, are left as they were. Outermost, it commits
+        on success as any block does.
+        """
+        self._depth += 1
+        outer_failure = self._first_failure
+        try:
+            async with self._session.begin_nested():
+                yield self
+        except BaseException:
+            # A block inside that failed was undone with the savepoint, so it fails nothing outside it.
+            self._first_failure = outer_failure
+            raise
+        finally:
+            self._depth -= 1
+        if self._depth == 0:
+            try:
+                await self._session.commit()
+            except BaseException:
+                await self._roll_back()
+                raise
+
     async def _roll_back(self) -> None:
         """Roll back, leaving the error that ended the step as the one the caller sees."""
         try:

@@ -133,6 +133,44 @@ async def test_the_tool_warning_names_builtin_fetch_with_no_price(
 
 
 @pytest.mark.asyncio
+async def test_the_tool_warning_names_the_fetch_tool_that_reads_a_searchs_pages_with_the_fetch_tool_off(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The pages a search reads take that fetch tool's price, so it is checked whether or not the fetch tool is on."""
+    config = GatewayConfig(
+        require_pricing=True,
+        search_tools={"fake-search": {"provider": "fake", "fetch_tool": "fake-fetch"}},
+        fetch_tools={"fake-fetch": {"provider": "fake"}, "other-fetch": {"provider": "fake"}},
+    )
+    async_db.add(_tool_row("fake-search", kind="search"))
+    await async_db.commit()
+
+    await _warn_for_web_tools(async_db, caplog, config)
+
+    assert _SEARCH_WARNING_MARKER in caplog.text
+    assert "fake-fetch" in caplog.text
+    assert "other-fetch" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_tool_warning_omits_the_fetch_tool_of_a_search_that_reads_no_page(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = GatewayConfig(
+        require_pricing=True,
+        web_search_extract=False,
+        search_tools={"fake-search": {"provider": "fake", "fetch_tool": "fake-fetch"}},
+        fetch_tools={"fake-fetch": {"provider": "fake"}},
+    )
+    async_db.add(_tool_row("fake-search", kind="search"))
+    await async_db.commit()
+
+    await _warn_for_web_tools(async_db, caplog, config)
+
+    assert "fake-fetch" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_gateway_tool_warning_omits_disabled_fetch(
     async_db: AsyncSession, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -154,7 +192,7 @@ def _tool_row(key: str, *, kind: str = "model") -> ModelPricing:
         effective_at=datetime(2020, 1, 1, tzinfo=UTC),
         input_price_per_million=5000.0,
         output_price_per_million=0.0,
-        unit="requests",
+        unit="request",
     )
 
 

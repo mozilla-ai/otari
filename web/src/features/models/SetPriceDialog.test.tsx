@@ -62,7 +62,7 @@ describe("SetPriceDialog", () => {
         {
           input_price_per_million: 2000,
           output_price_per_million: 0,
-          unit: "requests",
+          unit: "request",
         },
         "",
       ),
@@ -70,7 +70,7 @@ describe("SetPriceDialog", () => {
   })
 
   it("opens in the unit it is given", async () => {
-    await renderDialog({ chooseUnit: true, initialUnit: "images" })
+    await renderDialog({ chooseUnit: true, initialUnit: "image" })
 
     expect(screen.getByRole("radio", { name: "Images" })).toBeChecked()
     expect(screen.getByLabelText("Price per 1,000 images")).toBeInTheDocument()

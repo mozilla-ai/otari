@@ -9,6 +9,7 @@ from contextlib import AbstractAsyncContextManager
 from functools import cached_property
 
 import httpx
+import httpx2
 from anthropic import AnthropicError
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
@@ -30,13 +31,15 @@ __all__ = ["AnyLlmProviderFiles"]
 
 # How long to wait on the provider for a connection or for the next chunk.
 _TIMEOUT = httpx.Timeout(30.0)
+# Anthropic's SDK accepts only an httpx2 client, OpenAI's only an httpx one.
+_HTTPX2_TIMEOUT = httpx2.Timeout(30.0)
 
 # The providers whose files this adapter reads and writes.
 _FILE_PROVIDERS = frozenset({LLMProvider.ANTHROPIC, LLMProvider.OPENAI})
 
 # How a file call fails. any-llm raises its own error, or re-raises the provider
 # SDK's while unified exceptions are off.
-_FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, OpenAIError, httpx.HTTPError, ValidationError)
+_FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, OpenAIError, httpx.HTTPError, httpx2.HTTPError, ValidationError)
 
 _NOT_FOUND = 404
 
@@ -130,7 +133,14 @@ class _AnyLlmFileSession(ProviderFileSession):
         self._credential = credential
         # Handing this client to the provider SDK replaces the one it would have
         # built, whose own default is to follow the redirect a download can answer with.
-        self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
+        self._timeout: httpx.Timeout | httpx2.Timeout
+        self._connection: httpx.AsyncClient | httpx2.AsyncClient
+        if provider is LLMProvider.ANTHROPIC:
+            self._timeout = _HTTPX2_TIMEOUT
+            self._connection = httpx2.AsyncClient(timeout=_HTTPX2_TIMEOUT, follow_redirects=True)
+        else:
+            self._timeout = _TIMEOUT
+            self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
 
     @property
     def provider(self) -> str:
@@ -155,7 +165,7 @@ class _AnyLlmFileSession(ProviderFileSession):
                 # so a retry or a longer wait here spends the time the files
                 # after this one need.
                 "http_client": self._connection,
-                "timeout": _TIMEOUT,
+                "timeout": self._timeout,
                 "max_retries": 0,
             },
         )
@@ -168,7 +178,7 @@ class _AnyLlmFileSession(ProviderFileSession):
         """
         try:
             await self._connection.aclose()
-        except (httpx.HTTPError, RuntimeError):
+        except (httpx.HTTPError, httpx2.HTTPError, RuntimeError):
             logger.exception("Could not release the %s connection", self.provider)
 
     async def upload(self, data: bytes, *, filename: str, mime_type: str, expires_in: int) -> ProviderCopyReceipt:

@@ -260,6 +260,7 @@ FROZEN_LABELS = frozenset(
         _passthrough.DECISIONS_ENDPOINT,
         embeddings.USAGE_ENDPOINT,
         images.USAGE_ENDPOINT,
+        images.USAGE_ENDPOINT_EDITS,
         mcp.EXECUTE_ENDPOINT,
         mcp.TOOLS_ENDPOINT,
         messages.USAGE_ENDPOINT,

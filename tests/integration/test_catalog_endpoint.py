@@ -259,7 +259,7 @@ def test_the_detail_lists_every_offering_cheapest_first(priced: TestClient, mast
     assert nebius["price_source"] == "deployment"
     assert nebius["price_reference"] == _NEBIUS_GLM
     assert nebius["pricing"]["input_price_per_million"] == 0.5
-    assert nebius["pricing"]["unit"] == "tokens"
+    assert nebius["pricing"]["unit"] == "token"
     assert fireworks["context_window"] == 131072
     assert fireworks["max_output_tokens"] == 16384
     # Groq serves it too and is not configured here.
@@ -381,7 +381,7 @@ def test_a_session_is_priced_at_its_organizations_override(
                 pricing_tiers=[],
                 effective_from=datetime.now(UTC) - timedelta(days=1),
                 effective_to=None,
-                unit="tokens",
+                unit="token",
                 origin="api",
             )
         )
