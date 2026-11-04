@@ -1030,6 +1030,35 @@ Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
 accepted shape.
 
+### Every price in its unit: `rates`
+
+A price row also holds `rates`: every price of the model, as the models.dev
+`cost` block, in the document's own shape. Each modality (`text`, `image`,
+`audio`, `video`) has an `input` and an `output` price, each with its `unit`,
+`cache` prices and `overrides`. `web_search` sits beside the modalities, and
+so do `multipliers`. A price there is per its unit as published: one image,
+one million tokens, one thousand searches.
+
+Give `rates` instead of the per-million fields, in this file or on the
+pricing API, and the per-million fields are read out of it: the text prices
+first, else the one other price the block holds, scaled to per million. A
+block that gives both is refused, and so is one with a key the shape does not
+have.
+
+```yaml
+pricing:
+  openai:gpt-image-1:
+    rates:
+      image:
+        output: {price: 0.04, unit: image}
+```
+
+That row stores `unit: image` and `input_price_per_million: 40000`, as the
+per-image section below says. Every row reads back with both: one set through
+the per-million fields shows them in `rates` too, in the slot its unit
+chooses. Billing reads the per-million fields in this release. The other
+prices a block holds are stored for the meters a later release gives them.
+
 ### Per-request pricing (audio, moderations, rerank, and completion models)
 
 A rate's `unit` decides what it bills. A rate in `token` bills the tokens the

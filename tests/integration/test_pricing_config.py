@@ -800,3 +800,37 @@ async def test_log_usage_finds_pricing_with_colon_format(async_db: AsyncSession)
     log = writer.logs[0]
     expected_cost = (Decimal(1000) * Decimal("30") + Decimal(500) * Decimal("60")) / Decimal(1_000_000)
     assert log.cost == expected_cost
+
+
+def test_pricing_loaded_from_config_as_rates(postgres_url: str, test_db: Session) -> None:
+    """A config entry given as a cost block stores the block and the columns read out of it."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        providers={"openai": {"api_key": "test-key"}},
+        pricing={
+            "openai:gpt-image-1": PricingConfig.model_validate(
+                {"rates": {"image": {"output": {"price": 0.04, "unit": "image"}}}}
+            ),
+        },
+    )
+    app = create_app(config)
+    with TestClient(app):
+        pass
+
+    pricing = test_db.query(ModelPricing).filter(ModelPricing.model_key == "openai:gpt-image-1").one()
+    assert (pricing.unit, pricing.input_price_per_million, pricing.output_price_per_million) == (
+        "image",
+        Decimal(40000),
+        Decimal(0),
+    )
+    assert pricing.rates == {"image": {"output": {"price": Decimal("0.04"), "unit": "image"}}}
+
+
+def test_pricing_config_refuses_rates_beside_per_million_fields() -> None:
+    with pytest.raises(ValueError, match="remove input_price_per_million"):
+        PricingConfig.model_validate(
+            {"input_price_per_million": 3, "output_price_per_million": 15, "rates": {"text": {"input": {"price": 3}}}}
+        )

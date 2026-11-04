@@ -3126,6 +3126,132 @@
         "title": "BulkInviteOrganizationMembersResultPublic",
         "type": "object"
       },
+      "CacheRates-Input": {
+        "additionalProperties": false,
+        "description": "The cache prices of a price, in its unit.",
+        "properties": {
+          "explicit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The prices of explicit caching, where apart."
+          },
+          "read": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of a cached read.",
+            "title": "Read"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of cache storage.",
+            "title": "Storage"
+          },
+          "write": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of a cache write: one price, or one per TTL with the default TTL first.",
+            "title": "Write"
+          }
+        },
+        "title": "CacheRates",
+        "type": "object"
+      },
+      "CacheRates-Output": {
+        "additionalProperties": false,
+        "description": "The cache prices of a price, in its unit.",
+        "properties": {
+          "explicit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Output"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The prices of explicit caching, where apart."
+          },
+          "read": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of a cached read.",
+            "title": "Read"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of cache storage.",
+            "title": "Storage"
+          },
+          "write": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of a cache write: one price, or one per TTL with the default TTL first.",
+            "title": "Write"
+          }
+        },
+        "title": "CacheRates",
+        "type": "object"
+      },
       "CallToolResult": {
         "description": "The server's response to a tool call.\n\nErrors that originate from the tool SHOULD be reported inside the result\nwith `is_error` set to true, not as an MCP protocol-level error, so the LLM\ncan see and self-correct. Errors in finding the tool, or any other\nexceptional condition, should be reported as an MCP error response.",
         "properties": {
@@ -15986,6 +16112,17 @@
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
           },
+          "rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RatesDocument-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
+          },
           "unit": {
             "default": "token",
             "description": "What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
@@ -16092,6 +16229,10 @@
             "title": "Pricing Tiers",
             "type": "array"
           },
+          "rates": {
+            "$ref": "#/components/schemas/RatesDocument-Output",
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
+          },
           "unit": {
             "title": "Unit",
             "type": "string"
@@ -16113,6 +16254,7 @@
           "cache_write_price_per_million",
           "pricing_tiers",
           "unit",
+          "rates",
           "effective_from",
           "effective_to",
           "created_at",
@@ -16195,6 +16337,17 @@
             ],
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
+          },
+          "rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RatesDocument-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
           },
           "unit": {
             "default": "token",
@@ -17990,6 +18143,10 @@
             "title": "Pricing Tiers",
             "type": "array"
           },
+          "rates": {
+            "$ref": "#/components/schemas/RatesDocument-Output",
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
+          },
           "unit": {
             "description": "What the rates are per: token for a model, request or image for a non-token endpoint.",
             "title": "Unit",
@@ -18010,6 +18167,7 @@
           "cache_write_price_per_million",
           "pricing_tiers",
           "unit",
+          "rates",
           "origin",
           "created_at",
           "updated_at"
@@ -19128,6 +19286,168 @@
           "rules"
         ],
         "title": "RateLimitRulesPublic",
+        "type": "object"
+      },
+      "RateMultiplier": {
+        "additionalProperties": false,
+        "description": "A factor applied to every price, or to the prices it names, when a condition holds.",
+        "properties": {
+          "factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "description": "One factor for every price, or an object naming the prices.",
+            "title": "Factor"
+          },
+          "when": {
+            "additionalProperties": true,
+            "description": "The condition, as models.dev writes it.",
+            "title": "When",
+            "type": "object"
+          }
+        },
+        "required": [
+          "when",
+          "factor"
+        ],
+        "title": "RateMultiplier",
+        "type": "object"
+      },
+      "RateOverride-Input": {
+        "additionalProperties": false,
+        "description": "The prices that replace a price's own when a condition holds.",
+        "properties": {
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "when": {
+            "additionalProperties": true,
+            "description": "The condition, as models.dev writes it.",
+            "title": "When",
+            "type": "object"
+          }
+        },
+        "required": [
+          "when"
+        ],
+        "title": "RateOverride",
+        "type": "object"
+      },
+      "RateOverride-Output": {
+        "additionalProperties": false,
+        "description": "The prices that replace a price's own when a condition holds.",
+        "properties": {
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "when": {
+            "additionalProperties": true,
+            "description": "The condition, as models.dev writes it.",
+            "title": "When",
+            "type": "object"
+          }
+        },
+        "required": [
+          "when"
+        ],
+        "title": "RateOverride",
+        "type": "object"
+      },
+      "RatesDocument-Input": {
+        "additionalProperties": true,
+        "description": "A ``cost`` block on the wire: each other key is a modality (``text``, ``image``, ``audio``, ``video``).",
+        "properties": {
+          "multipliers": {
+            "items": {
+              "$ref": "#/components/schemas/RateMultiplier"
+            },
+            "title": "Multipliers",
+            "type": "array"
+          },
+          "web_search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRate-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RatesDocument",
+        "type": "object"
+      },
+      "RatesDocument-Output": {
+        "additionalProperties": true,
         "type": "object"
       },
       "RecommendationRefusal": {
@@ -21386,6 +21706,17 @@
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
           },
+          "rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RatesDocument-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
+          },
           "unit": {
             "default": "token",
             "description": "What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.",
@@ -22945,6 +23276,152 @@
           "cost"
         ],
         "title": "UnitChargeLine",
+        "type": "object"
+      },
+      "UnitRate-Input": {
+        "additionalProperties": false,
+        "description": "One price: of a modality's input or output, or of web search.",
+        "properties": {
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/RateOverride-Input"
+            },
+            "title": "Overrides",
+            "type": "array"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD per the unit's published quantity.",
+            "title": "Price"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of reasoning tokens, where apart.",
+            "title": "Reasoning"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the price is per; token when omitted.",
+            "title": "Unit"
+          }
+        },
+        "title": "UnitRate",
+        "type": "object"
+      },
+      "UnitRate-Output": {
+        "additionalProperties": false,
+        "description": "One price: of a modality's input or output, or of web search.",
+        "properties": {
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/RateOverride-Output"
+            },
+            "title": "Overrides",
+            "type": "array"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD per the unit's published quantity.",
+            "title": "Price"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of reasoning tokens, where apart.",
+            "title": "Reasoning"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the price is per; token when omitted.",
+            "title": "Unit"
+          }
+        },
+        "title": "UnitRate",
         "type": "object"
       },
       "UpdateBudgetRequest": {

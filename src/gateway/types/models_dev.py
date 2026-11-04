@@ -20,6 +20,7 @@ snapshot is cut with the same rules as every snapshot the gateway stores.
 import math
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import MISSING, dataclass, fields, is_dataclass
+from decimal import Decimal
 from types import MappingProxyType
 from typing import Any
 
@@ -81,6 +82,10 @@ RATE_FIELDS = ("input", "output", "cache_read", "cache_write")
 # ``packages/core/src/schema-v2.ts``). A price that names none is per ``token``.
 MODELS_DEV_UNITS = ("token", "character", "image", "megapixel", "second", "minute")
 
+# A price as a document gives it: a JSON number, read as ``float`` from models.dev and
+# as ``Decimal`` from a stored rate, so money a row holds never rounds through a float.
+type Number = float | Decimal
+
 # models.dev spells a handful of providers differently from any-llm. Looked up
 # by the any-llm implementation name; a provider absent here is spelled the same
 # in both, or is one models.dev does not carry (a local server, a proxy).
@@ -127,10 +132,10 @@ class ModelsDevRates:
     rather than price the model as if the rate were missing.
     """
 
-    input: float | None = None
-    output: float | None = None
-    cache_read: float | None = None
-    cache_write: float | None = None
+    input: Number | None = None
+    output: Number | None = None
+    cache_read: Number | None = None
+    cache_write: Number | None = None
     malformed: tuple[str, ...] = ()
 
 
@@ -161,10 +166,10 @@ class ModelsDevCachePrices:
     TTL in document order.
     """
 
-    read: float | None = None
-    write: float | None = None
-    write_ttls: tuple[tuple[str, float], ...] = ()
-    storage: float | None = None
+    read: Number | None = None
+    write: Number | None = None
+    write_ttls: tuple[tuple[str, Number], ...] = ()
+    storage: Number | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,8 +181,8 @@ class ModelsDevOverride:
     """
 
     when: Mapping[str, object]
-    price: float | None = None
-    reasoning: float | None = None
+    price: Number | None = None
+    reasoning: Number | None = None
     cache: ModelsDevCachePrices | None = None
     explicit_cache: ModelsDevCachePrices | None = None
     malformed: tuple[str, ...] = ()
@@ -196,9 +201,9 @@ class ModelsDevUnitPrice:
     a number, by its path (``price``, ``cache.read``, ``cache.explicit.write``).
     """
 
-    price: float | None
+    price: Number | None
     unit: str | None = None
-    reasoning: float | None = None
+    reasoning: Number | None = None
     cache: ModelsDevCachePrices | None = None
     explicit_cache: ModelsDevCachePrices | None = None
     overrides: tuple[ModelsDevOverride, ...] = ()
@@ -222,7 +227,7 @@ class ModelsDevMultiplier:
     """
 
     when: Mapping[str, object]
-    factor: float | Mapping[str, object]
+    factor: Number | Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,8 +371,8 @@ class ModelsDevCatalog:
         return None
 
 
-def _number(value: object) -> float | None:
-    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+def _number(value: object) -> Number | None:
+    return value if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool) else None
 
 
 def _tier_size(value: object) -> int | None:
@@ -383,9 +388,10 @@ def _tier_size(value: object) -> int | None:
 class _Reader:
     """Reads one document and notes each value it cannot read, by path and the type it expected."""
 
-    def __init__(self) -> None:
+    def __init__(self, known_units: tuple[str, ...] = MODELS_DEV_UNITS) -> None:
         self.count = 0
         self.examples: list[str] = []
+        self.known_units = known_units
         self.unknown_units: list[str] = []
 
     def note(self, path: str, expected: str) -> None:
@@ -523,7 +529,7 @@ class _Reader:
             knowledge=self.text(raw, "knowledge", path),
             release_date=self.text(raw, "release_date", path),
             last_updated=self.text(raw, "last_updated", path),
-            cost=None if pricing is None else _token_cost(pricing),
+            cost=None if pricing is None else token_cost(pricing),
             type=self.text(raw, "type", path) or "chat",
             api=self.api(raw, path),
             pricing=pricing,
@@ -540,7 +546,7 @@ class _Reader:
                 found.append(modality)
         return tuple(found)
 
-    def price(self, raw: dict[str, Any], name: str, path: str, malformed: list[str], field: str = "") -> float | None:
+    def price(self, raw: dict[str, Any], name: str, path: str, malformed: list[str], field: str = "") -> Number | None:
         value = raw.get(name)
         if value is None:
             return None
@@ -586,8 +592,8 @@ class _Reader:
 
     def cache_prices(self, cache: dict[str, Any], path: str, malformed: list[str], field: str) -> ModelsDevCachePrices:
         write = cache.get("write")
-        first: float | None = None
-        ttls: list[tuple[str, float]] = []
+        first: Number | None = None
+        ttls: list[tuple[str, Number]] = []
         if isinstance(write, dict):
             for n, (ttl, price) in enumerate(write.items()):
                 if (number := _number(price)) is None:
@@ -633,7 +639,7 @@ class _Reader:
         cache, explicit = self.cache(entry, path, malformed)
         overrides = [self.override(item, at) for at, item in self.objects(entry, "overrides", path)]
         unit = self.text(entry, "unit", path)
-        if unit is not None and unit not in MODELS_DEV_UNITS and unit not in self.unknown_units:
+        if unit is not None and unit not in self.known_units and unit not in self.unknown_units:
             self.unknown_units.append(unit)
         return ModelsDevUnitPrice(
             price=price,
@@ -648,7 +654,7 @@ class _Reader:
     def multiplier(self, raw: dict[str, Any], path: str) -> ModelsDevMultiplier | None:
         when = self.condition(raw, path)
         value = raw.get("factor")
-        factor: float | Mapping[str, object] | None = (
+        factor: Number | Mapping[str, object] | None = (
             _frozen_mapping(value) if isinstance(value, dict) else _number(value)
         )
         if factor is None:
@@ -657,9 +663,10 @@ class _Reader:
 
     def pricing(self, raw: dict[str, Any], path: str) -> ModelsDevPricing | None:
         cost = self.mapping(raw, "cost", path)
-        if cost is None:
-            return None
-        path = f"{path}.cost"
+        return None if cost is None else self.cost_v2(cost, f"{path}.cost")
+
+    def cost_v2(self, cost: dict[str, Any], path: str) -> ModelsDevPricing:
+        """A ``cost`` block: each key but ``web_search`` and ``multipliers`` is a modality."""
         modalities: dict[str, ModelsDevModalityCost] = {}
         for key, value in cost.items():
             if key in ("web_search", "multipliers"):
@@ -725,7 +732,7 @@ def _context_size(when: Mapping[str, object]) -> int | None:
     return _tier_size(context.get("gte") if bound is None else bound)
 
 
-def _cache_write(price: ModelsDevUnitPrice | ModelsDevOverride) -> float | None:
+def _cache_write(price: ModelsDevUnitPrice | ModelsDevOverride) -> Number | None:
     """v1's one cache write price: the default TTL's, else the explicit cache's."""
     for cache in (price.cache, price.explicit_cache):
         if cache is not None and cache.write is not None:
@@ -744,7 +751,7 @@ def _rates_malformed(given: tuple[str, ...], made: tuple[str, ...]) -> tuple[str
     return tuple(name for name, bad in found.items() if bad)
 
 
-def _token_cost(pricing: ModelsDevPricing) -> ModelsDevCost | None:
+def token_cost(pricing: ModelsDevPricing) -> ModelsDevCost | None:
     """The per-token text prices v1 shows for a v2 ``cost`` block, the way models.dev derives them (``costV2ToV1``).
 
     v1 has a price only where text input and output are both per token. Its
@@ -754,20 +761,31 @@ def _token_cost(pricing: ModelsDevPricing) -> ModelsDevCost | None:
     text = pricing.modalities.get("text")
     if text is None or text.input is None or text.output is None:
         return None
-    given, made = text.input, text.output
-    if given.unit not in (None, "token") or made.unit not in (None, "token"):
+    if text.input.unit not in (None, "token") or text.output.unit not in (None, "token"):
         return None
-    tiers: dict[int, dict[str, float | None]] = {}
-    bad: dict[int, tuple[list[str], list[str]]] = {}
+    return direction_cost(text.input, text.output)
 
-    def tier(override: ModelsDevOverride, *, output: bool) -> dict[str, float | None] | None:
+
+def direction_cost(given: ModelsDevUnitPrice | None, made: ModelsDevUnitPrice | None) -> ModelsDevCost:
+    """The v1 shape of one price pair in one unit: ``given`` as the input rates, ``made`` as the output rates.
+
+    The tiers are the overrides on context alone, each starting from the base
+    prices and taking what the override replaces. A side that is absent gives
+    no price. The caller says what the prices are in; this reads the numbers.
+    """
+    tiers: dict[int, dict[str, Number | None]] = {}
+    bad: dict[int, tuple[list[str], list[str]]] = {}
+    given_price = None if given is None else given.price
+    made_price = None if made is None else made.price
+
+    def tier(override: ModelsDevOverride, *, output: bool) -> dict[str, Number | None] | None:
         size = _context_size(override.when)
         if size is None:
             return None
         bad.setdefault(size, ([], []))[output].extend(override.malformed)
-        return tiers.setdefault(size, {"input": given.price, "output": made.price})
+        return tiers.setdefault(size, {"input": given_price, "output": made_price})
 
-    for override in given.overrides:
+    for override in () if given is None else given.overrides:
         if (entry := tier(override, output=False)) is not None:
             replaced = (
                 ("input", override.price),
@@ -775,16 +793,18 @@ def _token_cost(pricing: ModelsDevPricing) -> ModelsDevCost | None:
                 ("cache_write", _cache_write(override)),
             )
             entry.update((name, value) for name, value in replaced if value is not None)
-    for override in made.overrides:
+    for override in () if made is None else made.overrides:
         if (entry := tier(override, output=True)) is not None and override.price is not None:
             entry["output"] = override.price
     return ModelsDevCost(
         rates=ModelsDevRates(
-            input=given.price,
-            output=made.price,
-            cache_read=None if given.cache is None else given.cache.read,
-            cache_write=_cache_write(given),
-            malformed=_rates_malformed(given.malformed, made.malformed),
+            input=given_price,
+            output=made_price,
+            cache_read=None if given is None or given.cache is None else given.cache.read,
+            cache_write=None if given is None else _cache_write(given),
+            malformed=_rates_malformed(
+                () if given is None else given.malformed, () if made is None else made.malformed
+            ),
         ),
         tiers=tuple(
             ModelsDevTier(
@@ -795,6 +815,95 @@ def _token_cost(pricing: ModelsDevPricing) -> ModelsDevCost | None:
             for size, fields in tiers.items()
         ),
     )
+
+
+def parse_pricing(
+    raw: object, *, units: tuple[str, ...] = MODELS_DEV_UNITS, path: str = "cost"
+) -> tuple[ModelsDevPricing, ModelsDevIssues]:
+    """Read one ``cost`` block on its own, with the issues the read noted.
+
+    The same reader the catalog goes through, so a stored rate and the
+    document it came from read alike: a key it does not know is ignored, and a
+    value it cannot read is an issue, read as absent. ``units`` are the price
+    units it knows; one outside them joins ``unknown_units``. Each issue is
+    named under ``path``. A block that is not an object raises ``TypeError``.
+    """
+    if not isinstance(raw, Mapping):
+        raise TypeError("a cost block is not a JSON object")
+    reader = _Reader(units)
+    pricing = reader.cost_v2(dict(raw), path)
+    issues = ModelsDevIssues(
+        count=reader.count,
+        examples=tuple(reader.examples),
+        models=1,
+        damaged_models=int(reader.count > 0),
+        unknown_units=tuple(reader.unknown_units),
+    )
+    return pricing, issues
+
+
+def pricing_document(pricing: ModelsDevPricing) -> dict[str, Any]:
+    """A ``cost`` block as models.dev writes it, from what :func:`parse_pricing` read, so the two round-trip."""
+    document: dict[str, Any] = {}
+    for modality, prices in pricing.modalities.items():
+        entry: dict[str, Any] = {}
+        if prices.input is not None:
+            entry["input"] = _unit_price_document(prices.input)
+        if prices.output is not None:
+            entry["output"] = _unit_price_document(prices.output)
+        document[modality] = entry
+    if pricing.web_search is not None:
+        document["web_search"] = _unit_price_document(pricing.web_search)
+    if pricing.multipliers:
+        document["multipliers"] = [
+            {"when": _thawed(multiplier.when), "factor": _thawed(multiplier.factor)}
+            for multiplier in pricing.multipliers
+        ]
+    return document
+
+
+def _unit_price_document(price: ModelsDevUnitPrice | ModelsDevOverride) -> dict[str, Any]:
+    document: dict[str, Any] = {}
+    if isinstance(price, ModelsDevOverride):
+        document["when"] = _thawed(price.when)
+    if price.price is not None:
+        document["price"] = price.price
+    if isinstance(price, ModelsDevUnitPrice) and price.unit is not None:
+        document["unit"] = price.unit
+    if price.reasoning is not None:
+        document["reasoning"] = price.reasoning
+    cache = _cache_document(price.cache)
+    if price.explicit_cache is not None:
+        cache["explicit"] = _cache_document(price.explicit_cache)
+    if cache:
+        document["cache"] = cache
+    if isinstance(price, ModelsDevUnitPrice) and price.overrides:
+        document["overrides"] = [_unit_price_document(override) for override in price.overrides]
+    return document
+
+
+def _cache_document(cache: ModelsDevCachePrices | None) -> dict[str, Any]:
+    if cache is None:
+        return {}
+    document: dict[str, Any] = {}
+    if cache.read is not None:
+        document["read"] = cache.read
+    if cache.write_ttls:
+        document["write"] = dict(cache.write_ttls)
+    elif cache.write is not None:
+        document["write"] = cache.write
+    if cache.storage is not None:
+        document["storage"] = cache.storage
+    return document
+
+
+def _thawed(value: object) -> object:
+    """A read-only mapping or tuple back as the JSON object or list it was read from."""
+    if isinstance(value, Mapping):
+        return {key: _thawed(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thawed(item) for item in value]
+    return value
 
 
 def _segment(key: object) -> str:

@@ -9054,6 +9054,56 @@ export interface components {
             invited: components["schemas"]["InviteOrganizationMemberResultPublic"][];
         };
         /**
+         * CacheRates
+         * @description The cache prices of a price, in its unit.
+         */
+        "CacheRates-Input": {
+            /** @description The prices of explicit caching, where apart. */
+            explicit?: components["schemas"]["CacheRates-Input"] | null;
+            /**
+             * Read
+             * @description Price of a cached read.
+             */
+            read?: number | null;
+            /**
+             * Storage
+             * @description Price of cache storage.
+             */
+            storage?: number | null;
+            /**
+             * Write
+             * @description Price of a cache write: one price, or one per TTL with the default TTL first.
+             */
+            write?: number | {
+                [key: string]: number;
+            } | null;
+        };
+        /**
+         * CacheRates
+         * @description The cache prices of a price, in its unit.
+         */
+        "CacheRates-Output": {
+            /** @description The prices of explicit caching, where apart. */
+            explicit?: components["schemas"]["CacheRates-Output"] | null;
+            /**
+             * Read
+             * @description Price of a cached read.
+             */
+            read?: number | null;
+            /**
+             * Storage
+             * @description Price of cache storage.
+             */
+            storage?: number | null;
+            /**
+             * Write
+             * @description Price of a cache write: one price, or one per TTL with the default TTL first.
+             */
+            write?: number | {
+                [key: string]: number;
+            } | null;
+        };
+        /**
          * CallToolResult
          * @description The server's response to a tool call.
          *
@@ -15130,6 +15180,8 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
              * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
@@ -15182,6 +15234,8 @@ export interface components {
             output_price_per_million: number;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates: components["schemas"]["RatesDocument-Output"];
             /** Unit */
             unit: string;
             /**
@@ -15249,6 +15303,8 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
              * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
@@ -16145,6 +16201,8 @@ export interface components {
             price_per_request?: number | null;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates: components["schemas"]["RatesDocument-Output"];
             /**
              * Unit
              * @description What the rates are per: token for a model, request or image for a non-token endpoint.
@@ -16679,6 +16737,76 @@ export interface components {
         RateLimitRulesPublic: {
             /** Rules */
             rules: components["schemas"]["RateLimitRulePublic"][];
+        };
+        /**
+         * RateMultiplier
+         * @description A factor applied to every price, or to the prices it names, when a condition holds.
+         */
+        RateMultiplier: {
+            /**
+             * Factor
+             * @description One factor for every price, or an object naming the prices.
+             */
+            factor: number | {
+                [key: string]: unknown;
+            };
+            /**
+             * When
+             * @description The condition, as models.dev writes it.
+             */
+            when: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RateOverride
+         * @description The prices that replace a price's own when a condition holds.
+         */
+        "RateOverride-Input": {
+            cache?: components["schemas"]["CacheRates-Input"] | null;
+            /** Price */
+            price?: number | null;
+            /** Reasoning */
+            reasoning?: number | null;
+            /**
+             * When
+             * @description The condition, as models.dev writes it.
+             */
+            when: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RateOverride
+         * @description The prices that replace a price's own when a condition holds.
+         */
+        "RateOverride-Output": {
+            cache?: components["schemas"]["CacheRates-Output"] | null;
+            /** Price */
+            price?: number | null;
+            /** Reasoning */
+            reasoning?: number | null;
+            /**
+             * When
+             * @description The condition, as models.dev writes it.
+             */
+            when: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RatesDocument
+         * @description A ``cost`` block on the wire: each other key is a modality (``text``, ``image``, ``audio``, ``video``).
+         */
+        "RatesDocument-Input": {
+            /** Multipliers */
+            multipliers?: components["schemas"]["RateMultiplier"][];
+            web_search?: components["schemas"]["UnitRate-Input"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        "RatesDocument-Output": {
+            [key: string]: unknown;
         };
         /**
          * RecommendationRefusal
@@ -17719,6 +17847,8 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
              * @description What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.
@@ -18465,6 +18595,54 @@ export interface components {
             units: number;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * UnitRate
+         * @description One price: of a modality's input or output, or of web search.
+         */
+        "UnitRate-Input": {
+            cache?: components["schemas"]["CacheRates-Input"] | null;
+            /** Overrides */
+            overrides?: components["schemas"]["RateOverride-Input"][];
+            /**
+             * Price
+             * @description USD per the unit's published quantity.
+             */
+            price?: number | null;
+            /**
+             * Reasoning
+             * @description Price of reasoning tokens, where apart.
+             */
+            reasoning?: number | null;
+            /**
+             * Unit
+             * @description What the price is per; token when omitted.
+             */
+            unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
+        };
+        /**
+         * UnitRate
+         * @description One price: of a modality's input or output, or of web search.
+         */
+        "UnitRate-Output": {
+            cache?: components["schemas"]["CacheRates-Output"] | null;
+            /** Overrides */
+            overrides?: components["schemas"]["RateOverride-Output"][];
+            /**
+             * Price
+             * @description USD per the unit's published quantity.
+             */
+            price?: number | null;
+            /**
+             * Reasoning
+             * @description Price of reasoning tokens, where apart.
+             */
+            reasoning?: number | null;
+            /**
+             * Unit
+             * @description What the price is per; token when omitted.
+             */
+            unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * UpdateBudgetRequest

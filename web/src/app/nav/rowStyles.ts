@@ -112,9 +112,9 @@ const ROW_FOCUS =
  * wherever a row is rendered, rather than patching the one heading that has a
  * control inside it.
  *
- * Deliberately no `cursor-pointer`, and it is the one thing a call site is left
- * to name. Nearly every element this dresses already resolves to `pointer` on
- * its own: the leaves and the footer's desktop rows are `Link`s, so the
+ * Deliberately no `w-full` and no `cursor-pointer`; a call site adds the width
+ * where its row needs it, and the cursor is the case below. Nearly every element
+ * this dresses already resolves to `pointer` on its own: the leaves and the footer's desktop rows are `Link`s, so the
  * `<a href>` takes it from the user agent, and the expand triggers and the
  * account control carry HeroUI's `.disclosure__trigger` or `.button`, which set
  * `cursor: var(--cursor-interactive)`. The exceptions are the mobile drawer's
@@ -143,7 +143,7 @@ const ROW_FOCUS =
 // the reason the border color above is: a row in a chrome band pads by 24px and
 // a collapsed one by nothing, and three padding utilities on one row would leave
 // which of them wins to Tailwind's emitted order.
-const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
+const ROW_BASE = `flex min-h-11 items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
 
 /**
  * `data-pressed` alongside `active` because a rail row is three different

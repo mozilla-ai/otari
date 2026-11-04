@@ -60,7 +60,7 @@ export const WithDescription: Story = {
 
 /**
  * An error replaces the description rather than adding a row, which is why they
- * share one line. `reserveMessage` holds that line open so the form does not
+ * share one line. `shouldReserveMessage` holds that line open so the form does not
  * move when the message appears.
  */
 export const Invalid: Story = {

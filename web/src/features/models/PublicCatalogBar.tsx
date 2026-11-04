@@ -40,7 +40,7 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
         aria-label="Otari home"
         className="inline-flex min-h-11 items-center"
       >
-        <ProductLockup className="h-8 w-auto text-accent" />
+        <ProductLockup className="h-9 w-auto text-accent" />
       </a>
       <nav aria-label="Site" className="flex items-center gap-1 md:gap-2">
         <a

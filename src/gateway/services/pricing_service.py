@@ -42,6 +42,7 @@ from gateway.services.pricing import (
     resolve_as_of,
     tool_rate_lookup,
 )
+from gateway.types.models_dev import pricing_document
 from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER as GATEWAY_TOOL_PRICING_PROVIDER,
 )
@@ -222,6 +223,7 @@ def default_pricing_match(
         cache_read_price_per_million=entry.cache_read,
         cache_write_price_per_million=entry.cache_write,
         pricing_tiers=entry.pricing_tiers(),
+        rates=None if entry.pricing is None else pricing_document(entry.pricing),
     )
     return pricing, entry.reference
 
@@ -253,6 +255,7 @@ def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricin
         cache_write_price_per_million=override.cache_write_price_per_million,
         pricing_tiers=override.pricing_tiers or [],
         unit=override.unit or "token",
+        rates=override.rates,
     )
 
 

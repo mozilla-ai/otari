@@ -286,6 +286,18 @@ def test_a_claude_1h_write_bills_at_twice_the_input_rate() -> None:
         ("openai:gpt-5", "0.000500"),
         # An Anthropic-compatible endpoint serving another vendor's model.
         ("minimax:MiniMax-M2", "0.000500"),
+        # An instance named for Claude serving another vendor's model is not Claude.
+        ("claude-proxy:MiniMax-M2", "0.000500"),
+        # No provider: the key is the bare model id, whose Bedrock ":<n>" suffix is a version.
+        ("claude-haiku-5-5", "0.000800"),
+        ("us.anthropic.claude-haiku-5-5-v1:0", "0.000800"),
+        ("anthropic.claude-haiku-5-5-v1:0", "0.000800"),
+        ("anthropic.claude-3-sonnet-20240229-v1:0:200k", "0.000800"),
+        ("meta.llama3-70b-instruct-v1:0", "0.000500"),
+        # A non-ASCII digit is not a version, so the instance name stays ignored.
+        ("claude-proxy:\u00b2", "0.000500"),
+        # A provider and a Bedrock id that carries its own version suffix.
+        ("bedrock:us.anthropic.claude-haiku-5-5-v1:0", "0.000800"),
     ],
 )
 def test_a_1h_write_bills_at_twice_input_only_for_a_claude_model(model_key: str, cost: str) -> None:

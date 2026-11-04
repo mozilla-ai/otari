@@ -47,6 +47,7 @@ mozilla-ai/otari-ai), which is where the two conventions were reconciled;
 mozilla-ai/otari#661.
 """
 
+import re
 import typing
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
@@ -299,20 +300,33 @@ def _applicable_tier(
     return max(reached, key=lambda item: item[0])[1]
 
 
+_BEDROCK_VERSION_SUFFIX = re.compile(r"[0-9]+(?::|$)")
+
+
 def _is_claude(pricing: typing.Any) -> bool:
     """Whether ``pricing`` prices an Anthropic Claude model, on whichever provider serves it.
 
-    Read from the model half of ``model_key``, because the provider half names
+    Read from the model half of ``model_key`` (the whole key when it has no
+    provider, see below), because the provider half names
     an instance rather than a vendor, and an Anthropic-compatible endpoint can
     serve another vendor's model. ``anthropic:claude-haiku-5-5``,
     ``bedrock:us.anthropic.claude-haiku-5-5`` and
     ``vertexaianthropic:claude-haiku-5-5@default`` all qualify.
+
+    A key without a provider is the bare model id, and some model ids carry a
+    colon of their own: a Bedrock id ends in a ``:<n>`` version and
+    can carry a context-window suffix after it, as in
+    ``us.anthropic.claude-haiku-5-5-v1:0`` or ``anthropic.claude-3-sonnet-20240229-v1:0:200k``.
+    When what follows the first colon starts with ASCII digits and then ends or
+    meets another colon, it is that version, not a model, so the whole key is the model.
     """
     model_key = getattr(pricing, "model_key", None)
     if not isinstance(model_key, str):
         return False
-    provider, separator, model = model_key.partition(":")
-    return "claude" in (model if separator else provider).lower()
+    _, separator, model = model_key.partition(":")
+    if not separator or _BEDROCK_VERSION_SUFFIX.match(model):
+        return "claude" in model_key.lower()
+    return "claude" in model.lower()
 
 
 def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
