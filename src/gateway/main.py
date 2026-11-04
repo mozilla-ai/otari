@@ -1226,7 +1226,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app = FastAPI(
         title="otari",
-        description="Otari, an OpenAI-compatible LLM gateway with API key management",
+        description="Otari, an OpenAI-compatible AI gateway with API key management",
         version=__version__,
         docs_url=f"{API_ROOT}/docs" if config.enable_docs else None,
         redoc_url=f"{API_ROOT}/redoc" if config.enable_docs else None,
