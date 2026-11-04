@@ -486,6 +486,7 @@ def settle_cut_stream(
     prompt_chars: int | None,
     streamed_chars: int,
     reported_usage: CompletionUsage | None,
+    usage_is_final: bool,
 ) -> CompletionUsage | None:
     """The usage a stream the provider cut owes, or None when the row keeps what the provider reported.
 
@@ -493,12 +494,15 @@ def settle_cut_stream(
     streamed to the client, never projected to a full completion. A provider that
     reported usage before the cut keeps its prompt tokens (Anthropic reports input in
     ``message_start``), and its completion tokens are raised to the estimate when the
-    text streamed outweighs what it reported.
+    text streamed outweighs what it reported. A usage report the provider marked final
+    always wins.
     """
     if policy != "estimate":
         return None
     if reported_usage is None:
         return estimate_abandoned_stream_usage(policy=policy, prompt_chars=prompt_chars, streamed_chars=streamed_chars)
+    if usage_is_final:
+        return None
     streamed_tokens = estimate_output_tokens(streamed_chars)
     reported_output = reported_usage.completion_tokens or 0
     if streamed_tokens <= reported_output:

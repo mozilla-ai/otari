@@ -5769,6 +5769,20 @@ def _streamed_text_chars(chunk: Any) -> int:
     return len(text) if isinstance(text, str) else 0
 
 
+def _is_final_usage(chunk: Any) -> bool:
+    """Whether a chunk that carries usage carries the provider's last word on it.
+
+    A Chat chunk's usage is final on an empty-choices usage chunk or one that finishes a choice, a Messages
+    event's on ``message_delta`` (``message_start`` reports only the input), and a Responses event's on the
+    event that ends the response.
+    """
+    kind = str(getattr(chunk, "type", ""))
+    if kind:
+        return kind in {"message_delta", "response.completed", "response.incomplete", "response.failed"}
+    choices = getattr(chunk, "choices", None)
+    return not choices or any(getattr(choice, "finish_reason", None) for choice in choices)
+
+
 def build_streaming_response(
     *,
     adapter: FormatAdapter[Any, ChunkT],
@@ -5856,6 +5870,9 @@ def build_streaming_response(
     # cleanly. The generator hands only a completed stream's usage to a callback.
     reported_usage: CompletionUsage | None = None
     streamed_chars = 0
+    # Whether reported_usage includes the provider's final report, as opposed to only the input it
+    # announced when the stream began.
+    usage_is_final = False
 
     def _on_first_chunk() -> None:
         nonlocal first_chunk_at
@@ -5864,11 +5881,12 @@ def build_streaming_response(
             automatic_observation.first_response()
 
     def _extract_usage(chunk: ChunkT) -> CompletionUsage | None:
-        nonlocal reported_usage, streamed_chars
+        nonlocal reported_usage, streamed_chars, usage_is_final
         streamed_chars += _streamed_text_chars(chunk)
         chunk_usage = adapter.extract_stream_usage(chunk)
         if chunk_usage:
             reported_usage = chunk_usage if reported_usage is None else merge_stream_usage(reported_usage, chunk_usage)
+            usage_is_final = usage_is_final or _is_final_usage(chunk)
         return chunk_usage
 
     async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
@@ -6054,6 +6072,7 @@ def build_streaming_response(
                 prompt_chars=prompt_chars,
                 streamed_chars=streamed_chars,
                 reported_usage=reported_usage,
+                usage_is_final=usage_is_final,
             )
             if provider_cut
             else None
