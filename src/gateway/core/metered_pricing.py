@@ -307,12 +307,19 @@ def _is_claude(pricing: typing.Any) -> bool:
     serve another vendor's model. ``anthropic:claude-haiku-5-5``,
     ``bedrock:us.anthropic.claude-haiku-5-5`` and
     ``vertexaianthropic:claude-haiku-5-5@default`` all qualify.
+
+    A key without a provider is the bare model id, and some model ids carry a
+    colon of their own: a Bedrock id ends in a ``:<n>`` version, as in
+    ``us.anthropic.claude-haiku-5-5-v1:0``. When what follows the first colon is
+    only digits it is that version, not a model, so the whole key is the model.
     """
     model_key = getattr(pricing, "model_key", None)
     if not isinstance(model_key, str):
         return False
     provider, separator, model = model_key.partition(":")
-    return "claude" in (model if separator else provider).lower()
+    if not separator or model.isdigit():
+        return "claude" in model_key.lower()
+    return "claude" in model.lower()
 
 
 def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
