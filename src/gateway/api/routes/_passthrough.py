@@ -96,7 +96,7 @@ from gateway.core.error_codes import (
 )
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage, quantize_cost
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
-from gateway.core.settings.tools import ToolInstance
+from gateway.core.settings.tools import ToolInstance, ToolKind
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import DirectToolFailedError, WebSearchPolicyResolutionFailedError
 from gateway.inflight import track_request
@@ -1532,7 +1532,7 @@ def _refusal_detail(exc: TenancyError) -> str:
 async def run_direct_tool(
     *,
     endpoint: str,
-    kind: str,
+    kind: ToolKind,
     raw_request: Request,
     response: Response,
     auth_result: tuple[APIKey | None, bool],
@@ -1557,7 +1557,8 @@ async def run_direct_tool(
     tools the workspace's policy is read for. ``resolve`` turns the instance
     and that policy into the call, or raises a domain error. The usage row
     carries the instance's name and provider under ``endpoint``, one label
-    for every form of the route. ``kind`` is the call's noun in the log lines.
+    for every form of the route. ``kind`` is the tool's kind, which the key's
+    tool list is checked for and the log lines name.
 
     A refusal before the provider is called writes a rejection row, so refused
     traffic shows in Activity and counts as a failure. A provider failure is a
@@ -1655,7 +1656,7 @@ async def run_direct_tool(
     # Tool access control (per-key), by the tool's name. A key with no list of its
     # own inherits its user's, and a key restricted to models must be granted the
     # tool, which is the fail-closed side to be on for a spend surface.
-    not_allowed_detail = await api_keys.search_tool_refusal(config, api_key, provider=tool.provider, tool=tool.name)
+    not_allowed_detail = await api_keys.tool_refusal(config, api_key, kind=kind, provider=tool.provider, tool=tool.name)
     if not_allowed_detail is not None:
         await log_rejection(
             not_allowed_detail,
@@ -1865,7 +1866,7 @@ class DirectToolScaffold:
         self,
         *,
         endpoint: str,
-        kind: str,
+        kind: ToolKind,
         raw_request: Request,
         response: Response,
         auth_result: tuple[APIKey | None, bool],

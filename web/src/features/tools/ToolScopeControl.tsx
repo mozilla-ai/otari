@@ -11,7 +11,7 @@ export const ALL_SEARCH_TOOLS = "*"
 
 const EVERY_TOOL: AccessOption = {
   id: ALL_SEARCH_TOOLS,
-  label: "*  ·  every search tool",
+  label: "*  ·  every search and fetch tool",
 }
 
 const COPY: Omit<AccessListCopy, "inherit"> = {
@@ -19,23 +19,24 @@ const COPY: Omit<AccessListCopy, "inherit"> = {
   block: "No tool",
   blocked: (
     <>
-      <strong>every</strong> search tool on /v1/search until you change this
-      access.
+      <strong>every</strong> search and fetch tool on /v1/search and /v1/fetch
+      until you change this access.
     </>
   ),
-  pickPrompt: "Pick at least one search tool below, or choose “No tool”.",
-  inputLabel: "Add a search tool",
-  placeholder: "Search tools…",
+  pickPrompt: "Pick at least one tool below, or choose “No tool”.",
+  inputLabel: "Add a tool",
+  placeholder: "Search and fetch tools…",
 }
 
-// The search tool access-list, the same tri-state as model access, granted by
-// name apart from it, so no model wildcard reaches a tool. Only the deployment
-// operator may list the search tools, so anyone else is offered every tool or
-// none, and keeps the names already on the list.
+// The tool access-list, the same tri-state as model access, granted by name
+// apart from it, so no model wildcard reaches a tool. It names search and fetch
+// tools alike, builtin_fetch among the fetch ones. Only the deployment operator
+// may list the tools, so anyone else is offered every tool or none, and keeps
+// the names already on the list.
 export function ToolScopeControl({
   initial,
   onChange,
-  title = "Search tool access",
+  title = "Tool access",
   description,
   inheritLabel,
 }: {
@@ -46,25 +47,31 @@ export function ToolScopeControl({
   inheritLabel: string
 }) {
   const { isOperator, isSettled } = useDeploymentOperator()
-  const tools = useSearchTools("search", isSettled && isOperator)
+  const canList = isSettled && isOperator
+  const searchTools = useSearchTools("search", canList)
+  const fetchTools = useSearchTools("fetch", canList)
+  const isLoading = searchTools.isLoading || fetchTools.isLoading
 
   const names = [
-    ...new Set([
-      ...(tools.data?.stored ?? []).map((tool) => tool.name),
-      ...(tools.data?.config ?? []).map((tool) => tool.name),
-    ]),
+    ...new Set(
+      [searchTools.data, fetchTools.data].flatMap((listing) =>
+        [...(listing?.stored ?? []), ...(listing?.config ?? [])].map(
+          (tool) => tool.name,
+        ),
+      ),
+    ),
   ].sort((a, b) => a.localeCompare(b))
-  // Nothing to pick while the list is read, so the dropdown says it is loading
+  // Nothing to pick while the lists are read, so the dropdown says it is loading
   // rather than offering the star alone as if it were everything.
-  const catalog: AccessOption[] = tools.isLoading
+  const catalog: AccessOption[] = isLoading
     ? []
     : [EVERY_TOOL, ...names.map((name) => ({ id: name, label: name }))]
 
   const hint =
     isSettled && !isOperator
-      ? "Only the deployment operator can list the search tools, so you can grant every one or none here."
-      : tools.isError
-        ? "Could not load the search tools. Reload to try again."
+      ? "Only the deployment operator can list the tools, so you can grant every one or none here."
+      : searchTools.isError || fetchTools.isError
+        ? "Could not load the tools. Reload to try again."
         : null
 
   return (
@@ -76,7 +83,7 @@ export function ToolScopeControl({
       copy={{ ...COPY, inherit: inheritLabel }}
       catalog={catalog}
       hint={hint}
-      loadingMessage={tools.isLoading ? "Loading the search tools…" : null}
+      loadingMessage={isLoading ? "Loading the tools…" : null}
     />
   )
 }

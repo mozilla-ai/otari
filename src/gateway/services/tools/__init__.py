@@ -36,7 +36,8 @@ any-fetch's ``builtin`` provider, once, at startup. ``WebSearchBackend`` runs th
 ``WebToolCallCap`` is the search and fetch calls one request may make between them.
 ``pick_direct_search_instance``, ``resolve_direct_search`` and ``run_direct_search`` hold the direct
 search endpoint's rules and run its call, ``unpriced_direct_search_detail`` names the row one
-``require_pricing`` cannot bill is missing, and ``SearchQuery`` with the helpers beside it map LiteLLM's
+``require_pricing`` cannot bill is missing, their ``_fetch`` twins do the same for the direct fetch
+endpoint, and ``SearchQuery`` with the helpers beside it map LiteLLM's
 search fields onto a provider. ``build_web_provider_client`` builds the client the web tools' providers
 are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
 ``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's tool calls, ``mcp_entry``
@@ -154,6 +155,8 @@ from gateway.services.tools._web_search import (
     CHARS_PER_TOKEN,
     DEFAULT_MAX_TOKENS_PER_PAGE,
     DIRECT_DEFAULT_MAX_RESULTS,
+    DirectFetch,
+    DirectFetchResult,
     DirectSearch,
     DirectSearchResult,
     InLoopSearch,
@@ -165,13 +168,17 @@ from gateway.services.tools._web_search import (
     fetch_resolves,
     filter_hits_by_domain,
     page_budget_chars,
+    pick_direct_fetch_instance,
     pick_direct_search_instance,
+    resolve_direct_fetch,
     resolve_direct_search,
     resolve_fetch,
     resolve_in_loop_search,
     resolve_search,
+    run_direct_fetch,
     run_direct_search,
     search_resolves,
+    unpriced_direct_fetch_detail,
     unpriced_direct_search_detail,
     warn_about_tool_instances,
     web_search_configured,
@@ -296,6 +303,8 @@ __all__ = [
     "CHARS_PER_TOKEN",
     "DEFAULT_MAX_TOKENS_PER_PAGE",
     "DIRECT_DEFAULT_MAX_RESULTS",
+    "DirectFetch",
+    "DirectFetchResult",
     "DirectSearch",
     "DirectSearchResult",
     "SearchQuery",
@@ -305,10 +314,14 @@ __all__ = [
     "filter_hits_by_domain",
     "owning_backend",
     "page_budget_chars",
+    "pick_direct_fetch_instance",
     "pick_direct_search_instance",
+    "resolve_direct_fetch",
     "resolve_direct_search",
     "fetch_resolves",
+    "run_direct_fetch",
     "run_direct_search",
+    "unpriced_direct_fetch_detail",
     "unpriced_direct_search_detail",
     "search_resolves",
     "warn_about_tool_instances",

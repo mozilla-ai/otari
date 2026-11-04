@@ -555,6 +555,75 @@ class SearchResponse(pydantic.BaseModel):
     )
 
 
+class FetchRequest(pydantic.BaseModel):
+    """A direct fetch request: one page, read through the deployment's fetch tool or the one named."""
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={"example": {"url": "https://example.com/article", "max_chars": 20000}},
+    )
+
+    url: str = pydantic.Field(min_length=1, description="The page to fetch: one public http or https URL.")
+    fetch_tool_name: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "Configured fetch tool to run on, builtin_fetch included. Optional: the deployment's "
+            "web_fetch_default_tool serves, else builtin_fetch. Ignored on POST /api/v1/fetch/{fetch_tool_name}."
+        ),
+    )
+    max_chars: int | None = pydantic.Field(
+        default=None,
+        ge=1,
+        description=(
+            "Cut the page text to this many characters. Unset, the tool's own max_chars option applies, "
+            "else the provider's own limits."
+        ),
+    )
+    include_raw: bool = pydantic.Field(default=False, description="Also return the provider's whole response, as raw.")
+    provider_options: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        description=(
+            "Native options for the provider that serves the call, under the provider's own names, as "
+            "GET /api/v1/search-tools/providers?kind=fetch lists them. An option the provider does not take from a "
+            "request is refused with a 400. On a call that names no tool they go to whichever provider "
+            "serves it, so name the tool when they are meant for one provider."
+        ),
+    )
+    user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
+
+
+class FetchResponse(pydantic.BaseModel):
+    """A completed direct fetch: one page's text and where it came from."""
+
+    object: Literal["fetch"] = "fetch"
+    fetch_tool: str = pydantic.Field(description="The configured fetch tool that served the request")
+    url: str = pydantic.Field(description="The URL fetched, as asked, in canonical form.")
+    final_url: str = pydantic.Field(
+        description=(
+            "Where the page was found after redirects. The URL asked for when the provider does not report "
+            "where a redirect led (reports_final_url in the provider catalog)."
+        )
+    )
+    title: str = pydantic.Field(default="", description="The page's title; empty when the provider gave none.")
+    content_type: str = pydantic.Field(
+        default="", description="The page's content type; empty when the provider does not report one."
+    )
+    text: str = pydantic.Field(description="The page's text, as the provider extracted it.")
+    published: datetime | None = pydantic.Field(
+        default=None, description="When the page was published, where the provider reports it."
+    )
+    truncated: bool = pydantic.Field(
+        description=(
+            "Whether text is less than the whole page: the body or the extracted text hit a limit of the "
+            "provider's, or max_chars cut it."
+        )
+    )
+    raw: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        exclude_if=lambda raw: raw is None,
+        description="The provider's whole response, untouched; only when the request set include_raw.",
+    )
+
+
 _MAX_CODE_EXECUTION_INPUTS = 32
 
 

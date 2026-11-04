@@ -403,6 +403,36 @@ class DirectSearchFailedError(DirectToolFailedError):
     """The provider failed a direct search, or could not be reached."""
 
 
+class DirectFetchFailedError(DirectToolFailedError):
+    """The provider failed a direct fetch, or could not be reached; the built-in fetcher counts as one."""
+
+
+class DirectFetchNotEnabledError(TenancyValidationError):
+    """A direct fetch on a deployment whose ``web_fetch_enabled`` is off: the switch covers every page it fetches."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Web fetch is disabled on this gateway, so POST /api/v1/fetch is not served. "
+            "Set web_fetch_enabled: true in config.yml, or OTARI_WEB_FETCH_ENABLED=true, to serve it."
+        )
+
+
+class DirectFetchUrlRefusedError(TenancyValidationError):
+    """A direct fetch of a URL the gateway's own checks refuse: not a public http or https URL, or a private address."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The URL cannot be fetched: it is not a valid public http or https URL, or it names a private address."
+        )
+
+
+class DirectFetchDomainRefusedError(TenancyForbiddenError):
+    """A direct fetch of a URL the workspace's domain policy disallows, asked for or found after a redirect."""
+
+    def __init__(self) -> None:
+        super().__init__("The URL is disallowed by this workspace's web access policy.")
+
+
 class GatewayToolPricingRequiredError(TenancyError):
     """A request refused because ``require_pricing`` is on and no pricing row prices a gateway-run tool it uses.
 
@@ -444,6 +474,10 @@ class WebSearchCredentialRefusedError(TenancyError):
 
 
 __all__ = [
+    "DirectFetchDomainRefusedError",
+    "DirectFetchFailedError",
+    "DirectFetchNotEnabledError",
+    "DirectFetchUrlRefusedError",
     "DirectSearchFailedError",
     "DirectSearchFieldRefusedError",
     "DirectToolFailedError",
