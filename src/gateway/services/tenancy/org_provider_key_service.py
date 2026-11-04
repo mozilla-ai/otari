@@ -958,13 +958,20 @@ class OrgProviderKeyService:
 
         Every key rather than any: which key serves a workspace depends on its
         defaults and overrides, so one undeclared key means a request may go
-        out on an account that keeps data.
+        out on an account that keeps data. Usability costs a decryption, so a
+        provider with no declared key is never checked, and the checks stop
+        at the first answer.
         """
-        declared: dict[str, bool] = {}
+        by_provider: dict[str, list[OrgProviderKey]] = defaultdict(list)
         for key in await self.keys.list_live_keys(organization_id):
-            if key_is_usable(key):
-                declared[key.provider] = declared.get(key.provider, True) and key.zero_data_retention
-        return frozenset(provider for provider, zero in declared.items() if zero)
+            by_provider[key.provider].append(key)
+        return frozenset(
+            provider
+            for provider, keys in by_provider.items()
+            if any(key.zero_data_retention for key in keys)
+            and not any(key_is_usable(key) for key in keys if not key.zero_data_retention)
+            and any(key_is_usable(key) for key in keys if key.zero_data_retention)
+        )
 
 
 __all__ = [
