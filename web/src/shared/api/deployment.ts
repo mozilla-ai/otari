@@ -153,13 +153,16 @@ export function useIssuePasswordLink() {
   })
 }
 
+/** The blocklist reads' key prefix, which every blocklist write invalidates. */
+const BLOCKED_EMAILS = [DEPLOYMENT_ADMIN, "blocked-emails"] as const
+
 /** One page of the deployment's email blocklist, newest entry first. */
 export function useBlockedEmails(
   { page, pageSize }: { page: number; pageSize: number },
   enabled = true,
 ) {
   return useQuery({
-    queryKey: [DEPLOYMENT_ADMIN, "blocked-emails", page, pageSize],
+    queryKey: [...BLOCKED_EMAILS, page, pageSize],
     queryFn: () => {
       const params = new URLSearchParams({
         skip: String(page * pageSize),
@@ -184,9 +187,7 @@ export function useBlockEmail() {
     // Blocking ends the matching accounts' sessions, which the accounts list
     // does not show, so only the blocklist itself goes stale.
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: [DEPLOYMENT_ADMIN, "blocked-emails"],
-      })
+      void queryClient.invalidateQueries({ queryKey: BLOCKED_EMAILS })
     },
   })
 }
@@ -199,9 +200,7 @@ export function useUnblockEmail() {
         method: "DELETE",
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: [DEPLOYMENT_ADMIN, "blocked-emails"],
-      })
+      void queryClient.invalidateQueries({ queryKey: BLOCKED_EMAILS })
     },
   })
 }
