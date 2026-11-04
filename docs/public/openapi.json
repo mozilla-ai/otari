@@ -27555,7 +27555,7 @@
     }
   },
   "info": {
-    "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
+    "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
     "version": "0.0.0-dev"
   },
