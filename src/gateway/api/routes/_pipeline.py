@@ -198,7 +198,7 @@ from gateway.models.tools import (
     ResolvedWebSearchConfig,
     WebTool,
 )
-from gateway.models.usage import UsageLog
+from gateway.models.usage import StreamCutBy, UsageLog
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, BillingPort, InsufficientFundsError
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
@@ -4831,7 +4831,7 @@ async def record_usage(
     safety_identifier: str | None = None,
     upstream_attempt: bool = True,
     incomplete: bool = False,
-    stream_cut_by: str | None = None,
+    stream_cut_by: StreamCutBy | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -6041,16 +6041,17 @@ def build_streaming_response(
                 tool_tally is not None and not tool_tally.is_empty(),
                 request_id,
             )
-        # A stream the provider cut after output reached the client owes for that output,
-        # which the provider never reported: bill an estimate and mark the row incomplete.
-        provider_cut = not isinstance(exc, _GATEWAY_SIDE_FAILURES) and is_provider_cut(exc)
+        # A stream the provider cut after it started answering owes for the output already sent,
+        # which the provider never reported: bill an estimate. The row stays an error.
+        provider_cut = (
+            first_chunk_at is not None and not isinstance(exc, _GATEWAY_SIDE_FAILURES) and is_provider_cut(exc)
+        )
         cut = (
             settle_cut_stream(
                 policy=config.stream_missing_usage_policy,
                 prompt_chars=prompt_chars,
                 streamed_chars=streamed_chars,
                 reported_usage=reported_usage,
-                output_forwarded=first_chunk_at is not None,
             )
             if provider_cut
             else None

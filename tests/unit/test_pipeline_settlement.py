@@ -800,9 +800,8 @@ async def test_a_provider_cut_after_complete_usage_keeps_the_reported_usage(monk
         (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "allow_free", 40),
         (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "fail", 40),
         (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "estimate", None),
-        ([], httpx.RemoteProtocolError("dropped"), "estimate", 40),
     ],
-    ids=["allow_free", "fail", "request-size-unknown", "nothing-streamed"],
+    ids=["allow_free", "fail", "request-size-unknown"],
 )
 async def test_a_provider_cut_that_owes_no_estimate_is_still_attributed_to_the_provider(
     monkeypatch: pytest.MonkeyPatch,
@@ -821,14 +820,18 @@ async def test_a_provider_cut_that_owes_no_estimate_is_still_attributed_to_the_p
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "exc",
-    [HTTPException(status_code=422, detail="tool loop cap"), RuntimeError("chunk formatting failed")],
-    ids=["gateway-refusal", "gateway-bug"],
+    ("chunks", "exc"),
+    [
+        (_TWO_TEXT_CHUNKS, HTTPException(status_code=422, detail="tool loop cap")),
+        (_TWO_TEXT_CHUNKS, RuntimeError("chunk formatting failed")),
+        ([], httpx.RemoteProtocolError("dropped before any chunk")),
+    ],
+    ids=["gateway-refusal", "gateway-bug", "stream-never-started"],
 )
-async def test_a_failure_of_the_gateways_own_is_not_a_provider_cut(
-    monkeypatch: pytest.MonkeyPatch, exc: BaseException
+async def test_a_failure_that_is_not_a_provider_cut_is_not_attributed_or_estimated(
+    monkeypatch: pytest.MonkeyPatch, chunks: list[ChatCompletionChunk], exc: BaseException
 ) -> None:
-    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, exc)
+    settlement = await _cut_stream(monkeypatch, chunks, exc)
 
     (logged,) = settlement.logged
     assert not logged.get("incomplete")
@@ -844,20 +847,19 @@ def test_a_provider_cut_row_is_an_error_and_a_client_abandon_is_incomplete() -> 
 def test_settle_cut_stream_never_raises_the_reported_output() -> None:
     reported = CompletionUsage(prompt_tokens=10, completion_tokens=9, total_tokens=19)
 
-    def settle(streamed_chars: int, usage: CompletionUsage | None, *, forwarded: bool = True) -> Any:
+    def settle(streamed_chars: int, usage: CompletionUsage | None) -> Any:
         return settle_cut_stream(
-            policy="estimate",
-            prompt_chars=40,
-            streamed_chars=streamed_chars,
-            reported_usage=usage,
-            output_forwarded=forwarded,
+            policy="estimate", prompt_chars=40, streamed_chars=streamed_chars, reported_usage=usage
         )
 
     assert settle(8, reported) is None
     usage = settle(400, reported)
     assert usage is not None
     assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 100, 110)
-    assert settle(400, None, forwarded=False) is None
+    unreported_prompt = CompletionUsage(prompt_tokens=0, completion_tokens=1, total_tokens=1)
+    usage = settle(400, unreported_prompt)
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 100, 110)
 
 
 @pytest.mark.asyncio
