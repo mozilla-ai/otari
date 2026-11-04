@@ -248,6 +248,8 @@ class UsageEntry(BaseModel):
     attempt_position: int | None = None
     attempt_count: int | None = None
     request_group_id: str | None = None
+    # Who ended a stream before it completed, "provider" or "client"; null for any other row.
+    stream_cut_by: str | None = None
 
     @classmethod
     def from_model(
@@ -292,6 +294,7 @@ class UsageEntry(BaseModel):
             attempt_position=log.attempt_position,
             attempt_count=log.attempt_count,
             request_group_id=log.request_group_id,
+            stream_cut_by=log.stream_cut_by,
         )
 
 

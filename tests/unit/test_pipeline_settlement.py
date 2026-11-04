@@ -27,6 +27,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import anyio
+import httpx
 import pytest
 from any_llm import LLMProvider
 from any_llm.types.completion import (
@@ -69,7 +70,12 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig, WebTool
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.rate_limit import RateLimitInfo
-from gateway.services.budgets import ReservationHandle, estimate_output_tokens, settle_abandoned_stream
+from gateway.services.budgets import (
+    ReservationHandle,
+    estimate_output_tokens,
+    settle_abandoned_stream,
+    settle_cut_stream,
+)
 from gateway.services.inference import DeploymentCharge
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
@@ -700,9 +706,162 @@ async def test_abandoned_stream_before_usage_writes_an_incomplete_estimated_row(
         assert (usage.prompt_tokens, usage.completion_tokens) == (10, 6)
         assert logged["incomplete"] is True
         assert logged["error"] is None
+        assert logged["stream_cut_by"] == "client"
         assert settlement.settled_tokens == [16]
     else:
         assert settlement.refunded == 1
+
+
+async def _cut_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    chunks: list[ChatCompletionChunk],
+    exc: BaseException,
+    *,
+    policy: str = "estimate",
+    prompt_chars: int | None = 40,
+) -> _Settlement:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        for chunk in chunks:
+            yield chunk
+        raise exc
+
+    await _drain(
+        _build(stream(), GatewayConfig(stream_missing_usage_policy=policy), prompt_chars=prompt_chars, request_id="r1")
+    )
+    return settlement
+
+
+_TWO_TEXT_CHUNKS = [_text_chunk("abcd" * 2), _text_chunk("abcd" * 2)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cut",
+    [streaming.IncompleteStreamError(2), httpx.RemoteProtocolError("peer closed connection")],
+    ids=["ended-without-completing", "connection-dropped"],
+)
+async def test_a_provider_cut_before_usage_writes_an_estimated_error_row(
+    monkeypatch: pytest.MonkeyPatch, cut: BaseException
+) -> None:
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, cut)
+
+    (logged,) = settlement.logged
+    usage = logged["usage_override"]
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 4, 14)
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] == "provider"
+    assert logged["error"]
+    assert settlement.refunded == 0
+    assert settlement.settled_tokens == [14]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_estimates_only_what_was_streamed_to_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    short = await _cut_stream(monkeypatch, [_text_chunk("abcd")], streaming.IncompleteStreamError(1))
+    long = await _cut_stream(monkeypatch, [_text_chunk("abcd" * 50)], streaming.IncompleteStreamError(1))
+
+    assert short.logged[0]["usage_override"].completion_tokens == 1
+    assert long.logged[0]["usage_override"].completion_tokens == 50
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_after_the_prompt_was_reported_bills_the_streamed_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anthropic reports the prompt in message_start and the output only at the end."""
+    started = CompletionUsage(prompt_tokens=120, completion_tokens=1, total_tokens=121)
+    chunks = [_chunk(started).model_copy(update={"choices": []}), _text_chunk("abcd" * 100)]
+
+    settlement = await _cut_stream(monkeypatch, chunks, streaming.IncompleteStreamError(2))
+
+    (logged,) = settlement.logged
+    usage = logged["usage_override"]
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (120, 100, 220)
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] == "provider"
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_after_complete_usage_keeps_the_reported_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    reported = CompletionUsage(prompt_tokens=120, completion_tokens=500, total_tokens=620)
+    chunks = [_text_chunk("abcd"), _chunk(reported).model_copy(update={"choices": []})]
+
+    settlement = await _cut_stream(monkeypatch, chunks, streaming.IncompleteStreamError(2))
+
+    (logged,) = settlement.logged
+    assert logged["usage_override"].completion_tokens == 500
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] == "provider"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chunks", "exc", "policy", "prompt_chars"),
+    [
+        (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "allow_free", 40),
+        (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "fail", 40),
+        (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "estimate", None),
+        ([], httpx.RemoteProtocolError("dropped"), "estimate", 40),
+    ],
+    ids=["allow_free", "fail", "request-size-unknown", "nothing-streamed"],
+)
+async def test_a_provider_cut_that_owes_no_estimate_is_still_attributed_to_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    chunks: list[ChatCompletionChunk],
+    exc: BaseException,
+    policy: str,
+    prompt_chars: int | None,
+) -> None:
+    settlement = await _cut_stream(monkeypatch, chunks, exc, policy=policy, prompt_chars=prompt_chars)
+
+    (logged,) = settlement.logged
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] == "provider"
+    assert logged["usage_override"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc",
+    [HTTPException(status_code=422, detail="tool loop cap"), RuntimeError("chunk formatting failed")],
+    ids=["gateway-refusal", "gateway-bug"],
+)
+async def test_a_failure_of_the_gateways_own_is_not_a_provider_cut(
+    monkeypatch: pytest.MonkeyPatch, exc: BaseException
+) -> None:
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, exc)
+
+    (logged,) = settlement.logged
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] is None
+    assert logged["usage_override"] is None
+
+
+def test_a_provider_cut_row_is_an_error_and_a_client_abandon_is_incomplete() -> None:
+    assert pipeline._row_status(error="dropped", attribution=None) == "error"
+    assert pipeline._row_status(error=None, attribution=None, incomplete=True) == "incomplete"
+
+
+def test_settle_cut_stream_never_raises_the_reported_output() -> None:
+    reported = CompletionUsage(prompt_tokens=10, completion_tokens=9, total_tokens=19)
+
+    def settle(streamed_chars: int, usage: CompletionUsage | None, *, forwarded: bool = True) -> Any:
+        return settle_cut_stream(
+            policy="estimate",
+            prompt_chars=40,
+            streamed_chars=streamed_chars,
+            reported_usage=usage,
+            output_forwarded=forwarded,
+        )
+
+    assert settle(8, reported) is None
+    usage = settle(400, reported)
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 100, 110)
+    assert settle(400, None, forwarded=False) is None
 
 
 @pytest.mark.asyncio

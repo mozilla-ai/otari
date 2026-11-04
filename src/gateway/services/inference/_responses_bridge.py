@@ -48,6 +48,7 @@ from pydantic import BaseModel, TypeAdapter
 
 from gateway.log_config import logger
 from gateway.services.inference._upstream_user import chat_user_fields
+from gateway.streaming import IncompleteStreamError
 
 # Same name and meaning on both APIs.
 _SHARED_FIELDS = frozenset(
@@ -893,12 +894,19 @@ async def _stream_events(
         first = await anext(chunks, None)
         for event in translator.start():
             yield event
+        received = 0
         if first is not None:
+            received = 1
             for event in translator.feed(first):
                 yield event
         async for chunk in chunks:
+            received += 1
             for event in translator.feed(chunk):
                 yield event
+        # The chunk that ends a chat completion carries its finish_reason, as /chat/completions already
+        # requires of every provider. Chunks that stop short of it are a cut stream, not a finished one.
+        if received and translator.finish_reason is None:
+            raise IncompleteStreamError(received)
         for event in translator.finish():
             yield event
     finally:

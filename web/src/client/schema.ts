@@ -19665,6 +19665,8 @@ export interface components {
             status: string;
             /** Status Code */
             status_code: number | null;
+            /** Stream Cut By */
+            stream_cut_by?: string | null;
             /** Tags */
             tags?: {
                 [key: string]: string;

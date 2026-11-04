@@ -374,6 +374,8 @@ def test_list_usage_response_shape(
         "attempt_position": None,
         "attempt_count": None,
         "request_group_id": None,
+        # Null because no stream was cut.
+        "stream_cut_by": None,
     }
 
 
