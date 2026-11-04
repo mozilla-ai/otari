@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.core.settings.tools import enrichment_enabled
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools import (
     build_web_fetch_backend,
@@ -201,13 +202,8 @@ def _build_web_retrieval_backend(
     if isinstance(req_max, int) and req_max > 0:
         kwargs["max_results"] = req_max
 
-    config_extract = config.web_search_extract if config is not None else None
-    if config_extract is not None:
-        kwargs["extract_content"] = config_extract
-    else:
-        extract_env = otari_env("WEB_SEARCH_EXTRACT")
-        if extract_env is not None:
-            kwargs["extract_content"] = extract_env.lower() not in {"0", "false", "no", "off"}
+    if config is not None:
+        kwargs["extract_content"] = enrichment_enabled(config)
 
     allowed = tool_entry.get("allowed_domains")
     if isinstance(allowed, list) and allowed:

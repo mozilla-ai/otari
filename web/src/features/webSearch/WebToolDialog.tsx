@@ -522,8 +522,8 @@ export function WebToolDialog({
                   ]}
                   description={
                     enrichingProvider?.reports_final_url === false
-                      ? `Reads the page for a hit that has no text. ${enrichingProvider.id} ${REDIRECT_WARNING}`
-                      : "Reads the page for a hit that has no text."
+                      ? `With enrichment on, reads the page for a hit that has no text and bills it as a fetch on that tool. ${enrichingProvider.id} ${REDIRECT_WARNING}`
+                      : "With enrichment on, reads the page for a hit that has no text and bills it as a fetch on that tool."
                   }
                 />
               ) : null}

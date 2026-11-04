@@ -21,7 +21,7 @@ from gateway.services.pricing_service import (
     resolve_tool_rate,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.services.tools import configured_tools_to_price, deployment_tool_rate_keys
+from gateway.services.tools import configured_tools_to_price, deployment_tool_rate_keys, enriching_fetch_tool
 from gateway.types.tool_charges import InstanceRateKey
 
 
@@ -77,10 +77,16 @@ async def warn_about_unpriced_web_tools(config: GatewayConfig, db: AsyncSession)
     With ``require_pricing`` on, a request that would run the tool is refused
     with HTTP 402, except on a key exempt from budgets. With it off, a call
     reserves nothing before the provider is called and settles at zero unless
-    its provider reports a cost. A rate of 0 is a price. Fetch tools are checked
-    only where the fetch tool is enabled: only its calls take their price.
+    its provider reports a cost. A rate of 0 is a price. A fetch tool is checked
+    where the fetch tool is enabled, and where it reads the pages of the in-loop
+    search's hits, which take its price.
     """
-    keys = [key for key in deployment_tool_rate_keys(config) if key.kind == "search" or config.web_fetch_enabled]
+    enriching = enriching_fetch_tool(config)
+    keys = [
+        key
+        for key in deployment_tool_rate_keys(config)
+        if key.kind == "search" or config.web_fetch_enabled or key.name == enriching
+    ]
     unpriced = [key.name for key in keys if await resolve_tool_rate(db, (key,)) is None]
     if not unpriced:
         return

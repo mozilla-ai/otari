@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from gateway.core.settings.tools import enrichment_enabled
 from gateway.exceptions.tools_exceptions import (
     WebSearchInterceptedError,
     WebToolDeclarationError,
@@ -345,9 +346,10 @@ class AdmittedWebTools:
     ``search_tool_entry`` is the search declaration as the policy narrowed it,
     ``None`` where none was declared, and ``fetch_tool_entry`` the fetch
     declaration. ``in_loop_search`` is what the searches run on through the
-    libraries, ``None`` where the old backend serves them, and ``fetch`` the
-    instance the fetch tool runs on, ``None`` where it was not declared.
-    ``search_url`` is the old backend's, which the pipeline sets.
+    libraries, ``None`` where the old backend serves them, ``enrichment`` the
+    fetch that reads the pages of their hits, ``None`` where no page is read,
+    and ``fetch`` the instance the fetch tool runs on, ``None`` where it was
+    not declared. ``search_url`` is the old backend's, which the pipeline sets.
     """
 
     search_tool_entry: dict[str, Any] | None
@@ -357,10 +359,19 @@ class AdmittedWebTools:
     # The workspace's own search key, set only where it declared a search.
     search_credential: WebSearchCredential | None = None
     in_loop_search: InLoopSearch | None = None
+    enrichment: ResolvedFetch | None = None
     fetch: ResolvedFetch | None = None
 
 
 NO_WEB_TOOLS = AdmittedWebTools(search_tool_entry=None, fetch_tool_entry=None, fetch_policy=DomainPolicy())
+
+
+def enrichment_for(config: GatewayConfig, in_loop: InLoopSearch | None) -> ResolvedFetch | None:
+    """The fetch that reads the pages of ``in_loop``'s hits without text, or ``None`` where no page is read.
+
+    No page is read with enrichment off, and the old backend's pages are its own.
+    """
+    return in_loop.enrichment if in_loop is not None and enrichment_enabled(config) else None
 
 
 def admit_web_access(
@@ -413,5 +424,6 @@ def admit_web_access(
         fetch_policy=grant.fetch_policy,
         search_credential=grant.search_credential,
         in_loop_search=in_loop_search,
+        enrichment=enrichment_for(config, in_loop_search),
         fetch=fetch,
     )
