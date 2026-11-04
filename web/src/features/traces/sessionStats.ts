@@ -111,6 +111,42 @@ function rates(
   return out as Record<(typeof METERS)[number], number>
 }
 
+/**
+ * The model requests whose tokens count: one per call an agent exported. Two
+ * instrumentations of one process can each describe the same call, sharing its
+ * response id, and the span reporting the most tokens is counted. A gateway
+ * request's spans share its request id across calls, and a span's own id stands
+ * in where it carried no response id, so neither is matched.
+ */
+export function countedOnce(llm: readonly TraceSpan[]): TraceSpan[] {
+  const shared = (span: TraceSpan) =>
+    span.origin === "otlp" &&
+    !!span.request_id &&
+    span.request_id !== span.otel_span_id
+  const weight = (span: TraceSpan) => [
+    (span.input_tokens ?? 0) + (span.output_tokens ?? 0),
+    span.cache_read_tokens ?? 0,
+    span.cache_write_tokens ?? 0,
+  ]
+  const heavier = (a: TraceSpan, b: TraceSpan) => {
+    const [x, y] = [weight(a), weight(b)]
+    const index = x.findIndex((value, i) => value !== y[i])
+    return index >= 0 && x[index] > y[index]
+  }
+  const richest = new Map<string, TraceSpan>()
+  for (const span of llm) {
+    if (!shared(span) || !span.request_id) continue
+    const kept = richest.get(span.request_id)
+    if (!kept || heavier(span, kept)) richest.set(span.request_id, span)
+  }
+  return llm.filter(
+    (span) =>
+      !shared(span) ||
+      !span.request_id ||
+      richest.get(span.request_id) === span,
+  )
+}
+
 /** Whether a span of these ran inside a subagent: under a tool call that started one. */
 export function inSubagentOf(
   spans: readonly TraceSpan[],
@@ -144,6 +180,7 @@ export function sessionStats(
     (span) => span.kind === "tool" && !NOT_A_TOOL.has(span.tool_name ?? ""),
   )
   const llm = detail.spans.filter((span) => span.kind === "llm")
+  const calls = countedOnce(llm)
   const runs = new Map<string, TraceSpan[]>()
   for (const span of detail.spans) {
     if (span.operation === EXECUTION && span.parent_span_id) {
@@ -213,12 +250,21 @@ export function sessionStats(
   let cacheSaved = 0
   let pricedRequests = 0
   const models = new Map<string, ModelTally>()
-  for (const span of llm) {
+  const tallyOf = (span: TraceSpan) => {
     const model = span.model ?? "unknown model"
     const tally = models.get(model) ?? { model, requests: 0, cost: null }
-    tally.requests += 1
-    if (span.cost != null) tally.cost = (tally.cost ?? 0) + span.cost
     models.set(model, tally)
+    return tally
+  }
+  // A call's cost is on one of its spans, which need not be the one counted.
+  for (const span of llm) {
+    if (span.cost != null) {
+      const tally = tallyOf(span)
+      tally.cost = (tally.cost ?? 0) + span.cost
+    }
+  }
+  for (const span of calls) {
+    tallyOf(span).requests += 1
     const cacheRead = span.cache_read_tokens ?? 0
     const cacheWrite = span.cache_write_tokens ?? 0
     const used: Meters = {
@@ -270,7 +316,7 @@ export function sessionStats(
       activeMs,
       Date.parse(summary.last_activity_at) - Date.parse(summary.started_at),
     ),
-    requests: llm.length,
+    requests: calls.length,
     toolCalls: tools.length,
     inSubagents: tools.filter(inSubagent).length,
     tools: [...tallies]

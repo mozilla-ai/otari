@@ -329,3 +329,15 @@ def test_a_call_two_instrumentations_reported_alike_keeps_the_span_that_counted_
     [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
 
     assert turn.cache_read_tokens == 300
+
+
+def test_two_calls_whose_only_id_is_their_own_span_id_both_count_in_their_turn() -> None:
+    def call(span_id: str, trace: str) -> SpanRecord:
+        span = _span(span_id, "llm", "turn", request_id="00000000000000a1", input_tokens=500, output_tokens=20)
+        return replace(span, origin="otlp", otel_span_id="00000000000000a1", otel_trace_id=trace)
+
+    spans = [_span("turn", "step", opens_turn=True), call("a", "t1"), call("b", "t2")]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.llm_calls, turn.input_tokens) == (2, 1000)

@@ -313,8 +313,8 @@ class ReadUsage(NamedTuple):
 
 def one_booking_per_response(
     read: list[ReadUsage],
-) -> tuple[list[tuple[str, ExternalUsageEvent]], dict[str, tuple[str, str]]]:
-    """The usage events to book, one per response, and each one's span by its OTel trace and span id.
+) -> tuple[list[tuple[str, ExternalUsageEvent]], dict[tuple[str, str], tuple[str, str]]]:
+    """The usage events to book, one per response, and each one's span, keyed by its source and id.
 
     Spans of one response under different sources would each book it: a Claude SDK span's
     booking is kept, and otherwise the one reporting the most tokens. An event whose id is
@@ -335,7 +335,7 @@ def one_booking_per_response(
         if kept is None or tokens(usage.event) > tokens(read[kept].event):
             richest[event_id] = index
     pairs: list[tuple[str, ExternalUsageEvent]] = []
-    event_spans: dict[str, tuple[str, str]] = {}
+    event_spans: dict[tuple[str, str], tuple[str, str]] = {}
     for index, usage in enumerate(read):
         if (
             usage.source == CLAUDE_SOURCE
@@ -343,7 +343,7 @@ def one_booking_per_response(
             or richest.get(usage.event.source_event_id) == index
         ):
             pairs.append((usage.source, usage.event))
-            event_spans.setdefault(usage.event.source_event_id, usage.span_key)
+            event_spans.setdefault((usage.source, usage.event.source_event_id), usage.span_key)
     return pairs, event_spans
 
 

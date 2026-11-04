@@ -995,7 +995,7 @@ def test_a_response_the_claude_sdk_booked_is_priced_on_its_span_even_where_anoth
     )
 
     assert [source for source, _ in pairs] == [CLAUDE_SOURCE]
-    assert event_spans == {"msg_1": ("t", "sdk")}
+    assert event_spans == {(CLAUDE_SOURCE, "msg_1"): ("t", "sdk")}
 
 
 def test_a_response_two_libraries_booked_keeps_the_booking_reporting_most_tokens() -> None:
@@ -1008,7 +1008,7 @@ def test_a_response_two_libraries_booked_keeps_the_booking_reporting_most_tokens
     )
 
     assert [(source, event.source_event_id) for source, event in pairs] == [("agent-b", "msg_1"), ("agent-a", "msg_2")]
-    assert event_spans == {"msg_1": ("t", "full"), "msg_2": ("t", "other")}
+    assert event_spans == {("agent-b", "msg_1"): ("t", "full"), ("agent-a", "msg_2"): ("t", "other")}
 
 
 def test_a_response_whose_cache_one_library_counts_on_top_keeps_the_booking_with_its_cache_writes() -> None:
@@ -1025,7 +1025,7 @@ def test_a_response_whose_cache_one_library_counts_on_top_keeps_the_booking_with
 
 
 def test_two_calls_whose_ids_are_their_span_ids_are_never_merged() -> None:
-    pairs, _ = one_booking_per_response(
+    pairs, event_spans = one_booking_per_response(
         [
             ReadUsage("agent-a", _usage("00000000000000a1", input_tokens=5), ("t1", "00000000000000a1"), False),
             ReadUsage("agent-b", _usage("00000000000000a1", input_tokens=9), ("t2", "00000000000000a1"), False),
@@ -1033,6 +1033,11 @@ def test_two_calls_whose_ids_are_their_span_ids_are_never_merged() -> None:
     )
 
     assert [source for source, _ in pairs] == ["agent-a", "agent-b"]
+    # Each booking's cost reaches the span it was read from.
+    assert event_spans == {
+        ("agent-a", "00000000000000a1"): ("t1", "00000000000000a1"),
+        ("agent-b", "00000000000000a1"): ("t2", "00000000000000a1"),
+    }
 
 
 class _CappedWriter:
@@ -1061,3 +1066,27 @@ def test_a_span_kept_under_the_cap_is_in_the_session_a_span_past_it_names(monkey
     [write] = writer.writes
     assert [span.otel_span_id for span in write.spans] == ["call"]
     assert write.trace_id == SessionRef(source="otlp", key="conv-1").trace_id(_WORKSPACE, "alice", "k")
+
+
+def test_a_session_whose_calls_were_exported_is_never_the_one_the_session_cap_drops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gateway.services.traces._otlp.MAX_TRACES_PER_EXPORT", 1)
+    writer = _Writer()
+    at = datetime.now(UTC)
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [
+            PricedRequest("req_1", "labeled", at, Decimal("0.01"), "claude_code"),
+            PricedRequest("msg_1", "conv-1", at, Decimal("0.02"), "otel", traced=True),
+        ],
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id="k",
+        retention=_RETENTION,
+    )
+
+    [write] = writer.writes
+    assert write.trace_id == SessionRef(source="otlp", key="conv-1").trace_id(_WORKSPACE, None, "k")

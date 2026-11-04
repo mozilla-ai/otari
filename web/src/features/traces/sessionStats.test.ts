@@ -386,4 +386,48 @@ describe("sessionStats", () => {
 
     expect(stats.toolCalls).toBe(1)
   })
+
+  it("counts a call two instrumentations exported once, from the span reporting it", () => {
+    const call = (span_id: string, input: number | null, cost: number | null) =>
+      traceSpan({
+        span_id,
+        kind: "llm",
+        origin: "otlp",
+        model: "sonnet",
+        request_id: "msg_1",
+        otel_span_id: span_id,
+        input_tokens: input,
+        output_tokens: input == null ? null : 20,
+        cost,
+      })
+    // Two calls with no response id, whose only id is their own span id.
+    const bare = (span_id: string) =>
+      traceSpan({
+        span_id,
+        kind: "llm",
+        origin: "otlp",
+        model: "sonnet",
+        request_id: "00000000000000a1",
+        otel_span_id: "00000000000000a1",
+        input_tokens: 10,
+        output_tokens: 1,
+      })
+    const spans = [
+      call("wrapper", null, 0.25),
+      call("openllmetry", 500, null),
+      bare("x"),
+      bare("y"),
+    ]
+
+    const stats = sessionStats(traceSummary(), traceDetail({ spans }))
+
+    expect(stats.requests).toBe(3)
+    expect(stats.tokens).toEqual({
+      input: 520,
+      output: 22,
+      cacheRead: 0,
+      cacheWrite: 0,
+    })
+    expect(stats.models).toEqual([{ model: "sonnet", requests: 3, cost: 0.25 }])
+  })
 })

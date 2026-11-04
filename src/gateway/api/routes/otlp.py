@@ -503,7 +503,7 @@ def _record_priced(
     api_key: APIKey,
     config: GatewayConfig,
     spans: list[OtlpSpan] | None = None,
-    event_spans: dict[str, tuple[str, str]] | None = None,
+    event_spans: dict[tuple[str, str], tuple[str, str]] | None = None,
 ) -> None:
     """Hand each priced event's cost to its session: the session's cost is the ledger's."""
     writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)

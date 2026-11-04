@@ -845,14 +845,16 @@ def _usage_span(request: PricedRequest, window: _Window) -> SpanRecord:
 
 
 def priced_requests(
-    priced: Iterable[PricedEvent], spans: list[OtlpSpan], event_spans: Mapping[str, tuple[str, str]]
+    priced: Iterable[PricedEvent],
+    spans: list[OtlpSpan],
+    event_spans: Mapping[tuple[str, str], tuple[str, str]],
 ) -> list[PricedRequest]:
     """Each priced event in the session of the span it was read from, or else the session it names."""
     sessions = otlp_sessions(spans)
     by_key = {(span.trace_id, span.span_id): span for span in spans}
     requests: list[PricedRequest] = []
     for e in priced:
-        key = event_spans.get(e.source_event_id)
+        key = event_spans.get((e.source, e.source_event_id))
         session = sessions.get(key) if key is not None else None
         if session is not None and key is not None:
             harness = otlp_harness(by_key[key])
@@ -889,7 +891,9 @@ def record_priced_requests(
     try:
         by_session: dict[SessionRef, list[SpanRecord]] = {}
         harness: dict[SessionRef, str | None] = {}
-        for request in itertools.islice(requests, MAX_SPANS_PER_EXPORT):
+        # A request read off an exported span first, so a session that holds spans is never the one capped.
+        ordered = sorted(itertools.islice(requests, MAX_SPANS_PER_EXPORT), key=lambda request: not request.traced)
+        for request in ordered:
             # A ledger id a span cannot carry could never fold onto one, and would fail the whole export.
             if not (request.traced or request.source in _SESSION_USAGE_SOURCES):
                 continue
