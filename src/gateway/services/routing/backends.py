@@ -26,12 +26,9 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from gateway.models.routing import WEIGHTED_BACKEND
-
-if TYPE_CHECKING:
-    from gateway.core.config import GatewayConfig
 
 __all__ = [
     "PRIORITY_BACKEND",
@@ -174,7 +171,7 @@ def owes_missing_backend_warning(workspace_id: uuid.UUID | None, policy_name: st
     return True
 
 
-def get_router_backend(config: GatewayConfig, name: str) -> RouterBackend | None:
+def get_router_backend(name: str) -> RouterBackend | None:
     """Resolve the backend a policy named, or ``None`` if this build has no such backend.
 
     ``None`` is not an error: the caller compiles the policy without a router
