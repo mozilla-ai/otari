@@ -370,3 +370,17 @@ def test_a_copy_of_a_call_no_turn_holds_never_takes_the_call_out_of_its_turn() -
     [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
 
     assert (turn.llm_calls, turn.input_tokens) == (1, 500)
+
+
+def test_a_call_reported_twice_keeps_the_rounds_its_uncounted_copy_holds() -> None:
+    spans = [
+        _span("turn", "step", opens_turn=True),
+        replace(_span("rich", "llm", "turn", request_id="msg_1", input_tokens=900), origin="otlp"),
+        replace(_span("loop", "llm", "turn", request_id="msg_1", input_tokens=100), origin="otlp"),
+        _span("round-1", "llm", "loop"),
+        _span("round-2", "llm", "loop"),
+    ]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.llm_calls, turn.input_tokens) == (2, 900)

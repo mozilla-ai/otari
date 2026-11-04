@@ -481,4 +481,26 @@ describe("sessionStats", () => {
 
     expect(stats.models).toEqual([{ model: "sonnet", requests: 1, cost: 0.25 }])
   })
+
+  it("tallies a call reported twice under its priced copy's model over the counted copy's", () => {
+    const copy = (span_id: string, model: string, input: number, extra = {}) =>
+      traceSpan({
+        span_id,
+        kind: "llm",
+        origin: "otlp",
+        model,
+        request_id: "msg_1",
+        otel_span_id: span_id,
+        input_tokens: input,
+        ...extra,
+      })
+    const spans = [
+      copy("priced", "sonnet", 100, { cost: 0.25, attributes: RATES }),
+      copy("fuller", "claude-sonnet-4", 1_000),
+    ]
+
+    const stats = sessionStats(traceSummary(), traceDetail({ spans }))
+
+    expect(stats.models).toEqual([{ model: "sonnet", requests: 1, cost: 0.25 }])
+  })
 })

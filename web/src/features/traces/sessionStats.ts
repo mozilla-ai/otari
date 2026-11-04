@@ -157,7 +157,7 @@ export function countedOnce(llm: readonly TraceSpan[]): TraceSpan[] {
     // The priced copy also names the model its cost is tallied under.
     counted.push({
       ...span,
-      model: span.model ?? rated.model,
+      model: rated.model ?? span.model,
       attributes: rates(span)
         ? span.attributes
         : {

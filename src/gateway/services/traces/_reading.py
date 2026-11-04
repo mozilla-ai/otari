@@ -285,6 +285,12 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
         if span.kind == "llm" and span.parent_span_id in llm_ids:
             assert span.parent_span_id is not None
             rounds[span.parent_span_id] = rounds.get(span.parent_span_id, 0) + 1
+    # A call's rounds may sit under the copy that is not counted; the counted copy carries them.
+    kept = {span.request_id: span.span_id for span in in_turns if span.span_id in counted and span.origin == "otlp"}
+    for span in in_turns:
+        if span.span_id not in counted and span.span_id in rounds and span.request_id in kept:
+            copy = kept[span.request_id]
+            rounds[copy] = max(rounds.get(copy, 1), rounds[span.span_id])
     recent = now - last_activity < IDLE_TIMEOUT
     views: list[TurnView] = []
     for index, turn in enumerate(turns):
