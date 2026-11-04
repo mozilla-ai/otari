@@ -69,7 +69,7 @@ Otari never guesses that two requests belong together from their content.
 | A Claude Code span's session | `session.id` on a span Claude Code exported | `otlp` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
-| An OTLP span's Otari label | `otari.session_label` on an exported span | `otlp` |
+| An OTLP span's Otari label | `otari.user_session_label`, or else `otari.session_label`, on an exported span | `otlp` |
 
 A request that names no session is a trace of its own. To group a custom
 client's requests, send one of the signals above. An exported span that names
@@ -192,8 +192,8 @@ Each LLM call a span reports is priced by the usage ledger (see
 counts that cost, shown on the call's span. When two instrumentations in one
 process both report a call, such as the Claude SDK's own tracing beside
 OpenLLMetry, both spans are kept, but the call is one usage row and its cost
-counts once in the session's totals. Its tokens count once when both spans come
-in the same export.
+counts once in the session's totals. When both spans come in the same export,
+its tokens count once too, read off the span that reports more of them.
 
 A span's `gen_ai.response.finish_reasons` array is kept as
 one value, its reasons joined by a comma: `stop,length`. The read API returns

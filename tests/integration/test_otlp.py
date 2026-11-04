@@ -1096,6 +1096,31 @@ def test_otlp_a_call_the_claude_sdk_and_an_instrumentation_both_exported_is_one_
 
     rows = db_session.query(UsageLog).filter(UsageLog.source_event_id == "msg_claude_1").all()
     assert [row.source for row in rows] == ["claude_platform"]
+    [row] = rows
+    assert (row.prompt_tokens, row.cache_read_tokens, row.cache_write_tokens) == (1000, 200, 100)
+    assert row.cache_write_1h_tokens == 40
+    assert row.cost == _usd(700, "15") + _usd(200, "1.5") + _usd(60, "18.75") + _usd(40, "30") + _usd(50, "75")
+
+
+def test_otlp_a_call_two_instrumentations_book_under_different_sources_is_one_row(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    [first] = _genai_anthropic_export(
+        "opentelemetry.instrumentation.anthropic",
+        **{"gen_ai.usage.input_tokens": 510, "otari.client_name": "agent-a"},
+    )["resourceSpans"]
+    [second] = _genai_anthropic_export(
+        "openlit.instrumentation.anthropic",
+        **{"gen_ai.usage.input_tokens": 50, "otari.client_name": "agent-b"},
+    )["resourceSpans"]
+
+    resp = client.post("/otlp/v1/traces", json={"resourceSpans": [first, second]}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    rows = db_session.query(UsageLog).filter(UsageLog.source_event_id == "msg_genai_1").all()
+    assert [row.source for row in rows] == ["agent-a"]
 
 
 def test_otlp_a_judge_gates_cost_reaches_its_gate_on_the_session(

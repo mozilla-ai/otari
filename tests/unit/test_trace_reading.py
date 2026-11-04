@@ -303,3 +303,16 @@ def test_a_call_two_instrumentations_both_exported_is_priced_on_one_of_its_spans
         ("sdk", Decimal("0.25")),
         ("openllmetry", None),
     ]
+
+
+def test_a_call_two_instrumentations_both_exported_counts_its_tokens_once_in_its_turn() -> None:
+    call = {"request_id": "msg_1", "input_tokens": 500, "output_tokens": 20, "cache_read_tokens": 300}
+    spans = [
+        _span("turn", "step", opens_turn=True),
+        replace(_span("sdk", "llm", "turn", **call), origin="otlp"),
+        replace(_span("openllmetry", "llm", "turn", **call), origin="otlp"),
+    ]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.input_tokens, turn.output_tokens, turn.cache_read_tokens) == (500, 20, 300)

@@ -12,7 +12,7 @@ from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
 from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, SessionRef, TraceWriter, project_otlp_spans
 from gateway.services.traces._collector import call_id_digest
-from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, record_priced_requests
+from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, otlp_sessions, record_priced_requests
 from gateway.services.traces._reading import _gate_summaries
 from gateway.services.traces._service import _growth
 from gateway.types.traces import TraceWrite, is_identifier
@@ -119,6 +119,28 @@ def test_a_conversation_named_below_the_root_holds_the_spans_around_it() -> None
 
     [write] = writes
     assert len(write.spans) == 3
+
+
+def test_a_session_label_an_agent_names_for_its_user_holds_the_spans_under_it() -> None:
+    sessions = otlp_sessions(
+        [
+            _span("root", attrs={"otari.user_session_label": "project:otari", "otari.session_label": "other"}),
+            _span("chat", parent="root", attrs={"gen_ai.operation.name": "chat"}),
+        ]
+    )
+
+    assert set(sessions.values()) == {SessionRef(source="otlp", key="project:otari")}
+
+
+def test_a_long_chain_of_spans_naming_nothing_is_in_the_session_its_root_names() -> None:
+    depth = 20_000
+    chain = [_span("s0", attrs={"gen_ai.conversation.id": "conv-1"})]
+    chain += [_span(f"s{i}", parent=f"s{i - 1}") for i in range(1, depth)]
+
+    sessions = otlp_sessions(reversed(chain))
+
+    assert set(sessions.values()) == {SessionRef(source="otlp", key="conv-1")}
+    assert len(sessions) == depth
 
 
 def test_two_conversations_in_one_otel_trace_each_keep_the_spans_under_them() -> None:
@@ -633,6 +655,25 @@ def test_an_llm_span_carries_the_id_the_ledger_priced_its_call_by(
     assert write.spans[0].request_id == request_id
 
 
+def test_a_managed_agents_turn_carries_the_id_its_usage_was_booked_by() -> None:
+    attrs = {"gen_ai.operation.name": "chat", "anthropic.session.id": "sesn_1", "gen_ai.response.id": "msg_1"}
+    [write] = _project(_span("a", name="anthropic.model_request", attrs=attrs, scope="com.anthropic.claude-platform"))
+
+    assert write.spans[0].request_id == f"{'t' * 32}:a"
+
+
+def test_a_cache_write_reported_under_two_names_is_counted_as_the_larger() -> None:
+    attrs = {
+        "gen_ai.usage.input_tokens": 100,
+        "gen_ai.usage.cache_write.input_tokens": 0,
+        "gen_ai.usage.cache_creation.input_tokens": 160,
+    }
+    [write] = _project(_span("a", attrs=attrs, scope="openlit.instrumentation.anthropic"))
+
+    [span] = write.spans
+    assert (span.input_tokens, span.cache_write_tokens) == (260, 160)
+
+
 def test_a_reported_zero_cache_count_is_kept_not_stored_as_unknown() -> None:
     attrs = {
         "gen_ai.usage.input_tokens": 100,
@@ -898,3 +939,15 @@ def test_a_call_two_instrumentations_both_exported_counts_its_tokens_once_in_the
     # Both spans of the call are kept.
     assert len(write.spans) == 3
     assert (growth.input_tokens, growth.output_tokens) == (1000, 40)
+
+
+def test_a_call_two_instrumentations_exported_counts_the_tokens_of_the_one_reporting_them() -> None:
+    call = {"gen_ai.operation.name": "chat", "gen_ai.response.id": "msg_1"}
+    [write] = _project(
+        _span("wrapper", attrs=call),
+        _span("openllmetry", attrs={**call, "gen_ai.usage.input_tokens": 500, "gen_ai.usage.output_tokens": 20}),
+    )
+
+    growth = _growth((_WORKSPACE, write.trace_id), list(write.spans), _NOW)
+
+    assert (growth.input_tokens, growth.output_tokens) == (500, 20)

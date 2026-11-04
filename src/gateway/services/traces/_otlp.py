@@ -64,6 +64,7 @@ _TOOL_OPERATIONS = frozenset({"execute_tool"})
 
 _CLAUDE_CODE_SCOPE_PREFIX = "com.anthropic.claude_code"
 _CLAUDE_CODE_HARNESS = "claude-code"
+_MANAGED_AGENTS_MODEL_REQUEST = "anthropic.model_request"
 _CLAUDE_CODE_KINDS = {"interaction": "step", "llm_request": "llm", "tool": "tool"}
 # The child of a tool span that records whether it was allowed to run, and by
 # whom: ``source`` is ``hook`` when a hook refused it.
@@ -183,7 +184,10 @@ def usage_event_id(span: OtlpSpan) -> str | None:
 
     Held to the id pattern, like a Claude Code request's: a span carries only an id it can fold a cost onto.
     """
-    value = _str(span.attributes, "gen_ai.response.id") or span.span_id
+    if span.name == _MANAGED_AGENTS_MODEL_REQUEST and _str(span.attributes, "anthropic.session.id"):
+        value = f"{span.trace_id}:{span.span_id}"  # a Managed Agents turn is priced by its own span
+    else:
+        value = _str(span.attributes, "gen_ai.response.id") or span.span_id
     return value if ID_PATTERN.fullmatch(value) else None
 
 
@@ -249,7 +253,12 @@ def _false(attributes: Mapping[str, Any], key: str) -> bool:
 
 def _named_session(span: OtlpSpan) -> str | None:
     # A Claude Managed Agents session names each thread a conversation of its own.
-    keys: tuple[str, ...] = ("anthropic.session.id", "gen_ai.conversation.id", "otari.session_label")
+    keys: tuple[str, ...] = (
+        "anthropic.session.id",
+        "gen_ai.conversation.id",
+        "otari.user_session_label",
+        "otari.session_label",
+    )
     try:
         if span.names_harness_session:
             keys = ("session.id", *keys)
@@ -274,15 +283,23 @@ def otlp_sessions(spans: Iterable[OtlpSpan]) -> dict[tuple[str, str], SessionRef
     for (trace_id, _), name in named.items():
         if name is not None:
             traces.setdefault(trace_id, name)
+    # Each span's resolved name, kept for every span a walk passes so no chain is walked twice.
+    resolved: dict[tuple[str, str], str | None] = {}
     sessions: dict[tuple[str, str], SessionRef] = {}
     for span in spans:
         key = (span.trace_id, span.span_id)
         found: str | None = None
-        at, seen = key, set()
-        while found is None and at in named and at not in seen:
+        at, path, seen = key, [], set()
+        while at in named and at not in resolved and at not in seen:
             seen.add(at)
-            found = named[at]
+            path.append(at)
+            if (found := named[at]) is not None:
+                break
             at = (span.trace_id, parents[at] or "")
+        else:
+            found = resolved.get(at)
+        for visited in path:
+            resolved[visited] = found
         sessions[key] = SessionRef(source="otlp", key=found or traces.get(span.trace_id) or span.trace_id)
     return sessions
 
@@ -410,7 +427,9 @@ def _projected(span: OtlpSpan, window: _Window, tool: _ToolFacts | None) -> Span
         "gen_ai.usage.cache_read.input_tokens",
         "gen_ai.usage.cached_tokens",
     )
-    cache_write = _first_int(attributes, *CACHE_WRITE_ATTRIBUTES)
+    cache_write = max(
+        (count for key in CACHE_WRITE_ATTRIBUTES if (count := _int(attributes, key)) is not None), default=None
+    )
     cached = (cache_read or 0) + (cache_write or 0)
     if input_tokens is not None and not cache_in_input(span.scope, input_tokens, cached):
         input_tokens = min(input_tokens + cached, _INT32_MAX)

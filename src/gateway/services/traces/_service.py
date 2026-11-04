@@ -33,7 +33,7 @@ from gateway.models.traces import (
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
 from gateway.services.traces._collector import CALL_ID_DIGEST, call_id_digest
 from gateway.services.traces._content import SealItem, SpanContent
-from gateway.services.traces._reading import MAX_SPANS_PER_READ, ContextWindowOf, trace_view
+from gateway.services.traces._reading import MAX_SPANS_PER_READ, ContextWindowOf, counted_once, trace_view
 from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
     TRACE_BUCKET_DURATION,
@@ -692,28 +692,10 @@ def _key(trace: TraceWrite) -> TraceKey:
     return (trace.workspace_id, trace.trace_id)
 
 
-def _counted_once(llm: list[SpanRecord]) -> list[SpanRecord]:
-    """The LLM spans whose tokens a session counts: one per call an agent exported.
-
-    Two instrumentations of one process can each describe the same call, sharing its
-    response id; both spans are kept, its tokens counted once. A gateway request's
-    spans share its request id across calls, so only an exported span is held to it.
-    """
-    seen: set[str] = set()
-    counted: list[SpanRecord] = []
-    for span in llm:
-        if span.origin == "otlp" and span.request_id and span.operation != USAGE_OPERATION:
-            if span.request_id in seen:
-                continue
-            seen.add(span.request_id)
-        counted.append(span)
-    return counted
-
-
 def _growth(key: TraceKey, spans: list[SpanRecord], written_at: datetime) -> TraceGrowth:
     moments = [_span_moment(span, written_at) for span in spans]
     llm = [span for span in spans if span.kind == "llm"]
-    calls = _counted_once(llm)
+    calls = counted_once(llm)
     errors = [span for span in spans if span.outcome == "error" and not span.recovered]
     return TraceGrowth(
         workspace_id=key[0],

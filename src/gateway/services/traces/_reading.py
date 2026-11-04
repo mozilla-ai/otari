@@ -230,6 +230,31 @@ def _gate_summaries(
     return tuple(sorted(summaries, key=order))
 
 
+def counted_once(llm: list[SpanRecord]) -> list[SpanRecord]:
+    """The LLM spans whose tokens count: one per call an agent exported.
+
+    Two instrumentations of one process can each describe the same call, sharing its
+    response id; both spans are kept, and the tokens of the one reporting most are
+    counted. A gateway request's spans share its request id across calls, so only an
+    exported span is held to it.
+    """
+
+    def shared(span: SpanRecord) -> bool:
+        return span.origin == "otlp" and bool(span.request_id) and span.operation != USAGE_OPERATION
+
+    def tokens(span: SpanRecord) -> int:
+        return (span.input_tokens or 0) + (span.output_tokens or 0)
+
+    richest: dict[str, SpanRecord] = {}
+    for span in llm:
+        if not shared(span):
+            continue
+        kept = richest.get(span.request_id or "")
+        if kept is None or tokens(span) > tokens(kept):
+            richest[span.request_id or ""] = span
+    return [span for span in llm if not shared(span) or richest[span.request_id or ""] is span]
+
+
 def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -> tuple[TurnView, ...]:
     steps = sorted((span for span in spans if span.kind == "step"), key=_moment)
     turns: list[_Turn] = []
@@ -260,6 +285,7 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
         else:
             state = "completed"
         llm = [span for span in turn.children if span.kind == "llm"]
+        calls = counted_once(llm)
         views.append(
             TurnView(
                 index=index,
@@ -270,9 +296,9 @@ def _turns(spans: list[SpanRecord], *, now: datetime, last_activity: datetime) -
                 tool_calls=sum(1 for span in turn.children if span.kind == "tool"),
                 llm_calls=sum(rounds.get(span.span_id, 1) for span in llm),
                 errors=sum(1 for span in turn.children + turn.steps if span.outcome == "error" and not span.recovered),
-                input_tokens=sum(span.input_tokens or 0 for span in llm),
-                output_tokens=sum(span.output_tokens or 0 for span in llm),
-                cache_read_tokens=sum(span.cache_read_tokens or 0 for span in llm),
+                input_tokens=sum(span.input_tokens or 0 for span in calls),
+                output_tokens=sum(span.output_tokens or 0 for span in calls),
+                cache_read_tokens=sum(span.cache_read_tokens or 0 for span in calls),
                 cost=sum((span.cost_snapshot or Decimal(0) for span in llm), Decimal(0)),
                 continued=turn.continued,
             )

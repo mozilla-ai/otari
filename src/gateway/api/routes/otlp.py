@@ -660,10 +660,17 @@ async def receive_traces(
                 if mapped is not None:
                     pairs.append(mapped)
                     event_spans.setdefault(mapped[1].source_event_id, span_key)
-    # A Claude SDK span books its response under its own source, so an instrumentation library's
-    # span of the same response in this export would book it twice.
+    # Spans of one response under different sources would each book it: a Claude SDK span's
+    # booking is kept, and otherwise the first span read.
     booked = {event.source_event_id for source, event in pairs if source == CLAUDE_SOURCE}
-    pairs = [pair for pair in pairs if pair[0] == CLAUDE_SOURCE or pair[1].source_event_id not in booked]
+    deduped: list[tuple[str, ExternalUsageEvent]] = []
+    for source, event in pairs:
+        if source != CLAUDE_SOURCE:
+            if event.source_event_id in booked:
+                continue
+            booked.add(event.source_event_id)
+        deduped.append((source, event))
+    pairs = deduped
 
     response = ExportTraceServiceResponse()
     priced: list[PricedEvent] = []
