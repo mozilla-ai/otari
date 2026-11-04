@@ -174,7 +174,7 @@ function ModelAllowList({
           Every model this key serves is allowed.
         </span>
       ) : (
-        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 pointer-coarse:gap-y-5">
           {models.map((model) => (
             <li key={model}>
               <DismissChip
