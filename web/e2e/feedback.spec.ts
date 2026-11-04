@@ -62,7 +62,9 @@ test("desktop: the top bar opens it beside Documentation, a failure keeps the dr
     "That didn’t reach us. Your message is still here; send it again.",
   )
   await expect(field).toHaveValue(MESSAGE)
-  await dialog.getByRole("button", { name: /^Send to the Otari team/ }).click()
+  await dialog
+    .getByRole("button", { name: /^Send to the Otari team/ })
+    .dblclick()
   const thanks = page.getByRole("dialog", { name: "Thank you!" })
   await expect(thanks).toBeFocused()
   await page.keyboard.press("Escape")
@@ -103,10 +105,18 @@ test("an account with an email is told where replies go, and the shortcut sends 
     ),
   ).toBeVisible()
   await dialog.getByRole("textbox", { name: "Contact" }).fill(MESSAGE)
+  // offsetHeight, which the frame's entrance transform does not scale.
+  const height = (frame: typeof dialog) =>
+    frame.evaluate((element) => (element as HTMLElement).offsetHeight)
+  const composed = await height(dialog)
   await page.keyboard.press("ControlOrMeta+Enter")
-  await expect(page.getByRole("dialog", { name: "Thank you!" })).toContainText(
+  const thanks = page.getByRole("dialog", { name: "Thank you!" })
+  await expect(thanks).toContainText(
     "If we have a question, we’ll write to ada.lovelace@example.com.",
   )
+  // The consent line wraps, so the thanks hold the compose's height rather
+  // than a fixed one, and the frame does not shrink as they swap in.
+  expect(await height(thanks)).toBe(composed)
   expect(payloads).toEqual([
     { message: MESSAGE, share_email: "ada.lovelace@example.com" },
   ])
