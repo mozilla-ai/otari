@@ -457,6 +457,27 @@ describe("KeysPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("finds a key with no name by the label its row shows", async () => {
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: null, key_prefix: "gw-AbC" }),
+        apiKey({ id: "key-2", key_name: "staging-eval", key_prefix: "gw-Zz9" }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+    await screen.findByText("staging-eval")
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search API keys" }),
+      "unnamed",
+    )
+    await waitFor(() =>
+      expect(screen.queryByText("staging-eval")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("(unnamed)")).toBeInTheDocument()
+  })
+
   it("narrows the keys by name or prefix, and says so when nothing matches", async () => {
     mockApi({
       keys: [

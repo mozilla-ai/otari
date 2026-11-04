@@ -1288,7 +1288,7 @@ export function KeysPage() {
   const rows = allKeys.filter((apiKey) =>
     matchesSearch(
       search.term,
-      apiKey.key_name ?? "",
+      apiKey.key_name ?? "(unnamed)",
       apiKey.key_prefix ?? "",
       isDeploymentWide ? ownerLabel(apiKey) : "",
     ),
