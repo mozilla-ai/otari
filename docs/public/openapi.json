@@ -8908,7 +8908,7 @@
           },
           "include_raw": {
             "default": false,
-            "description": "Also return the provider's whole response, as raw.",
+            "description": "Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw holds only content_kind and redirect_count.",
             "title": "Include Raw",
             "type": "boolean"
           },

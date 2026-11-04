@@ -11719,7 +11719,7 @@ export interface components {
             fetch_tool_name?: string | null;
             /**
              * Include Raw
-             * @description Also return the provider's whole response, as raw.
+             * @description Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw holds only content_kind and redirect_count.
              * @default false
              */
             include_raw: boolean;

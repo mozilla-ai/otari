@@ -594,7 +594,7 @@ where the gateway checks only the URL it reports finding the page at.
 | `url` | string, required | The page: one public `http` or `https` URL. |
 | `fetch_tool_name` | string | The tool, when the path does not name one; `builtin_fetch` is a valid name. |
 | `max_chars` | integer, at least 1 | Cut the page text to this many characters. Unset, the tool's own `max_chars` option applies, else the provider's own limits. |
-| `include_raw` | boolean | Also return `raw`, the provider's whole response. Default `false`. |
+| `include_raw` | boolean | Also return `raw`, the provider's whole response. `builtin_fetch` calls no provider, so its `raw` holds only `content_kind`, how the page's body was read, and `redirect_count`. Default `false`. |
 | `provider_options` | object | Native options of the provider serving the call, under its own names, as `GET /api/v1/search-tools/providers?kind=fetch` lists them. They win over the tool's own options. An option the provider does not take, or takes only from the deployment, is a 400 naming it. A call that names no tool may be served by an organization key on another provider, so name the tool when the options are meant for one provider. |
 | `user` | string | Who the fetch is billed to; see [Search](#search). |
 

@@ -578,7 +578,13 @@ class FetchRequest(pydantic.BaseModel):
             "else the provider's own limits."
         ),
     )
-    include_raw: bool = pydantic.Field(default=False, description="Also return the provider's whole response, as raw.")
+    include_raw: bool = pydantic.Field(
+        default=False,
+        description=(
+            "Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw "
+            "holds only content_kind and redirect_count."
+        ),
+    )
     provider_options: dict[str, Any] | None = pydantic.Field(
         default=None,
         description=(
