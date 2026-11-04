@@ -10,6 +10,7 @@ import type { ReactNode } from "react"
 import { useEffect, useEffectEvent, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
+
 import type { CatalogFacets, CatalogModelSummary } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TablePagination } from "@/design-system/data/TablePagination"
