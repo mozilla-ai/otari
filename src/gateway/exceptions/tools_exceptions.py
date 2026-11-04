@@ -382,8 +382,8 @@ class DirectSearchFieldRefusedError(TenancyValidationError):
         )
 
 
-class DirectSearchFailedError(TenancyError):
-    """The provider failed a direct search, or could not be reached.
+class DirectToolFailedError(TenancyError):
+    """The provider failed a direct tool call, or could not be reached.
 
     ``message`` is the provider's own account, for the usage row and the log
     only: an old client's can quote the upstream body. ``headers`` carry the
@@ -399,15 +399,8 @@ class DirectSearchFailedError(TenancyError):
         self.upstream_status = upstream_status
 
 
-class DirectSearchPricingRequiredError(TenancyError):
-    """A direct search refused because ``require_pricing`` is on and no pricing row prices it.
-
-    ``message`` names the row to add; the route returns it to the caller and
-    writes it on the usage row.
-    """
-
-    status_code = status.HTTP_402_PAYMENT_REQUIRED
-    error_code: str = PRICING_REQUIRED
+class DirectSearchFailedError(DirectToolFailedError):
+    """The provider failed a direct search, or could not be reached."""
 
 
 class GatewayToolPricingRequiredError(TenancyError):
@@ -453,6 +446,7 @@ class WebSearchCredentialRefusedError(TenancyError):
 __all__ = [
     "DirectSearchFailedError",
     "DirectSearchFieldRefusedError",
+    "DirectToolFailedError",
     "McpSessionsInterruptedError",
     "SandboxCredentialRefusedError",
     "SandboxImageNotAllowedError",

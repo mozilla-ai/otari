@@ -22,6 +22,11 @@ the outcomes of an attempted provider call (success, provider error), and the
 shared ``log_gateway_rejection`` for requests the gateway refused before ever
 calling a provider, which the chat/messages/responses pipeline uses too so both
 scaffolds record a rejection identically.
+
+Two more scaffolds follow the same steps for calls ``run_passthrough`` cannot
+resolve, since neither is a model on an any-llm provider: :func:`run_decision`
+for a decisions request, and :func:`run_direct_tool` for a direct call of a
+gateway-run web tool, which the search route builds on.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -42,8 +47,12 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    BillingPortDep,
     ContainerDep,
+    WorkspaceWebSearchPoliciesDep,
     billing_port_on,
+    get_api_key_service,
+    get_budget_service,
     get_config,
     get_db,
     get_log_writer,
@@ -64,6 +73,7 @@ from gateway.api.routes._pipeline import (
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
     _elapsed_ms,
+    _names_end_user,
     _raise_for_unresolvable_model,
     _stored_error_message,
     classify_provider_error,
@@ -75,7 +85,7 @@ from gateway.api.routes._pipeline import (
     throttle_early_rejection,
 )
 from gateway.api.routes._unavailable_models import note_unavailable_model
-from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import END_USER_BUDGET_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
 from gateway.core.error_codes import (
     INSUFFICIENT_FUNDS,
@@ -84,22 +94,27 @@ from gateway.core.error_codes import (
     PROVIDER_CREDENTIAL_REJECTED,
     error_headers,
 )
-from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
+from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage, quantize_cost
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.core.settings.tools import ToolInstance
 from gateway.exceptions import TenancyError
+from gateway.exceptions.tools_exceptions import DirectToolFailedError, WebSearchPolicyResolutionFailedError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
+from gateway.models.tools import ResolvedWebSearchConfig, WebTool
 from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError
-from gateway.rate_limit import check_rate_limit
+from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
 from gateway.schemas.inference import DecisionRequest, DecisionResponse
+from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
+    BudgetService,
     ReservationHandle,
     estimate_cost,
     estimate_tokens,
@@ -139,6 +154,7 @@ from gateway.services.pricing_service import (
     pricing_provenance,
     pricing_required_but_missing,
     resolve_model_pricing,
+    resolve_tool_rate,
 )
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
@@ -153,9 +169,18 @@ from gateway.services.providers import (
     serve_on_hosted_provider,
     unpriced_model_refusal,
 )
-from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
+from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
+from gateway.services.tools import web_access_disabled_refusal
+from gateway.services.workspace_scope import (
+    organization_for_key_id,
+    organization_for_workspace_id,
+    resolve_workspace_id,
+    workspace_for_key_id,
+)
+from gateway.types.tool_charges import RateKey
 
 ResultT = TypeVar("ResultT")
+ResultT_co = TypeVar("ResultT_co", covariant=True)
 
 PASSTHROUGH_PROVIDER_ERROR_DETAIL = "The request could not be completed by the provider"
 
@@ -1459,3 +1484,435 @@ def get_decision_scaffold(
     budget settlement do.
     """
     return DecisionScaffold(db=db, config=config, log_writer=log_writer, billing=container.resolve(BillingPort, db))
+
+
+# A direct tool call: a gateway-run web tool the caller asks for, with no model.
+# The route picks the instance, resolves the call and runs it; the scaffold does
+# what every such call shares with a completion that runs the same tool.
+
+# The usage row's model when the request named no tool that could be resolved; the column is not nullable.
+_UNRESOLVED_TOOL = "unknown"
+
+
+class DirectToolResult(Protocol[ResultT_co]):
+    """What a direct tool call answered, and what the provider said it cost; ``None`` leaves the cost to the rate."""
+
+    @property
+    def response(self) -> ResultT_co: ...
+
+    @property
+    def cost(self) -> Decimal | None: ...
+
+
+@dataclass(frozen=True)
+class DirectToolCall(Generic[ResultT]):
+    """One direct tool call, resolved: what the scaffold bills, may refuse and runs.
+
+    ``provider`` serves the call, which an organization key can make another
+    than the instance's. ``label`` and ``rate_keys`` are what billing records,
+    and ``deployment_paid`` says the deployment's account runs the call, so only
+    the operator's prices count and the organization's funds are charged.
+    ``unpriced_detail`` is the 402's message when ``require_pricing`` finds no
+    row for the call: the row to add, and where.
+    """
+
+    provider: str
+    label: str | None
+    rate_keys: tuple[RateKey, ...]
+    deployment_paid: bool
+    unpriced_detail: str
+    run: Callable[[], Awaitable[DirectToolResult[ResultT]]]
+
+
+def _refusal_detail(exc: TenancyError) -> str:
+    """What the caller is told of a domain error: a 5xx names no credential or deployment state."""
+    return PASSTHROUGH_PROVIDER_ERROR_DETAIL if exc.status_code >= 500 else exc.message
+
+
+async def run_direct_tool(
+    *,
+    endpoint: str,
+    kind: str,
+    raw_request: Request,
+    response: Response,
+    auth_result: tuple[APIKey | None, bool],
+    db: AsyncSession,
+    config: GatewayConfig,
+    log_writer: LogWriter,
+    budget_service: BudgetService,
+    api_keys: ApiKeyService,
+    web_search_policy: WorkspaceWebSearchPolicies,
+    billing: BillingPort,
+    user: str | None,
+    tool_name: str | None,
+    pick: Callable[[], ToolInstance],
+    policy_tools: Sequence[WebTool],
+    resolve: Callable[[ToolInstance, ResolvedWebSearchConfig | None], DirectToolCall[ResultT]],
+) -> ResultT:
+    """Run the direct tool scaffold: pick, gate, reserve, call, log, settle.
+
+    ``pick`` returns the instance the call runs on, or raises a domain error
+    whose status answers the caller; ``tool_name`` is what the request named,
+    for the row of a pick that resolved nothing. ``policy_tools`` are the web
+    tools the workspace's policy is read for. ``resolve`` turns the instance
+    and that policy into the call, or raises a domain error. The usage row
+    carries the instance's name and provider under ``endpoint``, one label
+    for every form of the route. ``kind`` is the call's noun in the log lines.
+
+    A refusal before the provider is called writes a rejection row, so refused
+    traffic shows in Activity and counts as a failure. A provider failure is a
+    502 whose detail is fixed and whose headers carry the failure's safe fields.
+    """
+    # The session the policy reads on too, so one release before the provider call
+    # frees the request's one connection.
+    started_at = time.monotonic()
+    request_id = str(uuid.uuid4())
+    set_request_id(raw_request, response, request_id)
+    api_key, _ = auth_result
+    api_key_id = api_key.id if api_key else None
+    # A key flagged exclude_from_budget logs cost but is never reserved or folded into users.spend.
+    budget_exempt = api_key is not None and api_key.exclude_from_budget
+
+    if api_key is not None and user and _names_end_user(api_key, user):
+        # The owner's own rpm is checked before an end user is created for it.
+        rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
+        end_user = await budget_service.resolve_end_user(
+            api_key=api_key,
+            external_id=user,
+            requested_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
+        )
+        user_id = end_user.user_id
+        if end_user.budget_id is not None:
+            response.headers[END_USER_BUDGET_HEADER] = end_user.budget_id
+    else:
+        user_id = resolve_passthrough_user_id(auth_result, user, reject_mismatch=config.reject_user_mismatch)
+        rate_limit_info = await check_rate_limit(raw_request, user_id)
+
+    async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
+        """Record a call the gateway itself refused; the row keeps the status the refusal returns."""
+        await log_gateway_rejection(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            model=row_model,
+            provider=row_provider,
+            endpoint=endpoint,
+            detail=detail,
+            status_code=status_code,
+            started_at=started_at,
+            request_id=request_id,
+        )
+
+    # Picked before any reservation is taken, so an unknown tool costs the
+    # caller nothing to be told about. The refusal is still logged: a request
+    # the gateway turned away is dropped traffic, and it belongs in Activity and
+    # in the failure count, where the operator can see it.
+    try:
+        tool = pick()
+    except TenancyError as exc:
+        # No tool was resolved, so there is no provider to attribute the row to
+        # and the name is whatever the caller asked for.
+        await log_rejection(
+            exc.message, row_model=tool_name or _UNRESOLVED_TOOL, row_provider=None, status_code=exc.status_code
+        )
+        raise HTTPException(status_code=exc.status_code, detail=_refusal_detail(exc)) from exc
+
+    # Resolved before the gates below, because the first of them is a question
+    # about the workspace.
+    usage_workspace_id = await workspace_for_key_id(db, api_key_id)
+
+    # The workspace's web search policy, read as the in-loop tool reads it. A
+    # workspace that has turned web search off has turned it off: leaving this
+    # endpoint open would leave the switch bypassable by any key in that
+    # workspace, which is a policy that fails open.
+    try:
+        policy = await web_search_policy.resolve(usage_workspace_id, policy_tools)
+    except WebSearchPolicyResolutionFailedError as exc:
+        await log_rejection(
+            exc.message,
+            row_model=tool.name,
+            row_provider=tool.provider,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.message) from exc
+    if policy is not None and not policy.enabled:
+        refusal = web_access_disabled_refusal(policy_tools)
+        await log_rejection(
+            refusal.message,
+            row_model=tool.name,
+            row_provider=tool.provider,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal.message)
+
+    try:
+        call = resolve(tool, policy)
+    except TenancyError as exc:
+        await log_rejection(exc.message, row_model=tool.name, row_provider=tool.provider, status_code=exc.status_code)
+        raise HTTPException(status_code=exc.status_code, detail=_refusal_detail(exc)) from exc
+
+    # Tool access control (per-key), by the tool's name. A key with no list of its
+    # own inherits its user's, and a key restricted to models must be granted the
+    # tool, which is the fail-closed side to be on for a spend surface.
+    not_allowed_detail = await api_keys.search_tool_refusal(config, api_key, provider=tool.provider, tool=tool.name)
+    if not_allowed_detail is not None:
+        await log_rejection(
+            not_allowed_detail,
+            row_model=tool.name,
+            row_provider=tool.provider,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
+
+    # The rate the reservation holds and the settlement falls back to. Whose
+    # account runs the call decides whose overrides count, and whether the
+    # organization's funds pay for it.
+    organization_id = await organization_for_key_id(db, api_key_id)
+    rate = await resolve_tool_rate(
+        db,
+        call.rate_keys,
+        label=call.label,
+        deployment_paid=call.deployment_paid,
+        organization_id=organization_id,
+    )
+    unit_rate = rate.unit_rate if rate is not None else Decimal(0)
+    # After the gates above, so a call they refuse is counted by no rule, and
+    # before the reservation, so one the rules refuse holds no budget to refund.
+    rate_limit_grant = await admit_rate_limit_rules(
+        raw_request,
+        key_id=api_key_id,
+        user_id=user_id,
+        estimated_tokens=0,
+        budget_limits=None
+        if budget_exempt
+        else await budget_service.minute_limits(user_id, strategy=config.budget_strategy),
+    )
+    if rate_limit_grant is not None:
+        # A `per: model` rule names a tool by its pricing key, <provider>:<tool>.
+        await rate_limit_grant.admit_model(tool.provider, tool.name)
+    reservation = await reserve_budget(
+        db,
+        user_id,
+        unit_rate,
+        # Not the pricing key: ``model`` only drives reserve_budget's free-model
+        # shortcut through any-llm, which a tool is not, and a tool named like an
+        # any-llm provider could skip the reservation through it.
+        model=None,
+        strategy=config.budget_strategy,
+        counts_toward_budget=not budget_exempt,
+        # A tool is not a model, but it is billed to a workspace like one, so
+        # the scope carries the tool's provider as the narrowing axis.
+        scope=BudgetScopeRequest(api_key=api_key, provider_instance=tool.provider),
+    )
+
+    async def refused_after_reservation(
+        detail: str, status_code: int, headers: dict[str, str] | None = None
+    ) -> HTTPException:
+        """Refund the reservation, log the refusal against the tool, and return the error to raise."""
+        await refund_reservation(db, reservation)
+        await log_rejection(detail, row_model=tool.name, row_provider=tool.provider, status_code=status_code)
+        return HTTPException(status_code=status_code, detail=detail, headers=headers)
+
+    # After the budget checks, so a missing or exhausted budget answers first. The
+    # call is refused when require_pricing is on and no row prices it, even if the
+    # provider reports its own cost; a zero rate is a price. Two calls pass
+    # unpriced: one on a key exempt from budgets, which is never debited, and one
+    # with no rate keys, which this gateway does not settle. The rejection row
+    # shows an operator the calls require_pricing turns away.
+    if rate is None and config.require_pricing and not budget_exempt and call.rate_keys:
+        raise await refused_after_reservation(
+            call.unpriced_detail, status.HTTP_402_PAYMENT_REQUIRED, error_headers(PRICING_REQUIRED)
+        )
+    # Last, so a refusal above answers before the organization's funds are read.
+    funding: DeploymentCharge | None = None
+    if call.deployment_paid:
+        try:
+            funding = await admit_deployment_paid(
+                billing,
+                deployment_paid=True,
+                organization_id=organization_id,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                request_id=request_id,
+            )
+        except InsufficientFundsError as exc:
+            raise await refused_after_reservation(
+                exc.public_message, status.HTTP_402_PAYMENT_REQUIRED, error_headers(INSUFFICIENT_FUNDS)
+            ) from exc
+        except Exception as exc:
+            logger.error(
+                "BillingPort failed to admit a deployment-paid %s: organization=%s request_id=%s: %s",
+                kind,
+                organization_id,
+                request_id,
+                describe_port_error(exc),
+            )
+            # Ends the transaction the port may have left failed, rolling it back
+            # when it cannot commit, so the refund below has a usable session.
+            await release_session(db)
+            raise await refused_after_reservation(
+                FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
+            ) from exc
+
+    def usage_row(**overrides: Any) -> UsageLog:
+        """Build the row for a call that reached the provider; it carries a cost, so the key's exemption applies."""
+        return UsageLog(
+            id=str(uuid.uuid4()),
+            workspace_id=usage_workspace_id,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            timestamp=datetime.now(UTC),
+            model=tool.name,
+            provider=tool.provider,
+            endpoint=endpoint,
+            latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=not budget_exempt,
+            request_group_id=request_id,
+            **overrides,
+        )
+
+    # Every gate has passed and the provider is about to be called, so the request
+    # is in flight from here until its response has been sent; InFlightMiddleware
+    # drops the entry. The usage row carries the same tool name and provider.
+    track_request(
+        raw_request,
+        endpoint=endpoint,
+        model=tool.name,
+        provider=tool.provider,
+        user_id=user_id,
+        api_key_id=api_key_id,
+    )
+    # The policy read on this same session, so this frees the request's one
+    # connection before the provider call; settlement checks one back out. The
+    # commit also lands any credit the funding gate granted, so a call whose
+    # admission did not commit is not served on it.
+    if not await release_session(db) and funding is not None:
+        logger.error(
+            "Could not commit a deployment-paid %s admission: organization=%s request_id=%s",
+            kind,
+            organization_id,
+            request_id,
+        )
+        raise await refused_after_reservation(FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    try:
+        result = await call.run()
+    except Exception as exc:
+        if isinstance(exc, DirectToolFailedError):
+            # The failure's safe fields ride as headers (decision 67); the detail stays generic.
+            failed, row_status, headers = exc.message, exc.upstream_status or status.HTTP_502_BAD_GATEWAY, exc.headers
+        else:
+            # Raised by something other than the provider, and named by its type alone,
+            # since an adapter's exception text could carry the query or the URL.
+            failed, row_status, headers = type(exc).__name__, failure_status_code(exc), None
+        await log_writer.put(usage_row(status="error", error_message=failed, status_code=row_status))
+        await refund_reservation(db, reservation)
+        logger.error("%s failed for tool '%s' (%s): %s", kind.capitalize(), tool.name, call.provider, failed)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL, headers=headers
+        ) from exc
+    except BaseException:
+        # A request its client dropped is refunded all the same.
+        await refund_reservation(db, reservation)
+        raise
+
+    # The provider's own charge is the true cost; the configured flat rate is
+    # the fallback for a provider that reports none.
+    # Rounded once, here, so the row and the reconciled spend agree.
+    cost = quantize_cost(result.cost if result.cost is not None else unit_rate)
+    await log_writer.put(
+        usage_row(
+            status="success",
+            # The call bills per request; there are no tokens to report, and a
+            # zero is truthful where a null would read as "unknown".
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            cost=cost,
+        )
+    )
+    if funding is not None:
+        await funding.settle(
+            cost,
+            model=tool.name,
+            description=f"{tool.provider}:{tool.name}",
+            expects_cost=False,
+            savepoint=db.begin_nested,
+        )
+    await reconcile_reservation(db, reservation, cost)
+
+    if rate_limit_info:
+        for header, value in rate_limit_headers(rate_limit_info).items():
+            response.headers[header] = value
+
+    return result.response
+
+
+@dataclass(frozen=True)
+class DirectToolScaffold:
+    """:func:`run_direct_tool`, bound to the request's session and services, so the route never names them."""
+
+    db: AsyncSession
+    config: GatewayConfig
+    log_writer: LogWriter
+    budget_service: BudgetService
+    api_keys: ApiKeyService
+    web_search_policy: WorkspaceWebSearchPolicies
+    billing: BillingPort
+
+    async def run(
+        self,
+        *,
+        endpoint: str,
+        kind: str,
+        raw_request: Request,
+        response: Response,
+        auth_result: tuple[APIKey | None, bool],
+        user: str | None,
+        tool_name: str | None,
+        pick: Callable[[], ToolInstance],
+        policy_tools: Sequence[WebTool],
+        resolve: Callable[[ToolInstance, ResolvedWebSearchConfig | None], DirectToolCall[ResultT]],
+    ) -> ResultT:
+        """Run the scaffold for one direct tool call; the arguments are :func:`run_direct_tool`'s."""
+        return await run_direct_tool(
+            endpoint=endpoint,
+            kind=kind,
+            raw_request=raw_request,
+            response=response,
+            auth_result=auth_result,
+            db=self.db,
+            config=self.config,
+            log_writer=self.log_writer,
+            budget_service=self.budget_service,
+            api_keys=self.api_keys,
+            web_search_policy=self.web_search_policy,
+            billing=self.billing,
+            user=user,
+            tool_name=tool_name,
+            pick=pick,
+            policy_tools=policy_tools,
+            resolve=resolve,
+        )
+
+
+def get_direct_tool_scaffold(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    budget_service: Annotated[BudgetService, Depends(get_budget_service)],
+    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    web_search_policy: WorkspaceWebSearchPoliciesDep,
+    billing: BillingPortDep,
+) -> DirectToolScaffold:
+    """Build the direct tool scaffold on the request's session, which its billing port writes on too."""
+    return DirectToolScaffold(
+        db=db,
+        config=config,
+        log_writer=log_writer,
+        budget_service=budget_service,
+        api_keys=api_keys,
+        web_search_policy=web_search_policy,
+        billing=billing,
+    )
