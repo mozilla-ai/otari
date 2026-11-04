@@ -18,7 +18,6 @@ SPEC = Path(__file__).resolve().parents[2] / "docs" / "public" / "openapi.json"
         ("chat-completions", "/chat/completions"),
         ("responses", "/responses"),
         ("messages", "/messages"),
-        ("images", "/images/generations"),
         ("embeddings", "/embeddings"),
         ("speech", "/audio/speech"),
         ("transcriptions", "/audio/transcriptions"),
@@ -30,6 +29,10 @@ SPEC = Path(__file__).resolve().parents[2] / "docs" / "public" / "openapi.json"
 )
 def test_a_protocol_otari_serves_names_its_route(protocol: str, endpoint: str) -> None:
     assert models_dev_endpoints([protocol]) == (endpoint,)
+
+
+def test_the_images_protocol_names_generation_and_edit() -> None:
+    assert models_dev_endpoints(["images"]) == ("/images/generations", "/images/edits")
 
 
 @pytest.mark.parametrize(
@@ -63,6 +66,14 @@ def test_the_routes_follow_models_dev_order_and_appear_once() -> None:
     protocols = ["messages", "converse", "chat-completions", "messages", "responses"]
 
     assert models_dev_endpoints(protocols) == ("/messages", "/chat/completions", "/responses")
+
+
+def test_a_route_two_protocols_name_appears_once() -> None:
+    assert models_dev_endpoints(["images", "chat-completions", "images"]) == (
+        "/images/generations",
+        "/images/edits",
+        "/chat/completions",
+    )
 
 
 def test_no_protocols_name_no_route() -> None:

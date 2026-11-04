@@ -274,7 +274,7 @@ such a rate by its unit, for example "$0.002 per request". The same choice is on
 the Requests view's "Price this model", offered on a served request that carried no cost
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
-an image generation. What each unit bills is in
+an image generation or edit. What each unit bills is in
 [Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
 
 ## Playground

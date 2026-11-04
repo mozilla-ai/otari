@@ -2092,6 +2092,31 @@ export interface paths {
         patch: operations["hosted-providers-update_hosted_model"];
         trace?: never;
     };
+    "/api/v1/images/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Image
+         * @description OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and names an existing user.
+         *     - API key: usage and spend go to the key's own user. A ``user`` naming a
+         *       different user is refused with 403, or ignored when mismatch rejection is off.
+         */
+        post: operations["images-edit_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/images/generations": {
         parameters: {
             query?: never;
@@ -9438,7 +9463,7 @@ export interface components {
              * Endpoints
              * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
              */
-            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
+            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/images/edits" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /**
@@ -23172,6 +23197,65 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "images-edit_image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description The image or images to edit. */
+                    image?: string[];
+                    /** @description Same as image. */
+                    "image[]"?: string[];
+                    /** @description Where to edit: the transparent areas of this PNG. */
+                    mask?: string;
+                    /** Model */
+                    model: string;
+                    /** N */
+                    n?: number | null;
+                    /** Prompt */
+                    prompt: string;
+                    /** Quality */
+                    quality?: string | null;
+                    /** Response Format */
+                    response_format?: string | null;
+                    /** Size */
+                    size?: string | null;
+                    /** User */
+                    user?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description The upload is larger than 50 MB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A required field is missing, or a field is the wrong type. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

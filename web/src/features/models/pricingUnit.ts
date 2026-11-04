@@ -36,6 +36,7 @@ export function pricingUnitOf(value: string | null | undefined): PricingUnit {
 const ENDPOINT_UNITS: Readonly<Record<string, PricingUnit>> = {
   "/v1/rerank": "request",
   "/v1/images/generations": "image",
+  "/v1/images/edits": "image",
   "/v1/audio/transcriptions": "request",
   "/v1/audio/speech": "request",
   "/v1/moderations": "request",
