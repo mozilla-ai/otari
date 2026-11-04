@@ -20,6 +20,7 @@ from gateway.types.price_rates import (
     dump_rates,
     load_rates,
     rates_from_columns,
+    rates_with_columns,
 )
 from gateway.types.price_unit import PRICE_UNITS, PriceUnit
 
@@ -243,6 +244,7 @@ def test_a_rate_is_written_exactly_and_read_back_as_decimal() -> None:
     read = load_rates(text)
     assert read["text"]["input"]["price"] == Decimal("123456789.12345678")
     assert isinstance(read["text"]["output"]["price"], Decimal)
+    assert isinstance(read["text"]["input"]["cache"]["write"]["1h"], Decimal)
     assert list(read["text"]["input"]["cache"]["write"]) == ["5m", "1h"]
     assert dump_rates(read) == text
 
@@ -264,3 +266,215 @@ def test_a_number_is_written_in_plain_digits(value: object) -> None:
 def test_a_text_that_is_not_an_object_is_refused() -> None:
     with pytest.raises(ValueError, match="not a JSON object"):
         load_rates("[1]")
+
+
+def test_a_number_inside_a_condition_or_a_factor_goes_out_as_a_number() -> None:
+    """A row's Decimal inside the untyped part of a block is a number on the wire, not a string."""
+    block = {
+        "text": {
+            "input": {"price": 0.15},
+            "output": {"price": 0.6, "overrides": [{"when": {"context": {"gt": 200000}}, "price": 1.2}]},
+        },
+        "multipliers": [{"when": {"service_tier": {"equals": "priority"}}, "factor": {"text": 1.6666666667}}],
+    }
+    stored = load_rates(dump_rates(block))
+
+    wire = json.loads(RatesDocument.model_validate(stored).model_dump_json())
+
+    assert wire == block
+    assert wire["text"]["output"]["overrides"][0]["when"]["context"]["gt"] == 200000
+
+
+def test_a_slot_whose_price_objects_carry_no_price_is_skipped() -> None:
+    columns = columns_from_rates(
+        {"text": {"input": {}, "output": {}}, "image": {"output": {"price": 0.04, "unit": "image"}}}
+    )
+
+    assert (columns.unit, columns.input_price_per_million) == ("image", Decimal(40000))
+    with pytest.raises(ValueError, match="price nothing"):
+        columns_from_rates({"text": {"input": {"cache": {"read": 1}}}})
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"text": {"input": {"price": 1e309}}},
+        {"text": {"input": {"price": 3, "cache": {"write": {"5m": 1e309}}}}},
+        {"text": {"input": {"price": 3, "cache": {"write": float("nan")}}}},
+        {"multipliers": [{"when": {"service_tier": {"equals": "flex"}}, "factor": {"text": -1}}]},
+        {
+            "multipliers": [
+                {"when": {"service_tier": {"equals": "flex"}}, "factor": {"text": {"input": {"price": -0.5}}}}
+            ]
+        },
+        {"multipliers": [{"when": {"service_tier": {"equals": "flex"}}, "factor": 1e309}]},
+        {"multipliers": [{"when": {"service_tier": {"equals": "flex"}}, "factor": {"text": 10**400}}]},
+        {"text": {"input": {"price": 3, "cache": {"write": {"5m": 10**400}}}}},
+    ],
+)
+def test_the_wire_model_refuses_a_number_that_is_not_a_price(block: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        RatesDocument.model_validate(block)
+
+
+def test_the_schema_leaves_the_modalities_untyped_and_the_model_does_not() -> None:
+    """A generated client must not hold web_search and multipliers to the modality shape; the server still does."""
+    assert RatesDocument.model_json_schema()["additionalProperties"] is True
+    document = RatesDocument.model_validate({"text": {"input": {"price": 3}}, "web_search": {"price": 10}})
+    assert document.document() == {"text": {"input": {"price": 3.0}}, "web_search": {"price": 10.0}}
+    with pytest.raises(ValidationError):
+        RatesDocument.model_validate({"text": {"price": 3}})
+
+
+def test_columns_moved_alone_keep_the_other_prices_of_the_block() -> None:
+    block = {
+        "text": {"input": {"price": 2.5}, "output": {"price": 10}},
+        "web_search": {"price": 10},
+        "image": {"input": {"price": 0.003, "unit": "image"}},
+    }
+    columns = RateColumns(unit="token", input_price_per_million=Decimal(3), output_price_per_million=Decimal(15))
+
+    merged = rates_with_columns(block, columns)
+
+    assert merged["text"]["input"]["price"] == Decimal(3)
+    assert merged["web_search"] == {"price": 10}
+    assert merged["image"] == {"input": {"price": 0.003, "unit": "image"}}
+    assert list(merged) == ["text", "web_search", "image"]
+
+
+def test_columns_moved_to_another_slot_stand_alone() -> None:
+    block = {"text": {"input": {"price": 2.5}, "output": {"price": 10}}, "web_search": {"price": 10}}
+    columns = RateColumns(unit="image", input_price_per_million=Decimal(40000), output_price_per_million=Decimal(0))
+
+    assert rates_with_columns(block, columns) == {"image": {"output": {"price": Decimal("0.04"), "unit": "image"}}}
+    assert rates_with_columns(None, columns) == rates_from_columns(columns)
+
+
+def test_columns_moved_alone_keep_what_they_do_not_say() -> None:
+    """A reasoning price, cache storage, an override on another key, and a vision price survive a column write."""
+    block = {
+        "text": {
+            "input": {
+                "price": 2.5,
+                "reasoning": 5,
+                "cache": {"read": 1.25, "storage": 4.5},
+                "overrides": [
+                    {"when": {"context": {"gt": 200000}}, "price": 5},
+                    {"when": {"service_tier": {"equals": "flex"}}, "price": 1.25},
+                ],
+            },
+            "output": {"price": 10},
+        },
+        "image": {"input": {"price": 0.003, "unit": "image"}, "output": {"price": 0.04, "unit": "image"}},
+    }
+    columns = RateColumns(
+        unit="token",
+        input_price_per_million=Decimal(3),
+        output_price_per_million=Decimal(15),
+        cache_read_price_per_million=Decimal("0.3"),
+        pricing_tiers=({TIER_THRESHOLD: 128_000, "input_price_per_million": 6.0},),
+    )
+
+    merged = rates_with_columns(block, columns)
+
+    given = merged["text"]["input"]
+    assert (given["price"], given["reasoning"], given["cache"]) == (
+        Decimal(3),
+        5,
+        {"storage": 4.5, "read": Decimal("0.3")},
+    )
+    assert given["overrides"] == [
+        {"when": {"service_tier": {"equals": "flex"}}, "price": 1.25},
+        {"when": {"context": {"gte": 128_000}}, "price": Decimal("6.0")},
+    ]
+    assert merged["text"]["output"] == {"price": Decimal(15), "unit": "token"}
+    assert merged["image"]["input"] == {"price": 0.003, "unit": "image"}
+
+
+def test_a_column_write_to_a_one_price_slot_keeps_the_other_direction() -> None:
+    block = {"image": {"input": {"price": 0.003, "unit": "image"}, "output": {"price": 0.04, "unit": "image"}}}
+    columns = RateColumns(unit="image", input_price_per_million=Decimal(50000), output_price_per_million=Decimal(0))
+
+    merged = rates_with_columns(block, columns)
+
+    assert merged == {
+        "image": {"input": {"price": 0.003, "unit": "image"}, "output": {"price": Decimal("0.05"), "unit": "image"}}
+    }
+
+
+def test_the_unit_comes_from_a_priced_object() -> None:
+    columns = columns_from_rates({"text": {"input": {}, "output": {"price": 0.005, "unit": "request"}}})
+
+    assert (columns.unit, columns.input_price_per_million, columns.output_price_per_million) == (
+        "request",
+        Decimal(0),
+        Decimal(5000),
+    )
+
+
+@pytest.mark.parametrize(
+    "factor", ["cheap", {"text": "cheap"}, {"text": {"input": {"price": None}}}, True, {"text": [1]}]
+)
+def test_a_factor_leaf_that_is_not_a_number_is_refused(factor: Any) -> None:
+    with pytest.raises(ValidationError):
+        RatesDocument.model_validate(
+            {"multipliers": [{"when": {"service_tier": {"equals": "flex"}}, "factor": factor}]}
+        )
+
+
+def test_the_bundled_catalog_prices_in_the_modalities_known_here() -> None:
+    from gateway.types.price_rates import MODALITIES
+
+    document = json.loads(
+        (Path(__file__).resolve().parents[2] / "src" / "gateway" / "data" / "models_dev_catalog.json").read_text(
+            "utf-8"
+        )
+    )
+    found: set[str] = set()
+    for provider in document["providers"].values():
+        for model in provider["models"].values():
+            pricing = model.get("pricing") or {}
+            found.update(pricing.get("modalities") or {})
+    assert found and found <= set(MODALITIES)
+
+
+def test_a_column_write_that_moves_the_unit_drops_the_old_unit_s_details() -> None:
+    block = {
+        "text": {
+            "input": {"price": 2.5, "reasoning": 5, "cache": {"storage": 4.5}},
+            "output": {"price": 10, "overrides": [{"when": {"service_tier": {"equals": "flex"}}, "price": 5}]},
+        }
+    }
+    columns = RateColumns(unit="request", input_price_per_million=Decimal(5000), output_price_per_million=Decimal(0))
+
+    merged = rates_with_columns(block, columns)
+
+    assert merged == {
+        "text": {
+            "input": {"price": Decimal("0.005"), "unit": "request"},
+            "output": {"price": Decimal("0"), "unit": "request"},
+        }
+    }
+
+
+def test_a_cache_only_object_in_another_unit_is_refused_beside_a_priced_one() -> None:
+    with pytest.raises(ValueError, match="different units"):
+        columns_from_rates({"text": {"input": {"cache": {"read": 0.3}}, "output": {"price": 0.005, "unit": "request"}}})
+    with pytest.raises(ValueError, match="different units"):
+        columns_from_rates({"text": {"input": {"unit": "token"}, "output": {"price": 0.005, "unit": "request"}}})
+    columns = columns_from_rates(
+        {"text": {"input": {"unit": "request"}, "output": {"price": 0.005, "unit": "request"}}}
+    )
+    assert columns.unit == "request"
+
+
+def test_a_null_inside_a_condition_is_kept_as_given() -> None:
+    block = {"multipliers": [{"when": {"service_tier": {"equals": None}}, "factor": 1.5}]}
+
+    assert RatesDocument.model_validate(block).document() == block
+
+
+def test_a_price_that_rounds_to_a_zero_column_is_refused() -> None:
+    with pytest.raises(ValueError, match="too small"):
+        columns_from_rates({"text": {"input": {"price": 1e-9}}})
+    assert columns_from_rates({"text": {"input": {"price": 0}}}).input_price_per_million == Decimal(0)

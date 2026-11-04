@@ -15,13 +15,22 @@ text prices first. A rate's numbers are written exactly and read as
 """
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from gateway.types.models_dev import (
     ModelsDevCachePrices,
@@ -45,6 +54,9 @@ TIER_RATES = {
     "cache_read": "cache_read_price_per_million",
     "cache_write": "cache_write_price_per_million",
 }
+
+# The modalities a block prices in, as models.dev prices them; a test pins the bundled catalog to this list.
+MODALITIES = ("text", "image", "audio", "video")
 
 RATES_DESCRIPTION = (
     "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, "
@@ -143,6 +155,65 @@ def rates_from_columns(columns: RateColumns) -> dict[str, Any]:
     return pricing_document(ModelsDevPricing(modalities=MappingProxyType({slot.modality: modality})))
 
 
+def rates_with_columns(block: Mapping[str, Any] | None, columns: RateColumns) -> dict[str, Any]:
+    """``block`` with the slot ``columns``' unit chooses rewritten from them, and every other price kept.
+
+    A writer that moves the columns alone moves the text price of a row whose
+    block also holds an image or a web search price, so those stay. Where the
+    rest of the block would read back as a different price than the columns
+    (the unit moved to another slot), the fresh block stands alone.
+    """
+    fresh = rates_from_columns(columns)
+    if not block:
+        return fresh
+    merged = dict(block)
+    for key, prices in fresh.items():
+        old = block.get(key)
+        if key == "web_search":
+            merged[key] = _merged_price(old if isinstance(old, Mapping) else None, prices)
+        else:
+            kept = dict(old) if isinstance(old, Mapping) else {}
+            for direction, price in prices.items():
+                kept[direction] = _merged_price(kept.get(direction), price)
+            merged[key] = kept
+    try:
+        read = columns_from_rates(merged)
+    except ValueError:
+        return fresh
+    same = all(getattr(read, name) == getattr(columns, name) for name in _RATE_FIELDS)
+    return merged if same and read.unit == columns.unit else fresh
+
+
+def _merged_price(old: Mapping[str, Any] | None, fresh: Mapping[str, Any]) -> dict[str, Any]:
+    """``old`` with what the columns say rewritten: price, unit, cache read and write, and the context overrides.
+
+    The rest of ``old`` is in its unit, so where the columns moved the price to
+    another unit the fresh price stands alone.
+    """
+    if not old or (old.get("unit") or "token") != (fresh.get("unit") or "token"):
+        return dict(fresh)
+    merged = {key: value for key, value in old.items() if key not in ("price", "unit")}
+    merged.update({key: fresh[key] for key in ("price", "unit") if key in fresh})
+    cache = {key: value for key, value in (old.get("cache") or {}).items() if key not in ("read", "write")}
+    cache.update(fresh.get("cache") or {})
+    merged.pop("cache", None)
+    if cache:
+        merged["cache"] = cache
+    overrides = [o for o in old.get("overrides") or [] if not _on_context(o)] + list(fresh.get("overrides") or [])
+    merged.pop("overrides", None)
+    if overrides:
+        merged["overrides"] = overrides
+    return merged
+
+
+def _on_context(override: Mapping[str, Any]) -> bool:
+    when = override.get("when")
+    return isinstance(when, Mapping) and set(when) == {"context"}
+
+
+_RATE_FIELDS = tuple(TIER_RATES.values())
+
+
 def columns_from_rates(document: Mapping[str, Any]) -> RateColumns:
     """The six columns a ``cost`` block gives: its text prices, else the one other slot it prices.
 
@@ -162,10 +233,13 @@ def columns_from_rates(document: Mapping[str, Any]) -> RateColumns:
         raise ValueError(f"rates name a unit not known here: {', '.join(issues.unknown_units)}")
     for slot in _READ_ORDER:
         given, made = _prices_in(pricing, slot)
-        if given is None and made is None:
+        priced = [price for price in (given, made) if price is not None and price.price is not None]
+        if not priced:
             continue
-        unit = _unit_of(given if given is not None else made)
-        if given is not None and made is not None and _unit_of(made) != unit:
+        unit = _unit_of(priced[0])
+        # An unpriced object that names a unit or carries a cache price is in a unit too; an empty one is not.
+        in_a_unit = [p for p in (given, made) if p is not None and (p.price is not None or p.unit or p.cache)]
+        if any(_unit_of(price) != unit for price in in_a_unit):
             raise ValueError(f"rates price {slot.modality} input and output in different units")
         return _columns(direction_cost(given, made), unit)
     raise ValueError("rates price nothing a rate column can hold: no text, image, audio, video or web_search price")
@@ -182,7 +256,7 @@ def load_rates(text: str) -> dict[str, Any]:
     Raises:
         ValueError: ``text`` is not a JSON object.
     """
-    document = json.loads(text, parse_float=Decimal)
+    document = json.loads(text, parse_float=Decimal, parse_int=Decimal)
     if not isinstance(document, dict):
         raise ValueError("rates are not a JSON object")
     return document
@@ -192,40 +266,74 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _numbers(value: Any) -> Any:
+    """``value`` with each ``Decimal`` a row holds as the JSON number it was, for the untyped part of a block."""
+    if isinstance(value, dict):
+        return {key: _numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_numbers(item) for item in value]
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    return value
+
+
+def _a_price(value: Any) -> Any:
+    """``value`` where every leaf is a finite number, zero or more; the refusal names the first that is not."""
+    if isinstance(value, dict):
+        for item in value.values():
+            _a_price(item)
+    elif isinstance(value, bool) or not isinstance(value, (int, float, Decimal)) or not _finite(value) or value < 0:
+        raise ValueError(f"a price is a finite number, zero or more, not {value!r}")
+    return value
+
+
+def _finite(value: int | float | Decimal) -> bool:
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 class CacheRates(_Strict):
     """The cache prices of a price, in its unit."""
 
-    read: float | None = Field(default=None, ge=0, description="Price of a cached read.")
+    read: float | None = Field(default=None, ge=0, allow_inf_nan=False, description="Price of a cached read.")
     write: float | dict[str, float] | None = Field(
         default=None, description="Price of a cache write: one price, or one per TTL with the default TTL first."
     )
-    storage: float | None = Field(default=None, ge=0, description="Price of cache storage.")
+    storage: float | None = Field(default=None, ge=0, allow_inf_nan=False, description="Price of cache storage.")
     explicit: "CacheRates | None" = Field(default=None, description="The prices of explicit caching, where apart.")
 
-    @model_validator(mode="after")
-    def validate_writes(self) -> Self:
-        if isinstance(self.write, dict) and any(price < 0 for price in self.write.values()):
-            raise ValueError("a cache write price is not negative")
-        if isinstance(self.write, float) and self.write < 0:
-            raise ValueError("a cache write price is not negative")
-        return self
+    @field_validator("write", mode="before")
+    @classmethod
+    def _writes_are_prices(cls, value: Any) -> Any:
+        return _a_price(value)
 
 
 class RateOverride(_Strict):
     """The prices that replace a price's own when a condition holds."""
 
     when: dict[str, Any] = Field(description="The condition, as models.dev writes it.")
-    price: float | None = Field(default=None, ge=0)
-    reasoning: float | None = Field(default=None, ge=0)
+    price: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    reasoning: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     cache: CacheRates | None = None
+
+    @field_validator("when", mode="before")
+    @classmethod
+    def _as_numbers(cls, value: Any) -> Any:
+        return _numbers(value)
 
 
 class UnitRate(_Strict):
     """One price: of a modality's input or output, or of web search."""
 
-    price: float | None = Field(default=None, ge=0, description="USD per the unit's published quantity.")
+    price: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, description="USD per the unit's published quantity."
+    )
     unit: PriceUnit | None = Field(default=None, description="What the price is per; token when omitted.")
-    reasoning: float | None = Field(default=None, ge=0, description="Price of reasoning tokens, where apart.")
+    reasoning: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, description="Price of reasoning tokens, where apart."
+    )
     cache: CacheRates | None = None
     overrides: list[RateOverride] = Field(default_factory=list)
 
@@ -243,25 +351,58 @@ class RateMultiplier(_Strict):
     when: dict[str, Any] = Field(description="The condition, as models.dev writes it.")
     factor: float | dict[str, Any] = Field(description="One factor for every price, or an object naming the prices.")
 
-    @model_validator(mode="after")
-    def validate_factor(self) -> Self:
-        if isinstance(self.factor, float) and self.factor < 0:
-            raise ValueError("a multiplier is not negative")
-        return self
+    @field_validator("when", "factor", mode="before")
+    @classmethod
+    def _as_numbers(cls, value: Any) -> Any:
+        return _numbers(value)
+
+    @field_validator("factor", mode="before")
+    @classmethod
+    def _factors_are_prices(cls, value: Any) -> Any:
+        return _a_price(value)
 
 
 class RatesDocument(BaseModel):
     """A ``cost`` block on the wire: each other key is a modality (``text``, ``image``, ``audio``, ``video``)."""
 
+    # Untyped in the schema on purpose: a typed index signature would hold
+    # ``web_search`` and ``multipliers`` to the modality shape in a generated
+    # client. Each modality is still read into :class:`ModalityRates` below.
     model_config = ConfigDict(extra="allow")
-    __pydantic_extra__: dict[str, ModalityRates]
+    __pydantic_extra__: dict[str, Any]
 
     web_search: UnitRate | None = None
     multipliers: list[RateMultiplier] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _modalities_have_the_shape(self) -> Self:
+        for modality, prices in (self.__pydantic_extra__ or {}).items():
+            if not isinstance(prices, ModalityRates):
+                self.__pydantic_extra__[modality] = ModalityRates.model_validate(prices)
+        return self
+
+    @model_serializer(mode="wrap")
+    def _as_given(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """The block as the document writes it: a field left out stays out, on the wire as in a row."""
+        document: dict[str, Any] = _without_absent(handler(self))
+        return document
+
     def document(self) -> dict[str, Any]:
         """The block as given, without the fields left out."""
-        return self.model_dump(exclude_none=True, exclude_defaults=True)
+        return self.model_dump()
+
+
+def _without_absent(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            # A condition is untyped and kept as given, a null in it included.
+            key: item if key == "when" else _without_absent(item)
+            for key, item in value.items()
+            if item is not None and not (key in ("overrides", "multipliers") and item == [])
+        }
+    if isinstance(value, list):
+        return [_without_absent(item) for item in value]
+    return value
 
 
 def _prices_in(pricing: ModelsDevPricing, slot: _Slot) -> tuple[ModelsDevUnitPrice | None, ModelsDevUnitPrice | None]:
@@ -307,9 +448,14 @@ def _column(price: Number | None, per: Decimal) -> Decimal | None:
     """A published price as a per-million column, rounded as the column is; ``None`` stays absent."""
     if price is None:
         return None
-    column = (Decimal(str(price)) / per).quantize(_COLUMN_PLACES)
+    try:
+        column = (Decimal(str(price)) / per).quantize(_COLUMN_PLACES)
+    except InvalidOperation:
+        raise ValueError(f"a rate of {price} per unit does not fit a rate column") from None
     if not 0 <= column < _COLUMN_LIMIT:
         raise ValueError(f"a rate of {price} per unit does not fit a rate column")
+    if column == 0 and Decimal(str(price)) > 0:
+        raise ValueError(f"a rate of {price} per unit is too small for a rate column, which holds eight decimals")
     return column
 
 
