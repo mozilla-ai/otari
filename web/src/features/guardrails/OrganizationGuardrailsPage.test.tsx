@@ -16,6 +16,7 @@ import {
   organizationGuardrailDefinition,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { pickOption } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -184,6 +185,31 @@ describe("OrganizationGuardrailsPage", () => {
     expect(
       await screen.findByText("No guardrails match this search."),
     ).toBeInTheDocument()
+  })
+
+  it("ends the search once a guardrail is configured", async () => {
+    mockApi({ definitions: [lakera] })
+    const user = userEvent.setup()
+    await renderPage("/?q=zzz")
+    expect(
+      await screen.findByText("No guardrails match this search."),
+    ).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole("button", { name: "Configure guardrail" }),
+    )
+    await pickOption(user, "What do you want checked?", "Prompt injection")
+    await pickOption(user, "Which guardrail?", "Lakera Guard · Lakera")
+    const dialog = within(screen.getByRole("dialog"))
+    await user.click(
+      dialog.getByRole("button", { name: "Configure guardrail" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "Search guardrails" }),
+      ).toHaveValue(""),
+    )
   })
 
   it("says who runs each mandate, and what it does when the check cannot run", async () => {

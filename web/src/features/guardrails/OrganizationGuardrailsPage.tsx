@@ -409,7 +409,11 @@ export function OrganizationGuardrailsPage() {
             catalog={builtInCatalog.data}
             isCatalogPending={!builtInCatalog.isFetched}
             takenNames={defined.map((row) => row.name)}
-            onSaved={() => {}}
+            // A new guardrail the search does not match would vanish with the
+            // dialog, so setting one up ends the search; an edit keeps it.
+            onSaved={() => {
+              if (!editingDefinition) search.onChange("")
+            }}
           />
           {/* Each test dialog only while one is being tested, since it needs the row. */}
           {testing ? (
