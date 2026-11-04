@@ -314,8 +314,10 @@ CSV, plain text, an office document) is extracted to text for every model. A
 document block the caller wrote inline is forwarded as written.
 
 A file block (`file`, `input_file`, Anthropic's `document` or `container_upload`)
-whose upload or `file_data` is an image is handled as an image: a vision model is
-sent it as an image part, and a text-only model gets its caption.
+whose upload or `file_data` is a PNG, JPEG, GIF or WebP image is handled as an
+image: a vision model is sent it as an image part, and a text-only model gets
+what [`vision_strategy`](#configuration) gives it (a caption, OCR text, or
+nothing). Any other image type is treated as a document.
 
 Scanned/image-only PDFs (no extractable text) are rasterized page-by-page and
 sent through the image path.

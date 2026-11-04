@@ -427,6 +427,40 @@ async def test_an_inline_image_in_a_file_block_is_rewritten_to_an_image_part() -
     assert out[0]["content"][0] == {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"type": "document", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}},
+        {"type": "container_upload", "file_data": _PNG_DATA_URL},
+    ],
+)
+async def test_an_inline_anthropic_image_in_a_file_block_is_rewritten_to_an_image_part(block: dict[str, Any]) -> None:
+    msgs = [{"role": "user", "content": [block]}]
+    out, _ = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="anthropic", files=None, user_id="u"
+    )
+    assert out[0]["content"][0] == {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64},
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_uploaded_image_no_provider_reads_stays_a_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(data.decode("utf-8"), True, "ok")
+
+    monkeypatch.setattr(cn, "extract_text_from_file", fake_extract)
+    files = _files(_stored("file-svg", "logo.svg", "image/svg+xml"), data=b"<svg/>")
+    msgs = [{"role": "user", "content": [{"type": "file", "file": {"file_id": "file-svg"}}]}]
+    out, stats = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="openai", files=files, user_id="u"
+    )
+    assert "<svg/>" in out[0]["content"][0]["text"]
+    assert stats.files_extracted == 1
+
+
 @pytest.mark.parametrize(
     ("filename", "taken", "expected"),
     [

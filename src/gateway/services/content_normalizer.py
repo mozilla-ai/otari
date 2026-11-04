@@ -262,8 +262,13 @@ class _Resolved:
         return self.source(_DOCUMENT)
 
 
+# The image formats every provider's image part takes. Any other image (SVG,
+# TIFF, BMP) stays a document and goes through extraction.
+_PROVIDER_IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+
+
 def _is_image(mime: str) -> bool:
-    return mime.split(";", 1)[0].strip().lower().startswith("image/")
+    return mime.split(";", 1)[0].strip().lower() in _PROVIDER_IMAGE_TYPES
 
 
 async def _resolve_from_ref(
@@ -362,7 +367,7 @@ async def _classify(
                 return _Source(_DOCUMENT, str(src.get("data", "")).encode("utf-8"), "text/plain", None, None)
             if src.get("type") == "base64":
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
-                return _Source(_DOCUMENT, data, src.get("media_type", "application/pdf"), None, None)
+                return _Resolved(data, src.get("media_type", "application/pdf"), None).attachment()
             if src.get("type") == "file":
                 resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
                 if resolved:
@@ -651,7 +656,10 @@ async def _normalize_block(
         if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
             return _sandbox_file_text(fmt, staged.filename)
-        src.kind = _IMAGE if _is_image(src.mime) else _DOCUMENT
+        if _is_image(src.mime):
+            src.kind, src.needs_inline = _IMAGE, True
+        else:
+            src.kind = _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf and _is_native_document(src)
     if native:
