@@ -289,7 +289,6 @@ from gateway.services.pricing_service import (
     pricing_required_but_missing,
     resolve_model_pricing,
     resolve_tool_rate,
-    tool_unit_rate,
 )
 from gateway.services.provider_kwargs import (
     MissingCredential,
@@ -2438,10 +2437,15 @@ class ReservationToolGate:
         return True
 
     async def _unit_cost(self, call: LabelCalls) -> Decimal:
-        """What one call under ``call``'s label costs with no reported cost, looked up once per label."""
+        """What one call under ``call``'s label costs with no reported cost, looked up once per label.
+
+        The charge's unit rate is its cost over its calls with no rounding, so a
+        hold of several calls is their exact total.
+        """
         key = (call.tool, call.label, call.rate_keys, call.deployment_paid)
         if key not in self._unit_costs:
-            self._unit_costs[key] = await tool_unit_rate(self._ctx.db, call, organization_id=self._ctx.organization_id)
+            charges = await price_tool_calls(self._ctx.db, [call], organization_id=self._ctx.organization_id)
+            self._unit_costs[key] = charges.unit_rates.get(call.tool, ZERO)
             # The lookup's connection must not be held across the next provider call either.
             await release_session(self._ctx.db)
         return self._unit_costs[key]

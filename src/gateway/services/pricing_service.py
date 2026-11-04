@@ -3,7 +3,6 @@
 import time
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import NamedTuple
@@ -1029,19 +1028,6 @@ async def price_tool_calls(
     lookups = {lookup for entry in calls if (lookup := tool_rate_lookup(entry)) is not None}
     rates = await _tool_rates(db, lookups, as_of=as_of, organization_id=organization_id)
     return charge_tool_calls(calls, rates)
-
-
-async def tool_unit_rate(db: AsyncSession, call: LabelCalls, *, organization_id: uuid.UUID | None = None) -> Decimal:
-    """What one call under ``call``'s label costs when it reports no cost, before any rounding.
-
-    The rate :func:`price_tool_calls` charges such a call at, for a caller that
-    holds a price before the calls run. Zero when no pricing row prices the label.
-    """
-    lookup = tool_rate_lookup(replace(call, calls=1, unreported_calls=1))
-    if lookup is None or not lookup.rate_keys:
-        return Decimal(0)
-    rate = (await _tool_rates(db, {lookup}, as_of=None, organization_id=organization_id))[lookup]
-    return rate.unit_rate if rate is not None else Decimal(0)
 
 
 async def resolve_tool_rate(

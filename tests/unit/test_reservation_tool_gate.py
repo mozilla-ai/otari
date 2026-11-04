@@ -5,6 +5,8 @@ rate is resolved per label, and the hold is asked for as many calls as the tally
 asked for, at that rate.
 """
 
+import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -14,9 +16,11 @@ import pytest
 import gateway.api.routes._pipeline as pipeline
 from gateway.core.config import GatewayConfig
 from gateway.services.budgets import ReservationHandle
+from gateway.services.pricing import ToolCharges
 from gateway.types.tool_charges import LabelCalls
 
 _UNIT = Decimal("0.0000004")
+_ORGANIZATION = uuid.UUID(int=7)
 
 
 def _call(calls: int = 1) -> LabelCalls:
@@ -35,7 +39,7 @@ def _ctx() -> Any:
     """A context carrying only what the gate reads, with a reservation that counts."""
     return SimpleNamespace(
         db=object(),
-        organization_id=None,
+        organization_id=_ORGANIZATION,
         reservation=ReservationHandle(
             user_id="user-1",
             estimate=Decimal(1),
@@ -51,17 +55,21 @@ def _ctx() -> Any:
 
 @pytest.fixture
 def priced(monkeypatch: pytest.MonkeyPatch) -> list[LabelCalls]:
-    """Price every call at ``_UNIT``, below what a cost rounds to, and keep each call the rate was asked for."""
+    """Price every call at ``_UNIT``, below what a cost rounds to, and keep each call the rate was asked for.
+
+    The total is rounded to nothing, as settlement rounds it.
+    """
     asked: list[LabelCalls] = []
 
-    async def fake_rate(_db: Any, call: LabelCalls, *, organization_id: Any) -> Decimal:
-        asked.append(call)
-        return _UNIT
+    async def fake_price(_db: Any, calls: Sequence[LabelCalls], *, organization_id: uuid.UUID) -> ToolCharges:
+        assert organization_id == _ORGANIZATION, "priced for the request's organization"
+        asked.extend(calls)
+        return ToolCharges(Decimal(0), [], {call.tool: _UNIT for call in calls}, [], Decimal(0))
 
     async def fake_release(_db: Any) -> None:
         pass
 
-    monkeypatch.setattr(pipeline, "tool_unit_rate", fake_rate)
+    monkeypatch.setattr(pipeline, "price_tool_calls", fake_price)
     monkeypatch.setattr(pipeline, "release_session", fake_release)
     return asked
 

@@ -44,7 +44,6 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
     resolve_tool_rate,
-    tool_unit_rate,
 )
 from gateway.types.tool_charges import LabelCalls
 
@@ -742,18 +741,19 @@ async def _tool_price(session: AsyncSession, model_key: str, rate: float) -> Non
 _EXA = "exa:exa-search"
 
 
-def test_one_calls_rate_is_its_first_priced_rate_key_before_rounding() -> None:
-    """The reservation tool gate holds calls at this rate, so it is the rate settlement charges, unrounded."""
+def test_a_tools_unit_rate_keeps_what_rounding_the_total_loses() -> None:
+    """The reservation tool gate holds calls at the unit rate, so a rate below a micro-dollar keeps its value there."""
 
     async def scenario(session: AsyncSession) -> None:
         await _tool_price(session, _EXA, 0.4)
         await _tool_price(session, "otari:web_search", 10_000.0)
 
-        pages = await tool_unit_rate(session, _calls(label=_EXA, rate_keys=(_EXA, "otari:web_search"), calls=20))
-        unpriced = await tool_unit_rate(session, _calls(label="tabstack:tabstack", rate_keys=("tabstack:tabstack",)))
+        charges = await price_tool_calls(
+            session, [_calls(label=_EXA, rate_keys=(_EXA, "otari:web_search"))], as_of=_NOW
+        )
 
-        assert pages == pytest.approx(Decimal("0.0000004"))
-        assert unpriced == Decimal(0)
+        assert charges.total == Decimal(0)
+        assert charges.unit_rates["web_search"] == pytest.approx(Decimal("0.0000004"))
 
     _run(scenario)
 
@@ -1029,6 +1029,7 @@ def test_an_override_prices_its_rate_key_ahead_of_the_deployment_row() -> None:
         )
 
         assert charges.total == Decimal("0.005")
+        assert charges.unit_rates["web_search"] == pytest.approx(Decimal("0.005")), "the rate the tool gate holds"
 
     _run(scenario)
 
