@@ -410,6 +410,34 @@ describe("McpServerDetailPage, Access", () => {
     ).toBe(true)
   })
 
+  it("traces the call a session links to, on arrival", async () => {
+    const calls = mockMcpServerApi({
+      server: SERVER,
+      members: MEMBERS,
+      keys: [BO_LAPTOP],
+      access: { everyone_tools: [], grants: [] },
+      check: {
+        allowed: false,
+        decided_by: "everyone",
+        grant_id: null,
+        tools: [],
+      },
+    })
+    renderMcpServerPage(SERVER.id, "?key=key-bo&tool=create_issue")
+
+    await screen.findByText(/DENY, matched the default policy \(deny\)/)
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Bo's laptop (Bo) · create_issue → DENY, matched the default policy (deny)",
+    )
+    expect(
+      calls.some((call) =>
+        call.url.endsWith(
+          `${path}/access/check?api_key_id=key-bo&tool=create_issue`,
+        ),
+      ),
+    ).toBe(true)
+  })
+
   it("names the rule that allowed a key", async () => {
     mockMcpServerApi({
       server: SERVER,

@@ -450,6 +450,15 @@ record. Neither mechanism binds the call to an immutable remote implementation.
 your service and Otari. It is not proof of approval and **not an idempotency
 key.**
 
+Each execution is recorded in the workspace's [agent traces](traces.md) as a
+step with one tool span: the tool, its server, whether it ran, and which rule
+decided the call (the key's rule, its user's rule, the server's default policy,
+or the server's own tool list). A call the rules refuse is recorded too, as a
+blocked span, so a manager can see who tried a tool they may not use. The
+arguments and the result are never recorded here. Send the run's
+`Otari-Conversation-Id` header on each call to file it under the agent's
+session rather than as a session of its own. Discovery is not recorded.
+
 ### Never retry an execution automatically
 
 Repeating a request with the same `client_execution_id` may execute the tool

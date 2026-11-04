@@ -6,8 +6,9 @@ request-server switch run against the real database. URLs are public IP literals
 
 from __future__ import annotations
 
+import time
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -15,12 +16,14 @@ import pytest
 from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent, ToolAnnotations
 from mcp.types import Tool as MCPTool
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, CONVERSATION_HEADER
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tools import WorkspaceMcpServer
+from gateway.models.traces import Trace, TraceSpan
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CODE_SERVER_NOT_FOUND, CODE_TOOL_NOT_ALLOWED
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -579,3 +582,119 @@ def test_a_workspace_can_refuse_servers_a_request_names_itself(
     assert switched.json()["request_mcp_servers_allowed"] is False
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
+
+
+# --------------------------------------------------------------------------- #
+# Traces of POST /mcp/execute
+# --------------------------------------------------------------------------- #
+
+
+def _tool_spans(db_session_factory: Callable[[], Session], key: dict[str, Any], count: int) -> list[TraceSpan]:
+    """The key's tool spans, waiting for the writer, which stores traces off the request path."""
+    deadline = time.monotonic() + 10
+    while True:
+        with db_session_factory() as db:
+            spans = list(
+                db.scalars(
+                    select(TraceSpan)
+                    .join(Trace, Trace.trace_id == TraceSpan.trace_id)
+                    .where(Trace.api_key_id == key["id"], TraceSpan.kind == "tool")
+                    .order_by(TraceSpan.start_time)
+                )
+            )
+        if len(spans) >= count or time.monotonic() > deadline:
+            return spans
+        time.sleep(0.1)
+
+
+def test_a_direct_call_is_traced_with_its_server_and_the_rule_that_allowed_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github")
+
+    response = client.post(
+        f"{API_ROOT}/mcp/execute",
+        json={**_execute_body(row, "list_issues"), "arguments": {"q": "secret"}},
+        headers=_bearer(key),
+    )
+
+    assert response.status_code == 200, response.text
+    [span] = _tool_spans(db_session_factory, key, 1)
+    assert (span.tool_name, span.tool_type, span.outcome) == ("list_issues", "mcp", "ok")
+    assert span.attributes == {
+        "otari.mcp.server": "github",
+        "otari.mcp.server_id": str(row.id),
+        "otari.tool.decision": "accept",
+        "otari.tool.decision_source": "mcp_everyone",
+    }
+    # Names and outcomes only: the arguments are not kept.
+    assert span.content_sealed is None
+
+
+def test_a_refused_call_is_traced_as_blocked_naming_the_rule_that_refused_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", read_tools=["list_issues"])
+    _grant(client, master_key_header, row, ["@read"], keys=[key])
+
+    response = client.post(f"{API_ROOT}/mcp/execute", json=_execute_body(row, "create_issue"), headers=_bearer(key))
+
+    assert response.status_code == 403, response.text
+    assert session.calls == []
+    [span] = _tool_spans(db_session_factory, key, 1)
+    assert (span.tool_name, span.outcome, span.error_class) == ("create_issue", "blocked", None)
+    assert span.attributes is not None
+    assert span.attributes["otari.tool.decision"] == "reject"
+    assert span.attributes["otari.tool.decision_source"] == "mcp_key"
+
+
+def test_a_call_outside_the_servers_tool_list_is_traced_as_refused_by_the_server(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", allowed_tools=["list_issues"])
+
+    response = client.post(f"{API_ROOT}/mcp/execute", json=_execute_body(row, "create_issue"), headers=_bearer(key))
+
+    assert response.status_code == 403, response.text
+    [span] = _tool_spans(db_session_factory, key, 1)
+    assert span.outcome == "blocked"
+    assert span.attributes is not None
+    assert span.attributes["otari.tool.decision_source"] == "mcp_server"
+
+
+def test_direct_calls_naming_a_conversation_are_steps_of_one_session(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github")
+    headers = {**_bearer(key), CONVERSATION_HEADER: "agent-run-7"}
+
+    for tool in ("list_issues", "delete_issue"):
+        response = client.post(f"{API_ROOT}/mcp/execute", json=_execute_body(row, tool), headers=headers)
+        assert response.status_code == 200, response.text
+
+    spans = _tool_spans(db_session_factory, key, 2)
+    assert [span.tool_name for span in spans] == ["list_issues", "delete_issue"]
+    assert len({span.trace_id for span in spans}) == 1
+    with db_session_factory() as db:
+        trace = db.scalars(select(Trace).where(Trace.trace_id == spans[0].trace_id)).one()
+        assert trace.name == "agent-run-7"

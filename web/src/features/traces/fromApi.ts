@@ -392,6 +392,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           span.parent_span_id ? byId.get(span.parent_span_id) : undefined,
           blockedBy.get(span.span_id) ?? [],
           tally,
+          summary.api_key_id ?? null,
         ),
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),

@@ -117,11 +117,11 @@ export function mcpWrites(calls: McpCall[]): McpCall[] {
   return calls.filter((call) => call.method !== "GET")
 }
 
-export function renderMcpServerPage(serverId: string) {
+export function renderMcpServerPage(serverId: string, search = "") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  const url = `/tools/mcp-servers/${serverId}`
+  const url = `/tools/mcp-servers/${serverId}${search}`
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>

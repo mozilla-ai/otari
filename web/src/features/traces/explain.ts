@@ -8,13 +8,26 @@ import { clip, clipPath } from "./traceModel"
 // opens. Built from what the span already holds; nothing here is stored.
 export interface Explanation {
   sentence: string
-  facts: [term: string, value: string][]
+  facts: Fact[]
 }
+
+/** An MCP server's page, with its access test set to one key and tool when both are known. */
+export interface McpServerLink {
+  serverId: string
+  key?: string
+  tool?: string
+}
+
+export type Fact = [term: string, value: string, link?: McpServerLink]
 
 const DECIDED_BY: Record<string, string> = {
   config: "a permission rule in your settings",
   hook: "a hook",
   user: "the user",
+  mcp_key: "the key's rule on this MCP server",
+  mcp_user: "the user's rule on this MCP server",
+  mcp_everyone: "this MCP server's default policy",
+  mcp_server: "this MCP server's tool list",
 }
 
 // Claude Code reports a user's decision as user_reject, user_temporary and so on.
@@ -42,8 +55,10 @@ function count(value: unknown): string | null {
   return typeof value === "number" ? value.toLocaleString("en-US") : null
 }
 
-function facts(...pairs: [string, string | null | undefined][]) {
-  return pairs.filter((pair): pair is [string, string] => Boolean(pair[1]))
+function facts(
+  ...pairs: [string, string | null | undefined, McpServerLink?][]
+): Fact[] {
+  return pairs.filter((pair): pair is Fact => Boolean(pair[1]))
 }
 
 // What a tool call was asked to do, the way its row names it.
@@ -83,6 +98,11 @@ function permission(span: TraceSpan, tool: TraceSpan | undefined): Explanation {
   }
 }
 
+function mcpServer(span: TraceSpan): string | null {
+  const server = span.attributes["otari.mcp.server"]
+  return typeof server === "string" ? server : null
+}
+
 // A returned error is a result the agent read, so the call still ran rather than failed.
 function returnedError(span: TraceSpan): boolean {
   return span.attributes["otari.tool.succeeded"] === false
@@ -106,6 +126,7 @@ function tool(
   span: TraceSpan,
   blockedBy: readonly string[],
   gates: GateTally | undefined,
+  apiKeyId: string | null,
 ): Explanation {
   const source = decisionSource(span)
   const decision = span.attributes["otari.tool.decision"]
@@ -123,11 +144,20 @@ function tool(
         : returnedError(span)
           ? "It ran and returned an error, which the agent read."
           : "It ran."
+  const serverId = span.attributes["otari.mcp.server_id"]
+  const server = typeof serverId === "string" ? { serverId } : undefined
   return {
     sentence: `The agent called ${asked(span)}. ${outcome}`,
     facts: facts(
       ["Tool", span.tool_name],
-      ["Decision", decided],
+      ["MCP server", mcpServer(span), server],
+      [
+        "Decision",
+        decided,
+        server && apiKeyId && span.tool_name
+          ? { ...server, key: apiKeyId, tool: span.tool_name }
+          : server,
+      ],
       ["Took", span.outcome === "blocked" ? null : took(span)],
       ["Gates", gates ? describeTally(gates) : null],
     ),
@@ -176,10 +206,11 @@ export function explainSpan(
   parent: TraceSpan | undefined,
   blockedBy: readonly string[],
   gates: GateTally | undefined,
+  apiKeyId: string | null = null,
 ): Explanation | undefined {
   if (span.operation === "tool.blocked_on_user") return permission(span, parent)
   if (span.operation === "tool.execution") return ran(span)
-  if (span.kind === "tool") return tool(span, blockedBy, gates)
+  if (span.kind === "tool") return tool(span, blockedBy, gates, apiKeyId)
   if (span.kind === "llm") return llm(span)
   if (span.kind === "step" && span.operation === "interaction")
     return prompt(span)

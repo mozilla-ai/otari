@@ -27,6 +27,7 @@ import {
   useWorkspaceMcpServerAccess,
 } from "@/shared/api/tools"
 import { useWorkspaceMembers } from "@/shared/api/workspaces"
+import { useUrlValue } from "@/shared/helpers/urlState"
 
 const MATCH_ORDER =
   "Rules are matched from the most specific: a rule for the key, then a rule for the user who owns it, then the default policy. Tools the server does not expose are never reachable, whatever a rule says."
@@ -45,6 +46,11 @@ export function McpServerAcl({
   canManage: boolean
 }) {
   const access = useWorkspaceMcpServerAccess(workspaceId, server.id, canManage)
+  // A session's tool call links here with its key and tool, to show the rule that decided it.
+  const linkedKey = useUrlValue("key")
+  const linkedTool = useUrlValue("tool")
+  const linkedCall =
+    linkedKey && linkedTool ? { keyId: linkedKey, tool: linkedTool } : undefined
   const updateServer = useUpdateWorkspaceMcpServer()
   const addGrants = useAddWorkspaceMcpServerGrants()
   const updateGrant = useUpdateWorkspaceMcpServerGrant()
@@ -175,6 +181,7 @@ export function McpServerAcl({
             serverEnabled={server.enabled}
             keys={[...testKeys].map(([id, label]) => ({ id, label }))}
             tools={tools}
+            initial={linkedCall}
             ruleOwner={(grantId) => {
               const grant = grants.find((entry) => entry.id === grantId)
               return grant ? grantSubject(grant, labels).name : "a key or user"

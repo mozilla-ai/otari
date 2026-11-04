@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -19,6 +19,7 @@ export function McpAccessTest({
   serverEnabled,
   keys,
   tools,
+  initial,
   ruleOwner,
 }: {
   workspaceId: string
@@ -28,13 +29,20 @@ export function McpAccessTest({
   keys: readonly { id: string; label: string }[]
   /** Tool names to suggest; anything typed is asked about as well. */
   tools: readonly string[]
+  /** A call to trace on arrival, from a link to it; the test opens scrolled into view. */
+  initial?: { keyId: string; tool: string }
   /** Who a deciding grant is for, by its id. */
   ruleOwner: (grantId: string) => string
 }) {
-  const [keyId, setKeyId] = useState("")
-  const [tool, setTool] = useState("")
+  const [keyId, setKeyId] = useState(initial?.keyId ?? "")
+  const [tool, setTool] = useState(initial?.tool ?? "")
   const [query, setQuery] = useState("")
-  const [asked, setAsked] = useState({ keyId: "", tool: "" })
+  const [asked, setAsked] = useState(initial ?? { keyId: "", tool: "" })
+  const [linked] = useState(initial !== undefined)
+  const section = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (linked) section.current?.scrollIntoView({ block: "center" })
+  }, [linked])
   const check = useWorkspaceMcpServerAccessCheck({
     workspaceId,
     serverId,
@@ -49,7 +57,7 @@ export function McpAccessTest({
   const result = check.data
 
   return (
-    <div className="flex flex-col gap-3">
+    <div ref={section} className="flex flex-col gap-3">
       <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
         <Select
           label="Source key"
