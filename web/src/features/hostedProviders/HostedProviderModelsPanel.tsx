@@ -288,9 +288,12 @@ export function HostedProviderModelsPanel({
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}
+              // Empty rows that are not yet the typed term's answer: the last
+              // term's, held as placeholder data or waiting out the pause.
               isLoading={
                 models.isLoading ||
-                (models.isPlaceholderData && rows.length === 0)
+                (rows.length === 0 &&
+                  (models.isPlaceholderData || term !== typed))
               }
               // Not over a failed read: the banner above says what happened,
               // and "no match" would read as a search that ran and found none.

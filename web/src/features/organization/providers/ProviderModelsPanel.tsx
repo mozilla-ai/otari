@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   FiEdit2,
   FiPlus,
@@ -158,6 +158,17 @@ export function ProviderModelsPanel({
   }
 
   const rows = models.data?.data ?? []
+  // A shared link or Back can land on a page past the last of what matches,
+  // where the table would say nothing matches beside a positive count. The
+  // page is the parent's, in its URL, so it is moved after render.
+  const lastPage = Math.max(
+    0,
+    Math.ceil((models.data?.count ?? 0) / pageSize) - 1,
+  )
+  const isPastEnd = page > lastPage && !!models.data && !models.isFetching
+  useEffect(() => {
+    if (isPastEnd) onPageChange(lastPage)
+  }, [isPastEnd, lastPage, onPageChange])
   // The last refresh's outcome, worth a sentence either way: silence after a
   // press reads as a button that did nothing. Cleared by the next change made
   // here, so it never describes a list that has moved on.
@@ -392,9 +403,12 @@ export function ProviderModelsPanel({
               columns={columns}
               rows={rows}
               getRowKey={(row) => row.id}
+              // Empty rows that are not yet the typed term's answer: the last
+              // term's, held as placeholder data or waiting out the pause.
               isLoading={
                 models.isLoading ||
-                (models.isPlaceholderData && rows.length === 0)
+                (rows.length === 0 &&
+                  (models.isPlaceholderData || !search.isSettled))
               }
               // Not over a failed read: the banner above says what happened,
               // and "no match" would read as a search that ran and found none.

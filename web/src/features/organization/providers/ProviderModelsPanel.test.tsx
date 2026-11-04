@@ -100,6 +100,22 @@ afterEach(() => {
 })
 
 describe("ProviderModelsPanel", () => {
+  it("moves back to the last page when a search leaves the current one past it", async () => {
+    mockApi({
+      models: [orgProviderModel({ id: "m-1", model: "gpt-4o" })],
+    })
+    const onPageChange = vi.fn()
+    // On page 3 of a term that has one page of matches, as a shared link can.
+    await renderPanel(
+      true,
+      vi.fn(),
+      { page: 2, onPageChange },
+      "/?models_q=gpt",
+    )
+
+    await waitFor(() => expect(onPageChange).toHaveBeenCalledWith(0))
+  })
+
   it("says nothing about a search when the model list failed", async () => {
     mockApi({ listFails: true })
     await renderPanel(true, vi.fn(), {}, "/?models_q=gpt")
