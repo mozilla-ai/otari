@@ -15,7 +15,7 @@ from gateway.repositories.base_repository import BaseRepository
 
 # The statuses that end a request. ``absorbed`` is an attempt a later one recovered
 # from, so counting it would count one request twice.
-_REQUEST_STATUSES = ("success", "error")
+_REQUEST_STATUSES = ("success", "error", "incomplete")
 
 
 def new_usage_row(

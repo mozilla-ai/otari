@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
+from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -424,6 +425,59 @@ def estimate_tokens(
     prompt_tokens = (max(prompt_chars, 0) + 3) // 4
     output_tokens = max_output_tokens if max_output_tokens is not None else default_output_tokens
     return prompt_tokens + max(output_tokens, 0)
+
+
+def estimate_output_tokens(streamed_chars: int) -> int:
+    """Tokens for ``streamed_chars`` of output text, at the same ``chars / 4`` as the prompt estimate."""
+    return (max(streamed_chars, 0) + 3) // 4
+
+
+def estimate_abandoned_stream_usage(
+    *, policy: str, prompt_chars: int | None, streamed_chars: int
+) -> CompletionUsage | None:
+    """Usage to bill for a stream the client abandoned before the provider reported any.
+
+    Only the ``estimate`` policy bills one, and only when the request's size is known.
+    """
+    if policy != "estimate" or prompt_chars is None:
+        return None
+    prompt_tokens = estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0)
+    output_tokens = estimate_output_tokens(streamed_chars)
+    return CompletionUsage(
+        prompt_tokens=prompt_tokens, completion_tokens=output_tokens, total_tokens=prompt_tokens + output_tokens
+    )
+
+
+@dataclass(frozen=True)
+class AbandonedStreamRow:
+    """The usage row to write for a stream the client abandoned."""
+
+    usage: CompletionUsage | None
+    incomplete: bool
+    error: str | None
+
+
+def settle_abandoned_stream(
+    *,
+    policy: str,
+    prompt_chars: int | None,
+    streamed_chars: int,
+    reported_usage: CompletionUsage | None,
+    has_tool_work: bool,
+) -> AbandonedStreamRow | None:
+    """The row an abandoned stream owes, or None when there is nothing to bill."""
+    estimated = (
+        None
+        if reported_usage is not None
+        else estimate_abandoned_stream_usage(policy=policy, prompt_chars=prompt_chars, streamed_chars=streamed_chars)
+    )
+    if not (has_tool_work or reported_usage is not None or estimated is not None):
+        return None
+    return AbandonedStreamRow(
+        usage=reported_usage or estimated,
+        incomplete=estimated is not None,
+        error=None if estimated is not None else "client disconnected before the stream completed",
+    )
 
 
 def estimate_cost(

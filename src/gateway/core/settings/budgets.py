@@ -101,7 +101,9 @@ class BudgetSettings(BaseModel):
         default="estimate",
         description=(
             "How to bill a streamed response that completes without provider usage data: "
-            "'estimate' (charge the pre-debit estimate, default), 'fail' (charge estimate and mark "
+            "'estimate' (charge the pre-debit estimate, default; a stream the client abandons with no reported "
+            "usage writes an 'incomplete' row billed on an estimate, tokens only with no per-request charge), "
+            "'fail' (charge estimate and mark "
             "the request errored), or 'allow_free' (release the reservation, legacy behavior)."
         ),
     )
