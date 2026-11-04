@@ -8313,7 +8313,7 @@
             "additionalProperties": {
               "type": "number"
             },
-            "description": "For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.",
+            "description": "For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so it is knowable here: the plan above is the real ordering by share, not the decline path.",
             "title": "Router Weights",
             "type": "object"
           },
@@ -10264,7 +10264,12 @@
                 "enum": [
                   "tokens",
                   "requests",
-                  "images"
+                  "images",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
                 ],
                 "type": "string"
               },
@@ -10487,7 +10492,12 @@
                 "enum": [
                   "tokens",
                   "requests",
-                  "images"
+                  "images",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
                 ],
                 "type": "string"
               },
@@ -11790,26 +11800,6 @@
         "title": "KeyInfo",
         "type": "object"
       },
-      "KeyRankRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "examples": {
-            "description": "The scored prompts to record.",
-            "items": {
-              "$ref": "#/components/schemas/ScoredExample"
-            },
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Examples",
-            "type": "array"
-          }
-        },
-        "required": [
-          "examples"
-        ],
-        "title": "KeyRankRequest",
-        "type": "object"
-      },
       "KnownProviderSchema": {
         "description": "A selected provider's autofill hints for the add-provider form.",
         "properties": {
@@ -11886,38 +11876,6 @@
           "name"
         ],
         "title": "KnownProviderSummarySchema",
-        "type": "object"
-      },
-      "LearnedPolicy": {
-        "description": "A policy whose selection depends on routing memory, for the status overview.\n\nOnly a *learned* policy belongs here. A weighted policy names a router too, but\nits split is written in the policy document, so listing it under a warmth report\nwould tie it to a pool it never reads.",
-        "properties": {
-          "backend": {
-            "title": "Backend",
-            "type": "string"
-          },
-          "candidates": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Candidates",
-            "type": "array"
-          },
-          "default_target": {
-            "title": "Default Target",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "backend",
-          "candidates",
-          "default_target"
-        ],
-        "title": "LearnedPolicy",
         "type": "object"
       },
       "MailSettings": {
@@ -13273,6 +13231,16 @@
           },
           "unit": {
             "default": "tokens",
+            "enum": [
+              "tokens",
+              "requests",
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
+            ],
             "title": "Unit",
             "type": "string"
           }
@@ -13990,6 +13958,16 @@
           },
           "unit": {
             "default": "tokens",
+            "enum": [
+              "tokens",
+              "requests",
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
+            ],
             "title": "Unit",
             "type": "string"
           },
@@ -15903,11 +15881,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"
@@ -16108,11 +16091,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint, each priced per million. A completion model priced per requests is charged one request per successful call.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"
@@ -17614,24 +17602,6 @@
         "title": "PolicyResponse",
         "type": "object"
       },
-      "PoolStatus": {
-        "properties": {
-          "records": {
-            "title": "Records",
-            "type": "integer"
-          },
-          "warm": {
-            "title": "Warm",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "records",
-          "warm"
-        ],
-        "title": "PoolStatus",
-        "type": "object"
-      },
       "PricingDriftRow": {
         "description": "A stored deployment rate beside the default it shadows.",
         "properties": {
@@ -18611,70 +18581,6 @@
         "title": "ProvidersResponse",
         "type": "object"
       },
-      "RankRequest": {
-        "properties": {
-          "examples": {
-            "description": "The scored prompts to record.",
-            "items": {
-              "$ref": "#/components/schemas/ScoredExample"
-            },
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Examples",
-            "type": "array"
-          },
-          "user_id": {
-            "description": "Whose routing memory these examples belong to.",
-            "title": "User Id",
-            "type": "string"
-          },
-          "workspace_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which workspace's routing memory these examples belong to. Omit for the deployment's default workspace. Only requests billing to that workspace vote over them.",
-            "title": "Workspace Id"
-          }
-        },
-        "required": [
-          "examples",
-          "user_id"
-        ],
-        "title": "RankRequest",
-        "type": "object"
-      },
-      "RankResponse": {
-        "properties": {
-          "pools": {
-            "items": {
-              "$ref": "#/components/schemas/RecordedPool"
-            },
-            "title": "Pools",
-            "type": "array"
-          },
-          "recorded": {
-            "title": "Recorded",
-            "type": "integer"
-          },
-          "seed_count": {
-            "title": "Seed Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "recorded",
-          "seed_count",
-          "pools"
-        ],
-        "title": "RankResponse",
-        "type": "object"
-      },
       "RateLimitRuleCreate": {
         "additionalProperties": false,
         "description": "A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.",
@@ -19130,37 +19036,6 @@
           "detail"
         ],
         "title": "RecommendationRefusal",
-        "type": "object"
-      },
-      "RecordedPool": {
-        "description": "How warm one pool is after the write.",
-        "properties": {
-          "records": {
-            "title": "Records",
-            "type": "integer"
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Id"
-          },
-          "warm": {
-            "title": "Warm",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "task_id",
-          "records",
-          "warm"
-        ],
-        "title": "RecordedPool",
         "type": "object"
       },
       "ReencryptSearchToolsResponse": {
@@ -20185,76 +20060,6 @@
         "title": "RotateMasterKeyResponse",
         "type": "object"
       },
-      "RouterStatus": {
-        "description": "How warm this user's routing memory is, and what depends on it.\n\nRouting memory has no single warmth: it is a set of independent pools.\n``default_pool`` is what a request with no ``Otari-Router-Task`` header votes\nover (every record the user has in this workspace, labeled or not) and\n``tasks`` lists each partition, which only requests carrying that label use.\nEach crosses ``seed_count`` on its own.",
-        "properties": {
-          "alpha": {
-            "title": "Alpha",
-            "type": "number"
-          },
-          "confidence_floor": {
-            "title": "Confidence Floor",
-            "type": "number"
-          },
-          "default_pool": {
-            "$ref": "#/components/schemas/PoolStatus"
-          },
-          "embedding_model": {
-            "title": "Embedding Model",
-            "type": "string"
-          },
-          "granularity": {
-            "title": "Granularity",
-            "type": "string"
-          },
-          "k": {
-            "title": "K",
-            "type": "integer"
-          },
-          "policies": {
-            "items": {
-              "$ref": "#/components/schemas/LearnedPolicy"
-            },
-            "title": "Policies",
-            "type": "array"
-          },
-          "seed_count": {
-            "title": "Seed Count",
-            "type": "integer"
-          },
-          "tasks": {
-            "items": {
-              "$ref": "#/components/schemas/TaskPool"
-            },
-            "title": "Tasks",
-            "type": "array"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          },
-          "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "workspace_id",
-          "embedding_model",
-          "seed_count",
-          "granularity",
-          "alpha",
-          "k",
-          "confidence_floor",
-          "default_pool",
-          "tasks",
-          "policies"
-        ],
-        "title": "RouterStatus",
-        "type": "object"
-      },
       "SandboxCredentialPublic": {
         "description": "Where the key a hosted sandbox provider leases with comes from. Never the key itself.",
         "properties": {
@@ -20557,52 +20362,6 @@
           "criteria"
         ],
         "title": "ScoreQuestion",
-        "type": "object"
-      },
-      "ScoredExample": {
-        "description": "One prompt and how well each candidate answered it.",
-        "properties": {
-          "label_source": {
-            "default": "human",
-            "description": "Provenance of the scores: 'human' or 'judge'.",
-            "title": "Label Source",
-            "type": "string"
-          },
-          "prompt": {
-            "description": "The prompt that was tried.",
-            "minLength": 1,
-            "title": "Prompt",
-            "type": "string"
-          },
-          "scores": {
-            "additionalProperties": {
-              "maximum": 1.0,
-              "minimum": 0.0,
-              "type": "number"
-            },
-            "description": "Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and meaningful: two models that both answered well is exactly the case where the router should take the cheaper one.",
-            "minProperties": 1,
-            "title": "Scores",
-            "type": "object"
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Partition this example belongs to, matching the Otari-Router-Task header requests send. Omit to file it in the user's default pool.",
-            "title": "Task Id"
-          }
-        },
-        "required": [
-          "prompt",
-          "scores"
-        ],
-        "title": "ScoredExample",
         "type": "object"
       },
       "SearchProviderOptionSchema": {
@@ -21522,11 +21281,16 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation (USD per million images).",
+            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call, 'images' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing.",
             "enum": [
               "tokens",
               "requests",
-              "images"
+              "images",
+              "character",
+              "megapixel",
+              "second",
+              "minute",
+              "web_search"
             ],
             "title": "Unit",
             "type": "string"
@@ -22150,29 +21914,6 @@
           "organization_id"
         ],
         "title": "SwitchActiveOrganizationRequest",
-        "type": "object"
-      },
-      "TaskPool": {
-        "properties": {
-          "records": {
-            "title": "Records",
-            "type": "integer"
-          },
-          "task_id": {
-            "title": "Task Id",
-            "type": "string"
-          },
-          "warm": {
-            "title": "Warm",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "task_id",
-          "records",
-          "warm"
-        ],
-        "title": "TaskPool",
         "type": "object"
       },
       "TestServiceRequest": {
@@ -27816,7 +27557,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
     "title": "otari",
-    "version": "0.36.0"
+    "version": "0.37.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -45789,86 +45530,6 @@
         ]
       }
     },
-    "/api/v1/routing/me/preferences/rank": {
-      "post": {
-        "description": "Record scored examples into the calling key's own routing memory.\n\nThe memory is the key's user's in the key's workspace, the pool that key's\nrequests vote over; nothing in the body can name another. Validation, storage\nand the response are those of ``POST /api/v1/routing/preferences/rank``.\n\nEach call counts against the user's request rate limit, and is refused (403)\nwhen the router's embedding provider does not serve the caller's country,\nbecause embedding an example sends its prompt there.",
-        "operationId": "routing-rank_own_candidates",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/KeyRankRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RankResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Rank Own Candidates",
-        "tags": [
-          "routing"
-        ]
-      }
-    },
-    "/api/v1/routing/me/status": {
-      "get": {
-        "description": "Report how warm the calling key's own routing memory is, per pool.\n\nThe same report as ``GET /api/v1/routing/status``, for the key's user in the\nkey's workspace.",
-        "operationId": "routing-own_routing_memory_status",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RouterStatus"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Own Routing Memory Status",
-        "tags": [
-          "routing"
-        ]
-      }
-    },
     "/api/v1/routing/policies": {
       "get": {
         "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
@@ -46108,56 +45769,6 @@
           }
         ],
         "summary": "Delete Policy",
-        "tags": [
-          "routing"
-        ]
-      }
-    },
-    "/api/v1/routing/preferences/rank": {
-      "post": {
-        "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
-        "operationId": "routing-rank_candidates",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RankRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RankResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Rank Candidates",
         "tags": [
           "routing"
         ]
@@ -46403,78 +46014,6 @@
         "summary": "Update Agent Recommender",
         "tags": [
           "agent-recommenders"
-        ]
-      }
-    },
-    "/api/v1/routing/status": {
-      "get": {
-        "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
-        "operationId": "routing-routing_memory_status",
-        "parameters": [
-          {
-            "description": "Whose routing memory to report on.",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "Whose routing memory to report on.",
-              "title": "User Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
-            "in": "query",
-            "name": "workspace_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
-              "title": "Workspace Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RouterStatus"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Routing Memory Status",
-        "tags": [
-          "routing"
         ]
       }
     },

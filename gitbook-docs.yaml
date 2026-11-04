@@ -1,0 +1,59 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+# The site's top bar. Each section is one entry and holds one space, whose
+# pages are the `#` heading of the same title in docs/SUMMARY.md.
+# scripts/prepare_gitbook_site.py writes each space to the directory named
+# here, and fails when a heading has no section or a section no heading.
+# GitBook recognizes a node by its key across syncs, so never change a key:
+# rename an entry through its title, and move it through its path.
+site:
+  title: Otari
+  structure:
+    - type: section
+      key: section-home
+      title: Home
+      path: home
+      default: true
+      children:
+        - type: space
+          key: space-home
+          title: Home
+          path: home
+          default: true
+          content:
+            directory: ./home
+    - type: section
+      key: section-guides
+      title: Guides
+      path: guides
+      children:
+        - type: space
+          key: space-guides
+          title: Guides
+          path: guides
+          default: true
+          content:
+            directory: ./guides
+    - type: section
+      key: section-self-hosting
+      title: Self-Hosting
+      path: self-hosting
+      children:
+        - type: space
+          key: space-self-hosting
+          title: Self-Hosting
+          path: self-hosting
+          default: true
+          content:
+            directory: ./self-hosting
+    - type: section
+      key: section-reference
+      title: Reference
+      path: reference
+      children:
+        - type: space
+          key: space-reference
+          title: Reference
+          path: reference
+          default: true
+          content:
+            directory: ./reference
