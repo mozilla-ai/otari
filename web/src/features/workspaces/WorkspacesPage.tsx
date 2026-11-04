@@ -977,7 +977,7 @@ export function WorkspacesPage() {
               maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={
-                search.isSettled && !workspaces.isPending
+                search.isSettled && workspaces.isSuccess
                   ? shown.length
                   : undefined
               }

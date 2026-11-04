@@ -685,7 +685,7 @@ export function OrganizationProvidersPage() {
             maxLength={SEARCH_MAX_LENGTH}
             onChange={search.onChange}
             resultCount={
-              search.isSettled && !keys.isPending ? shown.length : undefined
+              search.isSettled && keys.isSuccess ? shown.length : undefined
             }
             className="w-full md:w-96"
           />

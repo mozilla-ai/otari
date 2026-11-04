@@ -382,7 +382,7 @@ export function WorkspaceMcpServersCard({
             maxLength={SEARCH_MAX_LENGTH}
             onChange={search.onChange}
             resultCount={
-              search.isSettled && !query.isPending ? rows.length : undefined
+              search.isSettled && query.isSuccess ? rows.length : undefined
             }
             className="w-full md:w-96"
           />

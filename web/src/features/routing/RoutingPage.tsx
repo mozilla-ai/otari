@@ -294,7 +294,9 @@ export function RoutingPage() {
               maxLength={SEARCH_MAX_LENGTH}
               onChange={search.onChange}
               resultCount={
-                search.isSettled && !isListLoading ? shown.length : undefined
+                search.isSettled && !isListLoading && !error
+                  ? shown.length
+                  : undefined
               }
               className="w-full md:w-96"
             />

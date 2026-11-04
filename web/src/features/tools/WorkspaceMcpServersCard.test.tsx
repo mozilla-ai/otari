@@ -145,6 +145,26 @@ describe("WorkspaceMcpServersCard", () => {
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
   })
 
+  it("states no count beside a failed read", async () => {
+    mockApi()
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes("/mcp-servers")) {
+        return Response.json(
+          { detail: "MCP servers are unavailable" },
+          { status: 500 },
+        )
+      }
+      return answer(input, init)
+    })
+    await renderCard("page", "/?q=github")
+
+    expect(
+      await screen.findByText(/MCP servers are unavailable/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/^\d+ match(es)?$/)).toBeNull()
+  })
+
   it("keeps the field to clear a search that outlived every server", async () => {
     mockApi()
     await renderCard("page", "/?q=github")
