@@ -293,9 +293,9 @@ def test_a_weighted_decision_is_not_logged_per_request() -> None:
     assert decision.log_decision is False
 
 
-def test_the_backend_is_registered(config: GatewayConfig) -> None:
-    assert isinstance(get_router_backend(config, WEIGHTED_BACKEND), WeightedRouterBackend)
-    assert isinstance(get_router_backend(config, " Weighted "), WeightedRouterBackend)
+def test_the_backend_is_registered() -> None:
+    assert isinstance(get_router_backend(WEIGHTED_BACKEND), WeightedRouterBackend)
+    assert isinstance(get_router_backend(" Weighted "), WeightedRouterBackend)
     assert backend_is_weighted(" WEIGHTED ")
 
 
