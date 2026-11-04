@@ -5762,8 +5762,8 @@ def _streamed_text_chars(chunk: Any) -> int:
         text = getattr(getattr(choices[0], "delta", None), "content", None)
     elif str(getattr(chunk, "type", "")).endswith("output_text.delta"):
         text = getattr(chunk, "delta", None)
-    elif getattr(chunk, "type", None) == "content_block_delta" and getattr(chunk.delta, "type", None) == "text_delta":
-        text = getattr(chunk.delta, "text", None)
+    elif getattr(chunk, "type", None) == "content_block_delta" and (delta := getattr(chunk, "delta", None)) is not None:
+        text = getattr(delta, "text", None) if getattr(delta, "type", None) == "text_delta" else None
     else:
         return 0
     return len(text) if isinstance(text, str) else 0
