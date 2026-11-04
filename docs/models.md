@@ -427,9 +427,19 @@ selects models whose vendor is unknown, and `type` never matches a model of
 unknown kind. A model's `type` is the kind most of its offerings give (see
 `type` above); a tie goes to the vendor's own provider. Repeat `input_modality`,
 `output_modality`, or `capability` to require every selected value. The endpoint
-also accepts `search`, `min_context`, `max_input`, `pricing`, `source`, and
-`released_within_days`. Release windows end today in UTC and exclude unknown
-and future dates. A price ceiling excludes models with no known input rate.
+also accepts `search`, `min_context`, `max_input`, `pricing`, `source`,
+`zero_data_retention`, and `released_within_days`. Release windows end today in
+UTC and exclude unknown and future dates. A price ceiling excludes models with
+no known input rate. `zero_data_retention=true` keeps the models at least one
+offering declared zero data retention serves.
+
+Each offering carries `zero_data_retention`, and each model lists the providers
+whose offering of it is declared in `zero_data_retention_providers`. A
+declaration is the operator's or the organization's statement about the
+provider account, which Otari does not check; whose declaration applies is in
+[Zero data retention](hosted-providers.md#zero-data-retention). The Models
+page marks these models and their offerings, and its **Data retention** filter
+sets the parameter.
 
 `sort` accepts `name`, `released`, `input`, `output`, `context`, or `providers`,
 with `direction=asc` or `desc`. Unknown values sort last in either direction;

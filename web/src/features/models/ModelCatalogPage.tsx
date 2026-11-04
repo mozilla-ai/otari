@@ -345,6 +345,17 @@ function FilterRail({
           options={PRICING_OPTIONS}
         />
       </FilterGroup>
+      <FilterGroup
+        label="Data retention"
+        count={filters.zeroDataRetention ? 1 : 0}
+      >
+        <Checkbox
+          isSelected={filters.zeroDataRetention}
+          onChange={(isOn) => set("zeroDataRetention", isOn)}
+        >
+          Zero data retention only
+        </Checkbox>
+      </FilterGroup>
       <FilterGroup label="Source" count={filters.source !== "all" ? 1 : 0}>
         <RadioList
           name="Source"
@@ -366,6 +377,11 @@ function FilterRail({
       </FilterGroup>
     </div>
   )
+}
+
+/** Whether any provider offering `model` is declared to keep no data. */
+function hasZeroDataRetention(model: CatalogModelSummary): boolean {
+  return (model.zero_data_retention_providers?.length ?? 0) > 0
 }
 
 /** A separator between the facts on a card's last line. */
@@ -400,6 +416,9 @@ function ModelCard({
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className={titleClass}>{title}</span>
           {model.open_weights ? <Badge tone="muted">Open weights</Badge> : null}
+          {hasZeroDataRetention(model) ? (
+            <Badge tone="muted">Zero data retention</Badge>
+          ) : null}
           {model.deprecated ? <Badge tone="warn">Deprecated</Badge> : null}
         </div>
         <span className="shrink-0 text-caption">{providers}</span>
@@ -493,6 +512,7 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
               {row.provider_count === 1
                 ? "1 provider"
                 : `${row.provider_count} providers`}
+              {hasZeroDataRetention(row) ? " · Zero data retention" : ""}
             </span>
           </span>
         </div>

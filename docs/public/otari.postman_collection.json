@@ -1948,6 +1948,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Only models at least one provider declared to keep no prompt or completion data offers.",
+                  "disabled": true,
+                  "key": "zero_data_retention",
+                  "value": ""
+                },
+                {
                   "description": "Release window ending today (UTC); zero disables it. Unknown and future releases do not match.",
                   "disabled": true,
                   "key": "released_within_days",
@@ -1972,7 +1978,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&zero_data_retention=&released_within_days=&sort=&direction=&include_facets="
             }
           }
         },
@@ -6906,7 +6912,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"name\": \"string\",\n  \"zero_data_retention\": false\n}"
             },
             "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.\n\nA new base URL on a key that holds a credential needs that credential in the\nsame request, `api_key` and any masked `client_args` entry, since the next call\nsends it to the new host. Clearing the base URL needs neither.",
             "header": [

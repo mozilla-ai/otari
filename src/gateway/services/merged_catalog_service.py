@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -73,6 +73,8 @@ from gateway.types.price_unit import PriceUnit
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
+
+    from gateway.services.providers import HostedProviderService
 
 
 # ``owned_by`` reported for alias entries. Aliases intentionally hide the
@@ -1076,6 +1078,41 @@ async def viewer_organization(
         return None
     api_key, _ = caller
     return await organization_for_key_id(db, api_key.id if api_key is not None else None)
+
+
+@dataclass(frozen=True)
+class ZeroDataRetention:
+    """The provider instances declared to keep no prompt or completion data, by whose key serves them."""
+
+    hosted: frozenset[str]
+    organization: frozenset[str]
+
+    def declared(self, instance: str, served_on: Literal["deployment", "hosted", "organization"]) -> bool:
+        """Whether an offering on ``instance`` is declared, by whoever holds the key it is ``served_on``.
+
+        A ``config.yml`` instance carries no declaration.
+        """
+        if served_on == "hosted":
+            return instance in self.hosted
+        if served_on == "organization":
+            return instance in self.organization
+        return False
+
+
+async def viewer_zero_data_retention(
+    hosted_providers: "HostedProviderService",
+    org_provider_keys: OrgProviderKeyService,
+    organization_id: uuid.UUID | None,
+) -> ZeroDataRetention:
+    """What the hosted providers and the viewer's organization have declared zero data retention."""
+    return ZeroDataRetention(
+        hosted=await hosted_providers.zero_data_retention_names(organization_id=organization_id),
+        organization=(
+            await org_provider_keys.get_zero_data_retention_providers(organization_id=organization_id)
+            if organization_id is not None
+            else frozenset()
+        ),
+    )
 
 
 async def apply_organization_pricing(

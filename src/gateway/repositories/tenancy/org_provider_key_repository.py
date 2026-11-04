@@ -205,6 +205,7 @@ class OrgProviderKeyRepository(
         last4: str | None,
         api_base: str | None,
         client_args: dict[str, object] | None,
+        zero_data_retention: bool = False,
     ) -> OrgProviderKey:
         key = OrgProviderKey(
             organization_id=organization_id,
@@ -214,6 +215,7 @@ class OrgProviderKeyRepository(
             last4=last4,
             api_base=api_base,
             client_args=client_args,
+            zero_data_retention=zero_data_retention,
         )
         self.db.add(key)
         await self.db.flush()
