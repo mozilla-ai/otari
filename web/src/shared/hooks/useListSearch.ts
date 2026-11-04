@@ -27,14 +27,21 @@ export function useListSearch({
 } = {}) {
   const url = useUrlState({ [param]: "", [pageParam]: "0" })
   const value = url.get(param)
-  const typed = value.trim().slice(0, SEARCH_MAX_LENGTH)
-  const term = useDebounced(typed)
   return {
     value,
     onChange: (next: string) => url.patch({ [param]: next, [pageParam]: 0 }),
-    term,
-    isSettled: term === typed,
+    ...useSearchTerm(value),
   }
+}
+
+/**
+ * `term` and `isSettled` for a field's `value`, the half of `useListSearch` a
+ * panel uses on its own when it keeps its term in component state.
+ */
+export function useSearchTerm(value: string) {
+  const typed = value.trim().slice(0, SEARCH_MAX_LENGTH)
+  const term = useDebounced(typed)
+  return { term, isSettled: term === typed }
 }
 
 /**
