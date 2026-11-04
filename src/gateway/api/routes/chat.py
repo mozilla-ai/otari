@@ -120,13 +120,12 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     The completion-param fields are derived from any-llm's ``CompletionParams``
     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
     forwards. Fields below either tighten a derived field (``messages``,
-    ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
-    gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
-    ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-    before the request is forwarded upstream, or restate a derived field
-    unchanged to document it (``max_completion_tokens``), which is only worth
-    doing where the wire contract is not guessable from the field itself.
+    ``response_format``), add gateway-internal behavior (``mcp_servers``,
+    ``mcp_server_ids``, ``guardrails``, ``tools_header``,
+    ``max_tool_iterations``) that is stripped before the request is forwarded
+    upstream, or restate a derived field unchanged to document it
+    (``max_completion_tokens``), which is only worth doing where the wire
+    contract is not guessable from the field itself.
     """
 
     # A field beyond the ones below is set aside here rather than kept on the
@@ -142,21 +141,6 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # any-llm types ``stream`` as ``bool | None``; keep the OpenAI wire contract
     # (a non-nullable boolean defaulting to false) for stable SDK generation.
     stream: bool = False
-    # Part of the OpenAI chat wire contract, but absent from any-llm's
-    # ``CompletionParams``, so derivation cannot supply it and the derived base
-    # (pydantic's default ``extra="ignore"``) dropped a caller's value before the
-    # provider call. Declared here so it survives ``model_dump`` and rides
-    # any-llm's ``**kwargs`` passthrough into the provider request. Left as a
-    # free-form string rather than an enum: the tier vocabulary is
-    # provider-specific ("auto"/"default"/"flex"/"scale"/"priority" on OpenAI,
-    # "auto"/"standard_only" on Anthropic) and grows independently of this
-    # gateway, so the provider is the right place to reject an unknown value.
-    # ``ResponsesParams`` already declares it, so /api/v1/responses never had the gap.
-    #
-    # Stopgap: remove this declaration once ``CompletionParams`` models the param
-    # and the SDK pin is bumped (mozilla-ai/any-llm#1269, tracked in #565). Until
-    # then it also shadows whatever annotation any-llm picks for it.
-    service_tier: str | None = None
     # Redeclared only to carry a description: the field is derived, but the
     # relationship between the two output-cap fields is the whole reason a caller
     # gets a completion instead of a 502, and it is not guessable from the schema.

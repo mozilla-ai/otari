@@ -61,9 +61,12 @@ sanitized message.
 Otari sometimes has to carry a workaround while any-llm catches up. That is a
 legitimate PR here, with conditions: keep the shim as small as the problem
 allows, comment it with a link to the any-llm issue, and open an Otari issue to
-remove it once the SDK pin moves. `service_tier` in
-`src/gateway/api/routes/chat.py` is the worked example. File the upstream issue
-first; a shim with no upstream issue is permanent by accident.
+remove it once the SDK pin moves. The worked example is `service_tier` on chat
+completions: [#561](https://github.com/mozilla-ai/otari/pull/561) declared it by
+hand while any-llm's `CompletionParams` lacked it, and
+[#565](https://github.com/mozilla-ai/otari/issues/565) removed the declaration
+once the pin moved. File the upstream issue first; a shim with no upstream issue
+is permanent by accident.
 
 ## Does this change belong in Otari?
 
