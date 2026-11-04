@@ -34,7 +34,7 @@ from gateway.api.deps import (
 )
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
 from gateway.core.settings.pricing import PricingConfig
-from gateway.exceptions.tools_exceptions import SearchToolNotFoundError
+from gateway.exceptions.tools_exceptions import SearchToolNotFoundError, WebSearchCredentialRefusedError
 from gateway.inflight import InFlightRegistry
 from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
@@ -1389,6 +1389,30 @@ def test_a_named_call_runs_on_the_tools_own_key_though_the_workspace_has_one(
         pytest.approx(0.007),
         pytest.approx(0.007),
     ]
+
+
+def test_a_pick_that_raises_answers_with_the_errors_own_status(
+    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str], api_key_obj: dict[str, Any]
+) -> None:
+    """A domain error from the pick answers with its status, a 5xx with the generic detail, and each is logged."""
+    not_found = SearchToolNotFoundError("fake-search")
+    with patch("gateway.api.routes.search.pick_direct_search_instance", side_effect=not_found):
+        resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert (resp.status_code, resp.json()["detail"]) == (404, not_found.message)
+
+    refused = WebSearchCredentialRefusedError("exa", "carries no API key, which the provider requires")
+    with patch("gateway.api.routes.search.pick_direct_search_instance", side_effect=refused):
+        resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "The request could not be completed by the provider"
+    assert "exa" not in resp.text
+
+    rows = _search_rows(client, master_key_header, api_key_obj["user_id"])
+    assert sorted((row["model"], row["provider"], row["status_code"]) for row in rows) == [
+        ("fake-search", None, 404),
+        ("fake-search", None, 502),
+    ]
+    assert [row["error_message"] for row in rows if row["status_code"] == 502] == [refused.message]
 
 
 def test_a_tool_removed_after_it_was_picked_is_refused_and_logged(
