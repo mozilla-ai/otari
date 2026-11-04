@@ -46,7 +46,7 @@ from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
-from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
@@ -70,6 +70,8 @@ from gateway.repositories.providers import (
     HostedProviderRepository,
     OrgProviderKeyModelRepository,
     ProviderEndpointRepository,
+    WorkspaceHostedAccessRepository,
+    WorkspaceProviderPolicyRepository,
 )
 from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.routing import AgentRecommenderRepository
@@ -159,7 +161,10 @@ from gateway.services.providers import (
     OrgProviderModelService,
     ProviderEndpointService,
     ScheduledRun,
+    WorkspaceHostedAccessService,
+    hosted_models_for,
     refresh_provider_endpoint_cache,
+    refresh_workspace_hosted_access_cache,
 )
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import (
@@ -1719,6 +1724,50 @@ def get_provider_endpoint_service(
 
 
 ProviderEndpointServiceDep = Annotated[ProviderEndpointService, Depends(get_provider_endpoint_service)]
+
+
+def get_workspace_access(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
+) -> WorkspaceAccess:
+    """Build the workspace visibility and management checks on the request's session."""
+    return WorkspaceAccess(db, organizations)
+
+
+WorkspaceAccessDep = Annotated[WorkspaceAccess, Depends(get_workspace_access)]
+
+
+def get_workspace_hosted_access_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    access: WorkspaceAccessDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
+    model_provider: RequestSessionModelProviderPortDep,
+) -> WorkspaceHostedAccessService:
+    """Build the workspace hosted provider access service on the request's unit of work.
+
+    The hosted port answers which providers an organization may use, and the
+    organization's own keys which of them a workspace never asks the port
+    about. Both are other domains' answers, handed in as callables.
+    """
+
+    async def hosted_models(organization_id: uuid.UUID | None) -> HostedModels:
+        return await hosted_models_for(model_provider, organization_id=organization_id)
+
+    async def byo_providers(workspace_id: uuid.UUID) -> frozenset[str]:
+        return await org_provider_keys.get_workspace_byo_providers(workspace_id=workspace_id)
+
+    return WorkspaceHostedAccessService(
+        uow,
+        rules=WorkspaceHostedAccessRepository(uow),
+        policies=WorkspaceProviderPolicyRepository(uow),
+        access=access,
+        hosted_models=hosted_models,
+        byo_providers=byo_providers,
+        refresh_cache=lambda: refresh_workspace_hosted_access_cache(uow),
+    )
+
+
+WorkspaceHostedAccessServiceDep = Annotated[WorkspaceHostedAccessService, Depends(get_workspace_hosted_access_service)]
 
 
 def get_web_search_key_service(

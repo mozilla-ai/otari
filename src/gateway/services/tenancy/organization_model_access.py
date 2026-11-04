@@ -49,7 +49,12 @@ from gateway.repositories.tenancy.org_provider_key_repository import (
     WorkspaceProviderModelRestrictionRepository,
 )
 from gateway.services.provider_kwargs import provider_key
-from gateway.services.tenancy.authorization import VisibleWorkspaceScope, resolve_visible_workspace_scope
+from gateway.services.providers import narrow_hosted_models
+from gateway.services.tenancy.authorization import (
+    VisibleWorkspaceScope,
+    resolve_visible_workspace,
+    resolve_visible_workspace_scope,
+)
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, has_credential, key_is_usable
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.workspace_scope import lookup_default_workspace_id, organization_for_workspace_id
@@ -148,15 +153,7 @@ async def resolve_workspace_byo_providers(db: AsyncSession, workspace_id: uuid.U
     """
     if workspace_id is None:
         return frozenset()
-    organization_id = await organization_for_workspace_id(db, workspace_id)
-    if organization_id is None:
-        return frozenset()
-    active = await OrgProviderKeyService(db).get_active_keys(
-        organization_id=organization_id, workspace_ids=[workspace_id]
-    )
-    return frozenset(
-        provider_key(provider) for provider, key in active.get(workspace_id, {}).items() if has_credential(key)
-    )
+    return await OrgProviderKeyService(db).get_workspace_byo_providers(workspace_id=workspace_id)
 
 
 def _narrowed(
@@ -326,28 +323,38 @@ async def resolve_session_catalog_scope(
     user: User,
     organizations: OrganizationService | None = None,
     model_provider: ModelProviderPort | None,
+    workspace_id: uuid.UUID | None = None,
 ) -> SessionCatalogScope:
     """Returns what this session identity may be shown.
 
     An owner or admin is answered from the whole organization,
     because a workspace's disable or model restriction is theirs to lift.
     A member is answered from their own workspaces.
+    ``workspace_id`` answers for that one workspace instead, whatever the
+    caller's role: what a request billed to it may call, its own disables and
+    model lists included. A workspace the caller may not see raises not-found.
     A caller with no live organization membership gets the configured instances rather than a refusal.
     Passing ``None`` as ``model_provider`` lists no hosted providers.
 
-    NOTE: this never answers unrestricted, so a caller should decide that for a deployment operator first.
+    NOTE: without ``workspace_id`` this never answers unrestricted, so a caller should decide that for a
+    deployment operator first.
     """
     services = organizations if organizations is not None else OrganizationService(db, membership_listener=None)
     allowlist = {f"{instance}:*" for instance in config.providers}
-    try:
-        scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)
-    except (TenancyForbiddenError, TenancyNotFoundError):
-        return SessionCatalogScope(
-            allowlist=sorted(allowlist),
-            reads_default_workspace=False,
-            deployment_supplied_providers=frozenset(),
-            offered_keys=frozenset(),
-        )
+    if workspace_id is not None:
+        workspace = await resolve_visible_workspace(db, user=user, workspace_id=workspace_id, organizations=services)
+        organization = await services.get_active_organization_for_user(user)
+        scope = VisibleWorkspaceScope(organization=organization, workspace_ids=[workspace.id])
+    else:
+        try:
+            scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)
+        except (TenancyForbiddenError, TenancyNotFoundError):
+            return SessionCatalogScope(
+                allowlist=sorted(allowlist),
+                reads_default_workspace=False,
+                deployment_supplied_providers=frozenset(),
+                offered_keys=frozenset(),
+            )
 
     provider_keys = OrgProviderKeyService(db)
     hosted_models = await resolve_hosted_models(model_provider, scope.organization.id)
@@ -371,12 +378,22 @@ async def resolve_session_catalog_scope(
             organization_id=scope.organization.id, workspace_ids=scope.workspace_ids or []
         )
         byo_allowlist = await _get_byo_allowlist(db, active_keys)
-        # Dispatch asks the port only in a workspace with no active key that has a credential.
-        reachable_hosted = frozenset(
-            provider
-            for provider in hosted
-            if any((key := keys.get(provider)) is None or not has_credential(key) for keys in active_keys.values())
-        )
+        # Dispatch asks the port only in a workspace with no active key that has
+        # a credential, and only for what that workspace's own rule leaves it.
+        # A model one of the caller's workspaces can call is one they can call.
+        reachable: dict[str, set[str] | None] = {}
+        for workspace_id, keys in active_keys.items():
+            for provider, roster in narrow_hosted_models(hosted_models, workspace_id).items():
+                if (key := keys.get(provider)) is not None and has_credential(key):
+                    continue
+                if roster is None or (provider in reachable and reachable[provider] is None):
+                    reachable[provider] = None
+                else:
+                    reachable[provider] = (reachable.get(provider) or set()) | roster
+        reachable_hosted = frozenset(reachable)
+        hosted_models = {
+            provider: None if roster is None else frozenset(roster) for provider, roster in reachable.items()
+        }
     byo_providers = (
         await provider_keys.get_byo_providers(organization_id=scope.organization.id) if hosted else frozenset()
     )

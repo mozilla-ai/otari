@@ -42,11 +42,12 @@ returns are described in
 
 A hosted provider and an organization's provider key can each be declared
 zero data retention (`zero_data_retention`): the account the key belongs to
-keeps no prompts or completions. Otari cannot check this and enforces nothing
-on it. It records what the operator or the organization says about their
-agreement with the provider, and the Models page shows it beside each
-offering and filters on it (see
-[Browsing the grouped catalog](models.md#browsing-the-grouped-catalog)).
+keeps no prompts or completions. Otari cannot check this. It records what the
+operator or the organization says about their agreement with the provider,
+and the Models page shows it beside each offering and filters on it (see
+[Browsing the grouped catalog](models.md#browsing-the-grouped-catalog)). A
+workspace can require it, which refuses every undeclared source at the API;
+see [Control workspace access](provider-keys.md#control-workspace-access).
 
 Whose declaration counts depends on whose key serves the offering:
 
@@ -146,6 +147,25 @@ model the operator switched off. A model switched on without a price on purpose
 stays on through a refresh: one a moved or copied provider lists, one an
 operator switched on while nothing priced it, and every model of a provider
 that serves models not on its list.
+
+### Workspace access
+
+An organization that may use a hosted provider may still keep it from one of
+its workspaces. On the workspace's **Providers** tab (**Organization**, then
+**Workspaces**), an organization owner or admin, or an owner or admin of the
+workspace, can switch a hosted provider off for that workspace or narrow it to
+some of the models it serves. Members of the workspace can read what is set.
+
+A workspace can only take away: it never reaches a hosted provider its
+organization may not use, nor a model the roster does not serve. A request
+the workspace's rule refuses gets `403` with the same detail as a model an API
+key may not use, and the workspace's catalog leaves out what it refuses. Where
+the workspace calls the provider on the organization's own key, the hosted
+provider is never asked, so its row there has no effect.
+
+A change takes effect at once on the server that saved it and within 30
+seconds on every other one. The rows are served under
+`/api/v1/workspaces/{workspace_id}/hosted-providers`.
 
 ## Pricing
 

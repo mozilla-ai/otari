@@ -393,6 +393,21 @@ class HostedProviderUnsafeApiBaseError(TenancyValidationError):
         super().__init__(message)
 
 
+class WorkspaceHostedProviderNotFoundError(TenancyNotFoundError):
+    """A hosted provider the workspace's organization may not use, or that does not exist.
+
+    The two are one answer, so a name restricted to another organization reads
+    exactly like one that was never configured.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' not found")
+
+
+class WorkspaceHostedModelsInvalidError(TenancyValidationError):
+    """A model list a workspace cannot store for a hosted provider: empty, or naming models it does not serve."""
+
+
 __all__ = [
     "HostedCatalogEmptyError",
     "HostedModelAlreadyOfferedError",
@@ -427,5 +442,7 @@ __all__ = [
     "ProviderEndpointNotFoundError",
     "ProviderEndpointOwnerNotFoundError",
     "ProviderEndpointsDisabledError",
+    "WorkspaceHostedModelsInvalidError",
+    "WorkspaceHostedProviderNotFoundError",
     "WorkspaceProviderKeyOverrideConflictError",
 ]
