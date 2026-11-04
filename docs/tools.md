@@ -885,9 +885,11 @@ An organization can bring its own provider keys, so its workspaces' searches and
 fetches are paid by its own accounts and count against its own quotas, rather
 than the deployment's. A search key alone leaves the pages a search reads to
 enrich its results on the deployment's fetch instance and account (see
-[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)); a fetch key moves
-them to the organization's, and `web_search_extract: false` reads none. Each
-key has a kind, fixed when it is added:
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A fetch key moves
+them to the organization's, except where the search runs on a search instance
+whose `fetch_tool` names a fetch instance: that instance reads them, on the
+deployment's account. `web_search_extract: false` reads none. Each key has a
+kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
