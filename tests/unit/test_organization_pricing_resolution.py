@@ -44,6 +44,7 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
     resolve_tool_rate,
+    tool_unit_rate,
 )
 from gateway.types.tool_charges import LabelCalls
 
@@ -741,6 +742,22 @@ async def _tool_price(session: AsyncSession, model_key: str, rate: float) -> Non
 
 
 _EXA = "exa:exa-search"
+
+
+def test_one_calls_rate_is_its_first_priced_rate_key_before_rounding() -> None:
+    """The reservation tool gate holds calls at this rate, so it is the rate settlement charges, unrounded."""
+
+    async def scenario(session: AsyncSession) -> None:
+        await _tool_price(session, _EXA, 0.4)
+        await _tool_price(session, "otari:web_search", 10_000.0)
+
+        pages = await tool_unit_rate(session, _calls(label=_EXA, rate_keys=(_EXA, "otari:web_search"), calls=20))
+        unpriced = await tool_unit_rate(session, _calls(label="tabstack:tabstack", rate_keys=("tabstack:tabstack",)))
+
+        assert pages == pytest.approx(Decimal("0.0000004"))
+        assert unpriced == Decimal(0)
+
+    _run(scenario)
 
 
 def test_each_label_gets_a_line_priced_by_its_first_rate_key_with_a_row() -> None:
