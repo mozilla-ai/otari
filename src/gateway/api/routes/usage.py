@@ -317,7 +317,8 @@ async def get_request_settlement(
     by a background writer, so a lookup made the instant a stream closes can
     precede them), and for an id that is unknown or belongs to another key, with
     no way to tell those apart. A stream that ended before the provider reported
-    usage, and ran no gateway tools, writes no row, so its id stays 404.
+    usage and ran no gateway tools writes a row only under the ``estimate`` policy,
+    billed on an estimate; otherwise it writes none, so its id stays 404.
     """
     api_key, is_master_key = auth_result
     api_key_id: str | None = None

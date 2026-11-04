@@ -661,7 +661,8 @@ def test_streamed_text_chars_reads_a_messages_text_delta() -> None:
         type="content_block_delta", delta=SimpleNamespace(type="input_json_delta", partial_json="{}")
     )
     start = SimpleNamespace(type="message_start")
-    assert [pipeline._streamed_text_chars(c) for c in (text, tool, start)] == [4, 0, 0]
+    no_delta = SimpleNamespace(type="content_block_delta")
+    assert [pipeline._streamed_text_chars(c) for c in (text, tool, start, no_delta)] == [4, 0, 0, 0]
 
 
 def test_streamed_text_chars_tolerates_a_chunk_without_a_delta() -> None:
