@@ -153,15 +153,7 @@ async def resolve_workspace_byo_providers(db: AsyncSession, workspace_id: uuid.U
     """
     if workspace_id is None:
         return frozenset()
-    organization_id = await organization_for_workspace_id(db, workspace_id)
-    if organization_id is None:
-        return frozenset()
-    active = await OrgProviderKeyService(db).get_active_keys(
-        organization_id=organization_id, workspace_ids=[workspace_id]
-    )
-    return frozenset(
-        provider_key(provider) for provider, key in active.get(workspace_id, {}).items() if has_credential(key)
-    )
+    return await OrgProviderKeyService(db).get_workspace_byo_providers(workspace_id=workspace_id)
 
 
 def _narrowed(

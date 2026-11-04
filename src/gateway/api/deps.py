@@ -162,7 +162,7 @@ from gateway.services.providers import (
     ProviderEndpointService,
     ScheduledRun,
     WorkspaceHostedAccessService,
-    organization_to_serve,
+    hosted_models_for,
     refresh_provider_endpoint_cache,
     refresh_workspace_hosted_access_cache,
 )
@@ -190,7 +190,6 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailService
-from gateway.services.tenancy.organization_model_access import resolve_hosted_models, resolve_workspace_byo_providers
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_activation_service import WorkspaceActivationService
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers, WorkspaceMcpServerService
@@ -1739,23 +1738,23 @@ WorkspaceAccessDep = Annotated[WorkspaceAccess, Depends(get_workspace_access)]
 
 
 def get_workspace_hosted_access_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     access: WorkspaceAccessDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
     model_provider: RequestSessionModelProviderPortDep,
 ) -> WorkspaceHostedAccessService:
-    """Build the workspace hosted provider access service on the request's session and unit of work.
+    """Build the workspace hosted provider access service on the request's unit of work.
 
     The hosted port answers which providers an organization may use, and the
     organization's own keys which of them a workspace never asks the port
-    about; both read through the session, which the service may not name.
+    about. Both are other domains' answers, handed in as callables.
     """
 
     async def hosted_models(organization_id: uuid.UUID | None) -> HostedModels:
-        return await resolve_hosted_models(model_provider, organization_to_serve(organization_id))
+        return await hosted_models_for(model_provider, organization_id=organization_id)
 
     async def byo_providers(workspace_id: uuid.UUID) -> frozenset[str]:
-        return await resolve_workspace_byo_providers(db, workspace_id)
+        return await org_provider_keys.get_workspace_byo_providers(workspace_id=workspace_id)
 
     return WorkspaceHostedAccessService(
         uow,

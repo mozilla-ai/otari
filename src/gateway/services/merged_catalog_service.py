@@ -1133,6 +1133,15 @@ class ZeroDataRetention:
         return False
 
 
+def withholds_offering(merged: MergedCatalog, *, zero_data_retention: bool) -> bool:
+    """Whether an offering is left out of ``merged``'s grouped view for the workspace it was built for.
+
+    A workspace requiring zero data retention is shown no offering that is not
+    declared it, since dispatch refuses every one of them.
+    """
+    return merged.requires_zero_data_retention and not zero_data_retention
+
+
 async def viewer_zero_data_retention(
     hosted_providers: "HostedProviderService",
     org_provider_keys: OrgProviderKeyService,

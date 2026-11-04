@@ -951,6 +951,20 @@ class OrgProviderKeyService:
             }
         return active
 
+    async def get_workspace_byo_providers(self, *, workspace_id: uuid.UUID) -> frozenset[str]:
+        """Returns the providers one workspace calls on a key of its own.
+
+        Narrowed exactly as dispatch is: the key active in that workspace,
+        holding a credential, which is the one condition under which dispatch
+        never asks the hosted port. A key the organization holds in another
+        workspace does not count.
+        """
+        workspace = await self.workspaces.get(workspace_id)
+        if workspace is None or workspace.organization_id is None:
+            return frozenset()
+        active = await self.get_active_keys(organization_id=workspace.organization_id, workspace_ids=[workspace_id])
+        return frozenset(provider for provider, key in active.get(workspace_id, {}).items() if has_credential(key))
+
     async def get_byo_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
         """Returns the providers that every workspace in the organization calls with its own key.
 
