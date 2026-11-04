@@ -135,8 +135,9 @@ admitted request keeps its hold until it settles, and a new request is admitted
 only while recorded spend, every hold still in flight and its own hold together
 fit under the cap, checked in one conditional update so two requests cannot both
 take the last of it. Ten parallel requests near the cap are therefore admitted
-only as far as their combined worst case fits, and the rest are refused. A hold a crashed request leaves behind is returned after 15 minutes (self-hosted,
-see [Budget enforcement](configuration.md#budget-enforcement)). Scoped ceilings hold the
+only as far as their combined worst case fits, and the rest are refused. A hold a crashed request leaves behind is returned after
+`budget_reservation_ttl_sec`, 15 minutes by default (see
+[Budget enforcement](configuration.md#budget-enforcement)). Scoped ceilings hold the
 same way, so a key's ceiling bounds all of its end users' in-flight requests
 together.
 

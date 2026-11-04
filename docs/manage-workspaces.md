@@ -41,7 +41,9 @@ environment without filtering.
 1. Open **Organization**, then **Workspaces**.
 2. Find the workspace, click **Delete** (the bin icon), and confirm.
 
-A workspace that still holds API keys, usage, aliases or routing policies cannot
-be deleted, so its spend history outlives it: move or delete those first. The
-organization's last workspace cannot be deleted either. Move every application
-that still uses the workspace before you delete it.
+A workspace that still holds API keys, aliases, routing policies or usage cannot
+be deleted. Keys, aliases and policies can be removed first, but the usage of
+requests the gateway served is kept for good, so a workspace that has served
+requests stays; only imported usage can be deleted. The organization's last
+workspace cannot be deleted either. Move every application that still uses the
+workspace before you delete it.

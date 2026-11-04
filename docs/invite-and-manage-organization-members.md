@@ -10,7 +10,8 @@ each person can use, so everyone sees only what their work needs.
 3. Enter one or more email addresses, separated by commas or new lines.
 4. Select the role: Owner, Admin, Member or Viewer.
 5. Choose the workspaces the person should have access to.
-6. Click **Invite member**. The person gets an invitation by email, and their
+6. Click **Invite member**. The person gets an invitation by email or, when no
+   email goes out, the dialog shows an accept link to share with them. The
    membership becomes active once they accept it.
 
 ## Manage existing members

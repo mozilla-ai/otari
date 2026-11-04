@@ -48,7 +48,9 @@ export OTARI_MASTER_KEY=$(grep '^OTARI_MASTER_KEY=' .env | cut -d= -f2-)
   of attached files. Compose requires it.
 
 The last command keeps the master key in your shell for steps 4 and 5, and is
-safe to run again in a new shell. Git ignores `.env`.
+safe to run again in a new shell. An `.env` that already existed is left alone,
+so check it sets all six variables: Compose refuses to start without
+`OTARI_PROVIDER_ACCOUNT_PEPPER`. Git ignores `.env`.
 
 ## 3. Start Otari
 

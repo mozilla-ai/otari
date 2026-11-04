@@ -45,8 +45,10 @@ The API, an SDK or automation addresses a workspace by its id, which
    **Delete workspace**.
 
 The workspace goes with its memberships. The gateway refuses to delete one that
-still holds API keys, usage, aliases or routing policies, so a workspace's spend
-history outlives it: move or delete those first. It also refuses to delete an
+still holds API keys, aliases, routing policies or usage. Keys, aliases and
+policies can be removed first, but the usage of requests the gateway served is
+never deleted (only imported usage is), so a workspace that has served requests
+cannot be deleted. It also refuses to delete an
 organization's last workspace; create another before deleting it.
 
 ## Delete an organization

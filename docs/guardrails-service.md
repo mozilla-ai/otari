@@ -30,7 +30,8 @@ x86 host, set `OTARI_ENCODERFILE_IMAGE` to the `.x86_64-linux-gnu` tag, as
 service image, so check that it names an image you have if the pull is refused.
 
 Start the gateway with `OTARI_GUARDRAILS_URL=http://localhost:8183`. Stop the
-containers with `docker compose --profile guardrails down`.
+guardrails containers with `docker compose stop anyguardrails encoderfile`; a
+`docker compose --profile guardrails down` would remove the gateway too.
 
 Check the service directly with:
 

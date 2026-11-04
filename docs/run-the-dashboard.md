@@ -137,8 +137,10 @@ Set `activation_guide: false` to disable the Overview's
 Where the deployment sets `open_signup: true`, a new address can create an
 account with its own organization, through the signup form or a Google or
 GitHub sign-in, and someone signed in who belongs to no organization is offered
-to create one. The gateway refuses both otherwise. Setup and the rules for each
-sign-in method are in [Sign-in and accounts](sign-in.md).
+to create one. The gateway refuses both otherwise. The signup form also needs
+[mail](configuration.md#mail), since it sends a verification link; a Google or
+GitHub sign-in does not. Setup and the rules for each sign-in method are in
+[Sign-in and accounts](sign-in.md).
 
 Where the deployment publishes terms (`terms_url`), the signup page asks for
 them before any of those, and the invitation page asks before "Accept and sign

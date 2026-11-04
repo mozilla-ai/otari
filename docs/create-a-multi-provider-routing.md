@@ -126,17 +126,22 @@ tab, with its cost and the models Otari tried.
 
 ## Test the fallback
 
-To see the fallback work, break the main model on purpose:
+To see the fallback work, break the main model on purpose, for the test
+workspace only. Every workspace that follows the organization uses its OpenAI
+key, so do not break that one:
 
-1. In **Organization**, then **Providers**, replace your OpenAI key with an
-   invalid one. Leave the Anthropic key alone.
-2. Send the same request again.
+1. In **Organization**, then **Providers**, add an OpenAI key with an invalid
+   value, named `fallback-test`.
+2. Edit the test workspace and select **Always use this key** for
+   `fallback-test`. Other workspaces keep the organization's key.
+3. Send the same request again.
 
 It still succeeds. This time `Otari-Fallback` is `true` and `Otari-Model` names
 the Anthropic model: OpenAI refused the key, and Otari moved on to the backup.
 The **Requests** tab records both attempts.
 
-Put your real OpenAI key back when you are done.
+When you are done, set the test workspace back to **Follow the organization**
+and remove the `fallback-test` key.
 
 ## A good first production setup
 
