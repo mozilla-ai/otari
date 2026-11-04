@@ -12,6 +12,9 @@ import re
 
 from gateway.secret_shapes import CREDENTIAL_SHAPES, REDACTION_PLACEHOLDER
 
+# What a caller is told of a provider's failure when nothing of the failure itself may be shown.
+PASSTHROUGH_PROVIDER_ERROR_DETAIL = "The request could not be completed by the provider"
+
 # Cap on an exposed upstream message. Providers occasionally echo the offending
 # request back in the error body, and a response detail is not the place for a
 # few hundred KB of it.
@@ -81,4 +84,13 @@ def redact_upstream_message(message: str) -> str:
     redacted = " ".join(redacted.split())
     if len(redacted) > MAX_EXPOSED_DETAIL_CHARS:
         redacted = redacted[: MAX_EXPOSED_DETAIL_CHARS - len("...")].rstrip() + "..."
+    return redacted
+
+
+def redacted_upstream_detail(message: str, fallback: str) -> str:
+    """Return redacted explanatory text, or a fixed detail when none remains."""
+    redacted = redact_upstream_message(message)
+    explanatory = redacted.replace("[redacted]", "")
+    if not any(char.isalpha() for char in explanatory):
+        return fallback
     return redacted

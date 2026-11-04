@@ -610,3 +610,11 @@ class RateLimitGrantMiddleware:
                     await asyncio.shield(_close_grant(grant))
                 except Exception:
                     logger.exception("Could not give back a request's concurrency slots; their leases will run out")
+
+
+def rate_limit_headers(info: RateLimitInfo) -> dict[str, str]:
+    return {
+        "X-RateLimit-Limit": str(info.limit),
+        "X-RateLimit-Remaining": str(info.remaining),
+        "X-RateLimit-Reset": str(int(info.reset)),
+    }

@@ -36,7 +36,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_api_key_or_master_key_for_upload,
 )
-from gateway.api.routes._helpers import bounded_body, resolve_user_id
+from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import FilesDisabledError
@@ -49,6 +49,7 @@ from gateway.schemas.files import (
     OpenAIFileList,
     OpenAIFileObject,
 )
+from gateway.services.api_keys import resolve_user_id
 from gateway.services.files import (
     DEFAULT_LIST_LIMIT,
     MAX_LIST_LIMIT,
