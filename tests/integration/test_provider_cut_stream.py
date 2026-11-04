@@ -1,4 +1,4 @@
-"""A stream the provider cuts after output reached the caller is billed on an estimate and marked incomplete."""
+"""A stream the provider cuts after output reached the caller is billed on an estimate and stays an error."""
 
 from collections.abc import AsyncIterator
 from typing import Any

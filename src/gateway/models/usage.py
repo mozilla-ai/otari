@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -13,6 +13,9 @@ from gateway.models.money import UsdCost
 
 # Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
 PRICING_REFERENCE_MAX_LENGTH = 511
+
+# Who ended a stream before it completed.
+StreamCutBy = Literal["provider", "client"]
 
 # ``usage_logs.source`` on a row this gateway served itself. Any other value is usage
 # imported through the external-events or OTLP ingest, which reserves this one so an
