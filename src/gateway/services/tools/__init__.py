@@ -11,7 +11,8 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
-and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
+and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
+``web_access_disabled_refusal`` where the workspace turned web access off.
 ``with_typed_code_execution_tool`` reads Gemini's own code-execution declaration as the bare keyword, and
 ``provider_attempt_kwargs`` gives it back to each attempt that goes to Gemini.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
@@ -33,9 +34,12 @@ tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds
 any-fetch's ``builtin`` provider, once, at startup. ``WebSearchBackend`` runs the search tool on an
 ``InLoopSearch``, ``build_web_search_backends`` builds it and the fetch tool's beside it for a request, and
 ``WebToolCallCap`` is the search and fetch calls one request may make between them.
+``DirectToolService`` runs a direct tool call, from its billed user to its settled cost, over the
+interfaces beside it (``DirectToolAccounts``, ``DirectToolLedger``, ``DirectToolGates``,
+``WorkspaceWebPolicies``), which the request's builder implements.
 ``pick_direct_search_instance``, ``resolve_direct_search`` and ``run_direct_search`` hold the direct
-search endpoint's rules and run its call, ``refuse_unpriced_direct_search`` refuses one ``require_pricing``
-cannot bill, and ``SearchQuery`` with the helpers beside it map LiteLLM's
+search endpoint's rules and run its call, ``unpriced_direct_search_detail`` names the row one
+``require_pricing`` cannot bill is missing, and ``SearchQuery`` with the helpers beside it map LiteLLM's
 search fields onto a provider. ``build_web_provider_client`` builds the client the web tools' providers
 are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
 ``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's tool calls, ``mcp_entry``
@@ -81,6 +85,18 @@ from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CA
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
 from gateway.services.tools._combined_backend import CombinedToolBackend, owning_backend
 from gateway.services.tools._declarations import Tool
+from gateway.services.tools._direct_tool_call import (
+    DirectCaller,
+    DirectToolAccounts,
+    DirectToolCall,
+    DirectToolGates,
+    DirectToolLedger,
+    DirectToolOutcome,
+    DirectToolResult,
+    DirectToolService,
+    DirectToolUsage,
+    WorkspaceWebPolicies,
+)
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
 from gateway.services.tools._native import (
@@ -116,7 +132,7 @@ from gateway.services.tools._tool_prices import (
     unpriced_tool_detail,
 )
 from gateway.services.tools._use_budget import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
-from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy
+from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy, web_access_disabled_refusal
 from gateway.services.tools._web_admission import (
     NO_WEB_TOOLS,
     AdmittedWebTools,
@@ -167,13 +183,13 @@ from gateway.services.tools._web_search import (
     filter_hits_by_domain,
     page_budget_chars,
     pick_direct_search_instance,
-    refuse_unpriced_direct_search,
     resolve_direct_search,
     resolve_fetch,
     resolve_in_loop_search,
     resolve_search,
     run_direct_search,
     search_resolves,
+    unpriced_direct_search_detail,
     warn_about_tool_instances,
     web_search_configured,
 )
@@ -183,6 +199,16 @@ from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_
 from gateway.services.tools._web_tool_failure import WebToolFailure
 
 __all__ = [
+    "DirectCaller",
+    "DirectToolAccounts",
+    "DirectToolCall",
+    "DirectToolGates",
+    "DirectToolLedger",
+    "DirectToolOutcome",
+    "DirectToolResult",
+    "DirectToolService",
+    "DirectToolUsage",
+    "WorkspaceWebPolicies",
     "MAX_TOOL_ITERATIONS_CAP",
     "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",
@@ -229,6 +255,7 @@ __all__ = [
     "admit_mcp_servers",
     "admit_web_access",
     "apply_web_access_policy",
+    "web_access_disabled_refusal",
     "code_execution_declaration_forms",
     "decide_code_executor",
     "decide_candidate_tools",
@@ -308,10 +335,10 @@ __all__ = [
     "owning_backend",
     "page_budget_chars",
     "pick_direct_search_instance",
-    "refuse_unpriced_direct_search",
     "resolve_direct_search",
     "fetch_resolves",
     "run_direct_search",
+    "unpriced_direct_search_detail",
     "search_resolves",
     "warn_about_tool_instances",
     "web_search_configured",

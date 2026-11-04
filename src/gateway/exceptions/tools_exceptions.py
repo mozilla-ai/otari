@@ -382,8 +382,8 @@ class DirectSearchFieldRefusedError(TenancyValidationError):
         )
 
 
-class DirectSearchFailedError(TenancyError):
-    """The provider failed a direct search, or could not be reached.
+class DirectToolFailedError(TenancyError):
+    """The provider failed a direct tool call, or could not be reached.
 
     ``message`` is the provider's own account, for the usage row and the log
     only: an old client's can quote the upstream body. ``headers`` carry the
@@ -399,15 +399,30 @@ class DirectSearchFailedError(TenancyError):
         self.upstream_status = upstream_status
 
 
-class DirectSearchPricingRequiredError(TenancyError):
-    """A direct search refused because ``require_pricing`` is on and no pricing row prices it.
+class DirectSearchFailedError(DirectToolFailedError):
+    """The provider failed a direct search, or could not be reached."""
 
-    ``message`` names the row to add; the route returns it to the caller and
-    writes it on the usage row.
+
+class DirectToolCallError(TenancyError):
+    """A direct tool call that ended without a result, as its caller is answered.
+
+    ``message`` is the detail the caller gets, ``status_code`` the status, and
+    ``headers`` what the answer carries besides: an error code, or a provider
+    failure's safe fields.
     """
 
-    status_code = status.HTTP_402_PAYMENT_REQUIRED
-    error_code: str = PRICING_REQUIRED
+    def __init__(self, message: str, *, status_code: int, headers: dict[str, str] | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.headers = headers
+
+
+class FundsCheckFailedError(Exception):
+    """The billing port could not say whether an organization's funds cover a call; ``description`` is for the log."""
+
+    def __init__(self, description: str) -> None:
+        super().__init__(description)
+        self.description = description
 
 
 class GatewayToolPricingRequiredError(TenancyError):
@@ -453,6 +468,9 @@ class WebSearchCredentialRefusedError(TenancyError):
 __all__ = [
     "DirectSearchFailedError",
     "DirectSearchFieldRefusedError",
+    "DirectToolCallError",
+    "DirectToolFailedError",
+    "FundsCheckFailedError",
     "McpSessionsInterruptedError",
     "SandboxCredentialRefusedError",
     "SandboxImageNotAllowedError",
