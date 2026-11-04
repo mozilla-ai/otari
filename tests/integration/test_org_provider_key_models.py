@@ -17,12 +17,13 @@ from decimal import Decimal
 
 import pytest
 from any_llm.types.model import Model
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.exceptions.providers_exceptions import (
@@ -378,6 +379,50 @@ async def test_adding_a_model_by_name_offers_it(async_db: AsyncSession, monkeypa
 
     with pytest.raises(OrgProviderModelAlreadyOfferedError):
         await _service(async_db).add_model(user=owner, key_id=key_id, model="gpt-4o")
+
+
+async def test_a_search_narrows_the_offered_models_and_their_count(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    other_key_id = await _key(async_db, owner, name="secondary")
+    _defaults(monkeypatch, {})
+    for model in ("gpt-4o", "gpt-4o-mini", "o3_pro", "o3-mini"):
+        await _service(async_db).add_model(user=owner, key_id=key_id, model=model)
+    await _service(async_db).add_model(user=owner, key_id=other_key_id, model="gpt-4o-other-key")
+
+    async def search(term: str) -> tuple[list[str], int]:
+        page = await _service(async_db).list_models(user=owner, key_id=key_id, search=term)
+        return [row.model for row in page.data], page.count
+
+    assert await search("GPT-4O") == (["gpt-4o", "gpt-4o-mini"], 2)
+    # An underscore is the text it says, not LIKE's any-character wildcard.
+    assert await search("o3_") == (["o3_pro"], 1)
+    assert await search("nothing-like-this") == ([], 0)
+    assert (await search("  "))[1] == 4
+
+
+def test_the_route_passes_the_search_through_and_bounds_it(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _discovery(monkeypatch, "gpt-4o", "o3_pro", "o3-mini")
+    _defaults(monkeypatch, {})
+    created = client.post(
+        f"{API_ROOT}/organizations/me/provider-keys",
+        json={"provider": "openai", "name": "primary", "api_key": "sk-live-1234"},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+    path = f"{API_ROOT}/organizations/me/provider-keys/{created.json()['id']}/models"
+
+    listed = client.get(path, params={"search": "O3_"}, headers=master_key_header)
+    assert listed.status_code == 200, listed.text
+    assert [row["model"] for row in listed.json()["data"]] == ["o3_pro"]
+    assert listed.json()["count"] == 1
+
+    assert client.get(path, params={"search": "x" * 201}, headers=master_key_header).status_code == 422
 
 
 async def test_the_unique_index_decides_a_racing_offer(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:

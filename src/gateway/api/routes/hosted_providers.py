@@ -216,9 +216,19 @@ async def list_hosted_models(
     provider: str,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description="Narrow to models whose name contains this text, case-insensitively.",
+        ),
+    ] = None,
 ) -> HostedModelsPublic:
-    """List the models offered on one provider, with the price each currently serves at."""
-    return await service.list_models(provider, skip=skip, limit=limit)
+    """List the models offered on one provider, with the price each currently serves at.
+
+    ``search`` narrows the page and the count together.
+    """
+    return await service.list_models(provider, skip=skip, limit=limit, search=search)
 
 
 @router.post("/{provider}/models", status_code=status.HTTP_201_CREATED)
