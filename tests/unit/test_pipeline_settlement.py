@@ -783,7 +783,7 @@ async def test_a_provider_cut_after_the_prompt_was_reported_bills_the_streamed_o
 ) -> None:
     """Anthropic reports the prompt in message_start and the output only at the end."""
     started = CompletionUsage(prompt_tokens=120, completion_tokens=1, total_tokens=121)
-    chunks = [_chunk(started).model_copy(update={"choices": []}), _text_chunk("abcd" * 100)]
+    chunks = [_text_chunk("").model_copy(update={"usage": started}), _text_chunk("abcd" * 100)]
 
     settlement = await _cut_stream(monkeypatch, chunks, streaming.IncompleteStreamError(2))
 
@@ -795,16 +795,39 @@ async def test_a_provider_cut_after_the_prompt_was_reported_bills_the_streamed_o
 
 
 @pytest.mark.asyncio
-async def test_a_provider_cut_after_complete_usage_keeps_the_reported_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_provider_cut_after_the_final_usage_report_bills_what_the_provider_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The streamed text would estimate 525 tokens, above the 500 the provider reported at the end."""
     reported = CompletionUsage(prompt_tokens=120, completion_tokens=500, total_tokens=620)
-    chunks = [_text_chunk("abcd"), _chunk(reported).model_copy(update={"choices": []})]
+    chunks = [_text_chunk("abcd" * 525), _chunk(reported).model_copy(update={"choices": []})]
 
     settlement = await _cut_stream(monkeypatch, chunks, streaming.IncompleteStreamError(2))
 
     (logged,) = settlement.logged
-    assert logged["usage_override"].completion_tokens == 500
+    usage = logged["usage_override"]
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (120, 500, 620)
     assert not logged.get("incomplete")
     assert logged["stream_cut_by"] == "provider"
+
+
+def test_usage_is_final_on_the_event_that_ends_it_and_not_on_the_one_that_starts_it() -> None:
+    from test_inline_cost_adapters import _message_delta, _message_start
+
+    usage_only = _chunk(CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2)).model_copy(
+        update={"choices": []}
+    )
+    midstream = _text_chunk("hi").model_copy(
+        update={"usage": CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2)}
+    )
+
+    assert pipeline._is_final_usage(usage_only) is True
+    assert pipeline._is_final_usage(_chunk()) is True
+    assert pipeline._is_final_usage(midstream) is False
+    assert pipeline._is_final_usage(_message_delta()) is True
+    assert pipeline._is_final_usage(_message_start()) is False
+    assert pipeline._is_final_usage(SimpleNamespace(type="response.completed")) is True
+    assert pipeline._is_final_usage(SimpleNamespace(type="response.created")) is False
 
 
 @pytest.mark.asyncio
@@ -861,12 +884,17 @@ def test_a_provider_cut_row_is_an_error_and_a_client_abandon_is_incomplete() -> 
 def test_settle_cut_stream_never_raises_the_reported_output() -> None:
     reported = CompletionUsage(prompt_tokens=10, completion_tokens=9, total_tokens=19)
 
-    def settle(streamed_chars: int, usage: CompletionUsage | None) -> Any:
+    def settle(streamed_chars: int, usage: CompletionUsage | None, *, final: bool = False) -> Any:
         return settle_cut_stream(
-            policy="estimate", prompt_chars=40, streamed_chars=streamed_chars, reported_usage=usage
+            policy="estimate",
+            prompt_chars=40,
+            streamed_chars=streamed_chars,
+            reported_usage=usage,
+            usage_is_final=final,
         )
 
     assert settle(8, reported) is None
+    assert settle(400, reported, final=True) is None
     usage = settle(400, reported)
     assert usage is not None
     assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 100, 110)
