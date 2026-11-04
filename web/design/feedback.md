@@ -271,7 +271,7 @@ dialog compiles, lints, ships and loses. `Dialog` shares the family.
 error can replace a description rather than push the footer down, so a field with
 nothing to say under it holds nothing. Spell that as `shouldReserveMessage={false}`
 rather than by leaving the prop off, which reserves because the prop defaults to
-on: `FieldMessages` defaults its own `shouldReserve` to true and the four controls
+on: `FieldMessages` defaults its own `shouldReserve` to true and the six controls
 forward an undefined prop into it. Measured, a bare field in a dialog is 83px
 against the 60px it should be.
 The first field takes `autoFocus`.

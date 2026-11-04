@@ -48,6 +48,7 @@ export const TheReserve: Story = {
             onChange={setWithout}
             isInvalid={without.length > 0 && without.length < 3}
             errorMessage="At least 3 characters."
+            shouldReserveMessage={false}
           />
           <div className="border-t border-border pt-2 text-caption">
             This line moves when the message appears.

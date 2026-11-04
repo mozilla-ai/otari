@@ -1074,7 +1074,7 @@ function AppShellChrome() {
               {footerHasRowAboveBand ? (
                 isMobile ? (
                   // `cursor-pointer` because a bare button resolves to the default
-                  // arrow, which is the one thing `navRowClass` leaves to its call
+                  // arrow, which `navRowClass` leaves to its call
                   // sites (its other rows are links or HeroUI buttons).
                   <button
                     type="button"
