@@ -525,6 +525,8 @@ async def test_a_search_whose_provider_reports_its_cost_is_billed_that_cost(
     [line] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls"]
     assert (line["label"], line["units"]) == (f"fake:{_FAKE_SEARCH}", 1)
     assert line["cost"] == pytest.approx(0.005)
+    [pages] = [entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_fetch_calls"]
+    assert pages["label"] == f"fake:{_FAKE_FETCH}"
 
 
 @pytest.mark.asyncio
@@ -1000,6 +1002,44 @@ async def test_unpriced_fetch_is_refused_before_the_provider_call(
 
     assert response.status_code == 402, response.text
     assert "kind 'fetch' and model_key 'builtin_fetch'" in response.json()["detail"]
+    provider.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_search_whose_pages_an_unpriced_fetch_tool_would_read_is_refused_before_the_provider_call(
+    strict_pricing_client: TestClient, unpriced_builtin_fetch: None
+) -> None:
+    """The search is priced; the pages it would read through ``builtin_fetch`` are not, and the 402 names that row."""
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    strict_pricing_client.post(f"{API_ROOT}/users", json={"user_id": "pages-user"}, headers=headers)
+    for body in (
+        {"model_key": "openai:gpt-4o", "input_price_per_million": 1.0, "output_price_per_million": 1.0},
+        {
+            "kind": "search",
+            "model_key": "fake-search",
+            "input_price_per_million": 1_000.0,
+            "output_price_per_million": 0.0,
+        },
+    ):
+        response = strict_pricing_client.post(f"{API_ROOT}/pricing", json=body, headers=headers)
+        assert response.status_code == 200, response.text
+
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock()) as provider:
+        response = strict_pricing_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": "openai:gpt-4o",
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": "pages-user",
+                "tools": [{"type": "otari_web_search"}],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    detail = response.json()["detail"]
+    assert "'web_search' reads the pages of its results through a fetch tool that has no pricing" in detail
+    assert "kind 'fetch' and model_key 'builtin_fetch'" in detail
     provider.assert_not_called()
 
 

@@ -198,7 +198,9 @@ take the request past a limit is not run: the model is told it was refused
 Completions' `otari_tool_calls`), it is recorded as a failed call and not
 charged, and the request goes on. A call priced only by the cost its provider
 reports, with no rate, holds nothing, since that cost is known only once it
-returns. The pages a search reads to enrich its results are one hold, taken
+returns, and a call held at its rate that reports more is charged what it
+reported, which can take the request past a limit by the difference. The pages
+a search reads to enrich its results are one hold, taken
 once the search returns, for the pages it will read at the rate their fetch is
 billed at (the fetch instance's own, or `otari:web_fetch` on an organization
 fetch key); when it does not fit, no page is read, the results show their
@@ -268,7 +270,11 @@ cannot be read is neither billed nor counted. Pages read on an
 `org:<provider>` and priced under `otari:web_fetch`. A search the older
 backend runs (the legacy settings, or a Tavily, Brave or SearXNG organization
 key) reads its pages on the built-in fetcher and records no fetch, until that
-backend is removed.
+backend is removed. With `require_pricing` on, a search whose pages would be
+read through a fetch instance with no price is refused with `402` before it
+runs, the detail naming that instance's row; a search the older backend runs
+is not, since it records no fetch. `web_search_extract: false` turns the
+reading of pages off.
 
 ### Searches a provider runs itself
 
@@ -880,7 +886,13 @@ the same setting. It defaults to `true`.
 
 An organization can bring its own provider keys, so its workspaces' searches and
 fetches are paid by its own accounts and count against its own quotas, rather
-than the deployment's. Each key has a kind, fixed when it is added:
+than the deployment's. A search key alone leaves the pages a search reads to
+enrich its results on the deployment's fetch instance and account (see
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A fetch key moves
+them to the organization's, except where the search runs on a search instance
+whose `fetch_tool` names a fetch instance: that instance reads them, on the
+deployment's account. `web_search_extract: false` reads none. Each key has a
+kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
@@ -1049,6 +1061,16 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.37: the pages a search reads are billed as fetches
+
+The pages a search reads to enrich its results are billed as fetches on the
+fetch instance that read them (see
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). That instance needs
+a price, as the fetch tool does, or every search it enriches answers `402`
+under `require_pricing`. `builtin_fetch` has one on every upgraded database,
+and the startup warning names an instance that lacks one whether or not the
+fetch tool is enabled.
 
 ### From 0.36: a search or fetch tool is billed at its own price only
 
