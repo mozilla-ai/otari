@@ -316,3 +316,16 @@ def test_a_call_two_instrumentations_both_exported_counts_its_tokens_once_in_its
     [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
 
     assert (turn.llm_calls, turn.input_tokens, turn.output_tokens, turn.cache_read_tokens) == (1, 500, 20, 300)
+
+
+def test_a_call_two_instrumentations_reported_alike_keeps_the_span_that_counted_its_cache() -> None:
+    call = {"request_id": "msg_1", "input_tokens": 500, "output_tokens": 20}
+    spans = [
+        _span("turn", "step", opens_turn=True),
+        replace(_span("plain", "llm", "turn", **call), origin="otlp"),
+        replace(_span("cached", "llm", "turn", **call, cache_read_tokens=300), origin="otlp"),
+    ]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert turn.cache_read_tokens == 300

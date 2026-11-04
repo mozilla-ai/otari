@@ -94,9 +94,11 @@ from gateway.services.external_usage_service import (
     ExternalEventsRequest,
     ExternalUsageEvent,
     PricedEvent,
+    ReadUsage,
     claude_usage_events,
     ingest_external_events,
     is_reserved_source,
+    one_booking_per_response,
     token_count,
 )
 from gateway.services.traces import (
@@ -105,13 +107,11 @@ from gateway.services.traces import (
     HOOK_SCOPE,
     HOOK_USAGE_SOURCE,
     OtlpSpan,
-    PricedRequest,
     TraceService,
     TraceWriter,
     cache_in_input,
     gate_usage_event_id,
-    otlp_harness,
-    otlp_sessions,
+    priced_requests,
     record_otlp_export,
     record_priced_requests,
 )
@@ -496,58 +496,6 @@ async def _content_generation(traces: TraceService, config: GatewayConfig, works
         return None
 
 
-def _one_booking_per_response(
-    read: list[tuple[str, ExternalUsageEvent, tuple[str, str]]],
-) -> tuple[list[tuple[str, ExternalUsageEvent]], dict[str, tuple[str, str]]]:
-    """The usage events to book, one per response, and each one's span by its OTel trace and span id.
-
-    Spans of one response under different sources would each book it: a Claude SDK span's
-    booking is kept, and otherwise the one reporting the most tokens. A booking's span is the
-    one it was read from, so its cost reaches that span's session.
-    """
-
-    def tokens(event: ExternalUsageEvent) -> int:
-        return event.input_tokens + event.output_tokens + event.cache_read_tokens + event.cache_write_tokens
-
-    claude = {event.source_event_id for source, event, _ in read if source == CLAUDE_SOURCE}
-    richest: dict[str, int] = {}
-    for index, (source, event, _) in enumerate(read):
-        if source == CLAUDE_SOURCE or event.source_event_id in claude:
-            continue
-        kept = richest.get(event.source_event_id)
-        if kept is None or tokens(event) > tokens(read[kept][1]):
-            richest[event.source_event_id] = index
-    pairs: list[tuple[str, ExternalUsageEvent]] = []
-    event_spans: dict[str, tuple[str, str]] = {}
-    for index, (source, event, span_key) in enumerate(read):
-        if source == CLAUDE_SOURCE or richest.get(event.source_event_id) == index:
-            pairs.append((source, event))
-            event_spans.setdefault(event.source_event_id, span_key)
-    return pairs, event_spans
-
-
-def _priced_requests(
-    priced: list[PricedEvent], spans: list[OtlpSpan], event_spans: dict[str, tuple[str, str]]
-) -> list[PricedRequest]:
-    """Each priced event in the session of the span it was read from, or else the session it names."""
-    sessions = otlp_sessions(spans)
-    by_key = {(span.trace_id, span.span_id): span for span in spans}
-    requests: list[PricedRequest] = []
-    for e in priced:
-        key = event_spans.get(e.source_event_id)
-        session = sessions.get(key) if key is not None else None
-        if session is not None and key is not None:
-            harness = otlp_harness(by_key[key])
-            requests.append(
-                PricedRequest(
-                    e.source_event_id, session.key, e.timestamp, e.cost, e.source, e.rates, traced=True, harness=harness
-                )
-            )
-        elif e.session_label:
-            requests.append(PricedRequest(e.source_event_id, e.session_label, e.timestamp, e.cost, e.source, e.rates))
-    return requests
-
-
 def _record_priced(
     request: Request,
     priced: list[PricedEvent],
@@ -563,7 +511,7 @@ def _record_priced(
         return
     record_priced_requests(
         writer,
-        _priced_requests(priced, spans or [], event_spans or {}),
+        priced_requests(priced, spans or [], event_spans or {}),
         budget_exempt=api_key.exclude_from_budget,
         workspace_id=api_key.workspace_id,
         user_id=api_key.user_id,
@@ -639,7 +587,7 @@ async def receive_traces(
     parsed = _parse(body, content_type, ExportTraceServiceRequest())
     assert isinstance(parsed, ExportTraceServiceRequest)
 
-    read: list[tuple[str, ExternalUsageEvent, tuple[str, str]]] = []
+    read: list[ReadUsage] = []
     received: list[tuple[str, Any]] = []
     for resource_spans in parsed.resource_spans:
         for scope_spans in resource_spans.scope_spans:
@@ -662,7 +610,7 @@ async def receive_traces(
                         duration_ms=duration,
                         failed=span.status.code == _STATUS_CODE_ERROR,
                     )
-                    read.extend((CLAUDE_SOURCE, event, span_key) for event in events)
+                    read.extend(ReadUsage(CLAUDE_SOURCE, event, span_key) for event in events)
                     continue
                 attrs = _attributes(span.attributes)
                 if scope == HOOK_SCOPE:
@@ -684,8 +632,8 @@ async def receive_traces(
                     scope=scope,
                 )
                 if mapped is not None:
-                    read.append((*mapped, span_key))
-    pairs, event_spans = _one_booking_per_response(read)
+                    read.append(ReadUsage(*mapped, span_key, names_response=bool(attrs.get("gen_ai.response.id"))))
+    pairs, event_spans = one_booking_per_response(read)
 
     response = ExportTraceServiceResponse()
     priced: list[PricedEvent] = []

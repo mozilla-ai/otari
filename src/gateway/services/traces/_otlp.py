@@ -40,6 +40,7 @@ from decimal import Decimal
 from typing import Any
 
 from gateway.log_config import logger
+from gateway.services.external_usage_service import PricedEvent
 from gateway.services.traces._collector import call_id_digest, identifier_or_none
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._writer import SPANS_DROPPED, TraceWriter
@@ -655,13 +656,14 @@ def _project(
     keep_content: bool,
     content_generation: int | None = None,
     captured_at: datetime,
+    sessions: Mapping[tuple[str, str], SessionRef] | None = None,
 ) -> OtlpProjection:
     by_session: dict[SessionRef, list[SpanRecord]] = {}
     harness: dict[SessionRef, str | None] = {}
     invalid = 0
     over_cap = 0
     tools = _tool_facts(spans)
-    sessions = otlp_sessions(spans)
+    sessions = sessions if sessions is not None else otlp_sessions(spans)
     for span in spans:
         if not span.trace_id or not span.span_id:
             continue
@@ -715,6 +717,7 @@ def project_otlp_spans(
     keep_content: bool = False,
     content_generation: int | None = None,
     captured_at: datetime | None = None,
+    sessions: Mapping[tuple[str, str], SessionRef] | None = None,
 ) -> OtlpProjection:
     """Group received spans by session and project each one, attributed to the exporting key.
 
@@ -735,6 +738,7 @@ def project_otlp_spans(
             keep_content=keep_content,
             content_generation=content_generation,
             captured_at=captured_at or now,
+            sessions=sessions,
         )
     except Exception as exc:  # noqa: BLE001 - recording spans never fails the export
         logger.warning("OTLP spans not recorded: %s", type(exc).__name__)
@@ -759,7 +763,8 @@ def record_otlp_export(
     """Hand one export's spans to the trace writer, attributed to the exporting key.
 
     Keeps the first :data:`MAX_SPANS_PER_EXPORT` of the export's ``total`` spans and
-    counts the rest as dropped. Never raises: the export has already been answered for.
+    counts the rest as dropped, each kept span in the session the whole export gives it.
+    Never raises: the export has already been answered for.
 
     Only a key that may import is traced (``budget_exempt``), the rule the usage
     import holds it to, whatever the export carries: an export of agent spans
@@ -769,9 +774,11 @@ def record_otlp_export(
     if not budget_exempt:
         return
     try:
-        kept = list(itertools.islice(spans, MAX_SPANS_PER_EXPORT))
+        received = list(spans)
+        kept = received[:MAX_SPANS_PER_EXPORT]
         projection = project_otlp_spans(
             kept,
+            sessions=otlp_sessions(received),
             workspace_id=workspace_id,
             user_id=user_id,
             api_key_id=api_key_id,
@@ -835,6 +842,28 @@ def _usage_span(request: PricedRequest, window: _Window) -> SpanRecord:
             if meter in request.rates
         },
     )
+
+
+def priced_requests(
+    priced: Iterable[PricedEvent], spans: list[OtlpSpan], event_spans: Mapping[str, tuple[str, str]]
+) -> list[PricedRequest]:
+    """Each priced event in the session of the span it was read from, or else the session it names."""
+    sessions = otlp_sessions(spans)
+    by_key = {(span.trace_id, span.span_id): span for span in spans}
+    requests: list[PricedRequest] = []
+    for e in priced:
+        key = event_spans.get(e.source_event_id)
+        session = sessions.get(key) if key is not None else None
+        if session is not None and key is not None:
+            harness = otlp_harness(by_key[key])
+            requests.append(
+                PricedRequest(
+                    e.source_event_id, session.key, e.timestamp, e.cost, e.source, e.rates, traced=True, harness=harness
+                )
+            )
+        elif e.session_label:
+            requests.append(PricedRequest(e.source_event_id, e.session_label, e.timestamp, e.cost, e.source, e.rates))
+    return requests
 
 
 def record_priced_requests(

@@ -300,6 +300,53 @@ def claude_usage_events(
     return [event for event in events if event is not None]
 
 
+class ReadUsage(NamedTuple):
+    """A usage event read off an exported span, before an export's events are booked."""
+
+    source: str
+    event: ExternalUsageEvent
+    # The OTel trace and span id it was read from.
+    span_key: tuple[str, str]
+    # Whether its id is the response's own, which another span of the same call can carry.
+    names_response: bool = True
+
+
+def one_booking_per_response(
+    read: list[ReadUsage],
+) -> tuple[list[tuple[str, ExternalUsageEvent]], dict[str, tuple[str, str]]]:
+    """The usage events to book, one per response, and each one's span by its OTel trace and span id.
+
+    Spans of one response under different sources would each book it: a Claude SDK span's
+    booking is kept, and otherwise the one reporting the most tokens. An event whose id is
+    not a response's is never merged. A booking's span is the one it was read from, so its
+    cost reaches that span's session.
+    """
+
+    def tokens(event: ExternalUsageEvent) -> int:
+        return event.input_tokens + event.output_tokens + event.cache_read_tokens + event.cache_write_tokens
+
+    claude = {usage.event.source_event_id for usage in read if usage.source == CLAUDE_SOURCE}
+    richest: dict[str, int] = {}
+    for index, usage in enumerate(read):
+        event_id = usage.event.source_event_id
+        if usage.source == CLAUDE_SOURCE or not usage.names_response or event_id in claude:
+            continue
+        kept = richest.get(event_id)
+        if kept is None or tokens(usage.event) > tokens(read[kept].event):
+            richest[event_id] = index
+    pairs: list[tuple[str, ExternalUsageEvent]] = []
+    event_spans: dict[str, tuple[str, str]] = {}
+    for index, usage in enumerate(read):
+        if (
+            usage.source == CLAUDE_SOURCE
+            or not usage.names_response
+            or richest.get(usage.event.source_event_id) == index
+        ):
+            pairs.append((usage.source, usage.event))
+            event_spans.setdefault(usage.event.source_event_id, usage.span_key)
+    return pairs, event_spans
+
+
 @dataclass(frozen=True)
 class PricedEvent:
     """An imported event as it was priced, for the session it names to show what it cost."""

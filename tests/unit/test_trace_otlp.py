@@ -8,10 +8,22 @@ from typing import Any, cast
 import pytest
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValue
 
-from gateway.api.routes.otlp import _attributes, _one_booking_per_response
+from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
-from gateway.services.external_usage_service import CLAUDE_SOURCE, ExternalUsageEvent
-from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, SessionRef, TraceWriter, project_otlp_spans
+from gateway.services.external_usage_service import (
+    CLAUDE_SOURCE,
+    ExternalUsageEvent,
+    ReadUsage,
+    one_booking_per_response,
+)
+from gateway.services.traces import (
+    MAX_SPANS_PER_EXPORT,
+    OtlpSpan,
+    SessionRef,
+    TraceWriter,
+    project_otlp_spans,
+    record_otlp_export,
+)
 from gateway.services.traces._collector import call_id_digest
 from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, otlp_sessions, record_priced_requests
 from gateway.services.traces._reading import _gate_summaries
@@ -955,7 +967,12 @@ def test_a_call_two_instrumentations_exported_counts_the_tokens_of_the_one_repor
 
 
 def _usage(
-    event_id: str, *, input_tokens: int = 0, output_tokens: int = 0, cache_read_tokens: int = 0
+    event_id: str,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
 ) -> ExternalUsageEvent:
     return ExternalUsageEvent(
         source_event_id=event_id,
@@ -965,14 +982,15 @@ def _usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
     )
 
 
 def test_a_response_the_claude_sdk_booked_is_priced_on_its_span_even_where_another_span_came_first() -> None:
-    pairs, event_spans = _one_booking_per_response(
+    pairs, event_spans = one_booking_per_response(
         [
-            ("otel", _usage("msg_1", input_tokens=1300), ("t", "openllmetry")),
-            (CLAUDE_SOURCE, _usage("msg_1", input_tokens=1000), ("t", "sdk")),
+            ReadUsage("otel", _usage("msg_1", input_tokens=1300), ("t", "openllmetry")),
+            ReadUsage(CLAUDE_SOURCE, _usage("msg_1", input_tokens=1000), ("t", "sdk")),
         ]
     )
 
@@ -981,13 +999,65 @@ def test_a_response_the_claude_sdk_booked_is_priced_on_its_span_even_where_anoth
 
 
 def test_a_response_two_libraries_booked_keeps_the_booking_reporting_most_tokens() -> None:
-    pairs, event_spans = _one_booking_per_response(
+    pairs, event_spans = one_booking_per_response(
         [
-            ("agent-a", _usage("msg_1", output_tokens=20), ("t", "wrapper")),
-            ("agent-b", _usage("msg_1", input_tokens=500, output_tokens=20, cache_read_tokens=300), ("t", "full")),
-            ("agent-a", _usage("msg_2", input_tokens=10), ("t", "other")),
+            ReadUsage("agent-a", _usage("msg_1", output_tokens=20), ("t", "wrapper")),
+            ReadUsage("agent-b", _usage("msg_1", input_tokens=500, output_tokens=20), ("t", "full")),
+            ReadUsage("agent-a", _usage("msg_2", input_tokens=10), ("t", "other")),
         ]
     )
 
     assert [(source, event.source_event_id) for source, event in pairs] == [("agent-b", "msg_1"), ("agent-a", "msg_2")]
     assert event_spans == {"msg_1": ("t", "full"), "msg_2": ("t", "other")}
+
+
+def test_a_response_whose_cache_one_library_counts_on_top_keeps_the_booking_with_its_cache_writes() -> None:
+    pairs, _ = one_booking_per_response(
+        [
+            ReadUsage("agent-a", _usage("msg_1", input_tokens=50, output_tokens=20), ("t", "a")),
+            ReadUsage(
+                "agent-b", _usage("msg_1", input_tokens=50, output_tokens=20, cache_write_tokens=160), ("t", "b")
+            ),
+        ]
+    )
+
+    assert [(source, event.cache_write_tokens) for source, event in pairs] == [("agent-b", 160)]
+
+
+def test_two_calls_whose_ids_are_their_span_ids_are_never_merged() -> None:
+    pairs, _ = one_booking_per_response(
+        [
+            ReadUsage("agent-a", _usage("00000000000000a1", input_tokens=5), ("t1", "00000000000000a1"), False),
+            ReadUsage("agent-b", _usage("00000000000000a1", input_tokens=9), ("t2", "00000000000000a1"), False),
+        ]
+    )
+
+    assert [source for source, _ in pairs] == ["agent-a", "agent-b"]
+
+
+class _CappedWriter:
+    def __init__(self) -> None:
+        self.writes: list[TraceWrite] = []
+
+    def submit(self, write: TraceWrite, *, truncated: int = 0) -> None:
+        self.writes.append(write)
+
+
+def test_a_span_kept_under_the_cap_is_in_the_session_a_span_past_it_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("gateway.services.traces._otlp.MAX_SPANS_PER_EXPORT", 1)
+    writer = _CappedWriter()
+
+    record_otlp_export(
+        cast(TraceWriter, writer),
+        [_span("call", parent="root"), _span("root", attrs={"gen_ai.conversation.id": "conv-1"})],
+        total=2,
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+    )
+
+    [write] = writer.writes
+    assert [span.otel_span_id for span in write.spans] == ["call"]
+    assert write.trace_id == SessionRef(source="otlp", key="conv-1").trace_id(_WORKSPACE, "alice", "k")

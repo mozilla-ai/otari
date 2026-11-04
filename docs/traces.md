@@ -193,7 +193,9 @@ counts that cost, shown on the call's span. When two instrumentations in one
 process both report a call, such as the Claude SDK's own tracing beside
 OpenLLMetry, both spans are kept, but the call is one usage row and its cost
 counts once in the session's totals. When both spans come in the same export,
-its tokens count once too, read off the span that reports more of them.
+its tokens count once too, read off the span that reports more of them. Two
+spans are one call when they carry the same `gen_ai.response.id`; a span that
+carries none is a call of its own.
 
 A span's `gen_ai.response.finish_reasons` array is kept as
 one value, its reasons joined by a comma: `stop,length`. The read API returns

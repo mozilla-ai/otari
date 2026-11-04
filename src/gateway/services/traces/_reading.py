@@ -235,15 +235,16 @@ def counted_once(llm: list[SpanRecord]) -> list[SpanRecord]:
 
     Two instrumentations of one process can each describe the same call, sharing its
     response id; both spans are kept, and the tokens of the one reporting most are
-    counted. A gateway request's spans share its request id across calls, so only an
+    counted, its cache counts breaking a tie. A gateway request's spans share its request id across calls, so only an
     exported span is held to it.
     """
 
     def shared(span: SpanRecord) -> bool:
         return span.origin == "otlp" and bool(span.request_id) and span.operation != USAGE_OPERATION
 
-    def tokens(span: SpanRecord) -> int:
-        return (span.input_tokens or 0) + (span.output_tokens or 0)
+    def tokens(span: SpanRecord) -> tuple[int, int, int]:
+        calls = (span.input_tokens or 0) + (span.output_tokens or 0)
+        return calls, span.cache_read_tokens or 0, span.cache_write_tokens or 0
 
     richest: dict[str, SpanRecord] = {}
     for span in llm:
