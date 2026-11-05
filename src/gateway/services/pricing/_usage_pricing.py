@@ -13,7 +13,7 @@ gate admits is one settlement prices. A unit with no row prices nothing.
 """
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from math import ceil, isfinite
 
@@ -24,6 +24,7 @@ from gateway.core.metered_pricing import (
     BillableUsage,
     ChargeLine,
     Direction,
+    billable_usage_of,
     calculate_metered_cost,
     meter_cost,
     price_billable_usage,
@@ -34,6 +35,7 @@ from gateway.core.metered_pricing import (
 )
 from gateway.models.pricing import MAX_REPORTED_UNITS, UNIT_METERS, ModelPricing
 from gateway.services.pricing._charge import UsageCharge
+from gateway.services.pricing._price_rules import NO_FACTS, PriceFacts, apply_rules
 from gateway.services.pricing._slot_pricing import Quantities, price_slot, slot_rate
 from gateway.types.price_unit import PriceUnit
 
@@ -111,6 +113,7 @@ def price_usage(
     units: Mapping[str, object],
     quantities: Quantities | None = None,
     slot: Slot | None = None,
+    facts: PriceFacts = NO_FACTS,
 ) -> UsageCharge | None:
     """What one successful attempt costs at ``rate``, or ``None`` when ``rate`` prices nothing it reported.
 
@@ -118,7 +121,8 @@ def price_usage(
     ``quantities`` what it measured, in each unit it can. A slot priced in a
     measured unit prices the quantity in that unit, or nothing when the
     attempt did not measure it. A rate in tokens or requests prices what the
-    attempt reported, as :data:`METERS` says.
+    attempt reported, as :data:`METERS` says. The rate is priced at the rules
+    ``facts`` meet, its context the tokens reported where there are any.
 
     Raises:
         ValueError: ``units`` carries an invalid count (see :func:`validated_units`).
@@ -126,6 +130,8 @@ def price_usage(
     counts = validated_units(units)
     if rate is None:
         return None
+    context = tokens.total_input_tokens if tokens is not None else facts.context
+    rate = apply_rules(rate, replace(facts, context=context)).rate
     if slot is not None and _measured_slot(rate, slot) is not None:
         return price_slot(rate, *slot, quantities or {})
     row = meter_for(rate)
@@ -158,7 +164,7 @@ def estimate_settles(rate: ModelPricing | None) -> bool:
 
 
 def price_completion(
-    rate: ModelPricing, usage: CompletionUsage | None, *, succeeded: bool
+    rate: ModelPricing, usage: CompletionUsage | None, *, succeeded: bool, facts: PriceFacts = NO_FACTS
 ) -> tuple[Decimal, dict[str, int], list[ChargeLine]] | None:
     """What one completion costs at ``rate``, or ``None`` when ``rate`` prices nothing it reported.
 
@@ -167,7 +173,11 @@ def price_completion(
     read settles the reported usage, a failed call's included. A rate in a unit
     no completion meter reads (``second``, ``minute``) prices nothing, so the
     row records its tokens with no cost rather than billing them as tokens.
+    The rate is priced at the rules ``facts`` meet, its context the billable
+    input reported.
     """
+    context = billable_usage_of(usage).total_input_tokens if usage is not None else facts.context
+    rate = apply_rules(rate, replace(facts, context=context)).rate
     if priced_per_request(rate):
         return price_request(rate) if succeeded else None
     if usage is None or not has_completion_meter(rate):

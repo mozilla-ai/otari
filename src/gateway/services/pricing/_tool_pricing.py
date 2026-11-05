@@ -17,6 +17,7 @@ from typing import NamedTuple
 
 from gateway.core.metered_pricing import quantize_cost
 from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.services.pricing._price_rules import NO_FACTS, PriceFacts, apply_rules
 from gateway.services.pricing._slot_pricing import search_rate
 from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER,
@@ -54,14 +55,16 @@ class ModelSearchRate(NamedTuple):
     source: PriceSource
 
 
-def model_search_rate(rate: ModelPricing | None, source: PriceSource) -> ModelSearchRate | None:
-    """The per-search rate ``rate``'s block gives, or ``None`` when it prices no web search.
+def model_search_rate(
+    rate: ModelPricing | None, source: PriceSource, *, facts: PriceFacts = NO_FACTS
+) -> ModelSearchRate | None:
+    """The per-search rate ``rate``'s block gives at the rules ``facts`` meet, or ``None`` when it prices no web search.
 
     The catalog prices a provider's search beside the model, per thousand
     searches, so a search the provider ran is priced from the model's own rate
     where the operator priced no ``<provider>:web_search`` row.
     """
-    found = search_rate(rate)
+    found = search_rate(None if rate is None else apply_rules(rate, facts).rate)
     return None if found is None else ModelSearchRate(found.cost(1), source)
 
 
