@@ -488,9 +488,8 @@ def test_transcription_billing_meters_tracked_with_pricing(
 ) -> None:
     """POST /api/v1/audio/transcriptions records auditable charge lines alongside cost.
 
-    Audio bills per request like moderations (input_price_per_million holds the
-    per-million-request rate), so a priced model yields one request meter and one
-    charge line.
+    A per-request rate (input_price_per_million holds the per-million-request
+    rate) yields one request meter and one charge line.
     """
     client.post(
         f"{API_ROOT}/pricing",
@@ -498,6 +497,7 @@ def test_transcription_billing_meters_tracked_with_pricing(
             "model_key": "openai:whisper-1",
             "input_price_per_million": 2.0,
             "output_price_per_million": 0.0,
+            "unit": "request",
         },
         headers=master_key_header,
     )
@@ -532,7 +532,7 @@ def test_transcription_unpriced_records_no_charge_lines(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """An unpriced audio model is free by design, so it records no charge line."""
+    """An unpriced audio model is recorded with no cost: unknown, not free."""
     with patch(
         "gateway.api.routes.audio.atranscription",
         new_callable=AsyncMock,
@@ -552,7 +552,7 @@ def test_transcription_unpriced_records_no_charge_lines(
         headers=master_key_header,
     )
     latest = usage_resp.json()[0]
-    assert latest["cost"] == 0.0
+    assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
 
@@ -569,6 +569,7 @@ def test_speech_billing_meters_tracked_with_pricing(
             "model_key": "openai:tts-1",
             "input_price_per_million": 4.0,
             "output_price_per_million": 0.0,
+            "unit": "request",
         },
         headers=master_key_header,
     )
@@ -600,7 +601,7 @@ def test_speech_unpriced_records_no_charge_lines(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """An unpriced speech model is free by design, so it records no charge line."""
+    """An unpriced speech model is recorded with no cost: unknown, not free."""
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
         resp = client.post(
             f"{API_ROOT}/audio/speech",
@@ -613,7 +614,7 @@ def test_speech_unpriced_records_no_charge_lines(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/audio/speech", "status": "success"}, headers=master_key_header
     )
     latest = usage_resp.json()[0]
-    assert latest["cost"] == 0.0
+    assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
 
@@ -657,7 +658,7 @@ def test_transcription_ignores_models_dev_defaults(
     )
     latest = usage_resp.json()[0]
     assert latest["model"] == "gpt-4o-transcribe"
-    assert latest["cost"] == 0.0
+    assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
 

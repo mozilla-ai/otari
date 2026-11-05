@@ -137,7 +137,7 @@ from gateway.services.model_access import (
     resolve_request_allowlist,
     unresolvable_model_detail,
 )
-from gateway.services.pricing import UsageCharge, can_price, price_usage
+from gateway.services.pricing import can_price, price_usage
 from gateway.services.pricing_service import (
     ResolvedPricing,
     find_model_pricing,
@@ -397,9 +397,10 @@ async def run_passthrough(
             resolve-first path: a ``reserve_before_resolve`` route resolves
             pricing after its reservation and skips this gate, so setting both
             silently serves an unpriced model. No route sets both today.
-        billing: How the endpoint is billed: what its result reports, which
-            the pricing domain prices at the rate found, and whether an attempt
-            no rate prices is free or unpriced.
+        billing: How the endpoint is billed: what its result reports and
+            measures, which the pricing domain prices at the rate found under
+            the slot the endpoint bills under. An attempt no rate prices is
+            recorded with no cost.
         map_provider_error: Route-specific provider-exception mapping checked
             before the shared classification (the error log and refund happen
             either way).
@@ -701,7 +702,7 @@ async def run_passthrough(
             enforce_require_pricing
             and not budget_exempt
             and config.require_pricing
-            and not can_price(pricing, meter=billing.meter, reports_tokens=billing.reports_tokens)
+            and not _can_price(pricing, billing)
         ):
             await refund_reservation(db, reservation)
             unpriced = await unpriced_model_refusal(
@@ -814,7 +815,7 @@ async def run_passthrough(
                 enforce_require_pricing
                 and not budget_exempt
                 and config.require_pricing
-                and not can_price(pricing, meter=billing.meter, reports_tokens=billing.reports_tokens)
+                and not _can_price(pricing, billing)
             ):
                 logger.warning(
                     "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
@@ -921,9 +922,13 @@ async def run_passthrough(
             total_tokens=reported.total_tokens,
         )
 
-        charge = price_usage(pricing, tokens=_billable_tokens(reported), units=reported.units)
-        if charge is None and billing.unpriced_is_free:
-            charge = UsageCharge(Decimal(0), {}, [])
+        charge = price_usage(
+            pricing,
+            tokens=_billable_tokens(reported),
+            units=reported.units,
+            quantities=reported.quantities,
+            slot=billing.slot,
+        )
         cost = charge.cost if charge is not None else None
         if charge is not None:
             usage_log.cost = charge.cost
@@ -1043,6 +1048,17 @@ async def run_passthrough(
         pricing=found_pricing,
         cost=cost,
         deployment_charge=deployment_charge,
+    )
+
+
+def _can_price(pricing: ModelPricing | None, billing: PassthroughBilling) -> bool:
+    """Whether ``pricing`` could price what an endpoint billed as ``billing`` reports."""
+    return can_price(
+        pricing,
+        meter=billing.meter,
+        reports_tokens=billing.reports_tokens,
+        slot=billing.slot,
+        measures=billing.measures,
     )
 
 

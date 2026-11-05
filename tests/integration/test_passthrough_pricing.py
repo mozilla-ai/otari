@@ -101,16 +101,16 @@ def test_an_images_rate_holds_the_requested_images_and_settles_the_returned_ones
     assert row.cost == Decimal("0.08")
     assert row.pricing_source == "deployment"
     assert row.billing_meters == {"images": 2}
-    assert row.pricing_breakdown == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": 0.08}]
+    assert row.pricing_breakdown == [{"meter": "images", "units": 2, "unit": "image", "unit_rate": 0.04, "cost": 0.08}]
     # The response carries what the row records, as a completion's usage does.
     assert response.json()["usage"] == {"cost_usd": f"{row.cost:.6f}", "pricing_source": row.pricing_source}
     _settled(client, master_key_header, 0.08)
 
 
-def test_a_token_rate_on_images_keeps_its_per_image_reading_and_records_the_tokens(
+def test_a_token_rate_on_images_prices_the_tokens_it_reports(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    """The legacy reading: the money a configuration produced before the rate's unit decided."""
+    """A token rate reads as tokens on every endpoint: nothing is held by count, and the tokens settle."""
     _price(client, master_key_header, "openai:dall-e-3", unit="token", rate=0.04)
     headers = _user_key(client, master_key_header)
     usage = ImageUsage(
@@ -124,10 +124,10 @@ def test_a_token_rate_on_images_keeps_its_per_image_reading_and_records_the_toke
         response = _generate(client, headers, _images(1, usage), n=1)
 
     assert response.status_code == 200, response.text
-    assert held == [Decimal("0.04")]
+    assert held == [Decimal(0)]
     row = _row(db_session_factory)
-    assert row.cost == Decimal("0.04")
-    assert row.billing_meters == {"images": 1}
+    assert row.cost == Decimal("0.000002")
+    assert row.billing_meters is not None and row.billing_meters["total_input_tokens"] == 50
     assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (50, 4160, 4210)
     # The provider's token counts stay on ``usage``, with the settled cost beside them.
     assert response.json()["usage"] == {
@@ -135,7 +135,7 @@ def test_a_token_rate_on_images_keeps_its_per_image_reading_and_records_the_toke
         "cost_usd": f"{row.cost:.6f}",
         "pricing_source": row.pricing_source,
     }
-    _settled(client, master_key_header, 0.04)
+    _settled(client, master_key_header, 0.000002)
 
 
 def test_a_requests_rate_on_images_bills_one_request_not_its_rate_per_image(
@@ -229,31 +229,32 @@ def _transcribe(client: TestClient, headers: dict[str, str]) -> Any:
         )
 
 
-def test_an_unpriced_transcription_is_recorded_free(
+def test_an_unpriced_transcription_is_recorded_with_no_cost(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
+    """A missing cost is unknown, not free, so the row keeps none and the needs-pricing view lists it."""
     headers = _user_key(client, master_key_header)
 
     response = _transcribe(client, headers)
 
     assert response.status_code == 200, response.text
     row = _row(db_session_factory)
-    assert row.cost == Decimal(0)
+    assert row.cost is None
     assert row.billing_meters is None
     _settled(client, master_key_header, 0.0)
 
 
-def test_an_images_rate_on_a_per_request_endpoint_settles_free_rather_than_per_image(
+def test_an_images_rate_on_a_per_request_endpoint_settles_unpriced_rather_than_per_image(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    """The rate cannot price a request, and this endpoint's unpriced is free: never the rate read per image."""
+    """The rate cannot price a request, so the row keeps no cost: never the rate read per image."""
     _price(client, master_key_header, "openai:whisper-1", unit="image", rate=0.5)
     headers = _user_key(client, master_key_header)
 
     response = _transcribe(client, headers)
 
     assert response.status_code == 200, response.text
-    assert _row(db_session_factory).cost == Decimal(0)
+    assert _row(db_session_factory).cost is None
     _settled(client, master_key_header, 0.0)
 
 

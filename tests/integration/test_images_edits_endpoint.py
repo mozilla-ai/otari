@@ -40,7 +40,12 @@ def _form(**fields: Any) -> dict[str, Any]:
 def _price_gpt_image(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.post(
         f"{API_ROOT}/pricing",
-        json={"model_key": "openai:gpt-image-1", "input_price_per_million": 0.04, "output_price_per_million": 0.0},
+        json={
+            "model_key": "openai:gpt-image-1",
+            "input_price_per_million": 40000,
+            "output_price_per_million": 0.0,
+            "unit": "image",
+        },
         headers=master_key_header,
     )
     assert resp.status_code in (200, 201), resp.text
@@ -405,7 +410,9 @@ def test_edits_bills_per_image_and_logs_usage(
     assert row["prompt_tokens"] == 1132
     assert row["completion_tokens"] == 1751
     assert row["billing_meters"] == {"images": 2}
-    assert row["pricing_breakdown"] == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": pytest.approx(0.08)}]
+    assert row["pricing_breakdown"] == [
+        {"meter": "images", "units": 2, "unit": "image", "unit_rate": 0.04, "cost": pytest.approx(0.08)}
+    ]
     assert row["cost"] == pytest.approx(0.08)
     # The settled cost rides the provider's usage, beside its token counts.
     assert resp.json()["usage"] == {**usage.model_dump(), "cost_usd": "0.080000", "pricing_source": "deployment"}
