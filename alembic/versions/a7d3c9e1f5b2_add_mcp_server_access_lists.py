@@ -9,7 +9,7 @@ and so does ``read_tools``, so an ``@read`` rule allows nothing until a
 manager labels a server's read tools.
 
 Revision ID: a7d3c9e1f5b2
-Revises: b7e3c9d2f4a1
+Revises: b3e7d1a9c5f2
 Create Date: 2026-10-23
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a7d3c9e1f5b2"
-down_revision: str | Sequence[str] | None = "b7e3c9d2f4a1"
+down_revision: str | Sequence[str] | None = "b3e7d1a9c5f2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
