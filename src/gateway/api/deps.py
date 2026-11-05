@@ -135,6 +135,7 @@ from gateway.services.identity import IdentityService
 from gateway.services.inference import (
     DeploymentCharge,
     InferenceService,
+    VideoJobService,
     admit_deployment_paid,
     describe_port_error,
 )
@@ -1105,6 +1106,14 @@ def get_inference_service(
 
 
 InferenceServiceDep = Annotated[InferenceService, Depends(get_inference_service)]
+
+
+def get_video_job_service(uow: UnitOfWorkDep) -> VideoJobService:
+    """Build the video job service on the request's Unit of Work."""
+    return VideoJobService(uow, InferenceRepositories.on(uow).video_jobs)
+
+
+VideoJobServiceDep = Annotated[VideoJobService, Depends(get_video_job_service)]
 
 
 def get_workspace_code_execution_policy_service(
