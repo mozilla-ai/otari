@@ -5543,6 +5543,17 @@ def _native_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext
     return {"native_tools": native_tools} if native_tools else {}
 
 
+def _declared_tool_names(tools: list[dict[str, Any]] | None) -> frozenset[str]:
+    """The names of the tools a request declares for its client to run, in any of the three formats."""
+    names: set[str] = set()
+    for tool in tools or []:
+        function = tool.get("function")
+        name = function.get("name") if isinstance(function, dict) else tool.get("name")
+        if isinstance(name, str):
+            names.add(name)
+    return frozenset(names)
+
+
 @dataclass(frozen=True)
 class _OpenedTools:
     """The tool backends one request opened, as the pool its tool loop drives."""
@@ -5565,7 +5576,12 @@ async def _open_tool_backends(
     mcp: MCPClientPool | None = None
     if tool_ctx.mcp_server_configs:
         mcp = await stack.enter_async_context(
-            MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace)
+            MCPClientPool(
+                tool_ctx.mcp_server_configs,
+                tally=tool_ctx.tally,
+                trace=tool_ctx.trace,
+                ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+            )
         )
         try:
             refuse_shadowed_builtin_tools(mcp, tool_ctx.reserved_tool_names)

@@ -14,11 +14,19 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import anyio
 import pytest
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCall,
+    Choice,
+    CompletionUsage,
+    Function,
+)
 from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent, ToolAnnotations
 from mcp.types import Tool as MCPTool
@@ -42,8 +50,9 @@ from gateway.services.mcp_stateless import CODE_SERVER_NOT_FOUND, CODE_TOOL_NOT_
 from gateway.services.model_access import resolve_request_mcp_access, revoke_user_mcp_grants
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import workspace_mcp_server_service
+from gateway.services.tools import OTARI_TOOL_CALLS_FIELD
 
-from .conftest import _to_async_url
+from .conftest import MODEL_NAME, _to_async_url
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 CLIENT_EXECUTION_ID = "6e51b3bc-6f48-4c68-a61e-0786bc80cd67"
@@ -1211,3 +1220,105 @@ def test_direct_calls_naming_a_conversation_are_steps_of_one_session(
     with db_session_factory() as db:
         trace = db.scalars(select(Trace).where(Trace.trace_id == spans[0].trace_id)).one()
         assert trace.name == "agent-run-7"
+
+
+# --------------------------------------------------------------------------- #
+# A completion's tool loop over a stored server
+# --------------------------------------------------------------------------- #
+
+
+def _round(tool: str | None) -> ChatCompletion:
+    calls = (
+        [
+            ChatCompletionMessageFunctionToolCall(
+                id="call_0", type="function", function=Function(name=tool, arguments="{}")
+            )
+        ]
+        if tool
+        else None
+    )
+    return ChatCompletion(
+        id="chatcmpl-1",
+        object="chat.completion",
+        created=0,
+        model=MODEL_NAME,
+        choices=[
+            Choice(
+                index=0,
+                message=ChatCompletionMessage(
+                    role="assistant",
+                    content=None if tool else "no access",
+                    tool_calls=cast(Any, calls if tool else None),
+                ),
+                finish_reason="tool_calls" if tool else "stop",
+            )
+        ],
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+
+def test_the_loop_refuses_a_withheld_tool_and_tells_the_model_what_it_holds(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=["list_*"])
+    fake = _FakeSession()
+
+    class _Session(_FakeSession):
+        async def __aenter__(self) -> _FakeSession:
+            return fake
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+    @asynccontextmanager
+    async def transport(*args: Any, **kwargs: Any) -> Any:
+        yield object(), object()
+
+    async def initialize() -> None:
+        return None
+
+    monkeypatch.setattr(fake, "initialize", initialize, raising=False)
+    monkeypatch.setattr("gateway.services.mcp_client.streamable_http_client", transport)
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", lambda *args: _Session())
+    sent: list[dict[str, Any]] = []
+    rounds = iter([_round("delete_issue"), _round(None)])
+
+    async def provider(**kwargs: Any) -> ChatCompletion:
+        sent.append(kwargs)
+        return next(rounds)
+
+    with patch("gateway.services.mcp_loop.acompletion", new=provider):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "delete issue 7"}],
+                "mcp_server_ids": [str(row.id)],
+            },
+            headers=_bearer(key),
+        )
+
+    assert response.status_code == 200, response.text
+    # Never handed to the client as a call of its own, and never sent to the server.
+    assert response.json()["choices"][0]["message"].get("tool_calls") is None
+    assert fake.calls == []
+    system = sent[0]["messages"][0]
+    assert system["role"] == "system"
+    assert (
+        "The user may use list_issues here. create_issue, delete_issue exist but are not granted" in system["content"]
+    )
+    [refusal] = [m["content"] for m in sent[1]["messages"] if m.get("role") == "tool"]
+    assert refusal == (
+        f"[tool error] {CODE_TOOL_NOT_ALLOWED}: delete_issue on github is not granted to you; ask a workspace admin"
+    )
+    [entry] = response.json()[OTARI_TOOL_CALLS_FIELD]
+    assert (entry["server"], entry["name"], entry["status"]) == ("github", "delete_issue", "failed")
+    [span] = _tool_spans(db_session_factory, key, 1)
+    assert (span.tool_name, span.outcome) == ("delete_issue", "blocked")
+    assert span.attributes is not None
+    assert span.attributes["otari.tool.decision_source"] == "mcp_everyone"

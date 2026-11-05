@@ -555,6 +555,7 @@ async def resolve_workspace_mcp_servers(
                 purpose_hint=row.purpose_hint,
                 allowed_tools=row.allowed_tools,
                 caller_tool_patterns=None if "*" in granted else granted,
+                caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
             )
         )
     return resolved

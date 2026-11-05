@@ -1543,6 +1543,7 @@ async def test_a_key_without_grants_reaches_what_everyone_may_and_nothing_else(a
 
     configs = await _admit(async_db, workspace.id, organization.id, key=key, ids=[shared])
     assert [(config.name, config.caller_tool_patterns) for config in configs] == [("shared", None)]
+    assert configs[0].caller_access_source == "mcp_everyone"
 
     with pytest.raises(HTTPException) as refused:
         await _admit(async_db, workspace.id, organization.id, key=key, ids=[shared, private])
@@ -1563,6 +1564,8 @@ async def test_a_keys_grant_decides_and_its_patterns_travel_with_the_server(asyn
 
     configs = await _admit(async_db, workspace.id, organization.id, key=key, ids=[private])
     assert [(config.name, config.caller_tool_patterns) for config in configs] == [("private", ["list_*", "get_x"])]
+    # The rule that decided travels too, so a refused call's span can name it.
+    assert configs[0].caller_access_source == "mcp_key"
     with pytest.raises(HTTPException) as refused:
         await _admit(async_db, workspace.id, organization.id, key=key, ids=[shared])
     assert refused.value.status_code == 404

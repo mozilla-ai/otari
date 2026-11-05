@@ -212,6 +212,15 @@ read-only.
   discovery and execution routes answer `404 mcp_server_not_found`. A tool outside
   the matching rule is not offered to the model and, on `POST /api/v1/mcp/execute`,
   is refused with `403 mcp_tool_not_allowed`, the code the server's own list uses.
+- **In a completion, the model is told what it may not use.** Where the matching
+  rule leaves out some of a server's tools, the server's line in the system message
+  names the tools the caller holds and the ones it does not (names only, no
+  schemas), so the model can say the caller lacks access instead of trying. A call
+  to a withheld tool, or to one outside the server's own `allowed_tools`, never
+  reaches the server or the client: the model reads `[tool error]
+  mcp_tool_not_allowed: ...` as its result, and the trace records the call as
+  blocked, naming the rule that refused it. A tool the request declares itself
+  under the same name stays the client's.
 - **Rules follow the server, the key and the user.** They name the server by id,
   so renaming a server keeps them, and deleting the server, the key or the user
   deletes them.

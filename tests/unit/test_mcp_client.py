@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import anyio
 import httpx2
@@ -100,7 +100,41 @@ async def test_empty_allowed_tools_exposes_no_discovered_tools(monkeypatch: pyte
     )
     async with MCPClientPool([config]) as pool:
         assert pool.openai_tools == []
-        assert pool.owns_tool("list_issues") is False
+        # Withheld, so the pool refuses it rather than run it or hand it to the client.
+        assert pool.owns_tool("list_issues") is True
+        assert (await pool.call_tool_outcome("list_issues", {})).is_error is True
+
+
+def _serve_catalog(monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...]) -> None:
+    """Connect every pool in the test to a fake server listing ``names``."""
+
+    @asynccontextmanager
+    async def fake_transport(*args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object]]:
+        yield object(), object()
+
+    class FakeSession:
+        async def __aenter__(self) -> FakeSession:
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> SimpleNamespace:
+            return SimpleNamespace(
+                tools=[SimpleNamespace(name=name, description=name, input_schema={"type": "object"}) for name in names]
+            )
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> SimpleNamespace:
+            raise AssertionError(f"{name} reached the server")
+
+    monkeypatch.setattr("gateway.services.mcp_client.streamable_http_client", fake_transport)
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", lambda *args: FakeSession())
+
+
+_CATALOG = ("list_issues", "delete_issue", "get_repo")
 
 
 @pytest.mark.asyncio
@@ -120,31 +154,7 @@ async def test_a_callers_patterns_narrow_the_discovered_tools_within_the_servers
     caller_patterns: list[str] | None,
     exposed: list[str],
 ) -> None:
-    @asynccontextmanager
-    async def fake_transport(*args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object]]:
-        yield object(), object()
-
-    class FakeSession:
-        async def __aenter__(self) -> FakeSession:
-            return self
-
-        async def __aexit__(self, *exc: object) -> None:
-            return None
-
-        async def initialize(self) -> None:
-            return None
-
-        async def list_tools(self) -> SimpleNamespace:
-            return SimpleNamespace(
-                tools=[
-                    SimpleNamespace(name=name, description=name, input_schema={"type": "object"})
-                    for name in ("list_issues", "delete_issue", "get_repo")
-                ]
-            )
-
-    monkeypatch.setattr("gateway.services.mcp_client.streamable_http_client", fake_transport)
-    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", lambda *args: FakeSession())
-
+    _serve_catalog(monkeypatch, _CATALOG)
     config = McpServerConfig(
         name="tools",
         url="https://93.184.216.34/mcp",
@@ -153,8 +163,85 @@ async def test_a_callers_patterns_narrow_the_discovered_tools_within_the_servers
     )
     async with MCPClientPool([config]) as pool:
         assert [tool["function"]["name"] for tool in pool.openai_tools] == exposed
-        for name in ("list_issues", "delete_issue", "get_repo"):
-            assert pool.owns_tool(name) is (name in exposed)
+        # A withheld tool is still the pool's to answer, by refusing it, so it never reaches the client.
+        for name in _CATALOG:
+            assert pool.owns_tool(name) is True
+            assert pool.server_name_for_tool(name) == "tools"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("allowed_tools", "decided_by"),
+    [(None, "mcp_user"), (["list_issues"], "mcp_server")],
+)
+async def test_a_call_to_a_withheld_tool_is_refused_without_reaching_the_server(
+    monkeypatch: pytest.MonkeyPatch, allowed_tools: list[str] | None, decided_by: str
+) -> None:
+    _serve_catalog(monkeypatch, _CATALOG)
+    trace = SimpleNamespace(record_tool_call=Mock(), record_mcp_connect=Mock())
+    config = McpServerConfig(
+        name="tools",
+        url="https://93.184.216.34/mcp",
+        allowed_tools=allowed_tools,
+        caller_tool_patterns=["list_*"],
+        caller_access_source="mcp_user",
+    )
+    async with MCPClientPool([config], trace=cast(Any, trace)) as pool:
+        outcome = await pool.call_tool_outcome("delete_issue", {"id": 7})
+        # The chat and Responses loops read the same refusal as text.
+        assert await pool.call_tool("delete_issue", {"id": 7}) == outcome.content
+
+    assert outcome.is_error is True
+    assert outcome.transport_error is False
+    assert outcome.content == (
+        "[tool error] mcp_tool_not_allowed: delete_issue on tools is not granted to you; ask a workspace admin"
+    )
+    assert outcome.activity_content == outcome.content.removeprefix("[tool error] ")
+    assert trace.record_tool_call.call_count == 2
+    recorded = trace.record_tool_call.call_args.kwargs
+    assert recorded["tool_name"] == "delete_issue"
+    assert recorded["mcp_server"] == "tools"
+    assert recorded["decided_by"] == decided_by
+    assert recorded["refused"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_withheld_tool_the_request_declares_itself_stays_the_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    _serve_catalog(monkeypatch, _CATALOG)
+    config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp", caller_tool_patterns=["list_*"])
+    async with MCPClientPool([config], ceded_tool_names={"delete_issue"}) as pool:
+        assert pool.owns_tool("delete_issue") is False
+        assert pool.owns_tool("get_repo") is True
+        assert pool.owns_tool("not_in_any_catalog") is False
+        with pytest.raises(KeyError):
+            await pool.call_tool_outcome("not_in_any_catalog", {})
+
+
+@pytest.mark.asyncio
+async def test_the_access_note_names_granted_and_withheld_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    _serve_catalog(monkeypatch, _CATALOG)
+    configs = [
+        McpServerConfig(
+            name="tools",
+            url="https://93.184.216.34/mcp",
+            purpose_hint="Issue tracker.",
+            # The server's own ceiling is no grant the caller lacks, so ``get_repo`` goes unnamed.
+            allowed_tools=["list_issues", "delete_issue"],
+            caller_tool_patterns=["list_*"],
+        ),
+        McpServerConfig(name="open", url="https://93.184.216.35/mcp"),
+    ]
+    async with MCPClientPool(configs[:1]) as pool:
+        assert pool.purpose_hints() == [
+            (
+                "tools",
+                "Issue tracker. The user may use list_issues here. delete_issue exists but is not granted to the "
+                "user: if asked for what only those do, say the user lacks access and a workspace admin can grant "
+                "it, instead of trying.",
+            )
+        ]
+    async with MCPClientPool(configs[1:]) as pool:
+        assert pool.purpose_hints() == []
 
 
 @pytest.mark.asyncio
