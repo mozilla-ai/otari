@@ -394,6 +394,7 @@ Each offering also lists the Otari routes its models.dev protocols map to, in
 | `transcriptions` | `/audio/transcriptions` |
 | `rerank` | `/rerank` |
 | `moderations` | `/moderations` |
+| `videos` | `/videos` |
 | `decisions` | `/decisions` |
 | `systemone` | `/systemone` |
 
@@ -409,7 +410,7 @@ route with that offering's selector is refused.
 Other protocols name no route. A vendor's native protocol, such as `converse`
 or `generate-content`, is what any-llm calls behind the routes above, so a
 client never calls it directly. A live, two-way session (`realtime`, `live`),
-`videos`, `fim` and `ocr` have no Otari route. An empty list means not known:
+`fim` and `ocr` have no Otari route. An empty list means not known:
 models.dev has no entry for the offering, its download is v1, which has no
 `api` block, or none of its protocols has a route. Otari does not guess routes
 from the model's `type`. The list repeats what models.dev says, so a model it

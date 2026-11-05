@@ -116,8 +116,11 @@ hard real-time cap. Batch settles dollars alone: its results arrive outside the
 reservation that gated the submission, so a batch counts as the one request that
 created it and contributes no tokens to a token cap, however many prompts it
 carried. The same holds for the vision side-call a request makes to describe an
-attachment. Cap batch-heavy workloads in dollars rather than in tokens. See
-[Importing external usage](https://docs.otari.ai/guides/observability/external-usage).
+attachment, and for a video job: its length is reserved at the model's
+per-second price while the job starts, and its cost is settled, in dollars
+alone, by the start call when the provider returns the job completed, else by
+the first read that finds it so. Cap batch-heavy workloads in dollars rather
+than in tokens. See [Importing external usage](https://docs.otari.ai/guides/observability/external-usage).
 
 ### Reservations are taken up front
 
