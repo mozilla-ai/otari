@@ -46,7 +46,7 @@ Missing an option? Don't hesitate to [open an issue on github](https://github.co
 
 ## Where to go next
 
-- **Home**: the [Quickstart](quickstart.md) sends a first request through
+- **Otari**: the [Quickstart](quickstart.md) sends a first request through
   otari.ai, from curl and from your code, in a few minutes. Then, in the
   dashboard: [manage workspaces](manage-workspaces.md),
   [invite members](invite-and-manage-organization-members.md), add

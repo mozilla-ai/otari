@@ -1,5 +1,5 @@
 ---
-description: Create, switch, organize, and delete workspaces in the otari.ai dashboard.
+description: Create, switch, organize, and delete workspaces in the dashboard.
 icon: desk
 ---
 
