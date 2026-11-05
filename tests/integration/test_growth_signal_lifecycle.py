@@ -456,15 +456,28 @@ def test_a_refused_password_sign_in_notifies_nothing(
     assert growth.calls == []
 
 
-def test_a_master_key_sign_in_notifies_nothing(
+def test_a_master_key_sign_in_notifies_nothing_even_for_an_operator_with_an_address(
     client: TestClient,
     test_config: GatewayConfig,
     growth: RecordingGrowthAdapter,
+    db_session_factory: Callable[[], Session],
 ) -> None:
-    """The master key resolves to the bootstrap operator, who holds no address for a vendor to key on."""
-    response = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
+    """The master key is the deployment's credential, not a person's, so nobody signed in."""
+    first = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
+    assert first.status_code == status.HTTP_200_OK, first.text
+    session = db_session_factory()
+    try:
+        operator = session.get(User, uuid.UUID(first.json()["user_id"]))
+        assert operator is not None
+        operator.email = "operator@example.com"
+        session.commit()
+    finally:
+        session.close()
+    client.cookies.clear()
 
-    assert response.status_code == status.HTTP_200_OK, response.text
+    again = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
+
+    assert again.status_code == status.HTTP_200_OK, again.text
     assert growth.calls == []
 
 

@@ -82,8 +82,9 @@ class GrowthSignalPort(Protocol):
         Called from the password, passkey and provider sign-ins once the session
         is committed, including the provider sign-in that also reported the
         signup: the two answer different questions, when the account was made
-        and when it was last used. Re-minting a session the caller already holds
-        (a master-key rotation) is not a sign-in and is not reported.
+        and when it was last used. Neither a master-key sign-in, which is the
+        deployment's credential rather than a person's, nor re-minting a session
+        the caller already holds (a master-key rotation) is reported.
 
         Every sign-in is reported, so an adapter that writes a date throttles
         on its own end.

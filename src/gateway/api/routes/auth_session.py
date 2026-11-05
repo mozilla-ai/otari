@@ -346,7 +346,9 @@ async def create_session(
         signed_in = await identities.sign_in(identity)
     except DATABASE_ERRORS as exc:
         raise database_error("persist a dashboard session on sign-in", exc) from None
-    await report_sign_in(growth, identity, background_tasks=background_tasks)
+    if body.master_key is None:
+        # The master key is the deployment's credential, not a person's, even once its operator holds an address.
+        await report_sign_in(growth, identity, background_tasks=background_tasks)
     apply_session_cookie(
         response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
     )
