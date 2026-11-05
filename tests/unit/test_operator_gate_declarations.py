@@ -40,6 +40,7 @@ from gateway.api.routes import (
     agent_telemetry,
     aliases,
     budgets,
+    calling_key,
     catalog,
     country_database,
     end_users,
@@ -108,6 +109,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
     ("usage.key", usage.key_router, verify_api_key_or_master_key),
+    ("calling_key", calling_key.router, verify_api_key),
     ("hooks", hooks.router, hooks.verify_hook_caller),
     ("hook_guardrails", hook_guardrails.router, verify_api_key_or_master_key),
     # Operator-only, with the 404 the admin surface answers rather than the 403:

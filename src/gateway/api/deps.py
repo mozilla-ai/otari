@@ -728,6 +728,9 @@ async def verify_service_key(api_key: Annotated[APIKey, Depends(verify_api_key)]
 
 ServiceKey = Annotated[APIKey, Depends(verify_service_key)]
 
+# The API key a request authenticates with, for a route that answers for that key alone.
+CallingKey = Annotated[APIKey, Depends(verify_api_key)]
+
 
 async def verify_master_key(
     request: Request,
@@ -2828,6 +2831,7 @@ __all__ = [
     "CallerUsageScope",
     "CallerWorkspaceQuery",
     "CallerWorkspaces",
+    "CallingKey",
     "CurrentIdentity",
     "EntitlementPortDep",
     "FileServiceDep",
