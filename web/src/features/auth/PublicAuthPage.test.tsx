@@ -131,3 +131,22 @@ describe("PublicAuthPage: the OAuth provider gate", () => {
     ).toBeInTheDocument()
   })
 })
+
+describe("PublicAuthPage: the organization-connection callback", () => {
+  it("renders its own page rather than falling through to a blank screen", () => {
+    // No deployment gate applies to this path at all, unlike the OAuth pair
+    // above it, and a hash with no arm in the switch renders nothing: this is
+    // the dispatch itself, not the callback page's own refusal handling.
+    renderPage("/auth/sso/callback", {
+      mailReady: false,
+      oauthProviders: [],
+    })
+
+    expect(
+      screen.queryByRole("heading", { name: "Not available on this gateway" }),
+    ).toBeNull()
+    expect(
+      screen.getByRole("heading", { name: "That sign-in did not complete" }),
+    ).toBeInTheDocument()
+  })
+})

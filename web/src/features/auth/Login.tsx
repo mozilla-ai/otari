@@ -47,6 +47,7 @@ import {
 } from "./oauthProviders"
 import { rememberOAuthState } from "./oauthRoundTrip"
 import { PublicAuthLink } from "./PublicAuthLayout"
+import { SsoEntry } from "./SsoEntry"
 import {
   forgetSignInAddress,
   readSignInAddress,
@@ -239,6 +240,11 @@ function LabelRow({
  * the bootstrap's `oauth_providers`, which lists only the providers an operator
  * configured: a provider nobody set up is absent rather than rendered disabled,
  * and a deployment that configured none carries no OAuth affordance at all.
+ *
+ * A company-connection row sits last. Unlike a passkey or an OAuth provider,
+ * it carries no bootstrap flag: whether an address's organization has a
+ * connection is resolved per address, so the row is offered on every
+ * deployment.
  *
  * Refusals render on the field label, and empty fields remain submittable so
  * validation can explain what to enter.
@@ -979,6 +985,16 @@ export function Login() {
               {usesPassword ? "Sign in with email" : "Sign in with master key"}
             </AuthMethodRow>
           )}
+          <div className="pt-3">
+            <SsoEntry
+              isDisabled={
+                isSubmitting ||
+                isSigningOut ||
+                isPasskeyPending ||
+                pendingProvider !== undefined
+              }
+            />
+          </div>
         </div>
         <div className="otari-auth-actions flex flex-wrap items-center justify-between gap-x-4 border-t border-border pt-2">
           {offersSignup ? (
