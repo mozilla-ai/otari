@@ -1,6 +1,7 @@
 """The video job records: who started a job here, and billing a completed one once."""
 
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -70,6 +71,9 @@ async def _record(service: VideoJobService, video_id: str, **overrides: Any) -> 
         "workspace_id": None,
         "seconds": None,
         "counts_toward_budget": True,
+        "resolution": None,
+        "aspect_ratio": None,
+        "created_at": datetime.now(UTC),
     }
     fields.update(overrides)
     await service.record(video_id=video_id, **fields)

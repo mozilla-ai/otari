@@ -31,7 +31,7 @@ import json
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Generic, Protocol, TypeVar
@@ -138,7 +138,7 @@ from gateway.services.model_access import (
     resolve_request_allowlist,
     unresolvable_model_detail,
 )
-from gateway.services.pricing import PriceFacts, apply_rules, can_price, price_usage
+from gateway.services.pricing import NO_FACTS, PriceFacts, apply_rules, can_price, price_usage
 from gateway.services.pricing_service import (
     ResolvedPricing,
     find_model_pricing,
@@ -356,8 +356,12 @@ async def run_passthrough(
     request_params: Collection[str] = (),
     reserve_before_resolve: bool = False,
     relabel: bool = True,
+    price_facts: PriceFacts = NO_FACTS,
 ) -> PassthroughOutcome[ResultT]:
     """Run the shared pass-through scaffold around a single provider call.
+
+    ``price_facts`` is what the request says about itself that a price's rules
+    ask (an image's size and quality); the result settles at the rules it meets.
 
     Steps: resolve the billed user (honoring ``config.reject_user_mismatch``),
     rate limit, resolve the provider selector, look up pricing, reserve the
@@ -922,7 +926,7 @@ async def run_passthrough(
             units=reported.units,
             quantities=reported.quantities,
             slot=billing.slot,
-            facts=PriceFacts(at=request_started(usage_log)),
+            facts=replace(price_facts, at=request_started(usage_log)),
         )
         cost = charge.cost if charge is not None else None
         if charge is not None:
