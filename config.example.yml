@@ -147,6 +147,7 @@ providers:
 #     provider: searxng
 #     api_base: "http://searxng:8080"
 #     options: {engines: "duckduckgo,mojeek,qwant,wikipedia"}
+#     price_per_call: 0   # USD; with require_pricing, an unpriced tool is refused
 # web_search_default_tool: local
 
 # What runs code-execution tool calls: "protocol" (the default) talks to the

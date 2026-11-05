@@ -1396,8 +1396,14 @@ search_tools:
     provider: searxng
     api_base: "http://searxng:8080"
     options: {engines: "duckduckgo,mojeek,qwant,wikipedia"}
+    price_per_call: 0   # USD; a SearXNG you run costs nothing
 web_search_default_tool: local
 ```
+
+The tool is priced on its own, not under `otari:web_search`: with
+`require_pricing`, the default, a request that declares web search on a key that
+counts toward budgets gets a 402 until the tool has a price, so set
+`price_per_call`, or price the tool through `/api/v1/pricing` or the dashboard.
 
 Leave `web_search_default_tool` out when the in-loop tool searches on
 `web_search_provider`, so it keeps doing so. Then turn the compose default off in
