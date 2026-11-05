@@ -285,7 +285,7 @@ from gateway.services.model_access import (
 )
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.policy_store import resolve_effective_policy
-from gateway.services.pricing import estimate_settles, price_completion
+from gateway.services.pricing import ModelSearchRate, estimate_settles, model_search_rate, price_completion
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     RequestPrices,
@@ -5025,7 +5025,12 @@ async def record_usage(
     # are folded in last: after the token branch (which may not have run at all) and
     # after cost_override (which replaces the token cost, not the whole bill).
     model_cost = usage_log.cost if deployment_paid else None
-    tool_cost = await _apply_tool_charges(db, usage_log, tool_tally)
+    tool_cost = await _apply_tool_charges(
+        db,
+        usage_log,
+        tool_tally,
+        model_search_rate=model_search_rate(resolved.pricing, resolved.source) if resolved is not None else None,
+    )
     if usage_log.cost is not None:
         usage_log.calculated_at = usage_log.timestamp
     deployment_paid_cost = (
@@ -5128,12 +5133,16 @@ async def _apply_tool_charges(
     db: AsyncSession,
     usage_log: UsageLog,
     tally: ToolUsageTally | None,
+    *,
+    model_search_rate: ModelSearchRate | None = None,
 ) -> Decimal | None:
     """Fold a request's gateway-run tool calls onto its usage row, returning the part the deployment's account ran.
 
     Writes the counts under the reserved ``tools`` meter namespace, appends one
     charge line per tool and label, and adds their cost to the row's total.
     ``None`` where the deployment's account ran nothing with a cost.
+    ``model_search_rate`` prices the searches the model's provider ran where
+    the operator priced no row for them.
 
     Never raises. Settlement must not turn an accounting problem into a failed
     response; the precedent is :func:`log_gateway_rejection`. A pricing lookup that
@@ -5166,6 +5175,7 @@ async def _apply_tool_charges(
             calls,
             as_of=usage_log.timestamp,
             organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
+            model_search_rate=model_search_rate,
         )
     except DATABASE_ERRORS as exc:
         logger.error(

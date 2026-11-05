@@ -7,7 +7,16 @@ import pytest
 
 from gateway.core.metered_pricing import UnitRate
 from gateway.models.pricing import ModelPricing
-from gateway.services.pricing import VIDEO_SECONDS, estimate_video_cost, price_video, video_rate
+from gateway.services.pricing import (
+    VIDEO_SECONDS,
+    ModelSearchRate,
+    UsageCharge,
+    estimate_video_cost,
+    model_search_rate,
+    price_video,
+    search_rate,
+    video_rate,
+)
 
 _PER_SECOND: dict[str, Any] = {"video": {"output": {"price": 0.1, "unit": "second"}}}
 
@@ -63,6 +72,15 @@ def test_a_negative_length_estimates_nothing() -> None:
     assert estimate_video_cost(_rate(_PER_SECOND), -8) == Decimal(0)
 
 
+def test_a_block_with_a_web_search_price_gives_the_models_search_rate() -> None:
+    rates = {**_PER_SECOND, "web_search": {"price": 20}}
+
+    assert search_rate(_rate(rates)) == UnitRate("web_search", Decimal(20))
+    assert model_search_rate(_rate(rates), "deployment") == ModelSearchRate(Decimal("0.02"), "deployment")
+    assert search_rate(_rate(_PER_SECOND)) is None
+    assert model_search_rate(None, "defaults") is None
+
+
 def test_a_completed_video_costs_its_seconds_with_a_line_that_explains_them() -> None:
     charge = price_video(_rate(_PER_SECOND), 6)
 
@@ -70,6 +88,12 @@ def test_a_completed_video_costs_its_seconds_with_a_line_that_explains_them() ->
     assert charge.cost == Decimal("0.6")
     assert charge.meters == {VIDEO_SECONDS: 6}
     assert charge.lines == [{"meter": VIDEO_SECONDS, "units": 6, "unit": "second", "unit_rate": 0.1, "cost": 0.6}]
+
+
+def test_a_slot_priced_at_zero_charges_nothing_and_carries_no_meter() -> None:
+    charge = price_video(_rate({"video": {"output": {"price": 0, "unit": "second"}}}), 6)
+
+    assert charge == UsageCharge(Decimal(0), {}, [])
 
 
 def test_the_cost_is_rounded_once_to_the_micro_dollar() -> None:
