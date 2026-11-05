@@ -234,10 +234,11 @@ export async function createSession(
     if (refusal.detail !== null) {
       return { isOk: false, message: refusal.detail, status: response.status }
     }
-    throw new ApiError(response.status, refusal.message)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   return { isOk: true }
 }
@@ -391,7 +392,8 @@ async function publicGet(path: string): Promise<{
     }
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   return {
     isOk: true,
@@ -571,7 +573,8 @@ export async function siteFetch<T>(path: string): Promise<T> {
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   return readJson<T>(response, TIMEOUT_MESSAGE)
 }
@@ -623,11 +626,13 @@ export async function apiFetch<T>(
   // the panel reports, the way every other 4xx does.
   if (response.status === 401) {
     unauthorizedHandler?.()
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
 
   if (response.status === 204) {
@@ -682,10 +687,12 @@ export async function apiStream(
 
   if (response.status === 401) {
     unauthorizedHandler?.()
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    const refusal = await readRefusal(response)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   if (response.body === null) {
     throw new ApiError(0, "The gateway returned no response body.")
