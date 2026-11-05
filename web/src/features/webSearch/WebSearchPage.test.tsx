@@ -38,6 +38,8 @@ const SEARCH_TOOLS: SearchToolsResponse = {
       decryptable: true,
       shadows_config: false,
       updated_at: "2026-10-20T10:00:00",
+      price_per_call: 0.005,
+      price_source: "own",
     },
   ],
   config: [
@@ -48,6 +50,8 @@ const SEARCH_TOOLS: SearchToolsResponse = {
       api_base: "http://searxng:8080",
       has_api_key: false,
       shadowed: false,
+      price_per_call: null,
+      price_source: "none",
     },
   ],
 }
@@ -62,6 +66,8 @@ const FETCH_TOOLS: SearchToolsResponse = {
       options: {},
       decryptable: true,
       shadows_config: false,
+      price_per_call: null,
+      price_source: "none",
     },
   ],
   config: [
@@ -71,6 +77,8 @@ const FETCH_TOOLS: SearchToolsResponse = {
       provider: "builtin",
       has_api_key: false,
       shadowed: false,
+      price_per_call: null,
+      price_source: "none",
     },
   ],
 }

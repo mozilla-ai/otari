@@ -122,7 +122,13 @@ from gateway.services.tools._sandbox_credential import (
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
 from gateway.services.tools._search_tool_connection import check_test_input, run_connection_test
 from gateway.services.tools._search_tool_overlay import reset_search_tool_cache, run_search_tool_refresher
-from gateway.services.tools._search_tool_service import ReadToolSettings, SearchToolService, StageToolSetting
+from gateway.services.tools._search_tool_service import (
+    ReadToolRate,
+    ReadToolSettings,
+    SearchToolService,
+    StageToolSetting,
+    ToolRateInForce,
+)
 from gateway.services.tools._tool_prices import (
     PricedTool,
     admitted_tools,
@@ -243,6 +249,7 @@ __all__ = [
     "NativeCall",
     "NativeRendering",
     "Tool",
+    "ToolRateInForce",
     "ToolUseBudget",
     "AdmittedWebTools",
     "PricedTool",
@@ -292,6 +299,7 @@ __all__ = [
     "DEFAULT_MAX_RESULTS",
     "web_search_max_results_baseline",
     "search_provider_catalog",
+    "ReadToolRate",
     "ReadToolSettings",
     "SearchToolService",
     "StageToolSetting",

@@ -8,7 +8,8 @@ and on the others within the refresh interval.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from decimal import Decimal
+from typing import Any, NamedTuple
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
@@ -28,10 +29,12 @@ from gateway.schemas.tools import (
     ConfigSearchToolSchema,
     CreatedSearchToolSchema,
     CreateSearchToolRequest,
+    ListedSearchToolSchema,
     ReencryptSearchToolsResponse,
     SearchToolsResponse,
     SearchToolTestRequest,
     StoredSearchToolSchema,
+    ToolPriceSource,
     UpdateSearchToolRequest,
 )
 from gateway.services.runtime_settings_service import SettingValue
@@ -61,11 +64,25 @@ from gateway.services.tools._search_tool_writes import (
     check_tool_write,
     default_to_pin,
 )
+from gateway.types.tool_charges import InstanceRateKey, instance_rate_key
 
 # The runtime tool settings as stored, every valid one.
 ReadToolSettings = Callable[[], Awaitable[dict[str, SettingValue]]]
 # Validate one runtime tool setting and stage it in the caller's transaction; returns the normalized value.
 StageToolSetting = Callable[[str, SettingValue], Awaitable[SettingValue]]
+
+
+class ToolRateInForce(NamedTuple):
+    """The rate one call of a search or fetch tool settles at on the deployment's own account."""
+
+    #: USD per call.
+    unit_rate: Decimal
+    #: The rate is stored under the tool's old ``<provider>:<name>`` key.
+    under_old_key: bool
+
+
+# The rate in force for an instance's rate key on the deployment's price list, or None when no row prices it.
+ReadToolRate = Callable[[InstanceRateKey], Awaitable[ToolRateInForce | None]]
 
 
 def _encrypted_key(api_key: str | None) -> tuple[str | None, str | None]:
@@ -104,51 +121,77 @@ class SearchToolService:
         tools: SearchToolRepository,
         read_settings: ReadToolSettings,
         stage_setting: StageToolSetting,
+        read_rate: ReadToolRate,
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
 
         ``read_settings`` and ``stage_setting`` reach the runtime tool settings,
-        whose module takes the session: the builder binds them to the session
-        ``uow`` runs on, so they read and write inside this service's blocks.
+        and ``read_rate`` the price list, whose modules take the session: the
+        builder binds them to the session ``uow`` runs on, so they read and
+        write inside this service's blocks.
         """
         self.uow = uow
         self.config = config
         self.tools = tools
         self.read_settings = read_settings
         self.stage_setting = stage_setting
+        self.read_rate = read_rate
 
     async def list_tools(self, kind: ToolKind) -> SearchToolsResponse:
-        """Every stored instance of ``kind`` beside every config-file one, ``builtin_fetch`` first among fetch ones."""
+        """Every stored instance of ``kind`` beside every config-file one, ``builtin_fetch`` first among fetch ones.
+
+        Each with what one of its calls costs on the deployment's own account,
+        read in the block that reads the rows.
+        """
+        from_config = config_file_tools(self.config, kind)
         async with self.uow:
             stored = await self.tools.list_by_kind(kind)
-        from_config = config_file_tools(self.config, kind)
-        stored_names = {row.name for row in stored}
-        builtin = [
-            ConfigSearchToolSchema(name=BUILTIN_FETCH, kind="fetch", provider=BUILTIN_FETCH_PROVIDER, has_api_key=False)
-        ]
-        return SearchToolsResponse(
-            stored=[
-                StoredSearchToolSchema.from_model(
-                    row,
-                    decryptable=_is_decryptable(row),
-                    shadows_config=row.name in from_config,
+            listed: list[ListedSearchToolSchema] = []
+            for row in stored:
+                per_call, source = await self._price(kind, row.name, row.provider, set_in_config=False)
+                listed.append(
+                    ListedSearchToolSchema.from_model(
+                        row,
+                        decryptable=_is_decryptable(row),
+                        shadows_config=row.name in from_config,
+                        price_per_call=per_call,
+                        price_source=source,
+                    )
                 )
-                for row in stored
-            ],
-            config=(builtin if kind == "fetch" else [])
-            + [
-                ConfigSearchToolSchema(
-                    name=name,
-                    kind=kind,
-                    provider=str(entry.get("provider") or name),
-                    fetch_tool=entry.get("fetch_tool") if kind == "search" else None,
-                    api_base=entry.get("api_base"),
-                    has_api_key=bool(entry.get("api_key")),
-                    shadowed=name in stored_names,
+            stored_names = {row.name for row in stored}
+            configured: list[ConfigSearchToolSchema] = []
+            if kind == "fetch":
+                per_call, source = await self._price(kind, BUILTIN_FETCH, BUILTIN_FETCH_PROVIDER, set_in_config=False)
+                configured.append(
+                    ConfigSearchToolSchema(
+                        name=BUILTIN_FETCH,
+                        kind=kind,
+                        provider=BUILTIN_FETCH_PROVIDER,
+                        has_api_key=False,
+                        price_per_call=per_call,
+                        price_source=source,
+                    )
                 )
-                for name, entry in sorted(from_config.items())
-            ],
-        )
+            for name, entry in sorted(from_config.items()):
+                provider = str(entry.get("provider") or name)
+                shadowed = name in stored_names
+                # A start writes the price_per_call of an entry no stored tool shadows.
+                set_in_config = not shadowed and entry.get("price_per_call") is not None
+                per_call, source = await self._price(kind, name, provider, set_in_config=set_in_config)
+                configured.append(
+                    ConfigSearchToolSchema(
+                        name=name,
+                        kind=kind,
+                        provider=provider,
+                        fetch_tool=entry.get("fetch_tool") if kind == "search" else None,
+                        api_base=entry.get("api_base"),
+                        has_api_key=bool(entry.get("api_key")),
+                        shadowed=shadowed,
+                        price_per_call=per_call,
+                        price_source=source,
+                    )
+                )
+        return SearchToolsResponse(stored=listed, config=configured)
 
     async def create(self, request: CreateSearchToolRequest) -> CreatedSearchToolSchema:
         """Store a search or fetch instance, pinning the in-loop default first when it adds a second one.
@@ -404,6 +447,20 @@ class SearchToolService:
         """
         entry = request.to_entry()
         return unsaved_instance_to_test(self.config, request.name.strip(), entry, kind=request.kind), entry
+
+    async def _price(
+        self, kind: ToolKind, name: str, provider: str, *, set_in_config: bool
+    ) -> tuple[float | None, ToolPriceSource]:
+        """What one call of a tool costs on the deployment's own account in USD, and which row says so.
+
+        ``set_in_config`` marks a tool whose own row each start writes from its ``price_per_call``.
+        """
+        rate = await self.read_rate(instance_rate_key(kind, name, provider))
+        if rate is None:
+            return None, "none"
+        if rate.under_old_key:
+            return float(rate.unit_rate), "old_key"
+        return float(rate.unit_rate), "config" if set_in_config else "own"
 
     async def _reload_stored_tools(self) -> set[str]:
         """Read the stored rows and the runtime tool settings, apply both, and return shadowed names.
