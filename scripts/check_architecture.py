@@ -1439,6 +1439,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/inference/country_database_repository.py",
         "baseline": (),
     },
+    "gateway.models.inference.VideoJobRecord": {
+        "repository": "gateway/repositories/inference/video_job_repository.py",
+        "baseline": (),
+    },
     "gateway.models.platform.RuntimeSetting": {
         "repository": None,
         "baseline": (

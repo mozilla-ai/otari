@@ -76,7 +76,7 @@ Otari implements three completion surfaces:
 - `POST /api/v1/messages` and `/api/v1/messages/count_tokens`, Anthropic Messages
 - `POST /api/v1/responses`, OpenAI Responses
 
-Otari also serves embeddings, images, audio, files, batches,
+Otari also serves embeddings, images, audio, files, batches, videos,
 moderations, rerank, search, fetch, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
@@ -445,6 +445,85 @@ in `usage` what the gateway metered and what it charged:
 
 How a rerank model is priced, per search unit or per input token, is described in
 [Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+
+## Videos
+
+A video takes minutes to render, so the Videos API is asynchronous, in the
+shape of OpenAI's. `POST /api/v1/videos` starts a job and returns it at once,
+`GET /api/v1/videos/{video_id}` reads its status from the provider that runs
+it, `GET /api/v1/videos/{video_id}/content` serves the finished video's bytes
+in the provider's media type, and `GET /api/v1/videos` lists the caller's own
+jobs from Otari's records, newest first. There is no delete and no remix.
+
+```json
+{"model": "gemini:veo-3.0-generate-001", "prompt": "a cat on a skateboard", "seconds": 8}
+```
+
+The request takes `model`, `prompt` and the optional `seconds`, `size`,
+`resolution`, `aspect_ratio`, `seed`, `negative_prompt`, `reference_images`,
+`reference_audios`, `first_frame` and `last_frame`, which reach the provider
+as any-llm names them. `user` is Otari's own and is never forwarded: it names
+the billed user under the rules of [The `user` field](#the-user-field). The
+job comes back as:
+
+```json
+{
+  "id": "…",
+  "object": "video",
+  "model": "veo-3.0-generate-001",
+  "provider": "gemini",
+  "status": "queued",
+  "created_at": 1700000000,
+  "completed_at": null,
+  "progress": null,
+  "seconds": null,
+  "size": null,
+  "error": null
+}
+```
+
+- `status` is `queued`, `in_progress`, `completed` or `failed`. `error` carries
+  the provider's message and code when the job failed.
+- `seconds` is the length the provider reports, once it does.
+- `provider` is the instance that runs the job, which every later call on the
+  job uses.
+
+How a video is billed:
+
+- The model must have a per-second video price, from the catalog or a `rates`
+  block set through the pricing API
+  ([Every price in its unit](configuration.md#every-price-in-its-unit-rates)).
+  A model with none is refused with 402 and the `pricing_required` error code,
+  whatever `require_pricing` says: a video is never started without a
+  per-second price.
+- Starting a job reserves the length asked for at that price, or 8 seconds
+  when the request names none, so a caller over budget is refused before the
+  job starts. The hold is released once the provider accepts the job, and the
+  start writes a usage row with no cost under the `/v1/videos` label.
+- A provider that renders inside the start call, as DeepInfra does, returns
+  the job already `completed`: it is billed then, and what it reported is
+  kept on Otari's record, so a later read of the job or its content answers
+  from the record without asking the provider.
+- The first `GET` that finds the job `completed`, on the job or on its content,
+  prices the seconds the provider reports, else the seconds asked for, and
+  writes one usage row under the `/v1/videos/completed` label with the cost,
+  its `seconds` meter and the charge line. The cost folds into the owner's
+  spend in dollars, except for a job started on a key exempt from budgets,
+  whose row carries the cost and whose spend stays as it was. A job whose
+  length neither the provider nor the request gives is recorded once with no
+  cost. A completed job whose model has lost its per-second price stays
+  unbilled, and the first read after the price is back bills it. Later reads
+  bill nothing, a failed job is never billed, and a job nobody reads is never
+  billed.
+- A job the gateway could not record after the provider accepted it answers
+  500, and the server log names the provider's job id.
+- A key reads only the jobs its user started in its workspace. Another user's
+  job, and an unknown id, are 404. The master key reads any job, and is the
+  only key that reads a job whose workspace was deleted since.
+
+Which providers serve video is any-llm's to say: Gemini, Together and DeepInfra
+in the release Otari pins. A provider without it is refused with 422 before it
+is called.
 
 ## Search
 

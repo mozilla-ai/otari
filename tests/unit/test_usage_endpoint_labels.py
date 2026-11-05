@@ -16,6 +16,7 @@ from gateway.api.routes import (
     moderations,
     rerank,
     responses,
+    videos,
 )
 
 
@@ -32,3 +33,5 @@ def test_labels_keep_their_historical_values() -> None:
     assert images.USAGE_ENDPOINT_EDITS == "/v1/images/edits"
     assert batches.USAGE_ENDPOINT == "/v1/batches"
     assert batches.USAGE_ENDPOINT_RESULTS == "/v1/batches/results"
+    assert videos.USAGE_ENDPOINT == "/v1/videos"
+    assert videos.USAGE_ENDPOINT_COMPLETED == "/v1/videos/completed"

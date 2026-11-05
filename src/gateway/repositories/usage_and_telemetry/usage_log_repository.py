@@ -9,6 +9,7 @@ from typing import Any, Never, cast
 
 from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select
 
+from gateway.core.metered_pricing import ChargeLine
 from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
@@ -69,6 +70,54 @@ def new_usage_row(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
+    )
+
+
+def settled_job_row(
+    *,
+    workspace_id: uuid.UUID,
+    api_key_id: str | None,
+    user_id: str,
+    model: str,
+    provider: str,
+    endpoint: str,
+    counts_toward_budget: bool,
+    deployment_paid: bool,
+    cost: Decimal | None,
+    billing_meters: dict[str, int] | None,
+    pricing_breakdown: list[ChargeLine] | None,
+    pricing_source: str | None,
+    pricing_reference: str | None,
+    pricing_effective_at: datetime | None,
+) -> UsageLog:
+    """The row that settles an asynchronous job once it completes.
+
+    No tokens and no latency: the work ran after its request returned. The row
+    is priced now, so ``calculated_at`` is its timestamp where it carries a cost.
+    """
+    now = datetime.now(UTC)
+    return UsageLog(
+        id=str(uuid.uuid4()),
+        timestamp=now,
+        workspace_id=workspace_id,
+        api_key_id=api_key_id,
+        user_id=user_id,
+        model=model,
+        provider=provider,
+        endpoint=endpoint,
+        status="success",
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
+        cost=cost,
+        calculated_at=now if cost is not None else None,
+        billing_meters=billing_meters,
+        pricing_breakdown=pricing_breakdown,
+        pricing_source=pricing_source,
+        pricing_reference=pricing_reference,
+        pricing_effective_at=pricing_effective_at,
     )
 
 
@@ -376,6 +425,11 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
 
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, UsageLog)
+
+    async def add(self, row: UsageLog) -> None:
+        """Stage ``row`` in the open block, so it commits with the step that settled it."""
+        self.db.add(row)
+        await self.db.flush()
 
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key.

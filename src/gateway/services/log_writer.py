@@ -333,7 +333,7 @@ class SignalingLogWriter:
         # from another task and the facts should not depend on how far it got.
         usage: RecordedUsage | None = None
         try:
-            usage = _recorded_usage(log)
+            usage = recorded_usage(log)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Usage row not signaled (%s)", type(exc).__name__)
         accepted = await self._inner.put(log)
@@ -352,7 +352,7 @@ class SignalingLogWriter:
         await self._inner.stop()
 
 
-def _recorded_usage(log: UsageLog) -> RecordedUsage:
+def recorded_usage(log: UsageLog) -> RecordedUsage:
     # Unset on a row the request path built, until the column default fills it at flush.
     source = log.source if log.source is not None else SERVED_HERE_SLUG
     return RecordedUsage(

@@ -60,6 +60,20 @@ class _FakeSandboxBackend:
         return "ok"
 
 
+class _ScriptedEvents:
+    """A ConverseStream event stream over scripted events, which any-llm closes once it has read them all."""
+
+    def __init__(self, events: list[dict[str, Any]]) -> None:
+        self._events = iter(events)
+        self.closed = False
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        return self._events
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _FakeBedrockClient:
     """A boto3 bedrock-runtime client whose ConverseStream replays one scripted event list per call."""
 
@@ -67,9 +81,9 @@ class _FakeBedrockClient:
         self._rounds = rounds
         self.requests: list[dict[str, Any]] = []
 
-    def converse_stream(self, **kwargs: Any) -> dict[str, Iterator[dict[str, Any]]]:
+    def converse_stream(self, **kwargs: Any) -> dict[str, _ScriptedEvents]:
         self.requests.append(kwargs)
-        return {"stream": iter(self._rounds[len(self.requests) - 1])}
+        return {"stream": _ScriptedEvents(self._rounds[len(self.requests) - 1])}
 
 
 _CODE_EXECUTION_ROUND: list[dict[str, Any]] = [
