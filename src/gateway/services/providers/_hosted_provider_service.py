@@ -364,7 +364,9 @@ class HostedProviderService:
             remember_hosted_zero_data_retention(name, entry.zero_data_retention)
         get_model_cache().clear(name)
 
-    async def list_models(self, provider: str, *, skip: int = 0, limit: int = 500) -> HostedModelsPublic:
+    async def list_models(
+        self, provider: str, *, skip: int = 0, limit: int = 500, search: str | None = None
+    ) -> HostedModelsPublic:
         """One page of a provider's offered models, each priced as it currently serves.
 
         Raises:
@@ -372,7 +374,7 @@ class HostedProviderService:
         """
         async with self.uow:
             source = await self._provider_or_raise(provider)
-            rows, count = await self.models.list_for_provider(source.name, skip=skip, limit=limit)
+            rows, count = await self.models.list_for_provider(source.name, skip=skip, limit=limit, search=search)
         rates = await self.offers.current_rates(source.name, rows, implementation=source.implementation)
         return HostedModelsPublic(
             data=[HostedModelPublic.from_row(model, rates=rates.get(model.model)) for model in rows], count=count
