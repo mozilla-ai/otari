@@ -970,8 +970,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             if missing_backend_url := config.search_tools_without_backend_url():
                 logger.warning(
                     "No backend URL for search tool(s): %s. POST /api/v1/search refuses them with a 400 until "
-                    "each declares an 'api_base' or a web-search URL is set (web_search_url, "
-                    "OTARI_WEB_SEARCH_URL, or the dashboard's Tools page).",
+                    "each declares its own 'api_base'.",
                     ", ".join(sorted(missing_backend_url)),
                 )
             # After the stored search tools and tool settings, for the same
