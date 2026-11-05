@@ -22,6 +22,7 @@ from gateway.services.pricing._usage_pricing import (
     request_rate,
     validated_units,
 )
+from gateway.services.pricing._video_pricing import VIDEO_SECONDS, estimate_video_cost, price_video, video_rate
 from gateway.services.pricing.bundled import (
     BUNDLED_SNAPSHOT_NAME,
     bundled_catalog,
@@ -66,6 +67,7 @@ __all__ = [
     "ToolRateLookup",
     "UnpricedToolLabel",
     "UsageCharge",
+    "VIDEO_SECONDS",
     "active_generations",
     "active_timeline",
     "add_accepted_generation",
@@ -80,9 +82,11 @@ __all__ = [
     "paid_by_the_deployment",
     "parse_rate",
     "estimate_settles",
+    "estimate_video_cost",
     "has_completion_meter",
     "price_completion",
     "price_usage",
+    "price_video",
     "request_rate",
     "reset_generations",
     "resolve_as_of",
@@ -90,4 +94,5 @@ __all__ = [
     "set_accepted_generations",
     "tool_rate_lookup",
     "validated_units",
+    "video_rate",
 ]
