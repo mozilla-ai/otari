@@ -919,7 +919,7 @@ def resolve_provider_selector(
         alias is None
         and (written := split_selector(model_selector)) is not None
         and written[0] not in config.providers
-        and _hosted_names(written[0]) is None
+        and (_hosted_names(written[0]) is None or org_key_slug_provider(written[0], workspace_id) is not None)
     ):
         # An organization key serves only the ids it offers, so a provider's
         # undated name reaches its one dated build there. A ``providers:``

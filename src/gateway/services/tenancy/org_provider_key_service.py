@@ -431,22 +431,22 @@ def slug_from_name(name: str) -> str:
     return re.sub(r"[^a-z0-9._-]+", "-", name.strip().lower()).strip("-._")[:64]
 
 
-def _validated_slug(slug: str, config: GatewayConfig | None) -> str:
-    """Refuse a slug a selector could not name this key by.
+def _slug_problem(slug: str, config: GatewayConfig | None) -> str | None:
+    """Why a selector could not name a key by ``slug``, or ``None`` when it could.
 
     A provider's own name would be shadowed by, or shadow, that provider, and a
     configured instance is resolved before any organization's key is.
     """
     if not _SLUG_PATTERN.fullmatch(slug):
-        raise OrgProviderKeyInvalidSlugError(
+        return (
             "A slug uses lowercase letters, digits, '.', '_' and '-', starts with a letter or digit, "
             "and is at most 64 characters"
         )
     if slug in _PROVIDER_NAMES:
-        raise OrgProviderKeyInvalidSlugError(f"'{slug}' names a provider, so it cannot name a key")
+        return f"'{slug}' names a provider, so it cannot name a key"
     if config is not None and (slug in config.providers or slug in (config._provider_baseline or {})):
-        raise OrgProviderKeyInvalidSlugError(f"'{slug}' is a configured provider instance, so it cannot name a key")
-    return slug
+        return f"'{slug}' is a configured provider instance, so it cannot name a key"
+    return None
 
 
 async def _gate_api_base(api_base: str | None) -> None:
@@ -536,7 +536,9 @@ class OrgProviderKeyService:
         provider = _validated_provider(request.provider)
         name = _validated_name(request.name)
         await _gate_api_base(request.api_base)
-        slug = await self._slug_for(organization.id, request.slug, name=name, api_base=request.api_base)
+        slug = await self._slug_for(
+            organization.id, request.slug, name=name, provider=provider, api_base=request.api_base
+        )
 
         if (
             await self.keys.get_by_org_provider_name(organization_id=organization.id, provider=provider, name=name)
@@ -560,9 +562,11 @@ class OrgProviderKeyService:
             await self.db.commit()
         except IntegrityError:
             # The pre-checks above race the insert; the unique constraints are
-            # what actually decide, as elsewhere in this slice.
+            # what actually decide, as elsewhere in this slice. The id is read
+            # first because the rollback expires the organization.
+            organization_id = organization.id
             await self.db.rollback()
-            if slug is not None and await self.keys.get_by_org_slug(organization.id, slug) is not None:
+            if slug is not None and await self.keys.get_by_org_slug(organization_id, slug) is not None:
                 raise OrgProviderKeySlugTakenError(slug) from None
             raise OrgProviderKeyAlreadyExistsError(provider, name) from None
 
@@ -570,16 +574,30 @@ class OrgProviderKeyService:
         return await self._public_row(key)
 
     async def _slug_for(
-        self, organization_id: uuid.UUID, requested: str | None, *, name: str, api_base: str | None
+        self, organization_id: uuid.UUID, requested: str | None, *, name: str, provider: str, api_base: str | None
     ) -> str | None:
-        """The slug a key is stored with: only a key with a custom endpoint has one."""
+        """The slug a key is created with: only a key with a custom endpoint has one.
+
+        One asked for is taken as it is or refused. One made from the name steps
+        around a provider's name and a slug already taken, as the migration did.
+        """
         if not api_base:
             if requested:
                 raise OrgProviderKeyInvalidSlugError("Only a key with a custom base URL takes a slug")
             return None
-        slug = _validated_slug(requested.strip() if requested else slug_from_name(name), self.config)
-        if await self.keys.get_by_org_slug(organization_id, slug) is not None:
-            raise OrgProviderKeySlugTakenError(slug)
+        if requested:
+            slug = requested.strip()
+            if (problem := _slug_problem(slug, self.config)) is not None:
+                raise OrgProviderKeyInvalidSlugError(problem)
+            if await self.keys.get_by_org_slug(organization_id, slug) is not None:
+                raise OrgProviderKeySlugTakenError(slug)
+            return slug
+        base = slug_from_name(name)[:56] or provider
+        if _slug_problem(base, self.config) is not None:
+            base = f"{base}-custom"
+        slug, n = base, 2
+        while await self.keys.get_by_org_slug(organization_id, slug) is not None:
+            slug, n = f"{base}-{n}", n + 1
         return slug
 
     async def update_key_for_user(
@@ -614,20 +632,18 @@ class OrgProviderKeyService:
                     is not None
                 ):
                     raise OrgProviderKeyAlreadyExistsError(key.provider, new_name)
-        if "slug" in update_data:
-            requested_slug = update_data.pop("slug")
-            if key.slug is not None and requested_slug not in (None, key.slug):
-                raise OrgProviderKeyInvalidSlugError("A key's slug cannot be changed once set")
-        else:
-            requested_slug = None
-        if key.slug is None and update_data.get("api_base"):
-            # A key gaining a custom endpoint gets a selector name of its own.
-            update_data["slug"] = await self._slug_for(
-                organization.id,
-                requested_slug,
-                name=str(update_data.get("name", key.name)),
-                api_base=update_data["api_base"],
-            )
+        # The slug and the custom endpoint come together, at creation: a key
+        # gaining one would move its rates and its requests to a new name, and
+        # one losing it would leave a name nothing but the provider's default serves.
+        if "api_base" in update_data:
+            if key.slug is not None and not update_data["api_base"]:
+                raise OrgProviderKeyInvalidSlugError(
+                    f"'{key.slug}' names a key with its own endpoint, so it keeps a base URL"
+                )
+            if key.slug is None and not key.api_base and update_data["api_base"]:
+                raise OrgProviderKeyInvalidSlugError(
+                    "A key for the provider's own endpoint cannot move to another; add a key for that endpoint"
+                )
         if "api_base" in update_data:
             await _gate_api_base(update_data["api_base"])
             if update_data["api_base"] and update_data["api_base"] != key.api_base:
@@ -651,8 +667,6 @@ class OrgProviderKeyService:
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
-            if update_data.get("slug") is not None:
-                raise OrgProviderKeySlugTakenError(update_data["slug"]) from None
             raise OrgProviderKeyAlreadyExistsError(key.provider, str(update_data.get("name", key.name))) from None
 
         await refresh_org_provider_cache(self.db)

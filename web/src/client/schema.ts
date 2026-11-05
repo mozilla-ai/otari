@@ -14562,11 +14562,6 @@ export interface components {
             } | null;
             /** Name */
             name?: string | null;
-            /**
-             * Slug
-             * @description Taken only by a key gaining a custom base URL; an existing slug never changes.
-             */
-            slug?: string | null;
             /** Zero Data Retention */
             zero_data_retention?: boolean | null;
         };

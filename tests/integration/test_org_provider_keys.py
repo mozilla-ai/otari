@@ -25,6 +25,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyArchivedError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNotArchivedError,
     OrgProviderKeyNotFoundError,
     WorkspaceProviderKeyOverrideConflictError,
@@ -168,7 +169,9 @@ async def test_moving_a_key_to_another_host_needs_its_credentials_again(async_db
         api_base="https://elsewhere/v1", api_key="sk-live-5678", client_args={"extra_token": "hidden-2"}
     )
     assert (moved.api_base, moved.last4) == ("https://elsewhere/v1", "5678")
-    assert (await update(api_base=None)).api_base is None, "the provider's own host needs no credential again"
+    with pytest.raises(OrgProviderKeyInvalidSlugError):
+        # A key named by its own prefix keeps an endpoint for that prefix to name.
+        await update(api_base=None)
 
 
 async def test_a_provider_counts_as_zero_data_retention_only_while_every_key_declares_it(

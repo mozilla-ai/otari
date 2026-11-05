@@ -47,8 +47,8 @@ async def _organization(db: AsyncSession, slug: str) -> tuple[Organization, User
     return organization, admin
 
 
-def _synthetic(**fields: str | None) -> OrgProviderKeyCreateRequest:
-    return OrgProviderKeyCreateRequest(provider="openai", name="Synthetic", api_base=_SYNTHETIC, **fields)
+def _synthetic(name: str = "Synthetic", slug: str | None = None) -> OrgProviderKeyCreateRequest:
+    return OrgProviderKeyCreateRequest(provider="openai", name=name, slug=slug, api_base=_SYNTHETIC)
 
 
 @pytest.mark.asyncio
@@ -90,9 +90,13 @@ async def test_a_slug_that_cannot_name_the_key_is_refused(
 async def test_a_slug_is_refused_when_a_configured_instance_has_it(async_db: AsyncSession) -> None:
     _, admin = await _organization(async_db, "acme-instance-slug")
     config = GatewayConfig(providers={"synthetic": {"provider_type": "openai", "api_key": "sk-deployment"}})
+    keys = OrgProviderKeyService(async_db, config)
 
     with pytest.raises(OrgProviderKeyInvalidSlugError):
-        await OrgProviderKeyService(async_db, config).create_key_for_user(user=admin, request=_synthetic())
+        await keys.create_key_for_user(user=admin, request=_synthetic(slug="synthetic"))
+    derived = await keys.create_key_for_user(user=admin, request=_synthetic())
+
+    assert derived.slug == "synthetic-custom"
 
 
 @pytest.mark.asyncio
@@ -111,34 +115,59 @@ async def test_two_keys_cannot_share_a_slug(async_db: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_slug_never_changes(async_db: AsyncSession) -> None:
+async def test_a_slug_made_from_the_name_steps_around_a_provider_and_a_taken_slug(async_db: AsyncSession) -> None:
+    _, admin = await _organization(async_db, "acme-slug-derived")
+    keys = OrgProviderKeyService(async_db)
+
+    first = await keys.create_key_for_user(user=admin, request=_synthetic(name="OpenAI"))
+    second = await keys.create_key_for_user(user=admin, request=_synthetic(name="OpenAI EU", slug=None))
+    third = await keys.create_key_for_user(
+        user=admin,
+        request=OrgProviderKeyCreateRequest(provider="anthropic", name="OpenAI", api_base="https://c.example/v1"),
+    )
+
+    assert (first.slug, second.slug, third.slug) == ("openai-custom", "openai-eu", "openai-custom-2")
+
+
+@pytest.mark.asyncio
+async def test_a_slug_survives_a_rename_and_a_new_endpoint(async_db: AsyncSession) -> None:
     _, admin = await _organization(async_db, "acme-slug-fixed")
+    keys = OrgProviderKeyService(async_db)
+    created = await keys.create_key_for_user(user=admin, request=_synthetic())
+
+    updated = await keys.update_key_for_user(
+        user=admin,
+        key_id=created.id,
+        request=OrgProviderKeyUpdateRequest(name="Synthetic EU", api_base="https://eu.synthetic.new/openai/v1"),
+    )
+
+    assert updated.slug == "synthetic"
+
+
+@pytest.mark.asyncio
+async def test_a_key_with_a_slug_keeps_its_endpoint(async_db: AsyncSession) -> None:
+    _, admin = await _organization(async_db, "acme-slug-keeps-base")
     keys = OrgProviderKeyService(async_db)
     created = await keys.create_key_for_user(user=admin, request=_synthetic())
 
     with pytest.raises(OrgProviderKeyInvalidSlugError):
         await keys.update_key_for_user(
-            user=admin, key_id=created.id, request=OrgProviderKeyUpdateRequest(slug="renamed")
+            user=admin, key_id=created.id, request=OrgProviderKeyUpdateRequest(api_base=None)
         )
-    renamed = await keys.update_key_for_user(
-        user=admin, key_id=created.id, request=OrgProviderKeyUpdateRequest(name="Synthetic EU")
-    )
-    assert renamed.slug == "synthetic"
 
 
 @pytest.mark.asyncio
-async def test_a_key_gaining_a_custom_endpoint_gains_a_slug(async_db: AsyncSession) -> None:
-    _, admin = await _organization(async_db, "acme-slug-gained")
+async def test_a_key_for_the_providers_own_endpoint_cannot_move_to_another(async_db: AsyncSession) -> None:
+    _, admin = await _organization(async_db, "acme-slug-no-move")
     keys = OrgProviderKeyService(async_db)
     created = await keys.create_key_for_user(
-        user=admin, request=OrgProviderKeyCreateRequest(provider="openai", name="Synthetic")
+        user=admin, request=OrgProviderKeyCreateRequest(provider="openai", name="OpenAI")
     )
 
-    updated = await keys.update_key_for_user(
-        user=admin, key_id=created.id, request=OrgProviderKeyUpdateRequest(api_base=_SYNTHETIC)
-    )
-
-    assert updated.slug == "synthetic"
+    with pytest.raises(OrgProviderKeyInvalidSlugError):
+        await keys.update_key_for_user(
+            user=admin, key_id=created.id, request=OrgProviderKeyUpdateRequest(api_base=_SYNTHETIC)
+        )
 
 
 @pytest.mark.asyncio
@@ -207,6 +236,7 @@ async def test_an_organization_prices_its_custom_endpoint_while_the_deployment_h
     saved = await pricing.create_for_caller(admin, f"synthetic:{_MODEL}", _rates())
 
     effective = await pricing.rates_in_effect(organization.id, [f"synthetic:{_MODEL}"], datetime.now(UTC))
-    assert effective[f"synthetic:{_MODEL}"].row is not None
-    assert effective[f"synthetic:{_MODEL}"].row.id == saved.id
+    row = effective[f"synthetic:{_MODEL}"].row
+    assert row is not None
+    assert row.id == saved.id
     assert await pricing.deployment_supplied_keys(organization.id, ["openai:gpt-4o"]) == {"openai:gpt-4o"}

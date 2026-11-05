@@ -14608,19 +14608,6 @@
             ],
             "title": "Name"
           },
-          "slug": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Taken only by a key gaining a custom base URL; an existing slug never changes.",
-            "title": "Slug"
-          },
           "zero_data_retention": {
             "anyOf": [
               {
