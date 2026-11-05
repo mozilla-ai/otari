@@ -366,9 +366,12 @@ class ToolSettings(BaseModel):
     web_search_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Base URL of the web-search backend (SearXNG instance or a search adapter) for "
-            "otari_web_search tools. When unset, otari_web_search requests are rejected with 400. "
-            "docker-compose sets this to the bundled SearXNG container."
+            "Deprecated, and removed by a coming breaking release: use a search tool with provider "
+            "searxng and its own api_base. The SearXNG instance otari_web_search searches when no "
+            "search tool is its default and no web_search_provider is set, and the api_base of a searxng "
+            "search tool that sets none. "
+            "docker-compose sets it to the bundled SearXNG container unless OTARI_WEB_SEARCH_URL is "
+            "set, even to an empty value."
         ),
     )
     web_search_provider: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -393,8 +396,10 @@ class ToolSettings(BaseModel):
     web_search_engines: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Comma-separated SearXNG engine list for the web-search backend (e.g. 'google,bing'). "
-            "When unset, the backend default engines are used."
+            "Deprecated, and removed with web_search_url: use a searxng search tool's engines option. "
+            "Comma-separated SearXNG engines for web_search_url, and for a searxng search tool that "
+            "sets no engines option. When unset, web_search_url searches duckduckgo, mojeek, qwant "
+            "and wikipedia."
         ),
     )
     web_search_max_results: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -568,7 +573,7 @@ class ToolSettings(BaseModel):
         )
         logger.warning(
             "Web search through a licensed provider is configured but will not run: %s, and %s is not set. "
-            "Set both, or neither and point web_search_url at a SearXNG-shaped backend instead.",
+            "Set both, or neither and add a search tool under search_tools instead.",
             present,
             missing,
         )

@@ -710,6 +710,9 @@ describe("WebSearchPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Legacy SearXNG backend" }),
     ).toBeInTheDocument()
+    expect(
+      screen.getByText(/^Deprecated: a coming breaking release removes/),
+    ).toBeVisible()
   })
 
   it("saves the model's settings from their own rows, and says when one is refused", async () => {
