@@ -310,7 +310,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.45.0"
+version = "1.46.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
@@ -321,9 +321,9 @@ dependencies = [
     { name = "rich", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
     { name = "typing-extensions", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/73/f3/dd37d1b279260d4a77e8707e27d4579c67beee9994db530c46871a3349ab/any_llm_sdk-1.45.0.tar.gz", hash = "sha256:23e39395ea6218f650e8f942775b82c060b7085c69c9972dc899ec229bc19b90", size = 327374, upload-time = "2026-11-05T08:32:14.163Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ea/86/fca16f429aeedf2238f78957558a599caa3f496653693aeb5e846ad23f5d/any_llm_sdk-1.46.0.tar.gz", hash = "sha256:d2240d71205a00bdd8f17959185d81e6dc1090c0dc50debb2c73b9df9cf73d58", size = 330992, upload-time = "2026-11-05T14:50:08.037Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/e6/37675ce7b740fc499b1990f05b0ba754a02227ba3de296a1e02741a140bf/any_llm_sdk-1.45.0-py3-none-any.whl", hash = "sha256:05fd99130ebd467df77ce60bacd6d39aaf5a8b839ed00732134f139b4dfefc30", size = 396170, upload-time = "2026-11-05T08:32:12.295Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/cf/29c9a75f5ad9e4660e529a79cc2bd218cd84fb350227d3a2eeaa91b5b832/any_llm_sdk-1.46.0-py3-none-any.whl", hash = "sha256:d49d1cc3ef8321d3d0c2859fa8dcfa7d84cc76a34f1b110255e5065afccd65cc", size = 400107, upload-time = "2026-11-05T14:50:05.921Z" },
 ]
 
 [package.optional-dependencies]
@@ -1406,7 +1406,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "any-fetch", editable = "any-fetch" },
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.45.0" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.46.0" },
     { name = "any-search", editable = "any-search" },
     { name = "apron-auth", specifier = ">=0.18.0,<0.19.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
