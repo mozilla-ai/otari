@@ -21,8 +21,9 @@ also has to fit the organization's [balance](billing.md#budgets-are-a-different-
 1. Open **Organization** and select **Spend & budgets**.
 2. Click **Add budget**, then set an optional **Name**, the **Limit (USD)**
    (blank for no dollar limit) and how often it **Resets**: Daily, Weekly
-   (Mondays) or Monthly (the first of the month), at midnight UTC. Click
-   **Add budget**.
+   (Mondays) or Monthly (the first of the month), at midnight UTC. Under
+   **Token and request limits**, optionally cap tokens or requests per period.
+   Click **Add budget**.
 3. Click **Add ceiling**, then choose what it caps under **Capping** (the
    organization or one of its workspaces), optionally a **Provider instance** to
    cap one provider only, the **Budget** to use, and an optional **Name**. Click
