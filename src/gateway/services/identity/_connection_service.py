@@ -357,7 +357,7 @@ class OIDCConnectionService:
     ) -> None:
         """Set whether the caller's organization requires sign-in through its own connection. Owners and admins only.
 
-        Switching it on revokes the live session of every active member it newly refuses.
+        Setting it to ``True`` revokes the live session of every active member it currently refuses.
 
         Raises:
             OIDCConnectionNotFoundError: The organization has not configured a connection yet.
@@ -367,7 +367,6 @@ class OIDCConnectionService:
                 organization's own owners to keep a non-SSO route, or waiving that exception.
         """
         organization = await self._managed_organization(user)
-        was_required = organization.sso_required
 
         async with self._uow:
             connection = await self._connections.get_for_organization(organization.id)
@@ -392,7 +391,7 @@ class OIDCConnectionService:
                     "sso_break_glass_waived": break_glass_waived,
                 },
             )
-            if required and not was_required:
+            if required:
                 await self._revoke_newly_blocked_sessions(organization, connection)
 
     async def _revoke_newly_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
