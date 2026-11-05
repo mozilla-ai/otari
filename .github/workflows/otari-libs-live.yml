@@ -1,7 +1,7 @@
 name: Otari Libs Live
 
 # The live tests of any-search and any-fetch against the real providers, keyed
-# from repository secrets. The libraries call providers over plain HTTP with no
+# from repository secrets, and against a SearXNG container this job starts. The libraries call providers over plain HTTP with no
 # vendor SDK, so nothing absorbs a change on a provider's side: an adapter
 # checks every field it reads and raises `unexpected_response` on a change, and
 # this run is how that change is noticed without anyone following each
@@ -22,6 +22,7 @@ on:
     paths:
       - 'any-search/**'
       - 'any-fetch/**'
+      - 'scripts/searxng/**'
       - '.github/workflows/otari-libs-live.yml'
   workflow_dispatch:
   schedule:
@@ -118,6 +119,23 @@ jobs:
     - name: Install dependencies
       run: uv sync --dev --frozen
 
+    # SearXNG needs no key: the live tests search an instance of it started here, with the settings
+    # docker-compose.yml mounts. The image is dated, so a new SearXNG reaches these tests through a
+    # change to this file. A failed start fails only the SearXNG tests.
+    - name: Start SearXNG
+      continue-on-error: true
+      run: |
+        docker run --detach --name searxng --publish 127.0.0.1:8080:8080 \
+          --volume "$PWD/scripts/searxng/settings.yml:/etc/searxng/settings.yml:ro" \
+          --env SEARXNG_SECRET=otari-libs-live --env SEARXNG_BASE_URL=http://127.0.0.1:8080/ \
+          docker.io/searxng/searxng:2026.11.2-cccbc9e15
+        for _ in $(seq 1 60); do
+          curl --silent --fail --output /dev/null http://127.0.0.1:8080/healthz && exit 0
+          sleep 1
+        done
+        docker logs searxng
+        exit 1
+
     # One run per library, since both have test files of the same names (Makefile, test-libs).
     - name: Live searches
       env:
@@ -127,6 +145,7 @@ jobs:
         DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         SERPLY_API_KEY: ${{ secrets.SERPLY_API_KEY }}
         SYNTHETIC_API_KEY: ${{ secrets.SYNTHETIC_API_KEY }}
+        SEARXNG_BASE_URL: http://127.0.0.1:8080
       run: uv run pytest -v -rs any-search/tests/test_live.py
 
     - name: Live fetches

@@ -41,8 +41,8 @@ export const KIND_COPY: Readonly<
 
 /**
  * The providers a new key may name: the catalog's, less those no library
- * serves. The catalog lists `searxng` with no tier, and the gateway refuses a
- * key on it.
+ * serves, which the catalog lists with no tier and the gateway refuses a key
+ * on.
  */
 export function offeredProviders(
   catalog: readonly SearchProviderInfo[],

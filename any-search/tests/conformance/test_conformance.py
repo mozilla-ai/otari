@@ -77,6 +77,12 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario(handler=_replay("mojeek", "error")),
         "in_body_error": Scenario(handler=_replay("mojeek", "in_body_error")),
     },
+    "searxng": {
+        "normal": Scenario(handler=_replay("searxng", "normal")),
+        "empty": Scenario(handler=_replay("searxng", "empty")),
+        "error": Scenario(handler=_replay("searxng", "error")),
+        "in_body_error": Scenario(handler=_replay("searxng", "in_body_error")),
+    },
     "serply": {
         "normal": Scenario(handler=_replay("serply", "normal")),
         "empty": Scenario(handler=_replay("serply", "empty")),
@@ -102,11 +108,13 @@ TIMEOUT = 7.5
 
 @pytest.fixture(autouse=True)
 def _keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give every provider that reads a key from the environment a fake one, never the developer's own."""
+    """Give every provider that reads a key or a base URL from the environment a fake one, never the developer's own."""
     for provider in PROVIDERS:
-        env_key = AnySearch.get_provider_metadata(provider).env_key
-        if env_key:
-            monkeypatch.setenv(env_key, "conformance-key")
+        metadata = AnySearch.get_provider_metadata(provider)
+        if metadata.env_key:
+            monkeypatch.setenv(metadata.env_key, "conformance-key")
+        if metadata.env_api_base:
+            monkeypatch.setenv(metadata.env_api_base, "https://conformance.example")
 
 
 def _scenario(provider: str, case: Case) -> Scenario:

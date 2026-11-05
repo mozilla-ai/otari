@@ -45,20 +45,10 @@ from gateway.log_config import logger
 # ``web_search_provider`` without the config layer importing
 # `gateway.services.web_search_providers`, which imports this name.
 WEB_SEARCH_PROVIDERS = ("tavily", "brave")
-# Providers that authenticate with an API key, for the direct endpoint's own
-# clients and the catalog's entries for providers without an adapter. Validation
-# asks the library's metadata instead, so a provider any-search adds is held to
-# its own requirement.
-SEARCH_PROVIDERS_REQUIRING_API_KEY = ("exa",)
-# Providers with no endpoint of their own to default to, so the tool has to say
-# where the backend is. The only one today is ``searxng``, which speaks the same
-# wire contract as the in-loop otari_web_search backend and therefore inherits
-# ``web_search_url`` when the tool declares no ``api_base``.
+# The providers whose search tools inherit the legacy SearXNG settings (contract
+# C8): ``web_search_url`` with no ``api_base``, ``web_search_engines`` with no
+# ``engines``.
 SEARCH_PROVIDERS_REQUIRING_API_BASE = ("searxng",)
-# Accepted in ``search_tools`` although any-search has no adapter for it: the
-# direct endpoint serves it through its own client, its options passed unchecked
-# since there is no schema to check them against. It needs no key.
-SEARCH_PROVIDERS_WITHOUT_ADAPTER = ("searxng",)
 
 # The fetch instance that always exists: the built-in fetcher, on any-fetch's
 # ``builtin`` provider, which no declared instance may use.
@@ -78,12 +68,10 @@ DEFAULT_WEB_SEARCH_MAX_CALLS = 10
 # ``web_search_engines`` is unset; why these four is said where it uses them.
 DEFAULT_SEARXNG_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")
 # What otari has always sent these providers, applied below every other option
-# layer so that moving a provider onto its library adapter changes nothing: GET
-# for SearXNG, which some SearXNG-shaped backends require, and page text from
-# Tavily, so its hits need no enrichment. An instance that sets the key wins.
+# layer: page text from Tavily, so its hits need no enrichment. An instance that
+# sets the key wins.
 PROVIDER_DEFAULT_OPTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
     {
-        "searxng": MappingProxyType({"method": "get"}),
         "tavily": MappingProxyType({"include_raw_content": True}),
     }
 )
@@ -94,7 +82,7 @@ ToolKind = Literal["search", "fetch"]
 
 def supported_search_providers() -> tuple[str, ...]:
     """The providers a ``search_tools`` entry may name."""
-    return (*any_search.AnySearch.get_supported_providers(), *SEARCH_PROVIDERS_WITHOUT_ADAPTER)
+    return tuple(any_search.AnySearch.get_supported_providers())
 
 
 def supported_fetch_providers() -> tuple[str, ...]:
@@ -108,16 +96,12 @@ def is_test_tier(kind: ToolKind, provider: str) -> bool:
     """Whether the provider exists for tests: accepted in configuration, never offered."""
     if kind == "fetch":
         return any_fetch.AnyFetch.get_provider_metadata(provider).tier == "test"
-    if provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
-        return False
     return any_search.AnySearch.get_provider_metadata(provider).tier == "test"
 
 
 def _requires_api_key(kind: ToolKind, provider: str) -> bool:
     if kind == "fetch":
         return any_fetch.AnyFetch.get_provider_metadata(provider).requires_api_key
-    if provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
-        return False
     return any_search.AnySearch.get_provider_metadata(provider).requires_api_key
 
 
@@ -259,8 +243,7 @@ def validate_search_tool_entry(name: str, entry: Any) -> None:
     (``/api/v1/search-tools``) can hold a dashboard-written tool to the same rules
     the config file is held to at startup, instead of restating them.
 
-    The provider is one any-search serves, or ``searxng`` until it has an
-    adapter. Whether it needs a key is the library's metadata's answer; a keyless
+    The provider is one any-search serves. Whether it needs a key is the library's metadata's answer; a keyless
     provider (a self-hosted SearXNG or an adapter fronting one) is allowed to
     declare none. The tool name doubles as a ``/api/v1/search/{tool}`` path
     segment, so it must not contain a slash.
@@ -644,16 +627,16 @@ class ToolSettings(BaseModel):
 def default_api_base(settings: ToolSettings, provider: str) -> str | None:
     """The base URL a search instance inherits when it declares no ``api_base``.
 
-    A ``searxng`` tool falls back to ``web_search_url``, the backend the in-loop
-    ``otari_web_search`` tool already speaks to over the same contract, so a
-    deployment that runs one exposes it on ``POST /v1/search`` with a single
-    ``provider: searxng`` line. Read off the field alone: only the in-loop reads
-    fall back to the environment. Any other provider takes any-search's own.
+    A ``searxng`` tool falls back to ``web_search_url``, the SearXNG instance
+    the legacy in-loop settings search, so a deployment that runs one exposes it
+    on ``POST /v1/search`` with a single ``provider: searxng`` line (contract C8).
+    Read off the field alone: only the in-loop reads fall back to the
+    environment. Any other provider takes any-search's own.
 
     Public because the dashboard's add-a-search-tool form shows the same value as
     the placeholder for an omitted ``api_base``.
     """
-    if provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
+    if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE:
         return (settings.web_search_url or "").strip() or None
     if provider not in any_search.AnySearch.get_supported_providers():
         return None
@@ -793,7 +776,7 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider="searxng",
         api_base=url,
         engines=engines or DEFAULT_SEARXNG_ENGINES,
-        provider_defaults=PROVIDER_DEFAULT_OPTIONS["searxng"],
+        provider_defaults=_NO_OPTIONS,
     )
 
 

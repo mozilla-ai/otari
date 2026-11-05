@@ -15,8 +15,7 @@ its own allowlist, budget and usage steps.
 - :func:`unpriced_direct_search_detail` names the row ``require_pricing``
   needs, for the 402 a direct tool call answers when none prices it.
 - :func:`run_direct_search` calls the provider through any-search, or through
-  the SearXNG client for a ``searxng`` instance and the Tavily or Brave client
-  for an organization key on those providers.
+  the Tavily or Brave client for an organization key on those providers.
 
 Whichever key serves the call, the instance supplies the allowlist entry, the
 rate-limit rules, the timeout, the usage row's names and the response's
@@ -239,13 +238,12 @@ def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, orga
 async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     """Run a direct search through the app's web provider client.
 
-    The call runs on any-search for a library-backed provider, on the SearXNG
-    client for a ``searxng`` instance, and on the Tavily or Brave client for an
+    The call runs on any-search, or on the Tavily or Brave client for an
     organization key on those providers. Raises :class:`DirectSearchFailedError`
     when the provider fails the call, an error inside a successful answer
     included. Its message, for the usage row and the log, holds only the
-    failure's safe fields, since the SearXNG, Tavily and Brave clients' own text
-    can quote the upstream body or a URL carrying the query.
+    failure's safe fields, since the Tavily and Brave clients' own text can
+    quote the upstream body.
     """
     # Imported here: the old clients' module imports this package's root.
     from gateway.services.search_backend import SearchProviderError

@@ -413,8 +413,6 @@ def test_patch_accepts_defaults_that_name_instances(tmp_path: Path) -> None:
     "body",
     [
         {"web_search_default_tool": "gone"},
-        # The in-loop tool cannot search with a provider any-search has no adapter for.
-        {"web_search_default_tool": "local"},
         {"web_fetch_default_tool": "exa"},
         {"web_search_max_calls": 0},
     ],
