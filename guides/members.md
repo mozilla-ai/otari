@@ -2,7 +2,7 @@
 
 Owners and admins invite people to an organization and choose which workspaces
 each person can use. The roles are described in
-[Roles](organizations-and-workspaces.md#roles), and the rules an invitation
+[Roles](https://docs.otari.ai/learn/workspaces#roles), and the rules an invitation
 follows (mail limits, link expiry, first passwords, vouched addresses) in
 [Invitations](#invitations) below.
 

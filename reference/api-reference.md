@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/3a18b83a35015871e4024f670740d3f1c1e3cd9c/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/3a18b83a35015871e4024f670740d3f1c1e3cd9c/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/b9b972b73039d48f2e208de3288a13f4e531e21a/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/b9b972b73039d48f2e208de3288a13f4e531e21a/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 ## Base URL
@@ -962,7 +962,7 @@ budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
 cost of $Y`); see [Budgets](budgets.md#what-a-budget-limits). Its `Retry-After` is
 when the budget resets, which may be days away for a monthly budget; see
-[Refusals and `Retry-After`](https://docs.otari.ai/guides/organizations-and-access/budgets#refusals-and-retry-after).
+[Refusals and `Retry-After`](https://docs.otari.ai/learn/budgets#refusals-and-retry-after).
 
 ### Provider failures
 

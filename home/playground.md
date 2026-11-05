@@ -1,10 +1,14 @@
+---
+icon: basketball
+---
+
 # Playground
 
 The Playground lets you try models directly in Otari, experiment with prompts,
 and compare two models' answers, with each response's token usage, latency and
 cost. How its requests are authorized and billed, what it stores, and how
 attached files and tools behave is in
-[Admin dashboard](dashboard.md#playground).
+[Admin dashboard](https://docs.otari.ai/guides/dashboard/dashboard#playground).
 
 ## Test a single model
 

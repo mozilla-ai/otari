@@ -1,3 +1,7 @@
+---
+icon: square-dollar
+---
+
 # Budgets
 
 A budget caps what can be spent over a period, and Otari refuses requests that
@@ -29,7 +33,7 @@ up, new matching requests are refused until the next reset. Requests already
 running finish normally.
 
 To cap one API key, set its budget on the key itself; see
-[Cap a key's spend](api-keys.md#cap-a-keys-spend). Through the API, a budget can
+[Cap a key's spend](https://docs.otari.ai/guides/organizations-and-access/api-keys#cap-a-keys-spend). Through the API, a budget can
 also cap tokens and requests, limit each user per minute, or use a rolling
 duration instead of a calendar period; the fields are in
 [What a budget limits](#what-a-budget-limits).
@@ -113,7 +117,7 @@ reservation that gated the submission, so a batch counts as the one request that
 created it and contributes no tokens to a token cap, however many prompts it
 carried. The same holds for the vision side-call a request makes to describe an
 attachment. Cap batch-heavy workloads in dollars rather than in tokens. See
-[Importing external usage](external-usage.md).
+[Importing external usage](https://docs.otari.ai/guides/observability/external-usage).
 
 ### Reservations are taken up front
 

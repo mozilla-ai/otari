@@ -1,3 +1,8 @@
+---
+description: Create a spending budget, then apply it with a ceiling.
+icon: square-dollar
+---
+
 # Set a budget and ceiling
 
 A budget says how much can be spent and over what period. On its own it limits
@@ -38,4 +43,4 @@ it.
 and marks a budget once it passes 80% of it and again once it is used up.
 
 How budgets are enforced, and what a refused request looks like, is in
-[Budgets](https://docs.otari.ai/guides/organizations-and-access/budgets).
+[Budgets](budgets.md).

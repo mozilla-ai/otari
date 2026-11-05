@@ -7,22 +7,22 @@ steps and the rules.
 
 | Concept | What it is | Page |
 | --- | --- | --- |
-| Organization | The tenant boundary: owns workspaces, members, provider keys and organization-wide settings | [Organizations and workspaces](organizations-and-workspaces.md) |
-| Workspace | One app's, environment's, team's or customer's resources inside an organization | [Organizations and workspaces](organizations-and-workspaces.md) |
+| Organization | The tenant boundary: owns workspaces, members, provider keys and organization-wide settings | [Organizations and workspaces](https://docs.otari.ai/learn/workspaces) |
+| Workspace | One app's, environment's, team's or customer's resources inside an organization | [Organizations and workspaces](https://docs.otari.ai/learn/workspaces) |
 | Member | A person's membership of an organization and some of its workspaces, with a role in each | [Members and invitations](members.md) |
 | User | Who a request's spend is attributed to, and who per-user budgets apply to | [Sign-in and accounts](https://docs.otari.ai/self-hosting/sign-in#users-and-identities) |
 | Identity | Who signs in to the dashboard | [Sign-in and accounts](https://docs.otari.ai/self-hosting/sign-in) |
 | API key | A workload credential bound to one user and one workspace | [API keys](api-keys.md) |
 | Service key and end user | A key whose requests bill the people an application serves | [Track spend per end user](end-users.md) |
-| Budget | A spend, token or request limit over a period | [Budgets](budgets.md) |
-| Provider key | The organization's credential for an upstream LLM provider | [Provider keys](provider-keys.md) |
+| Budget | A spend, token or request limit over a period | [Budgets](https://docs.otari.ai/learn/budgets) |
+| Provider key | The organization's credential for an upstream LLM provider | [Provider keys](https://docs.otari.ai/learn/provider-keys) |
 | Operator | Runs a self-hosted deployment as a whole | [Deployment-wide account administration](https://docs.otari.ai/self-hosting/sign-in#deployment-wide-account-administration) |
 
 ## How they relate
 
 An organization holds workspaces, and a member belongs to the organization and
 to the workspaces they were given, with one of four
-[roles](organizations-and-workspaces.md#roles) in each. A member signs in as an
+[roles](https://docs.otari.ai/learn/workspaces#roles) in each. A member signs in as an
 identity, and the user record behind that identity is what their spend is
 recorded against.
 
@@ -57,5 +57,5 @@ belong to its own user.
 A dashboard session authorizes the management API, not inference; see
 [Dashboard sessions and identity](https://docs.otari.ai/self-hosting/sign-in#dashboard-sessions-and-identity).
 
-The generated [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/3a18b83a35015871e4024f670740d3f1c1e3cd9c/docs/public/openapi.json) is the source of
+The generated [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/b9b972b73039d48f2e208de3288a13f4e531e21a/docs/public/openapi.json) is the source of
 truth for endpoint schemas.

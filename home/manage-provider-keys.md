@@ -1,3 +1,8 @@
+---
+description: Add provider keys at the organization level, then control which workspaces can use them.
+icon: key
+---
+
 # Manage provider keys
 
 A provider key is the credential Otari uses to call a model provider, such as
@@ -10,7 +15,7 @@ You do not need a provider key of your own to start. Two ways work side by side:
 
 - **otari.ai's own keys.** Without any setup, requests can use models otari.ai
   provides. otari.ai holds the upstream credential, and the requests are paid
-  from your organization's balance; see [Billing](https://docs.otari.ai/guides/organizations-and-access/billing).
+  from your organization's balance; see [Billing](billing.md).
 - **Your own keys.** Add a provider key you already have, and Otari uses it on
   your behalf. The provider bills you directly, and Otari adds no per-token
   charge.
@@ -46,4 +51,4 @@ you choose otherwise. Open **Organization**, then **Workspaces**, click **Edit**
 
 To replace a key without breaking anything, see
 [Rotate a provider key](rotate-a-provider-key.md). More detail is in
-[Provider keys](https://docs.otari.ai/guides/organizations-and-access/provider-keys).
+[Provider keys](provider-keys.md).
