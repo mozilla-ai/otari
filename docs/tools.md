@@ -295,11 +295,14 @@ the count the provider reports (Anthropic's
 `usage.server_tool_use.web_search_requests`) and adds those searches to the row
 as `web_search` calls labeled `<provider>:web_search`, so the row and the
 budget carry what the provider will charge. They are priced at the operator's
-`anthropic:web_search` row when there is one, otherwise, with `default_pricing`
-on, at the provider's list price: Anthropic's is $10 per 1,000 searches. An
+`anthropic:web_search` row when there is one, else at the `web_search` price
+the model's own rate carries, per 1,000 searches, which the catalog gives a
+model whose provider searches (Anthropic's is $10 per 1,000) and a `rates`
+block can set ([Every price in its unit](configuration.md#every-price-in-its-unit-rates)),
+else, with `default_pricing` on, at the provider's list price. An
 organization's override prices them as it prices the call's tokens, so a
 search on the organization's own provider key takes its override. With
-neither, the searches stay on the row at no cost. Searches across the rounds
+none of these, the searches stay on the row at no cost. Searches across the rounds
 of a gateway tool loop are added up, as the rounds' tokens are. A search Otari runs in the
 model's place, under [interception](#web-search-interception) or the
 `Otari-Web-Search` header, is not the provider's. It is billed once, under the
@@ -314,7 +317,7 @@ price, then at its old `<provider>:<search-tool-name>` row, or under
 reported cost, when it reports one, comes first. How that rate is reserved and
 settled, and how `require_pricing` refuses a missing one with a
 `402 pricing_required`, is in
-[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
 The deployment pays for a search on one of its tools, so only its own price, or
 an override the deployment operator set, prices it; a search an organization key
 served takes the organization's own override.

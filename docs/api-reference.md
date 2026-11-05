@@ -444,7 +444,7 @@ in `usage` what the gateway metered and what it charged:
   the request was not priced.
 
 How a rerank model is priced, per search unit or per input token, is described in
-[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
 
 ## Videos
 

@@ -180,7 +180,7 @@ the Requests view's "Price this model", offered on a served request that carried
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
 an image generation or edit. What each unit bills is in
-[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
 
 ## Playground
 
