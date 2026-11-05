@@ -333,6 +333,11 @@ _CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
 _READ_ONLY_DETAIL = "Viewers have read-only access to this workspace"
 
 
+async def _never_blocks(_organization: Organization) -> bool:
+    """A ``blocked`` predicate that refuses no organization, for a caller that enforces no such rule here."""
+    return False
+
+
 class OrganizationService:
     """Business logic for the organization surface."""
 
@@ -375,7 +380,7 @@ class OrganizationService:
         pointer itself is repaired where a session is minted
         (``active_organization_id_for_sign_in``) and by ``get_active_or_bootstrap``.
         """
-        organization = await self._live_active_organization(user)
+        organization = await self._live_active_organization(user, blocked=_never_blocks)
         if organization is None:
             raise NotAuthorizedError(f"Identity {user.id} has no active membership in this organization")
         return organization
@@ -384,8 +389,8 @@ class OrganizationService:
         self,
         user: User,
         *,
+        blocked: Callable[[Organization], Awaitable[bool]],
         repair: bool = False,
-        blocked: Callable[[Organization], Awaitable[bool]] | None = None,
     ) -> Organization | None:
         """The organization the caller can act in, or ``None`` if there is none.
 
@@ -396,10 +401,10 @@ class OrganizationService:
         organization = await self.organizations.get(user.active_organization_id)
         if organization is not None:
             membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
-            if membership is not None and (blocked is None or not await blocked(organization)):
+            if membership is not None and not await blocked(organization):
                 return organization
         for _membership, candidate in await self.members.get_active_by_user_with_organizations(user.id):
-            if blocked is not None and await blocked(candidate):
+            if await blocked(candidate):
                 continue
             if repair:
                 await self.users.set_active_organization(user, candidate.id)
@@ -407,7 +412,7 @@ class OrganizationService:
         return None
 
     async def active_organization_id_for_sign_in(
-        self, user: User, *, blocked: Callable[[Organization], Awaitable[bool]] | None = None
+        self, user: User, *, blocked: Callable[[Organization], Awaitable[bool]]
     ) -> uuid.UUID | None:
         """The organization a fresh session acts in, or ``None`` where ``blocked`` admits no live membership.
 
@@ -677,7 +682,7 @@ class OrganizationService:
         naming the one the pointer still holds.
         """
         stale_id = user.active_organization_id
-        organization = await self._live_active_organization(user, repair=True)
+        organization = await self._live_active_organization(user, repair=True, blocked=_never_blocks)
         if organization is None:
             raise NoActiveOrganizationError
         if organization.id != stale_id:
@@ -919,17 +924,17 @@ class OrganizationService:
         self,
         *,
         user: User,
+        blocked: Callable[[Organization], Awaitable[bool]],
         skip: int = 0,
         limit: int = 100,
-        blocked: Callable[[Organization], Awaitable[bool]] | None = None,
     ) -> CallerOrganizationMembershipsPublic:
         """List the organizations the caller belongs to, for a switcher to render.
 
         Active memberships only. An ``invited`` one is not somewhere the caller
         may act yet (``switch_active_organization_for_user`` would refuse it),
         and a ``suspended`` one is somewhere they no longer may, so offering
-        either as a destination would be offering a refusal. ``blocked`` additionally
-        hides an organization whose own SSO enforcement refuses the caller.
+        either as a destination would be offering a refusal. ``blocked`` hides
+        an organization whose own SSO enforcement refuses the caller.
         """
         rows, count = await self.members.get_by_user_with_organizations(
             user.id,
@@ -937,10 +942,9 @@ class OrganizationService:
             skip=skip,
             limit=limit,
         )
-        if blocked is not None:
-            admitted = [row for row in rows if not await blocked(row[1])]
-            count -= len(rows) - len(admitted)
-            rows = admitted
+        admitted = [row for row in rows if not await blocked(row[1])]
+        count -= len(rows) - len(admitted)
+        rows = admitted
         return CallerOrganizationMembershipsPublic(
             data=[
                 CallerOrganizationMembershipPublic(
@@ -960,7 +964,7 @@ class OrganizationService:
         *,
         user: User,
         organization_id: uuid.UUID,
-        blocked: Callable[[Organization], Awaitable[bool]] | None = None,
+        blocked: Callable[[Organization], Awaitable[bool]],
     ) -> OrganizationMembershipContextPublic:
         """Point the caller's identity at another organization they belong to.
 
@@ -975,8 +979,8 @@ class OrganizationService:
         indistinguishable from an id that was never issued. That is the same
         rule ``resolve_visible_workspace`` follows, and it is the whole of the
         tenant boundary on the one endpoint that names an organization.
-        ``blocked`` additionally refuses switching into an organization whose
-        own SSO enforcement refuses the caller, with the same not-found answer.
+        ``blocked`` refuses switching into an organization whose own SSO
+        enforcement refuses the caller, with the same not-found answer.
 
         Switching to the organization already active is allowed and is a no-op
         write: a switcher that re-sent the current row should not have to be
@@ -991,7 +995,7 @@ class OrganizationService:
             # reads. Reported as the same not-found the membership check gives,
             # since from the caller's side it is the same answer.
             raise OrganizationNotFoundError(organization_id)
-        if blocked is not None and await blocked(organization):
+        if await blocked(organization):
             raise OrganizationNotFoundError(organization_id)
 
         await self.users.set_active_organization(user, organization.id)

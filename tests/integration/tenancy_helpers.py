@@ -62,6 +62,11 @@ class _NoBlockedAddresses:
 NO_BLOCKED_ADDRESSES = _NoBlockedAddresses()
 
 
+async def no_sso_enforcement(_organization: Organization) -> bool:
+    """A ``blocked`` predicate that refuses nothing, for a test that is not about SSO enforcement."""
+    return False
+
+
 def claim_writes(db: AsyncSession) -> dict[str, Any]:
     """Build the Unit of Work and the organization service a claim writes through, as the claim routes do."""
     writes = membership_writes(db)

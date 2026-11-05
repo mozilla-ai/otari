@@ -47,7 +47,7 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
-from .tenancy_helpers import NO_BLOCKED_ADDRESSES, NO_MAIL_LIMIT, NO_TERMS, membership_writes
+from .tenancy_helpers import NO_BLOCKED_ADDRESSES, NO_MAIL_LIMIT, NO_TERMS, membership_writes, no_sso_enforcement
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -472,6 +472,7 @@ async def test_switching_is_refused_for_an_organization_the_caller_only_created_
         await OrganizationService(async_db, membership_listener=None).switch_active_organization_for_user(
             user=user,
             organization_id=elsewhere.id,
+            blocked=no_sso_enforcement,
         )
     assert user.active_organization_id == organization.id
 
@@ -496,6 +497,7 @@ async def test_switching_is_refused_for_a_membership_that_is_not_active(
         await OrganizationService(async_db, membership_listener=None).switch_active_organization_for_user(
             user=user,
             organization_id=elsewhere.id,
+            blocked=no_sso_enforcement,
         )
     assert user.active_organization_id == organization.id
 
@@ -516,6 +518,7 @@ async def test_switching_carries_the_caller_workspaces_of_the_organization_moved
     context = await OrganizationService(async_db, membership_listener=None).switch_active_organization_for_user(
         user=user,
         organization_id=there.id,
+        blocked=no_sso_enforcement,
     )
 
     assert context.organization.id == there.id
@@ -558,12 +561,14 @@ async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a
         invitation.accept_link.split("token=")[1], claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES
     )
 
-    memberships = await service.list_organization_memberships_for_user(user=invitee)
+    memberships = await service.list_organization_memberships_for_user(user=invitee, blocked=no_sso_enforcement)
     assert memberships.count == 2
     assert {row.organization.slug for row in memberships.data} == {"home", "inviting"}
     assert [row.organization.slug for row in memberships.data if row.is_active_organization] == ["home"]
 
-    context = await service.switch_active_organization_for_user(user=invitee, organization_id=inviting.id)
+    context = await service.switch_active_organization_for_user(
+        user=invitee, organization_id=inviting.id, blocked=no_sso_enforcement
+    )
     assert context.organization.id == inviting.id
 
 
