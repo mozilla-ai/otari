@@ -7,8 +7,8 @@ steps and the rules.
 
 | Concept | What it is | Page |
 | --- | --- | --- |
-| Organization | The tenant boundary: owns workspaces, members, provider keys and organization-wide settings | [Organizations and workspaces](organizations-and-workspaces.md) |
-| Workspace | One app's, environment's, team's or customer's resources inside an organization | [Organizations and workspaces](organizations-and-workspaces.md) |
+| Organization | The tenant boundary: owns workspaces, members, provider keys and organization-wide settings | [Organizations and workspaces](workspaces.md) |
+| Workspace | One app's, environment's, team's or customer's resources inside an organization | [Organizations and workspaces](workspaces.md) |
 | Member | A person's membership of an organization and some of its workspaces, with a role in each | [Members and invitations](members.md) |
 | User | Who a request's spend is attributed to, and who per-user budgets apply to | [Sign-in and accounts](sign-in.md#users-and-identities) |
 | Identity | Who signs in to the dashboard | [Sign-in and accounts](sign-in.md) |
@@ -22,7 +22,7 @@ steps and the rules.
 
 An organization holds workspaces, and a member belongs to the organization and
 to the workspaces they were given, with one of four
-[roles](organizations-and-workspaces.md#roles) in each. A member signs in as an
+[roles](workspaces.md#roles) in each. A member signs in as an
 identity, and the user record behind that identity is what their spend is
 recorded against.
 

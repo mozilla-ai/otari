@@ -1,3 +1,8 @@
+---
+description: How your organization's balance is funded and spent, and what keeps it from running out.
+icon: wallet
+---
+
 # Billing
 
 Requests served with otari.ai's own provider keys, and otari.ai's hosted tools, are paid from your organization's balance. Requests that use your own provider keys are billed by that provider, not from the balance.

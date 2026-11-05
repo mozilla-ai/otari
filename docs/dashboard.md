@@ -69,7 +69,7 @@ The organization view contains tenant-wide administration:
 
 | Page | What it is | Rules |
 | --- | --- | --- |
-| Usage | Organization-wide usage | [Workspace-scoped spend](organizations-and-workspaces.md#workspace-scoped-spend) |
+| Usage | Organization-wide usage | [Workspace-scoped spend](workspaces.md#workspace-scoped-spend) |
 | Workspaces, Members | Workspaces and organization members, with invitations | [Organization](#organization) |
 | Email domains | Domains whose colleagues join automatically | [Email-domain auto-join](members.md#email-domain-auto-join) |
 | Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](budgets.md) |

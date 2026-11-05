@@ -1,3 +1,7 @@
+---
+icon: square-dollar
+---
+
 # Budgets
 
 A budget caps what can be spent over a period, and Otari refuses requests that

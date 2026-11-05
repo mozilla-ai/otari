@@ -341,4 +341,4 @@ def test_every_docs_page_is_on_the_menu() -> None:
 def test_real_docs_build(tmp_path: Path) -> None:
     site = gitbook.Site.from_summary(_DOCS_DIR, "v0.0.0")
     site.build(tmp_path / "site")
-    assert (tmp_path / "site" / "home" / "index.md").is_file()
+    assert (tmp_path / "site" / "otari" / "index.md").is_file()

@@ -159,7 +159,7 @@ unlike the artifacts above, so a reader finds the drift rather than CI.
 The GitBook site publishes the pages [docs/SUMMARY.md](docs/SUMMARY.md) lists, on each
 release (`otari-docs.yml`, see [RELEASE.md](RELEASE.md)). A new page under `docs/` therefore owes
 a `SUMMARY.md` entry, and `tests/unit/test_gitbook_site.py` fails until it has one. Each `#`
-heading of `SUMMARY.md` is one entry of the site's top bar (Home, Guides, Self-Hosting,
+heading of `SUMMARY.md` is one entry of the site's top bar (Otari, Guides, Self-Hosting,
 Reference), which [docs/gitbook-docs.yaml](docs/gitbook-docs.yaml) declares; the build writes each
 as its own GitBook space, so a new top-bar entry owes both files. A page's URL is its top-bar
 entry, its `##` group and its file name, so moving or renaming a page changes its URL. A page for

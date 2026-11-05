@@ -1,3 +1,8 @@
+---
+description: Replace a provider credential without breaking active workloads.
+icon: rotate
+---
+
 # Rotate a provider key
 
 Rotate a provider key by adding its replacement first, and keep the old one
