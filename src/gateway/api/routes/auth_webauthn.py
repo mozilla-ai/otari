@@ -31,11 +31,18 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, IdentityServiceDep, get_config, get_db, record_auth_failure
+from gateway.api.deps import (
+    CurrentIdentity,
+    GrowthSignalPortDep,
+    IdentityServiceDep,
+    get_config,
+    get_db,
+    record_auth_failure,
+)
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
@@ -58,7 +65,7 @@ from gateway.services.dashboard_session_service import (
     request_is_https,
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
-from gateway.services.tenancy import webauthn_service
+from gateway.services.tenancy import report_sign_in, webauthn_service
 
 router = APIRouter(prefix="/auth/webauthn", tags=["auth"])
 
@@ -210,6 +217,8 @@ async def authenticate_passkey(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     identities: IdentityServiceDep,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> Any:
     """Verify an assertion and set the HttpOnly session cookie.
 
@@ -247,6 +256,7 @@ async def authenticate_passkey(
         signed_in = await identities.sign_in(identity)
     except DATABASE_ERRORS as exc:
         raise database_error("persist a dashboard session on a passkey sign-in", exc) from None
+    await report_sign_in(growth, identity, background_tasks=background_tasks)
     apply_session_cookie(
         response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
     )

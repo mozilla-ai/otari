@@ -43,12 +43,13 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Self
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    GrowthSignalPortDep,
     IdentityServiceDep,
     MembershipListenerDep,
     UnitOfWorkDep,
@@ -77,7 +78,7 @@ from gateway.services.password_service import MAX_PASSWORD_BYTES
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.user_service import authenticate, operator_has_password
+from gateway.services.tenancy.user_service import authenticate, operator_has_password, report_sign_in
 
 router = APIRouter(prefix="/auth/session", tags=["auth"])
 
@@ -286,6 +287,8 @@ async def create_session(
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
     identities: IdentityServiceDep,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> SessionResponse:
     """Verify a sign-in credential and set the HttpOnly session cookie.
 
@@ -343,6 +346,9 @@ async def create_session(
         signed_in = await identities.sign_in(identity)
     except DATABASE_ERRORS as exc:
         raise database_error("persist a dashboard session on sign-in", exc) from None
+    if body.master_key is None:
+        # The master key is the deployment's credential, not a person's, even once its operator holds an address.
+        await report_sign_in(growth, identity, background_tasks=background_tasks)
     apply_session_cookie(
         response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
     )

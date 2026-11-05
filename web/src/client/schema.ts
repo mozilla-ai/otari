@@ -2186,6 +2186,11 @@ export interface paths {
          *     - Master key: the ``user`` field is required and names an existing user.
          *     - API key: usage and spend go to the key's own user. A ``user`` naming a
          *       different user is refused with 403, or ignored when mismatch rejection is off.
+         *
+         *     A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+         *     USD string) and `pricing_source`, as a chat completion does; a provider that
+         *     sends no `usage` gets one holding just those two fields. An unpriced
+         *     response carries neither.
          */
         post: operations["images-edit_image"];
         delete?: never;
@@ -2211,6 +2216,11 @@ export interface paths {
          *     - Master key + user field: Use specified user (must exist)
          *     - API key + user field: Use specified user (must exist)
          *     - API key without user field: Use the shared "default" user
+         *
+         *     A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+         *     USD string) and `pricing_source`, as a chat completion does; a provider that
+         *     sends no `usage` gets one holding just those two fields. An unpriced
+         *     response carries neither.
          */
         post: operations["images-create_image"];
         delete?: never;
@@ -3743,6 +3753,9 @@ export interface paths {
          *     deployment settles the upstream bill, so its rate is the deployment price
          *     list's rather than a tenant's.
          *
+         *     A rate on a tool the deployment's own account runs, a search or fetch tool's
+         *     or ``otari:code_execution``, is refused with a 403 for the same reason.
+         *
          *     The key is normalized to its canonical ``instance:model`` form first, the same
          *     call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
          *     rather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and
@@ -3774,9 +3787,9 @@ export interface paths {
          *     keeps the cost it was billed, because a settled cost is stored on the usage
          *     row rather than recomputed.
          *
-         *     Refused with a 403 on the same deployment-supplied-model rule the create path
-         *     carries, so a row stored before that rule existed cannot be edited into a rate
-         *     nobody could create today, and with a 403 for a rate the deployment operator
+         *     Refused with a 403 on the same deployment-supplied rules the create path
+         *     carries, so an edit cannot store a rate a create would refuse, and with a
+         *     403 for a rate the deployment operator
          *     set, which only the operator may change.
          */
         put: operations["organization-pricing-replace_organization_pricing"];
@@ -6866,6 +6879,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/videos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Videos
+         * @description The caller's video jobs, newest first, from the gateway's own records.
+         *
+         *     A key sees the jobs its user started in its workspace; the master key sees
+         *     every job. The records say what the gateway knows without asking a
+         *     provider; a job's status is ``GET /api/v1/videos/{video_id}``'s.
+         */
+        get: operations["videos-list_videos"];
+        put?: never;
+        /**
+         * Create Video
+         * @description Start a video generation job.
+         *
+         *     The job is returned at once. Poll ``GET /api/v1/videos/{video_id}`` until
+         *     its status is ``completed``, then fetch the video from
+         *     ``GET /api/v1/videos/{video_id}/content``. The model must have a per-second
+         *     video price, from the catalog or set through the pricing API; one with none
+         *     is refused with 402. The length asked for is reserved against the budget at
+         *     that price while the job starts, and the job is billed when a retrieval
+         *     finds it completed. A provider that renders inside this call returns the
+         *     job already completed, billed, and ready for its content.
+         *
+         *     Authentication modes:
+         *     - Master key + user field: Use specified user (must exist)
+         *     - API key + user field: Use specified user (must exist)
+         *     - API key without user field: Use the shared "default" user
+         */
+        post: operations["videos-create_video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{video_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve Video
+         * @description The job's status, from its record once it completed, else from the provider that runs it.
+         *
+         *     The first retrieval that finds the job completed bills its length at the
+         *     model's per-second video price. A key reads only the jobs its user started
+         *     in its workspace; the master key reads any job.
+         */
+        get: operations["videos-retrieve_video"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videos/{video_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve Video Content
+         * @description The finished video's bytes, in the provider's media type.
+         *
+         *     Reads the job first, so a completed job is billed here as it would be on
+         *     ``GET /api/v1/videos/{video_id}``. A job still running, or one that failed,
+         *     is a 409 naming its status.
+         */
+        get: operations["videos-retrieve_video_content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces": {
         parameters: {
             query?: never;
@@ -9647,7 +9750,7 @@ export interface components {
              * Endpoints
              * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
              */
-            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/images/edits" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations")[];
+            endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/images/edits" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations" | "/videos")[];
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /**
@@ -19707,6 +19810,133 @@ export interface components {
             email: string;
         };
         /**
+         * VideoError
+         * @description Why a video job failed, in the provider's words.
+         */
+        VideoError: {
+            /** Code */
+            code?: string | null;
+            /** Message */
+            message: string;
+        };
+        /**
+         * VideoGenerationRequest
+         * @description Start a video generation job.
+         *
+         *     The fields are any-llm's ``VideoGenerationParams``, its ``model_id`` as
+         *     ``model``; a field any-llm adds fails a test until the route accepts it.
+         *     ``seconds`` is the length asked for, which the provider may round.
+         */
+        VideoGenerationRequest: {
+            /** Aspect Ratio */
+            aspect_ratio?: string | null;
+            /** First Frame */
+            first_frame?: string | null;
+            /** Last Frame */
+            last_frame?: string | null;
+            /** Model */
+            model: string;
+            /** Negative Prompt */
+            negative_prompt?: string | null;
+            /** Prompt */
+            prompt: string;
+            /** Reference Audios */
+            reference_audios?: string[] | null;
+            /** Reference Images */
+            reference_images?: string[] | null;
+            /** Resolution */
+            resolution?: string | null;
+            /** Seconds */
+            seconds?: number | null;
+            /** Seed */
+            seed?: number | null;
+            /** Size */
+            size?: string | null;
+            /** User */
+            user?: string | null;
+        };
+        /**
+         * VideoJobList
+         * @description The caller's video jobs, newest first.
+         */
+        VideoJobList: {
+            /** Data */
+            data: components["schemas"]["VideoJobSummary"][];
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
+        };
+        /**
+         * VideoJobResponse
+         * @description A video generation job as the provider reports it, in the shape of OpenAI's video object.
+         */
+        VideoJobResponse: {
+            /** Completed At */
+            completed_at?: number | null;
+            /** Created At */
+            created_at?: number | null;
+            error?: components["schemas"]["VideoError"] | null;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string;
+            /**
+             * Object
+             * @default video
+             * @constant
+             */
+            object: "video";
+            /** Progress */
+            progress?: number | null;
+            /** Provider */
+            provider: string;
+            /** Seconds */
+            seconds?: number | null;
+            /** Size */
+            size?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "in_progress" | "completed" | "failed";
+        };
+        /**
+         * VideoJobSummary
+         * @description One job the gateway started, from its own records: what it knows without asking the provider.
+         */
+        VideoJobSummary: {
+            /**
+             * Billed
+             * @description Whether a retrieval has found the job completed and billed it.
+             */
+            billed: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string;
+            /**
+             * Object
+             * @default video
+             * @constant
+             */
+            object: "video";
+            /** Provider */
+            provider: string;
+            /**
+             * Seconds
+             * @description The length the request asked for, in seconds, when it named one.
+             */
+            seconds: number | null;
+        };
+        /**
          * WebAuthnCredentialPublic
          * @description A passkey as the settings page lists it.
          *
@@ -26747,7 +26977,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationModelPricingPublic"];
                 };
             };
-            /** @description The deployment holds the credential that serves the model. */
+            /** @description The deployment holds the credential that serves the model, or runs the tool on its own account. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -26796,7 +27026,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationModelPricingPublic"];
                 };
             };
-            /** @description The deployment serves the model, or the deployment operator set the rate. */
+            /** @description The deployment serves the model or runs the tool, or the deployment operator set the rate. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -32088,6 +32318,147 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "videos-list_videos": {
+        parameters: {
+            query?: {
+                /** @description How many of the newest jobs to list */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoJobList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "videos-create_video": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoGenerationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "videos-retrieve_video": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "videos-retrieve_video_content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                video_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The video, in the provider's media type */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": unknown;
+                };
+            };
+            /** @description The job has not completed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description LLM provider error */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -1,3 +1,7 @@
+---
+icon: desk
+---
+
 # Organizations and workspaces
 
 This guide creates, organizes and deletes workspaces, and deletes an

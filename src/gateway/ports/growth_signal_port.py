@@ -1,8 +1,8 @@
 """Lifecycle notifications for whichever CRM or support messenger a build runs.
 
 The seam between the core and whichever build tells an outside vendor about a
-user's lifecycle: signup, activation milestones, onboarding, profile edits, and
-account deletion. The core has no growth-marketing or support-messaging vendor of its
+user's lifecycle: signup, sign-in, activation milestones, onboarding, profile
+edits, and account deletion. The core has no growth-marketing or support-messaging vendor of its
 own, and that is the point: an operator running Otari serves their own users on
 their own channels, and nothing about those users' lifecycle should reach a
 vendor the deployment never chose. So the core adapter is a Null Object, and an
@@ -51,6 +51,7 @@ class GrowthActivationEvent(StrEnum):
     FIRST_ROUTE_CONFIGURED = "first_route_configured"
     FIRST_REQUEST_ROUTED = "first_request_routed"
     BUDGET_RULE_SET = "budget_rule_set"
+    FIRST_GUARDRAIL_CONFIGURED = "first_guardrail_configured"
 
 
 class GrowthSignalPort(Protocol):
@@ -68,6 +69,28 @@ class GrowthSignalPort(Protocol):
         """Notify of a brand-new account, immediately after it is created."""
         ...
 
+    async def record_sign_in(
+        self,
+        *,
+        background_tasks: BackgroundTasks,
+        user_id: uuid.UUID,
+        email: str,
+        signed_in_at: datetime,
+    ) -> None:
+        """Notify that a person started a dashboard session.
+
+        Called from the password, passkey and provider sign-ins once the session
+        is committed, including the provider sign-in that also reported the
+        signup: the two answer different questions, when the account was made
+        and when it was last used. Neither a master-key sign-in, which is the
+        deployment's credential rather than a person's, nor re-minting a session
+        the caller already holds (a master-key rotation) is reported.
+
+        Every sign-in is reported, so an adapter that writes a date throttles
+        on its own end.
+        """
+        ...
+
     async def record_activation(
         self,
         *,
@@ -82,12 +105,15 @@ class GrowthSignalPort(Protocol):
         decide whether to call this at all; an adapter may additionally
         de-duplicate on its own end, so a redundant call is safe.
 
-        Only ``API_KEY_CREATED`` is emitted, from
+        Two are emitted. ``API_KEY_CREATED`` from
         ``POST /v1/organizations/me/keys``, where first occurrence is the owner
-        holding no key yet. That derivation is a read of current state, not a
-        once-per-person guarantee: deleting every key re-arms it, and two
-        concurrent creates can both read zero, so an adapter that must fire once
-        per person de-duplicates on its own end rather than relying on this.
+        holding no key yet, and ``FIRST_GUARDRAIL_CONFIGURED`` from
+        ``POST /v1/organizations/me/guardrails``, where it is the organization
+        mandating none yet, reported for whoever saved it. Each derivation is a
+        read of current state, not a once-per-person guarantee: deleting every
+        key or guardrail re-arms it, and two concurrent creates can both read
+        zero, so an adapter that must fire once per person de-duplicates on its
+        own end rather than relying on this.
 
         The other three stay uncalled, and an overlay should not expect them:
 

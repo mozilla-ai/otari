@@ -84,7 +84,7 @@ from gateway.services.oauth_service import (
     provider_label,
     require_configured,
 )
-from gateway.services.tenancy import report_new_account
+from gateway.services.tenancy import report_new_account, report_sign_in
 
 router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
 
@@ -332,6 +332,7 @@ async def callback(
     identity = signed_in.account
     logger.info("Signed in %s with %s", identity.id, provider_label(provider))
     await report_new_account(growth, identity, background_tasks=background_tasks, new_account=signed_in.new_account)
+    await report_sign_in(growth, identity, background_tasks=background_tasks)
     apply_session_cookie(
         response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
     )

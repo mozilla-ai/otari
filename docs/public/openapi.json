@@ -4203,7 +4203,8 @@
                 "/systemone",
                 "/rerank",
                 "/decisions",
-                "/moderations"
+                "/moderations",
+                "/videos"
               ],
               "type": "string"
             },
@@ -26423,6 +26424,363 @@
         "title": "VerifyEmailResponse",
         "type": "object"
       },
+      "VideoError": {
+        "description": "Why a video job failed, in the provider's words.",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "VideoError",
+        "type": "object"
+      },
+      "VideoGenerationRequest": {
+        "description": "Start a video generation job.\n\nThe fields are any-llm's ``VideoGenerationParams``, its ``model_id`` as\n``model``; a field any-llm adds fails a test until the route accepts it.\n``seconds`` is the length asked for, which the provider may round.",
+        "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio"
+          },
+          "first_frame": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame"
+          },
+          "last_frame": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Frame"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Prompt"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "reference_audios": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Audios"
+          },
+          "reference_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Images"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "maximum": 3600.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "title": "VideoGenerationRequest",
+        "type": "object"
+      },
+      "VideoJobList": {
+        "description": "The caller's video jobs, newest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/VideoJobSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "VideoJobList",
+        "type": "object"
+      },
+      "VideoJobResponse": {
+        "description": "A video generation job as the provider reports it, in the shape of OpenAI's video object.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "object": {
+            "const": "video",
+            "default": "video",
+            "title": "Object",
+            "type": "string"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "provider",
+          "status"
+        ],
+        "title": "VideoJobResponse",
+        "type": "object"
+      },
+      "VideoJobSummary": {
+        "description": "One job the gateway started, from its own records: what it knows without asking the provider.",
+        "properties": {
+          "billed": {
+            "description": "Whether a retrieval has found the job completed and billed it.",
+            "title": "Billed",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "object": {
+            "const": "video",
+            "default": "video",
+            "title": "Object",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The length the request asked for, in seconds, when it named one.",
+            "title": "Seconds"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "provider",
+          "created_at",
+          "seconds",
+          "billed"
+        ],
+        "title": "VideoJobSummary",
+        "type": "object"
+      },
       "WebAuthnCredentialPublic": {
         "description": "A passkey as the settings page lists it.\n\nCarries no key material. ``credential_id`` is here because the browser needs\nit to tell the passkey it just used from the others in the list, and it is\na public identifier the authenticator hands to any site that asks: it is\nwhat ``allowCredentials`` publishes to an unauthenticated caller during a\nceremony.",
         "properties": {
@@ -34652,7 +35010,7 @@
     },
     "/api/v1/images/edits": {
       "post": {
-        "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names an existing user.\n- API key: usage and spend go to the key's own user. A ``user`` naming a\n  different user is refused with 403, or ignored when mismatch rejection is off.",
+        "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names an existing user.\n- API key: usage and spend go to the key's own user. A ``user`` naming a\n  different user is refused with 403, or ignored when mismatch rejection is off.\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; a provider that\nsends no `usage` gets one holding just those two fields. An unpriced\nresponse carries neither.",
         "operationId": "images-edit_image",
         "requestBody": {
           "content": {
@@ -34787,7 +35145,7 @@
     },
     "/api/v1/images/generations": {
       "post": {
-        "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; a provider that\nsends no `usage` gets one holding just those two fields. An unpriced\nresponse carries neither.",
         "operationId": "images-create_image",
         "requestBody": {
           "content": {
@@ -39464,7 +39822,7 @@
         ]
       },
       "post": {
-        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it. Refused with a\n403 when the deployment, not the caller's organization, holds the credential\nthat serves the model, whether through one of its own provider instances or a\nhosted credential the bound port supplies because no usable BYO credential of\nthe organization's own covers every one of its workspaces: either way the\ndeployment settles the upstream bill, so its rate is the deployment price\nlist's rather than a tenant's.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
+        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it. Refused with a\n403 when the deployment, not the caller's organization, holds the credential\nthat serves the model, whether through one of its own provider instances or a\nhosted credential the bound port supplies because no usable BYO credential of\nthe organization's own covers every one of its workspaces: either way the\ndeployment settles the upstream bill, so its rate is the deployment price\nlist's rather than a tenant's.\n\nA rate on a tool the deployment's own account runs, a search or fetch tool's\nor ``otari:code_execution``, is refused with a 403 for the same reason.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
         "operationId": "organization-pricing-create_organization_pricing",
         "requestBody": {
           "content": {
@@ -39488,7 +39846,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "The deployment holds the credential that serves the model."
+            "description": "The deployment holds the credential that serves the model, or runs the tool on its own account."
           },
           "409": {
             "description": "The period overlaps one already stored for the model."
@@ -39566,7 +39924,7 @@
         ]
       },
       "put": {
-        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today, and with a 403 for a rate the deployment operator\nset, which only the operator may change.",
+        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied rules the create path\ncarries, so an edit cannot store a rate a create would refuse, and with a\n403 for a rate the deployment operator\nset, which only the operator may change.",
         "operationId": "organization-pricing-replace_organization_pricing",
         "parameters": [
           {
@@ -39602,7 +39960,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "The deployment serves the model, or the deployment operator set the rate."
+            "description": "The deployment serves the model or runs the tool, or the deployment operator set the rate."
           },
           "422": {
             "content": {
@@ -52269,6 +52627,214 @@
         "summary": "Get User Usage",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/v1/videos": {
+      "get": {
+        "description": "The caller's video jobs, newest first, from the gateway's own records.\n\nA key sees the jobs its user started in its workspace; the master key sees\nevery job. The records say what the gateway knows without asking a\nprovider; a job's status is ``GET /api/v1/videos/{video_id}``'s.",
+        "operationId": "videos-list_videos",
+        "parameters": [
+          {
+            "description": "How many of the newest jobs to list",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "How many of the newest jobs to list",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Videos",
+        "tags": [
+          "videos"
+        ]
+      },
+      "post": {
+        "description": "Start a video generation job.\n\nThe job is returned at once. Poll ``GET /api/v1/videos/{video_id}`` until\nits status is ``completed``, then fetch the video from\n``GET /api/v1/videos/{video_id}/content``. The model must have a per-second\nvideo price, from the catalog or set through the pricing API; one with none\nis refused with 402. The length asked for is reserved against the budget at\nthat price while the job starts, and the job is billed when a retrieval\nfinds it completed. A provider that renders inside this call returns the\njob already completed, billed, and ready for its content.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "operationId": "videos-create_video",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoGenerationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/api/v1/videos/{video_id}": {
+      "get": {
+        "description": "The job's status, from its record once it completed, else from the provider that runs it.\n\nThe first retrieval that finds the job completed bills its length at the\nmodel's per-second video price. A key reads only the jobs its user started\nin its workspace; the master key reads any job.",
+        "operationId": "videos-retrieve_video",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Retrieve Video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/api/v1/videos/{video_id}/content": {
+      "get": {
+        "description": "The finished video's bytes, in the provider's media type.\n\nReads the job first, so a completed job is billed here as it would be on\n``GET /api/v1/videos/{video_id}``. A job still running, or one that failed,\nis a 409 naming its status.",
+        "operationId": "videos-retrieve_video_content",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "video/*": {}
+            },
+            "description": "The video, in the provider's media type"
+          },
+          "409": {
+            "description": "The job has not completed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "description": "LLM provider error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Retrieve Video Content",
+        "tags": [
+          "videos"
         ]
       }
     },

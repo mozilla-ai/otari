@@ -1,5 +1,6 @@
 ---
 description: Go from sign-up to your first request in a few minutes.
+icon: bolt
 ---
 
 # Quickstart

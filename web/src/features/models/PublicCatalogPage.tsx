@@ -1,10 +1,15 @@
 import { useState } from "react"
 
-import { EMPTY_CATALOG_LIST } from "@/features/models/catalog"
+import {
+  CATALOG_URL_DEFAULTS,
+  catalogListFromUrl,
+} from "@/features/models/catalog"
 import { ModelCatalogView } from "@/features/models/ModelCatalogPage"
 import { ModelDetailView } from "@/features/models/ModelDetailPage"
 import { PublicCatalogBar } from "@/features/models/PublicCatalogBar"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
+import { parseSearch } from "@/shared/helpers/search"
+import { readUrlState } from "@/shared/helpers/urlState"
 
 // The catalog ahead of a session, where the deployment has opened it
 // (`public_catalog`). Rendered by `DeploymentRoot` before the auth gate, like
@@ -16,7 +21,17 @@ import { publicCatalogHref } from "@/features/models/publicCatalog"
 // a form, and these pages are as wide as the dashboard's. It carries the site's
 // own navbar destinations; see `PublicCatalogBar`.
 export function PublicCatalogPage({ modelId }: { modelId?: string }) {
-  const [list, setList] = useState(EMPTY_CATALOG_LIST)
+  // A link can name the list it opens (the website's "See models" links pass
+  // `?provider=`), so the first list is read off the hash. Later changes stay
+  // in memory: the page is keyed on the hash, and writing one would remount it.
+  const [list, setList] = useState(() =>
+    catalogListFromUrl(
+      readUrlState(
+        parseSearch(window.location.hash.split("?")[1] ?? ""),
+        CATALOG_URL_DEFAULTS,
+      ),
+    ),
+  )
   return (
     <div className="flex min-h-full flex-col">
       <PublicCatalogBar onList={!modelId} />

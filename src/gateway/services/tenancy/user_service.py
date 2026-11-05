@@ -330,6 +330,22 @@ async def report_new_account(
     )
 
 
+async def report_sign_in(growth: GrowthSignalPort, identity: User, *, background_tasks: BackgroundTasks) -> None:
+    """Report a dashboard session just committed for ``identity`` to ``GrowthSignalPort``, or do nothing.
+
+    Nothing for an identity with no address, the bootstrap operator's normal state
+    (``services/tenancy/provisioning_service``): the address is what a vendor keys a person on.
+    """
+    if identity.email is None:
+        return
+    await growth.record_sign_in(
+        background_tasks=background_tasks,
+        user_id=identity.id,
+        email=identity.email,
+        signed_in_at=datetime.now(UTC),
+    )
+
+
 class _SignupRaceLostError(Exception):
     """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
 
@@ -923,6 +939,7 @@ __all__ = [
     "request_password_reset",
     "resend_verification_email",
     "report_new_account",
+    "report_sign_in",
     "reset_password",
     "set_password",
     "unverified_identity_is_claimable",

@@ -63,18 +63,19 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         await self.db.execute(statement.values(**values))
 
     async def names_by_id(
-        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID]
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID] | None
     ) -> dict[str, str | None]:
-        """Each of these keys that still exists in these workspaces, to its name.
+        """Each of these keys that still exists in these workspaces, or in any with ``None``, to its name.
 
         Read in batches, so the ids never exceed a driver's bound-parameter limit.
         """
         ids = sorted(key_ids)
         names: dict[str, str | None] = {}
+        in_workspaces = [] if workspace_ids is None else [APIKey.workspace_id.in_(sorted(workspace_ids))]
         for start in range(0, len(ids), _NAMES_BATCH):
             result = await self.db.execute(
                 select(APIKey.id, APIKey.key_name).where(
-                    APIKey.id.in_(ids[start : start + _NAMES_BATCH]), APIKey.workspace_id.in_(sorted(workspace_ids))
+                    APIKey.id.in_(ids[start : start + _NAMES_BATCH]), *in_workspaces
                 )
             )
             names.update({key_id: name for key_id, name in result.all()})

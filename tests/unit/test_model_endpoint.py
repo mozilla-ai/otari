@@ -52,7 +52,6 @@ def test_the_images_protocol_names_generation_and_edit() -> None:
         "live",
         "bidi-generate-music",
         # No route yet.
-        "videos",
         "fim",
         "ocr",
         "a-protocol-models-dev-adds-later",
@@ -60,6 +59,10 @@ def test_the_images_protocol_names_generation_and_edit() -> None:
 )
 def test_a_protocol_otari_does_not_serve_names_no_route(protocol: str) -> None:
     assert models_dev_endpoints([protocol]) == ()
+
+
+def test_the_videos_protocol_names_the_videos_route() -> None:
+    assert models_dev_endpoints(["videos"]) == ("/videos",)
 
 
 def test_the_routes_follow_models_dev_order_and_appear_once() -> None:

@@ -3,8 +3,8 @@
 A path is below the API base: ``/chat/completions``, not ``/api/v1/chat/completions``.
 A protocol with no route here names none: a vendor's native protocol (``converse``,
 ``generate-content``), which any-llm calls behind the OpenAI-shaped routes; a live,
-two-way session (``realtime``, ``live``); and ``videos``, ``fim`` and ``ocr``, which
-Otari has no route for.
+two-way session (``realtime``, ``live``); and ``fim`` and ``ocr``, which Otari has no
+route for.
 """
 
 from collections.abc import Iterable
@@ -23,6 +23,7 @@ ModelEndpoint = Literal[
     "/rerank",
     "/decisions",
     "/moderations",
+    "/videos",
 ]
 
 # models.dev's v2 ``api`` protocols. ``decisions`` and ``systemone`` are one handler
@@ -42,6 +43,7 @@ _MODELS_DEV_PROTOCOLS: dict[str, tuple[ModelEndpoint, ...]] = {
     "rerank": ("/rerank",),
     "decisions": ("/decisions",),
     "moderations": ("/moderations",),
+    "videos": ("/videos",),
 }
 
 

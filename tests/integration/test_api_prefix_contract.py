@@ -44,6 +44,7 @@ from gateway.api.routes import (
     responses,
     retired_root,
     search,
+    videos,
 )
 from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 from gateway.main import (
@@ -270,6 +271,8 @@ FROZEN_LABELS = frozenset(
         rerank.USAGE_ENDPOINT,
         responses.USAGE_ENDPOINT,
         search.SEARCH_ENDPOINT,
+        videos.USAGE_ENDPOINT,
+        videos.USAGE_ENDPOINT_COMPLETED,
         PLAYGROUND_USAGE_ENDPOINT,
     }
 )

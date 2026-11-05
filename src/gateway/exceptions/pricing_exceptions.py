@@ -58,15 +58,16 @@ class OrganizationPricingManagedModelError(TenancyForbiddenError):
 
 
 class OrganizationPricingToolRateError(TenancyForbiddenError):
-    """An organization manager's override of a search or fetch instance's rate.
+    """An organization manager's override of a rate for tool calls the deployment's own account runs.
 
-    An instance always runs on the deployment's own key, so its rate is what the
-    deployment charges, which is the operator's alone to set.
+    A search or fetch instance always runs on the deployment's own key, and code
+    execution on its sandbox, so the rate is what the deployment charges, which
+    is the operator's alone to set.
     """
 
     def __init__(self, kind: str, name: str):
         super().__init__(
-            f"'{name}' is a {kind} tool this deployment runs on its own key, so only the deployment "
+            f"'{name}' is a {kind} tool this deployment runs on its own account, so only the deployment "
             "operator sets its rate."
         )
 

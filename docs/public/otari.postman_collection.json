@@ -3716,7 +3716,7 @@
         {
           "name": "Edit Image",
           "request": {
-            "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names an existing user.\n- API key: usage and spend go to the key's own user. A ``user`` naming a\n  different user is refused with 403, or ignored when mismatch rejection is off.",
+            "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names an existing user.\n- API key: usage and spend go to the key's own user. A ``user`` naming a\n  different user is refused with 403, or ignored when mismatch rejection is off.\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; a provider that\nsends no `usage` gets one holding just those two fields. An unpriced\nresponse carries neither.",
             "header": [],
             "method": "POST",
             "url": {
@@ -3745,7 +3745,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}"
             },
-            "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; a provider that\nsends no `usage` gets one holding just those two fields. An unpriced\nresponse carries neither.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6819,7 +6819,7 @@
               },
               "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0,\n  \"model_key\": \"string\"\n}"
             },
-            "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it. Refused with a\n403 when the deployment, not the caller's organization, holds the credential\nthat serves the model, whether through one of its own provider instances or a\nhosted credential the bound port supplies because no usable BYO credential of\nthe organization's own covers every one of its workspaces: either way the\ndeployment settles the upstream bill, so its rate is the deployment price\nlist's rather than a tenant's.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
+            "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it. Refused with a\n403 when the deployment, not the caller's organization, holds the credential\nthat serves the model, whether through one of its own provider instances or a\nhosted credential the bound port supplies because no usable BYO credential of\nthe organization's own covers every one of its workspaces: either way the\ndeployment settles the upstream bill, so its rate is the deployment price\nlist's rather than a tenant's.\n\nA rate on a tool the deployment's own account runs, a search or fetch tool's\nor ``otari:code_execution``, is refused with a 403 for the same reason.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6854,7 +6854,7 @@
               },
               "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0,\n  \"effective_from\": \"2024-01-01T00:00:00Z\"\n}"
             },
-            "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today, and with a 403 for a rate the deployment operator\nset, which only the operator may change.",
+            "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied rules the create path\ncarries, so an edit cannot store a rate a create would refuse, and with a\n403 for a rate the deployment operator\nset, which only the operator may change.",
             "header": [
               {
                 "key": "Content-Type",
@@ -13079,6 +13079,126 @@
         }
       ],
       "name": "users"
+    },
+    {
+      "item": [
+        {
+          "name": "List Videos",
+          "request": {
+            "description": "The caller's video jobs, newest first, from the gateway's own records.\n\nA key sees the jobs its user started in its workspace; the master key sees\nevery job. The records say what the gateway knows without asking a\nprovider; a job's status is ``GET /api/v1/videos/{video_id}``'s.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "videos"
+              ],
+              "query": [
+                {
+                  "description": "How many of the newest jobs to list",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/videos?limit="
+            }
+          }
+        },
+        {
+          "name": "Create Video",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}"
+            },
+            "description": "Start a video generation job.\n\nThe job is returned at once. Poll ``GET /api/v1/videos/{video_id}`` until\nits status is ``completed``, then fetch the video from\n``GET /api/v1/videos/{video_id}/content``. The model must have a per-second\nvideo price, from the catalog or set through the pricing API; one with none\nis refused with 402. The length asked for is reserved against the budget at\nthat price while the job starts, and the job is billed when a retrieval\nfinds it completed. A provider that renders inside this call returns the\njob already completed, billed, and ready for its content.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "videos"
+              ],
+              "raw": "{{baseUrl}}/api/v1/videos"
+            }
+          }
+        },
+        {
+          "name": "Retrieve Video",
+          "request": {
+            "description": "The job's status, from its record once it completed, else from the provider that runs it.\n\nThe first retrieval that finds the job completed bills its length at the\nmodel's per-second video price. A key reads only the jobs its user started\nin its workspace; the master key reads any job.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "videos",
+                ":video_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/videos/:video_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "video_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Retrieve Video Content",
+          "request": {
+            "description": "The finished video's bytes, in the provider's media type.\n\nReads the job first, so a completed job is billed here as it would be on\n``GET /api/v1/videos/{video_id}``. A job still running, or one that failed,\nis a 409 naming its status.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "videos",
+                ":video_id",
+                "content"
+              ],
+              "raw": "{{baseUrl}}/api/v1/videos/:video_id/content",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "video_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "videos"
     },
     {
       "item": [

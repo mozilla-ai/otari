@@ -2,7 +2,7 @@
 
 Runs against the PostgreSQL the suite is configured for (``TEST_DATABASE_URL``, or
 a testcontainer). The bucketing expressions are dialect-aware (see
-``_bucket_expr``), and these assertions pin the bucketing and reconciliation
+``core.sql.bucket_expr``), and these assertions pin the bucketing and reconciliation
 contract they produce.
 """
 
