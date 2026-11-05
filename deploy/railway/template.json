@@ -84,6 +84,11 @@
           "isOptional": false,
           "description": "S3 region of the otari-files bucket (Railway reports auto). Wired to the bucket; leave as-is."
         },
+        "OTARI_FILES_RETENTION_HOURS": {
+          "defaultValue": "168",
+          "isOptional": true,
+          "description": "Hours a stored file, an upload or a sandbox output alike, is served before it expires, after which the sweep (hourly by default) removes its bytes from the bucket. One week by default, so the bucket, which Railway bills per stored GB, does not grow without bound. Delete the variable, or leave it blank, to keep files until you delete them. Where a provider's own code execution reads attached files, keep it well above 1 hour: a copy never outlives the file, and the provider needs at least an hour."
+        },
         "AWS_ACCESS_KEY_ID": {
           "defaultValue": "${{otari-files.ACCESS_KEY_ID}}",
           "isOptional": false,

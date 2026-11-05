@@ -4,7 +4,7 @@
 
 ## About Hosting Otari
 
-This template runs two services and a storage bucket: the Otari gateway from its published Docker image (`mzdotai/otari:0.27.0`, pinned to a release), a managed PostgreSQL database, and a Railway bucket for uploaded files. Otari keeps no state on its own disk. Postgres holds your keys, users, budgets, and usage; the bucket holds the files you upload through the Files API, so they survive a redeploy and every replica reads the same files.
+This template runs two services and a storage bucket: the Otari gateway from its published Docker image (`mzdotai/otari:0.27.0`, pinned to a release), a managed PostgreSQL database, and a Railway bucket for uploaded files. Otari keeps no state on its own disk. Postgres holds your keys, users, budgets, and usage; the bucket holds the files you upload through the Files API, so they survive a redeploy, for the week `OTARI_FILES_RETENTION_HOURS` keeps them, and every replica reads the same files.
 
 On first boot Otari runs its database migrations and prints a first-use API key in the deploy logs, so the gateway is usable right away. The template generates the master key, the key that encrypts stored provider credentials, and the provider account pepper for you. The gateway listens on port `8000`, with a healthcheck at `/api/v1/health/readiness`, so a deploy that cannot reach its database does not go live.
 
@@ -39,6 +39,7 @@ curl "https://YOUR_DOMAIN/api/v1/chat/completions" \
 | `OTARI_FILES_S3_BUCKET` | `${{otari-files.BUCKET}}` | Pre-wired to the bucket's S3 name. |
 | `OTARI_FILES_S3_ENDPOINT_URL` | `${{otari-files.ENDPOINT}}` | Pre-wired to the bucket's S3 endpoint. |
 | `OTARI_FILES_S3_REGION` | `${{otari-files.REGION}}` | Pre-wired to the bucket's region. |
+| `OTARI_FILES_RETENTION_HOURS` | `168` | A stored file, an upload or a sandbox output alike, expires after a week, and the sweep then removes its bytes from the bucket. Delete the variable, or leave it blank, to keep files until you delete them. |
 | `AWS_ACCESS_KEY_ID` | `${{otari-files.ACCESS_KEY_ID}}` | Pre-wired to the bucket's access key. |
 | `AWS_SECRET_ACCESS_KEY` | `${{otari-files.SECRET_ACCESS_KEY}}` | Pre-wired to the bucket's secret key. |
 | `PORT` | `8000` | The port Railway's healthcheck probes. Keep it equal to the target port. |
