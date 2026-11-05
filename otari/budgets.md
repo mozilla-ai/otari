@@ -1,3 +1,7 @@
+---
+icon: square-dollar
+---
+
 # Budgets
 
 A budget caps what can be spent over a period, and Otari refuses requests that
@@ -17,8 +21,9 @@ also has to fit the organization's [balance](billing.md#budgets-are-a-different-
 1. Open **Organization** and select **Spend & budgets**.
 2. Click **Add budget**, then set an optional **Name**, the **Limit (USD)**
    (blank for no dollar limit) and how often it **Resets**: Daily, Weekly
-   (Mondays) or Monthly (the first of the month), at midnight UTC. Click
-   **Add budget**.
+   (Mondays) or Monthly (the first of the month), at midnight UTC. Under
+   **Token and request limits**, optionally cap tokens or requests per period.
+   Click **Add budget**.
 3. Click **Add ceiling**, then choose what it caps under **Capping** (the
    organization or one of its workspaces), optionally a **Provider instance** to
    cap one provider only, the **Budget** to use, and an optional **Name**. Click
@@ -29,7 +34,7 @@ up, new matching requests are refused until the next reset. Requests already
 running finish normally.
 
 To cap one API key, set its budget on the key itself; see
-[Cap a key's spend](api-keys.md#cap-a-keys-spend). Through the API, a budget can
+[Cap a key's spend](https://docs.otari.ai/guides/organizations-and-access/api-keys#cap-a-keys-spend). Through the API, a budget can
 also cap tokens and requests, limit each user per minute, or use a rolling
 duration instead of a calendar period; the fields are in
 [What a budget limits](#what-a-budget-limits).
@@ -86,7 +91,11 @@ budget already at its cap is refused as `has exceeded budget limit`.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests
-already in flight when it runs out.
+already in flight when it runs out. What each of them holds in dollars is what
+it can measure before the call: image generation the images asked for at the
+`size` asked for, speech the characters of its input, moderations one request,
+and transcription nothing, because the audio's length is not read here
+([Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit)).
 
 ### Per-minute limits
 
@@ -116,7 +125,7 @@ attachment, and for a video job: its length is reserved at the model's
 per-second price while the job starts, and its cost is settled, in dollars
 alone, by the start call when the provider returns the job completed, else by
 the first read that finds it so. Cap batch-heavy workloads in dollars rather
-than in tokens. See [Importing external usage](external-usage.md).
+than in tokens. See [Importing external usage](https://docs.otari.ai/guides/observability/external-usage).
 
 ### Reservations are taken up front
 

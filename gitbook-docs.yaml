@@ -10,17 +10,17 @@ site:
   structure:
     - type: section
       key: section-home
-      title: Home
+      title: Otari
       path: home
       default: true
       children:
         - type: space
           key: space-home
-          title: Home
+          title: Otari
           path: home
           default: true
           content:
-            directory: ./home
+            directory: ./otari
     - type: section
       key: section-guides
       title: Guides

@@ -28835,7 +28835,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.39.0"
+    "version": "0.0.0-dev"
   },
   "openapi": "3.1.0",
   "paths": {

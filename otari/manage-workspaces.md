@@ -1,8 +1,13 @@
+---
+description: Create, switch, organize, and delete workspaces in the dashboard.
+icon: desk
+---
+
 # Manage workspaces
 
 A workspace holds the API keys, routing policies, tools and usage of one team,
 application or environment. What workspaces are, and how they fit in an
-organization, is in [Organizations and workspaces](https://docs.otari.ai/guides/organizations-and-access/organizations-and-workspaces).
+organization, is in [Organizations and workspaces](workspaces.md).
 
 ## Create a workspace
 
@@ -22,7 +27,7 @@ Select the workspace in the top-left corner. Its menu has:
 - **Models**: the models its requests can use.
 - **Routing**, then **Policies**: its [routing policies](create-a-multi-provider-routing.md).
 - **Guardrails**: the guardrails that run on its requests.
-- **Tools**: its [web search, code execution and MCP servers](workspace-tools.md).
+- **Tools**: its [web search](configure-web-search.md), [code execution](configure-code-execution.md) and [MCP servers](add-an-mcp-server.md).
 - **API keys** and **Members**: who and what can call it.
 
 The organization's own settings are under **Organization**: **Usage**,

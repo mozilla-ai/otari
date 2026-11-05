@@ -1,5 +1,6 @@
 ---
 description: Otari is an open-source AI gateway by Mozilla AI (Apache-2.0). Run it yourself for free, or use the hosted version at otari.ai, see pricing.
+icon: circle-info
 ---
 
 # What is Otari?
@@ -45,7 +46,7 @@ Missing an option? Don't hesitate to [open an issue on github](https://github.co
 
 ## Where to go next
 
-- **Home**: the [Quickstart](quickstart.md) sends a first request through
+- **Otari**: the [Quickstart](quickstart.md) sends a first request through
   otari.ai, from curl and from your code, in a few minutes. Then, in the
   dashboard: [manage workspaces](manage-workspaces.md),
   [invite members](invite-and-manage-organization-members.md), add

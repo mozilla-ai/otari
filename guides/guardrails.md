@@ -67,7 +67,7 @@ to what callers send rather than replacing it, and an organization that
 configures nothing leaves every request checked exactly as it was.
 
 Organization owners and admins set this up in the dashboard, under
-**Organization**, then **Guardrails**: [Manage guardrails](https://docs.otari.ai/use-otari-ai/manage-guardrails)
+**Organization**, then **Guardrails**: [Manage guardrails](https://docs.otari.ai/how-to-guides/manage-guardrails)
 walks through configuring, mandating, testing and removing one. The page says
 when a guardrail is not running, and whether the requests it covers are being
 refused or served unchecked.

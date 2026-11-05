@@ -47,7 +47,7 @@ operator or the organization says about their agreement with the provider,
 and the Models page shows it beside each offering and filters on it (see
 [Browsing the grouped catalog](https://docs.otari.ai/reference/gateway/models#browsing-the-grouped-catalog)). A
 workspace can require it, which refuses every undeclared source at the API;
-see [Control workspace access](https://docs.otari.ai/guides/organizations-and-access/provider-keys#control-workspace-access).
+see [Control workspace access](https://docs.otari.ai/learn/provider-keys#control-workspace-access).
 
 Whose declaration counts depends on whose key serves the offering:
 

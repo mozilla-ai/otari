@@ -1,10 +1,14 @@
+---
+icon: key
+---
+
 # Provider keys
 
 Provider keys are the upstream credentials Otari uses to call LLM providers
 such as OpenAI, Anthropic or Mistral. They belong to the organization, and
 workspaces inherit them unless a workspace pins or turns off a key per provider.
 
-A provider key is not an [API key](api-keys.md): your application sends an API
+A provider key is not an [API key](https://docs.otari.ai/guides/organizations-and-access/api-keys): your application sends an API
 key to Otari, and Otari calls the provider with a provider key, so the
 application never sees the provider key. Where a request's credential comes
 from when the organization has no key for a model (a deployment's own providers,

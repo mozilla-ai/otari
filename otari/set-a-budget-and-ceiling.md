@@ -1,3 +1,8 @@
+---
+description: Create a spending budget, then apply it with a ceiling.
+icon: square-dollar
+---
+
 # Set a budget and ceiling
 
 A budget says how much can be spent and over what period. On its own it limits
@@ -10,7 +15,9 @@ nothing: a **spend ceiling** applies it to the organization or a workspace.
 3. Set an optional **Name**, the **Limit (USD)** (blank for no dollar limit),
    and how often it **Resets**: daily, weekly (on Mondays) or monthly (on the
    first of the month), at midnight UTC.
-4. Click **Add budget**.
+4. Optionally, open **Token and request limits** to also cap the tokens or the
+   number of requests per period. Blank caps nothing.
+5. Click **Add budget**.
 
 ## Apply a spend ceiling
 
@@ -38,4 +45,4 @@ it.
 and marks a budget once it passes 80% of it and again once it is used up.
 
 How budgets are enforced, and what a refused request looks like, is in
-[Budgets](https://docs.otari.ai/guides/organizations-and-access/budgets).
+[Budgets](budgets.md).

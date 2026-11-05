@@ -69,10 +69,10 @@ The organization view contains tenant-wide administration:
 
 | Page | What it is | Rules |
 | --- | --- | --- |
-| Usage | Organization-wide usage | [Workspace-scoped spend](organizations-and-workspaces.md#workspace-scoped-spend) |
+| Usage | Organization-wide usage | [Workspace-scoped spend](https://docs.otari.ai/learn/workspaces#workspace-scoped-spend) |
 | Workspaces, Members | Workspaces and organization members, with invitations | [Organization](#organization) |
 | Email domains | Domains whose colleagues join automatically | [Email-domain auto-join](members.md#email-domain-auto-join) |
-| Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](budgets.md) |
+| Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](https://docs.otari.ai/learn/budgets) |
 | Providers > Inference (under General) | The organization's own provider keys, the models each one offers, and what the organization pays for them | [Organization provider keys](https://docs.otari.ai/self-hosting/providers/hosted-providers#organization-provider-keys), [Who is shown which models](https://docs.otari.ai/reference/gateway/models#who-is-shown-which-models) |
 | Providers > Web search (under General) | The organization's own search and fetch keys | [Web search keys](#web-search-keys) |
 | Guardrails, Org settings (under General) | Organization guardrail policy and settings | [Guardrails](guardrails.md) |
@@ -180,7 +180,7 @@ the Requests view's "Price this model", offered on a served request that carried
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
 an image generation or edit. What each unit bills is in
-[Per-request pricing](https://docs.otari.ai/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit).
 
 ## Playground
 

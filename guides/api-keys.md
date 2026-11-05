@@ -27,7 +27,7 @@ budget of its own: in the key's create or edit form, pick an existing budget und
 **Budget (optional)**, or set a **Limit (USD)** and how often it **Resets**. The
 key's owner's budget still applies beside it. The page's Budget column shows
 each key's spend this period against its limit. For budgets in general, see
-[Budgets](budgets.md).
+[Budgets](https://docs.otari.ai/learn/budgets).
 
 ## Accept or reject mismatched `user` fields
 

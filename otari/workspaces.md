@@ -1,3 +1,7 @@
+---
+icon: desk
+---
+
 # Organizations and workspaces
 
 This guide creates, organizes and deletes workspaces, and deletes an
@@ -89,7 +93,7 @@ Organization and workspace memberships use four roles:
 ### Workspace-scoped spend
 
 A request's usage lands in the workspace of the API key that authenticated it
-(see [How a request is attributed](access-control.md#how-a-request-is-attributed)).
+(see [How a request is attributed](https://docs.otari.ai/guides#how-a-request-is-attributed)).
 Organization and workspace usage views then apply the signed-in identity's
 membership.
 
