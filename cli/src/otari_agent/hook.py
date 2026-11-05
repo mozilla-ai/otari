@@ -2980,6 +2980,35 @@ _HOOK_SETUP_BY_HARNESS = {
 }
 
 
+def _hook_global_registration_without_repo_only(otari_hook_prefix: str) -> Path | None:
+    """`~/.claude/settings.json`, if it registers otari hook there without `--repo-only`.
+
+    That registration runs in every repository on this machine, so it would still enforce the
+    person's own gates in a repository whose own entry just turned them off.
+    """
+    settings_path = Path.home() / ".claude" / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(settings, dict):
+        return None
+    hooks_section = settings.get("hooks")
+    if not isinstance(hooks_section, dict):
+        return None
+    for entries in hooks_section.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for hook_item in entry["hooks"]:
+                command = hook_item.get("command") if isinstance(hook_item, dict) else None
+                if isinstance(command, str) and command.startswith(otari_hook_prefix) and "--repo-only" not in command:
+                    return settings_path
+    return None
+
+
 @hook.command(name="setup")
 @click.option(
     "--harness",
@@ -3013,7 +3042,9 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     `--repo-only` writes that flag into the registered command, so the hook
     enforces this repo's guardrail alone here. The matcher is then picked from
     the repo's own gates, because a matcher widened for a gate the hook will
-    not run invokes it on every such tool call for nothing.
+    not run invokes it on every such tool call for nothing. On claude-code, it
+    also warns when `~/.claude/settings.json` registers the hook for every
+    repository without the flag, since that registration still runs here.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -3081,6 +3112,15 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     # PreToolUse-only install left both silently unreachable.
     stop_created = _merge_hook_entry(settings_path, "Stop", command)
     click.echo(f"{'Added' if stop_created else 'Updated'} the Stop hook in {settings_path}.")
+
+    if repo_only and harness == "claude-code":
+        global_settings_path = _hook_global_registration_without_repo_only(command.split(" --", 1)[0])
+        if global_settings_path is not None:
+            click.echo(
+                f"{global_settings_path} also registers otari hook without --repo-only. It runs in "
+                "every repository on this machine and will still enforce your own gates here unless "
+                "it gets the flag too."
+            )
 
 
 # otari's own doc, checked first; CLAUDE.md is a one-line @AGENTS.md import in

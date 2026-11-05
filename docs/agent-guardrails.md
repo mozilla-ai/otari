@@ -440,12 +440,18 @@ otari hook setup --repo-only
 
 That writes `otari hook --harness claude-code --repo-only` into that
 repository's `.claude/settings.local.json`, so the hook enforces that
-repository's guardrail alone and leaves `~/.otari/` out. Everywhere else is
-unaffected. `otari guardrails validate --repo-only` shows the same set, so a dry
-run agrees with the hook.
+repository's guardrail alone and leaves `~/.otari/` out there. `otari
+guardrails validate --repo-only` shows the same set, so a dry run agrees with
+the hook.
 
 Pass the flag to `setup` rather than editing the settings file: a later `setup`
 run rewrites the registered command and would drop a flag added by hand.
+
+If `~/.claude/settings.json` also registers the hook for every repository (see
+below), that registration carries no `--repo-only` of its own and still
+enforces your gates in this repository too. `setup --repo-only` warns when it
+finds one; add the flag there as well, or remove the per-repository entry
+instead.
 
 ### Running your guardrail in every repository
 

@@ -182,6 +182,53 @@ def test_repo_only_keeps_a_user_level_read_gate_out_of_the_matcher(repo: Path, i
     assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit"
 
 
+def _write_global_registration(isolated_home: Path, *, repo_only: bool = False) -> Path:
+    """A claude-code hook entry in `~/.claude/settings.json`, as if registered for every repository."""
+    path = isolated_home / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    command = f"{_FAKE_OTARI_PATH} hook --harness claude-code" + (" --repo-only" if repo_only else "")
+    path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": command}]}
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_repo_only_warns_of_a_global_registration_without_it(repo: Path, isolated_home: Path) -> None:
+    """A global registration that still omits the flag would still enforce personal gates here."""
+    global_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) in result.output
+    assert "--repo-only" in result.output
+
+
+def test_repo_only_does_not_warn_when_the_global_registration_already_has_it(repo: Path, isolated_home: Path) -> None:
+    global_settings = _write_global_registration(isolated_home, repo_only=True)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) not in result.output
+
+
+def test_without_repo_only_a_global_registration_draws_no_warning(repo: Path, isolated_home: Path) -> None:
+    """Both registrations already enforce the same gates here, so there is nothing to warn about."""
+    global_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) not in result.output
+
+
 def test_a_broken_repo_file_still_leaves_the_user_level_gates_in_the_matcher(repo: Path, isolated_home: Path) -> None:
     """The hook still enforces the user's gates when the repo's files fail, so it must still be called for them."""
     _guardrail_path(repo).write_text("gates: [", encoding="utf-8")

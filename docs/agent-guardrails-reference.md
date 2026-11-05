@@ -845,6 +845,10 @@ Re-running `setup` rewrites the registered command in place, matching an
 existing entry on the binary and `hook` alone. So a flag added to the settings
 file by hand does not survive a re-run: pass `--repo-only` to `setup` instead.
 
+On claude-code, `setup --repo-only` also warns when `~/.claude/settings.json`
+registers the hook for every repository without the flag, since that entry
+still enforces the user's gates here.
+
 ### `otari guardrails validate`
 
 Checks the composed guardrail without running it, and dry-runs it against
