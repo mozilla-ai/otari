@@ -77,6 +77,10 @@ class PriceFacts:
         }
 
 
+# A request that says nothing about itself: its clock is read when it is priced.
+NO_FACTS = PriceFacts()
+
+
 @dataclass(frozen=True)
 class ResolvedRates:
     """A block with each price final and no rule left, and the conditions that changed each price.

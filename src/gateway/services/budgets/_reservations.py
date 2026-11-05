@@ -48,7 +48,15 @@ from gateway.services.budgets._scoped_enforcement import (
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
 from gateway.services.budgets._scoped_enforcement import settle as settle_scoped
-from gateway.services.pricing import Quantities, Slot, has_completion_meter, price_usage
+from gateway.services.pricing import (
+    NO_FACTS,
+    PriceFacts,
+    Quantities,
+    Slot,
+    apply_rules,
+    has_completion_meter,
+    price_usage,
+)
 from gateway.services.pricing_service import find_model_pricing, is_free_pricing, search_unit_cost
 from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
@@ -487,6 +495,7 @@ def estimate_cost(
     max_output_tokens: int | None,
     default_output_tokens: int,
     cache_write_ttl: Literal["5m", "1h"] | None = None,
+    facts: PriceFacts = NO_FACTS,
 ) -> Decimal:
     """Estimate request cost up front for budget pre-debit.
 
@@ -499,13 +508,15 @@ def estimate_cost(
     requested TTL bills at (a ``1h`` request also covers its 5m writes), since
     any prompt token could become a cache write. The estimate is reconciled to
     actual usage on completion. A rate in a unit no completion meter reads
-    settles unpriced, so it holds nothing.
+    settles unpriced, so it holds nothing. The rate is priced at the rules
+    ``facts`` meet, its context the estimated prompt.
     """
-    if not has_completion_meter(pricing):
+    if pricing is None or not has_completion_meter(pricing):
         return ZERO
     # Whole tokens, rounded up: a fraction of a token is not billable, and the
     # estimate is an upper bound, so the fraction rounds towards the gateway.
     prompt_tokens = (max(prompt_chars, 0) + 3) // 4
+    pricing = apply_rules(pricing, replace(facts, context=prompt_tokens)).rate
     # `is None` rather than falsy: max_output_tokens == 0 is an explicit "no
     # output" bound and must not fall through to the default cap. Clamp negatives
     # so a hostile max_output_tokens can't produce a negative estimate.
@@ -532,29 +543,43 @@ _DOCUMENTS_PER_SEARCH_UNIT = 100
 _SEARCH_CHUNK_TOKENS = 500
 
 
-def rerank_estimate(pricing: ModelPricing | None, *, query_chars: int, document_chars: Sequence[int]) -> Decimal:
+def rerank_estimate(
+    pricing: ModelPricing | None,
+    *,
+    query_chars: int,
+    document_chars: Sequence[int],
+    facts: PriceFacts = NO_FACTS,
+) -> Decimal:
     """Upper bound a rerank request holds against its budgets before dispatch.
 
     A per-request rate holds the search units the documents imply, so a request
     over many or long documents cannot settle at several times what it held. A
     per-token rate holds the input tokens estimated from the query and documents.
     """
-    if priced_per_request(pricing):
+    if pricing is not None and priced_per_request(pricing):
         chunks = sum(max(1, ceil((query_chars + chars) / 4 / _SEARCH_CHUNK_TOKENS)) for chars in document_chars)
-        return search_unit_cost(max(1, ceil(chunks / _DOCUMENTS_PER_SEARCH_UNIT)), pricing)
+        units = max(1, ceil(chunks / _DOCUMENTS_PER_SEARCH_UNIT))
+        return search_unit_cost(units, apply_rules(pricing, facts).rate)
     prompt_chars = query_chars + sum(document_chars)
-    return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
+    return estimate_cost(
+        pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0, facts=facts
+    )
 
 
-def count_estimate(pricing: ModelPricing | None, *, meter: str, count: int) -> Decimal:
+def count_estimate(pricing: ModelPricing | None, *, meter: str, count: int, facts: PriceFacts = NO_FACTS) -> Decimal:
     """What a request billed by ``count`` under ``meter`` holds: exactly what that count settles at."""
     clamped = min(max(count, 0), MAX_REPORTED_UNITS)
-    charge = price_usage(pricing, tokens=None, units={meter: clamped})
+    charge = price_usage(pricing, tokens=None, units={meter: clamped}, facts=facts)
     return charge.cost if charge is not None else ZERO
 
 
 def report_estimate(
-    pricing: ModelPricing | None, *, slot: Slot | None, quantities: Quantities, units: Mapping[str, int]
+    pricing: ModelPricing | None,
+    *,
+    slot: Slot | None,
+    quantities: Quantities,
+    units: Mapping[str, int],
+    facts: PriceFacts = NO_FACTS,
 ) -> Decimal:
     """What a request holds for what it says it will report: exactly what that report settles at.
 
@@ -565,7 +590,7 @@ def report_estimate(
     """
     clamped = {meter: min(max(count, 0), MAX_REPORTED_UNITS) for meter, count in units.items()}
     measured = {unit: max(Decimal(quantity), ZERO) for unit, quantity in quantities.items()}
-    charge = price_usage(pricing, tokens=None, units=clamped, quantities=measured, slot=slot)
+    charge = price_usage(pricing, tokens=None, units=clamped, quantities=measured, slot=slot, facts=facts)
     return charge.cost if charge is not None else ZERO
 
 

@@ -1,5 +1,6 @@
 """The per-token rates a priced event carries, which a tool call's cost estimate is read with."""
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -28,6 +29,28 @@ def test_a_cache_meter_bills_at_input_only_with_no_rate_of_its_own(
         cache_write_price_per_million=cache_write,
     )
 
-    rates = _rates(pricing, billable_usage(input_tokens=100, output_tokens=10, cache_tokens_included=True))
+    usage = billable_usage(input_tokens=100, output_tokens=10, cache_tokens_included=True)
+
+    rates = _rates(pricing, usage, datetime(2026, 11, 2, tzinfo=UTC))
 
     assert (rates["cache_read"], rates["cache_write"]) == expected
+
+
+def test_an_imported_event_is_priced_at_the_rules_of_its_own_time() -> None:
+    rates = {
+        "text": {"input": {"price": 3}, "output": {"price": 15}},
+        "multipliers": [{"when": {"date": {"gte": "2027-01-01"}}, "factor": 2}],
+    }
+    pricing = ModelPricing(
+        model_key="anthropic:claude-haiku-4-5",
+        input_price_per_million=Decimal(3),
+        output_price_per_million=Decimal(15),
+        unit="token",
+        rates=rates,
+    )
+    usage = billable_usage(input_tokens=100, output_tokens=10, cache_tokens_included=True)
+
+    before = _rates(pricing, usage, datetime(2026, 12, 31, tzinfo=UTC))
+    after = _rates(pricing, usage, datetime(2027, 1, 2, tzinfo=UTC))
+
+    assert (before["input"], after["input"]) == (Decimal(3), Decimal(6))

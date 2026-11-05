@@ -1,7 +1,14 @@
 """The pricing domain: which meter a rate prices, what an attempt costs at it, and the models.dev default prices."""
 
 from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
-from gateway.services.pricing._price_rules import AppliedRate, PriceFacts, ResolvedRates, apply_rules, resolve_rates
+from gateway.services.pricing._price_rules import (
+    NO_FACTS,
+    AppliedRate,
+    PriceFacts,
+    ResolvedRates,
+    apply_rules,
+    resolve_rates,
+)
 from gateway.services.pricing._slot_pricing import (
     UNIT_METER,
     Quantities,
@@ -70,6 +77,7 @@ __all__ = [
     "DeploymentPricingService",
     "MAX_RATE_PER_MILLION",
     "MEASURED_UNITS",
+    "NO_FACTS",
     "ModelSearchRate",
     "MAX_RESIDENT_GENERATIONS",
     "ModelsDevPrice",
