@@ -35,9 +35,14 @@ from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.password_service import hash_password
+
+from .webauthn_helpers import SoftwareAuthenticator, challenge_of
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 _KEYS = f"{API_ROOT}/organizations/me/keys"
+_GUARDRAILS = f"{API_ROOT}/organizations/me/guardrails"
+_MEMBER_EMAIL = "member@example.com"
 
 
 class RecordingGrowthAdapter:
@@ -62,6 +67,16 @@ class RecordingGrowthAdapter:
         self.calls.append(
             ("signup", {"user_id": user_id, "email": email, "full_name": full_name, "created_at": created_at})
         )
+
+    async def record_sign_in(
+        self,
+        *,
+        background_tasks: Any,
+        user_id: uuid.UUID,
+        email: str,
+        signed_in_at: datetime,
+    ) -> None:
+        self.calls.append(("sign_in", {"user_id": user_id, "email": email, "signed_in_at": signed_in_at}))
 
     async def record_activation(
         self,
@@ -389,4 +404,197 @@ def test_an_operator_with_no_address_notifies_nothing(
     """
     response = client.post(_KEYS, json={"key_name": "operator"}, headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
+    assert growth.calls == []
+
+
+# -- sign-in ----------------------------------------------------------------
+
+
+def _give_password(db_session_factory: Callable[[], Session], user_id: uuid.UUID) -> None:
+    """A verified address and a password, which is what a password sign-in asks of an identity."""
+    session = db_session_factory()
+    try:
+        user = session.get(User, user_id)
+        assert user is not None
+        user.hashed_password = hash_password(PASSWORD)
+        user.email_verified_at = datetime.now(UTC)
+        session.commit()
+    finally:
+        session.close()
+
+
+def test_a_password_sign_in_notifies_the_sign_in(
+    client: TestClient,
+    growth: RecordingGrowthAdapter,
+    member: tuple[uuid.UUID, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    user_id, _cookie = member
+    _give_password(db_session_factory, user_id)
+    before = datetime.now(UTC)
+
+    response = client.post(f"{API_ROOT}/auth/session", json={"email": _MEMBER_EMAIL, "password": PASSWORD})
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert [name for name, _ in growth.calls] == ["sign_in"], growth.calls
+    [sign_in] = growth.of("sign_in")
+    assert (sign_in["user_id"], sign_in["email"]) == (user_id, _MEMBER_EMAIL)
+    assert sign_in["signed_in_at"] >= before
+
+
+def test_a_refused_password_sign_in_notifies_nothing(
+    client: TestClient,
+    growth: RecordingGrowthAdapter,
+    member: tuple[uuid.UUID, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _give_password(db_session_factory, member[0])
+
+    response = client.post(f"{API_ROOT}/auth/session", json={"email": _MEMBER_EMAIL, "password": "not-the-password"})
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED, response.text
+    assert growth.calls == []
+
+
+def test_a_master_key_sign_in_notifies_nothing_even_for_an_operator_with_an_address(
+    client: TestClient,
+    test_config: GatewayConfig,
+    growth: RecordingGrowthAdapter,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The master key is the deployment's credential, not a person's, so nobody signed in."""
+    first = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
+    assert first.status_code == status.HTTP_200_OK, first.text
+    session = db_session_factory()
+    try:
+        operator = session.get(User, uuid.UUID(first.json()["user_id"]))
+        assert operator is not None
+        operator.email = "operator@example.com"
+        session.commit()
+    finally:
+        session.close()
+    client.cookies.clear()
+
+    again = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
+
+    assert again.status_code == status.HTTP_200_OK, again.text
+    assert growth.calls == []
+
+
+def test_every_provider_sign_in_notifies_a_sign_in_beside_the_one_signup(
+    client: TestClient,
+    test_config: GatewayConfig,
+    growth: RecordingGrowthAdapter,
+    oauth: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The registering sign-in is both: the account was made, and it was used."""
+    monkeypatch.setattr(test_config, "open_signup", True)
+
+    _sign_in_with_google(client, monkeypatch, email="new@example.com")
+    _sign_in_with_google(client, monkeypatch, email="new@example.com")
+
+    assert [name for name, _ in growth.calls] == ["signup", "sign_in", "sign_in"], growth.calls
+    assert {sign_in["email"] for sign_in in growth.of("sign_in")} == {"new@example.com"}
+
+
+def test_a_passkey_sign_in_notifies_the_sign_in(
+    client: TestClient,
+    test_config: GatewayConfig,
+    growth: RecordingGrowthAdapter,
+    member: tuple[uuid.UUID, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "public_base_url", "http://testserver")
+    authenticator = SoftwareAuthenticator(rp_id="testserver", origin="http://testserver")
+    user_id, cookie = member
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options")
+    assert options.status_code == status.HTTP_200_OK, options.text
+    registered = client.post(
+        f"{API_ROOT}/auth/webauthn/register",
+        json={"credential": authenticator.register(challenge_of(options.json()))},
+    )
+    assert registered.status_code == status.HTTP_201_CREATED, registered.text
+    client.cookies.clear()
+
+    options = client.post(f"{API_ROOT}/auth/webauthn/authenticate/options")
+    assert options.status_code == status.HTTP_200_OK, options.text
+    signed_in = client.post(
+        f"{API_ROOT}/auth/webauthn/authenticate",
+        json={"credential": authenticator.authenticate(challenge_of(options.json()))},
+    )
+
+    assert signed_in.status_code == status.HTTP_200_OK, signed_in.text
+    assert [(sign_in["user_id"], sign_in["email"]) for sign_in in growth.of("sign_in")] == [(user_id, _MEMBER_EMAIL)]
+
+
+# -- the first guardrail ----------------------------------------------------
+
+
+def _make_admin(db_session_factory: Callable[[], Session], user_id: uuid.UUID) -> None:
+    """Guardrails are mandated by an organization's owners and admins."""
+    session = db_session_factory()
+    try:
+        membership = session.execute(
+            select(OrganizationMember).where(col(OrganizationMember.user_id) == user_id)
+        ).scalar_one()
+        membership.role = "admin"
+        session.commit()
+    finally:
+        session.close()
+
+
+def test_an_organizations_first_guardrail_notifies_the_activation_and_the_second_does_not(
+    client: TestClient,
+    growth: RecordingGrowthAdapter,
+    member: tuple[uuid.UUID, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    user_id, cookie = member
+    _make_admin(db_session_factory, user_id)
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+    first = client.post(
+        _GUARDRAILS, json={"profile": "prompt-injection", "mode": "block", "applies_to_all_workspaces": True}
+    )
+    assert first.status_code == status.HTTP_201_CREATED, first.text
+    second = client.post(
+        _GUARDRAILS, json={"profile": "toxicity", "mode": "monitor", "applies_to_all_workspaces": True}
+    )
+    assert second.status_code == status.HTTP_201_CREATED, second.text
+
+    assert growth.of("activation") == [
+        {"event": GrowthActivationEvent.FIRST_GUARDRAIL_CONFIGURED, "user_id": user_id, "email": _MEMBER_EMAIL}
+    ], growth.calls
+
+
+def test_a_guardrail_the_caller_may_not_mandate_notifies_nothing(
+    client: TestClient,
+    growth: RecordingGrowthAdapter,
+    member: tuple[uuid.UUID, str],
+) -> None:
+    """A plain member is refused before anything is read or written, so nothing was configured."""
+    client.cookies.set(SESSION_COOKIE_NAME, member[1])
+
+    response = client.post(
+        _GUARDRAILS, json={"profile": "prompt-injection", "mode": "block", "applies_to_all_workspaces": True}
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.text
+    assert growth.calls == []
+
+
+def test_a_guardrail_mandated_with_the_master_key_notifies_nothing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    growth: RecordingGrowthAdapter,
+) -> None:
+    response = client.post(
+        _GUARDRAILS,
+        json={"profile": "prompt-injection", "mode": "block", "applies_to_all_workspaces": True},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED, response.text
     assert growth.calls == []

@@ -53,6 +53,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
+from fastapi import BackgroundTasks
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy import and_, delete, func, or_, select
@@ -83,6 +84,7 @@ from gateway.models.guardrails import (
 )
 from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
 from gateway.models.tenancy import User
+from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.secret_box import (
@@ -727,9 +729,19 @@ class OrganizationGuardrailService:
         )
 
     async def create_guardrail(
-        self, *, user: User, request: OrganizationGuardrailCreate
+        self,
+        *,
+        user: User,
+        request: OrganizationGuardrailCreate,
+        growth: GrowthSignalPort | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> OrganizationGuardrailPublic:
-        """Mandate a guardrail, encrypting its credential before it is stored."""
+        """Mandate a guardrail, encrypting its credential before it is stored.
+
+        With ``growth``, the organization's first guardrail is reported as
+        ``FIRST_GUARDRAIL_CONFIGURED`` for ``user``, derived as the first key is:
+        a read of current state, so deleting every guardrail re-arms it.
+        """
         organization_id = await self._manageable_organization_id(user)
 
         existing = (
@@ -780,6 +792,13 @@ class OrganizationGuardrailService:
         await self._replace_scope(guardrail.id, workspace_ids)
         await self._commit()
         await self.db.refresh(guardrail)
+        if existing == 0 and growth is not None and background_tasks is not None and user.email is not None:
+            await growth.record_activation(
+                background_tasks=background_tasks,
+                event=GrowthActivationEvent.FIRST_GUARDRAIL_CONFIGURED,
+                user_id=user.id,
+                email=user.email,
+            )
         return await self._public(guardrail)
 
     async def update_guardrail(
