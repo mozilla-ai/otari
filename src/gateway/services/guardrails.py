@@ -213,7 +213,7 @@ async def _validate_one(
         ) from exc
     try:
         result = response.json()["result"]
-    except (KeyError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} returned no readable 'result': {type(exc).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),

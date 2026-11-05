@@ -175,6 +175,7 @@ def _protocol_error() -> httpx.Response:
     ("answer", "diagnosis"),
     [
         (partial(httpx.Response, 200, json={"result": {"echo": _ECHO}}), "returned no 'valid' field"),
+        (partial(httpx.Response, 200, json=[_ECHO]), "returned no readable 'result': TypeError"),
         (partial(httpx.Response, 200, json={"result": _ECHO}), "returned an unexpected result shape: str"),
         (partial(httpx.Response, 200, json={"result": {"valid": _ECHO}}), "returned a non-boolean 'valid': str"),
         (
@@ -183,7 +184,14 @@ def _protocol_error() -> httpx.Response:
         ),
         (_protocol_error, "failed against http://anyguardrails:8000: RemoteProtocolError"),
     ],
-    ids=["no valid field", "result not an object", "non-boolean valid", "redirect", "protocol error"],
+    ids=[
+        "no valid field",
+        "body not an object",
+        "result not an object",
+        "non-boolean valid",
+        "redirect",
+        "protocol error",
+    ],
 )
 async def test_a_malformed_answer_is_logged_without_what_the_service_sent(
     monkeypatch: pytest.MonkeyPatch,
