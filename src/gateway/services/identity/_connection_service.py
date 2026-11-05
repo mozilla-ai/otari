@@ -4,6 +4,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from apron_auth import BrowserBoundAuthorization, StoredStateClient
+
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionConflictError,
@@ -13,12 +15,14 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.identity import OIDCConnection
+from gateway.models.identity import OIDC_PROVIDER_PREFIX, OIDCConnection
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, OrganizationDomain, User
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.tenancy import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionDomain, OIDCConnectionPublic, OIDCConnectionRequest
+from gateway.services.identity._connection_clients import client_for, pending_flow_provider
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
+from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
 from gateway.services.tenancy import OrganizationService
 
@@ -91,7 +95,7 @@ class OIDCConnectionService:
     async def _managed_organization(self, user: User) -> Organization:
         """The caller's active organization, with their authority to manage it proven.
 
-        The only way this unit reaches an organization on a caller's behalf, so a method added
+        The only way this unit proves authority over an organization, so a management method added
         here cannot obtain one without the check.
         """
         organization = await self._organizations.get_active_organization_for_user(user)
@@ -236,6 +240,79 @@ class OIDCConnectionService:
                 current.discovered_at = discovered.discovered_at
                 self._connections.stage(current)
         return discovered
+
+    async def connection_for_sign_in(self, *, slug: str) -> OIDCConnection | None:
+        """Return the organization's enabled connection at ``slug``, for the sign-in path.
+
+        No authority check runs: a person signing in has no authority over the organization they
+        sign in to. None for a slug naming no organization and for one naming an organization with
+        no enabled connection alike, so the answer does not reveal which of the two it is.
+        """
+        async with self._uow:
+            organization = await self._organizations.organizations.get_by_slug(slug)
+            if organization is None:
+                return None
+            connection = await self._connections.get_for_organization(organization.id)
+        return connection if connection is not None and connection.enabled else None
+
+    async def organization_for_sign_in(self, *, email: str) -> Organization | None:
+        """Return the one organization whose enabled connection admits a sign-in at ``email``'s domain.
+
+        None where the domain carries no current proof, and where the organization that proves it
+        has no enabled connection, so the two answer alike.
+        """
+        async with self._uow:
+            organization_id = await organization_for_email_domain(
+                email, connections=self._connections, domains=self._domains, now=datetime.now(UTC)
+            )
+            if organization_id is None:
+                return None
+            return await self._organizations.organizations.get(organization_id)
+
+    async def connection_for_pending_state(self, state: str) -> OIDCConnection | None:
+        """Return the connection one pending SSO flow's own ``state`` names, or None.
+
+        None where ``state`` names no pending sign-in through an organization's own connection,
+        including one minted for a built-in provider, or one whose connection no longer exists or
+        is disabled.
+        """
+        async with self._uow:
+            provider = await pending_flow_provider(self._connections.db, state)
+            if provider is None or not provider.startswith(OIDC_PROVIDER_PREFIX):
+                return None
+            try:
+                connection_id = uuid.UUID(provider.removeprefix(OIDC_PROVIDER_PREFIX))
+            except ValueError:
+                return None
+            connection = await self._connections.get_by_id(connection_id)
+        return connection if connection is not None and connection.enabled else None
+
+    async def start_sign_in(
+        self, connection: OIDCConnection, metadata: DiscoveredProvider, *, redirect_uri: str, allow_private_hosts: bool
+    ) -> BrowserBoundAuthorization:
+        """Mint an authorization URL for ``connection``'s own provider, and stage the pending state."""
+        async with self._uow:
+            client = client_for(
+                connection,
+                metadata,
+                db=self._connections.db,
+                redirect_uri=redirect_uri,
+                allow_private_hosts=allow_private_hosts,
+            )
+            return await client.get_authorization_url(redirect_uri=redirect_uri)
+
+    async def client_for_sign_in(
+        self, connection: OIDCConnection, metadata: DiscoveredProvider, *, redirect_uri: str, allow_private_hosts: bool
+    ) -> StoredStateClient:
+        """Build the apron-auth client ``connection``'s own provider signs in through."""
+        async with self._uow:
+            return client_for(
+                connection,
+                metadata,
+                db=self._connections.db,
+                redirect_uri=redirect_uri,
+                allow_private_hosts=allow_private_hosts,
+            )
 
     async def _store_first(
         self,

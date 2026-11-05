@@ -411,6 +411,18 @@ class OIDCDiscoveryError(TenancyValidationError):
         )
 
 
+class OIDCSignInUnavailableError(TenancyNotFoundError):
+    """No organization admits a sign-in at this slug.
+
+    One answer for a slug naming no organization and for one naming an organization with no
+    enabled connection: telling the two apart would turn this surface into a directory of which
+    organizations use Otari.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("No sign-in is available at this address")
+
+
 class CurrentPasswordIncorrectError(TenancyValidationError):
     """The current password given with a password change does not match.
 
@@ -630,6 +642,7 @@ __all__ = [
     "OIDCConnectionNotFoundError",
     "OIDCConnectionSecretRequiredError",
     "OIDCDiscoveryError",
+    "OIDCSignInUnavailableError",
     "PasskeyAlreadyRegisteredError",
     "PasskeyCeremonyError",
     "PasskeyLimitReachedError",

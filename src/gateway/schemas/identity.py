@@ -10,6 +10,14 @@ from gateway.models.tenancy import OrganizationDomainRole
 
 # A generated token is about 43 characters; this bounds the request body, it is not a format.
 _MAX_SUBMITTED_TOKEN = 512
+# A provider's authorization code is a few hundred characters at most; this is a sanity ceiling
+# on an unauthenticated request body, not a format.
+_MAX_SSO_CODE_LENGTH = 2048
+# A state of the wrong length matches nothing stored; this bounds what an unauthenticated caller
+# can make this process hash.
+_MAX_SSO_STATE_LENGTH = 512
+# A sanity ceiling on an issuer URL, not a format.
+_MAX_SSO_ISS_LENGTH = 2048
 
 
 class PasswordLinkPublic(BaseModel):
@@ -179,6 +187,93 @@ class OrganizationSsoPublic(BaseModel):
     )
 
 
+class SsoLookupRequest(BaseModel):
+    """An address to resolve an organization's own sign-in connection from."""
+
+    email: str = Field(max_length=MAX_EMAIL_LENGTH, description="The address to resolve an organization from.")
+
+
+class SsoLookupResponse(BaseModel):
+    """Whether an organization's own connection admits a sign-in at this address.
+
+    An unknown domain, one no organization has proven, and a proven one whose organization holds
+    no enabled connection all answer alike: ``found`` is false and the other two fields are null,
+    so the response cannot be read as a directory of which organizations use Otari.
+    """
+
+    found: bool = Field(description="Whether an organization's own connection admits a sign-in at this address.")
+    organization_name: str | None = Field(default=None, description="The organization's own name, set only when found.")
+    slug: str | None = Field(
+        default=None, description="The organization's slug, to start the sign-in with, set only when found."
+    )
+
+
+class SsoAuthorizeResponse(BaseModel):
+    """Where to send the browser, and the state to check when it comes back."""
+
+    authorization_url: str = Field(description="The identity provider's consent screen to navigate to.")
+    state: str = Field(
+        description=(
+            "An opaque CSRF value to keep for the length of the redirect and send back with the "
+            "authorization code. The response also sets an HttpOnly cookie that the callback requires, "
+            "so the exchange can only be completed from the browser this call was made from."
+        )
+    )
+
+
+class SsoCallbackRequest(BaseModel):
+    """The authorization code a provider handed the browser, for a sign-in through one organization's own connection.
+
+    No ``slug``: the pending authorization the ``state`` names already resolves to one connection,
+    so a browser cannot redeem a code against a connection other than the one that minted the state.
+    """
+
+    code: str = Field(
+        max_length=_MAX_SSO_CODE_LENGTH, description="The authorization code from the provider's redirect."
+    )
+    state: str = Field(
+        max_length=_MAX_SSO_STATE_LENGTH,
+        description="The 'state' from the provider's redirect, as issued by /authorize.",
+    )
+    terms_accepted: bool = Field(
+        default=False,
+        description=(
+            "Whether the person accepted this deployment's terms before going to the provider. Required where "
+            "the bootstrap reports a terms_url and the sign-in is the first way in to an account nobody has "
+            "claimed yet; ignored otherwise."
+        ),
+    )
+    iss: str | None = Field(
+        default=None,
+        max_length=_MAX_SSO_ISS_LENGTH,
+        description=(
+            "The 'iss' from the provider's redirect (RFC 9207), where it sent one. Checked against this "
+            "connection's issuer when its discovery document advertises the parameter; a provider that does "
+            "not advertise it sends none."
+        ),
+    )
+
+
+class SsoSessionPublic(BaseModel):
+    """A dashboard session minted by signing in through an organization's own connection."""
+
+    expires_at: datetime = Field(description="When the session cookie stops being accepted.")
+    user_id: uuid.UUID = Field(description="The identity this session speaks for.")
+    active_organization_id: uuid.UUID | None = Field(
+        description=(
+            "The organization that identity is acting in, which scopes every tenancy surface. Null when it "
+            "is an active member of none."
+        )
+    )
+    password_removed: bool = Field(
+        default=False,
+        description=(
+            "Whether this sign-in removed a password the account held: the first provider sign-in on an "
+            "address nobody had proven removes the password set before then."
+        ),
+    )
+
+
 __all__ = [
     "BlockedEmailCreateRequest",
     "BlockedEmailCreatedPublic",
@@ -191,4 +286,9 @@ __all__ = [
     "OIDCConnectionRequest",
     "OrganizationSsoPublic",
     "PasswordLinkPublic",
+    "SsoAuthorizeResponse",
+    "SsoCallbackRequest",
+    "SsoLookupRequest",
+    "SsoLookupResponse",
+    "SsoSessionPublic",
 ]
