@@ -617,7 +617,8 @@ tool, and restricted model access runs only a tool named by its deprecated
 | `user` | string | Who the search is billed to; see below. |
 
 Until any-search has their adapters, `include_raw` and `provider_options` are a
-400 on a call a Tavily or Brave organization key serves; `false` and `{}` pass.
+400 on a `searxng` tool and on a call a Tavily or Brave organization key serves;
+`false` and `{}` pass.
 
 **Response.**
 

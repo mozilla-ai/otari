@@ -655,7 +655,7 @@ def _instance(kind: ToolKind, name: str, entry: Mapping[str, Any], *, library_ba
         provider=provider,
         library_backed=library_backed,
         api_key=entry.get("api_key") or None,
-        api_base=entry.get("api_base") or None,
+        api_base=str(entry.get("api_base") or "").strip() or None,
         timeout=float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else None,
         options=MappingProxyType(copy.deepcopy(options)),
         dropped_options=frozenset(option_problems(kind, provider, options)),

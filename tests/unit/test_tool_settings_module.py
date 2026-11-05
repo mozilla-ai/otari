@@ -157,6 +157,7 @@ def test_a_dangling_default_falls_through_to_the_single_instance() -> None:
         ),
         pytest.param({"search_tools": {"local": _SEARXNG}}, True, id="one-searxng-instance"),
         pytest.param({"search_tools": {"local": {"provider": "searxng"}}}, False, id="searxng-with-no-address"),
+        pytest.param({"search_tools": {"local": {"provider": "searxng", "api_base": " "}}}, False, id="blank-address"),
         pytest.param({"web_search_url": "http://searxng:8080"}, True, id="legacy-url"),
         pytest.param({"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-k"}, True, id="pair"),
         pytest.param({"web_search_url": "http://searxng:8080", "web_search_default_tool": "none"}, False, id="none"),

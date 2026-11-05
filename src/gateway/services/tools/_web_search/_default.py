@@ -47,7 +47,7 @@ def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchI
 
 
 def _runs(settings: ToolSettings, instance: ToolInstance) -> bool:
-    """Whether any-search serves the instance's provider, with an address when the provider needs one."""
+    """Whether any-search serves the instance's provider, with an address if it needs one."""
     if not instance.library_backed:
         return False
     needs_address = any_search.AnySearch.get_provider_metadata(instance.provider).requires_api_base
