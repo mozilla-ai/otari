@@ -854,7 +854,9 @@ matcher cannot stop the other hook from seeing a tool call.
 
 On claude-code, `setup --repo-only` also warns when `~/.claude/settings.json`
 registers the hook for every repository without the flag, since that entry
-still enforces the user's gates here.
+still enforces the user's gates here. Adding the flag there turns those gates
+off in every repository that entry covers, so the warning names removing it and
+registering per repository as the alternative.
 
 ### `otari guardrails validate`
 

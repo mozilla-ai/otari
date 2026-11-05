@@ -3138,9 +3138,10 @@ def hook_setup(harness: str, repo_only: bool) -> None:
         global_settings_path = _hook_global_registration_without_repo_only()
         if global_settings_path is not None:
             click.echo(
-                f"{global_settings_path} also registers otari hook without --repo-only. It runs in "
-                "every repository on this machine and will still enforce your own gates here unless "
-                "it gets the flag too."
+                f"{global_settings_path} also registers otari hook without --repo-only, so it still "
+                "enforces your own gates here. Adding the flag there turns them off in every repository "
+                "that entry covers, so to keep them elsewhere remove that entry and register the hook "
+                "per repository instead."
             )
 
 

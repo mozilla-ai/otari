@@ -247,6 +247,16 @@ def test_repo_only_ignores_a_global_entry_that_does_not_run_otari_hook(repo: Pat
     assert str(global_settings) not in result.output
 
 
+def test_the_global_registration_warning_names_the_cost_and_the_alternative(repo: Path, isolated_home: Path) -> None:
+    """Flagging the global entry turns the person's gates off everywhere, so the warning says so."""
+    _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert "every repository" in result.output
+    assert "per repository" in result.output
+
+
 def test_a_broken_repo_file_still_leaves_the_user_level_gates_in_the_matcher(repo: Path, isolated_home: Path) -> None:
     """The hook still enforces the user's gates when the repo's files fail, so it must still be called for them."""
     _guardrail_path(repo).write_text("gates: [", encoding="utf-8")

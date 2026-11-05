@@ -450,8 +450,9 @@ run rewrites the registered command and would drop a flag added by hand.
 If `~/.claude/settings.json` also registers the hook for every repository (see
 below), that registration carries no `--repo-only` of its own and still
 enforces your gates in this repository too. `setup --repo-only` warns when it
-finds one; add the flag there as well, or remove the per-repository entry
-instead.
+finds one. Adding the flag there turns your own gates off in every repository
+that entry covers, so to keep them elsewhere remove that entry and register the
+hook in each repository you want it in instead.
 
 ### Running your guardrail in every repository
 
