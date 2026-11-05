@@ -20,7 +20,17 @@ A new organization gets $2 once the person who created it answers every question
 | **Auto top-up** | Whenever the balance falls below a threshold you choose. | The person who set it up (the cardholder). |
 | **Recurring top-up** | On a schedule: every day, every week, or on a day of the month. | The cardholder. |
 
-Payment happens on Stripe. Every charge adds a 4.5% service fee on top of the amount, and VAT is added at checkout based on the billing address. Only the amount itself is added to the balance. The person who paid receives the receipt by email, and each deposit is listed under **Transactions** with its receipt.
+Payment happens on Stripe. Every charge adds a 4.5% service fee on top of the amount, and VAT is added at checkout based on the organization's billing details (see below). Only the amount itself is added to the balance. The person who paid receives the receipt by email, and each deposit is listed under **Transactions** with its receipt.
+
+## Billing details
+
+Before the first payment, otari.ai asks for the name and address the organization is billed as: an account name, a street address, a city and a postal code (the postal code is optional in countries that have none), plus a state in the US. A tax ID is optional and can be an EU VAT number, a UK VAT number, a Northern Ireland VAT number (it starts with XI), a Swiss, Liechtenstein or Norwegian VAT number, a US EIN or a Canadian GST/HST number, whichever applies to the country. The question comes up when an owner or admin first chooses **Add funds**, **Set up recurring top-up**, **Set up auto top-up** or manage one of them. Redeeming a voucher, turning off an auto top-up and stopping a recurring top-up never ask.
+
+The details are saved once for the organization and shared by every payment type and every owner and admin. Each payment form shows who it is billed to, with an **Edit** link. An edit applies to the payments that follow, including automatic and recurring charges, and the invoices Stripe issues from then on show the new name, address and tax ID. Stripe copies these onto an invoice when it is finalized and does not update them afterwards, so invoices already issued do not change.
+
+Stripe checks EU and UK VAT numbers against the official registers (VIES for EU and Northern Ireland numbers, HMRC for UK numbers) and otari.ai shows the result under the number when you edit the details; the other types are not checked automatically. Saving waits a few seconds for the register's answer. A number the register could not confirm never stops you saving or paying, but it is not given to Stripe, so VAT is added to your top-ups as for any customer without a VAT number; saving it again has it checked again. A payment made before the register answers keeps the reverse charge, and so does an invoice Stripe has already issued. The registered name and address the register returned are kept on the customer in Stripe's dashboard, which is the record of the check ([Stripe: customer tax IDs](https://docs.stripe.com/billing/customer/tax-ids), "Validation").
+
+A recurring top-up's invoices are raised by Stripe, so after an edit its customer is updated within about a minute. An invoice Stripe finalizes in that minute can still carry the previous address.
 
 ## Redeeming a voucher
 
