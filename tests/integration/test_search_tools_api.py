@@ -454,7 +454,7 @@ def test_search_catalog_serves_the_library_metadata(
 ) -> None:
     catalog = _catalog(catalog_client, headers=master_key_header)
     # any-search's fake provider exists for tests: accepted in configuration, never offered.
-    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng", "serply"]
+    assert list(catalog) == ["deepseek", "exa", "mojeek", "searxng", "serply", "synthetic"]
     exa = catalog["exa"]
     metadata = any_search.AnySearch.get_provider_metadata("exa")
     assert exa["kind"] == "search"

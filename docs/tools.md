@@ -1077,6 +1077,17 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
   $2.00 per 1,000 (2,500 for $5) down to $0.75 per 1,000 in the largest packs; a
   new account gets 2,500 credits for its first 30 days. A search returns at most
   10 results, and its hits carry a snippet but no page text.
+- **Synthetic** (`synthetic`) needs an API key, read from the tool's `api_key`,
+  such as `${SYNTHETIC_API_KEY}`. It reports no cost, so a search is billed at the
+  tool's own rate (its `price_per_call`, or a `search` price set on the dashboard's
+  Web search page or through the API). Synthetic's
+  [pricing](https://synthetic.new/pricing), read 2026-11-05, includes the search
+  API in every subscription (Go at $9 a month, Standard at $30, Big at $90) and
+  names no price per search; a key whose account has no subscription is
+  refused. Set the rate at what a search costs you, or 0. It
+  takes no result count and no recency filter: Otari keeps at most 10 results and,
+  for a `time_range`, drops the hits dated before it. Its hits carry page text but
+  no snippet.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate.
 

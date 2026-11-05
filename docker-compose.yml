@@ -74,6 +74,7 @@ services:
       # DeepSeek's key serves `fetch_tools:` as well.
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - SERPLY_API_KEY=${SERPLY_API_KEY:-}
+      - SYNTHETIC_API_KEY=${SYNTHETIC_API_KEY:-}
       # And for fetch providers, under `fetch_tools:` as
       # `api_key: ${TABSTACK_API_KEY}`.
       - TABSTACK_API_KEY=${TABSTACK_API_KEY:-}
