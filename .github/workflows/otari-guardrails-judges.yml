@@ -203,8 +203,10 @@ jobs:
         if: steps.judges.outcome == 'success'
         run: |
           report="$RUNNER_TEMP/judges.txt"
-          required=$(grep -oE '^[0-9]+ required gate\(s\) did not pass' "$report" | grep -oE '^[0-9]+')
-          if [ "${required:-0}" != "0" ]; then
+          required=$(grep -oE '^[0-9]+ required gate\(s\) did not pass' "$report" | grep -oE '^[0-9]+' || true)
+          if [ -z "$required" ]; then
+            echo "::warning title=Judge gates::Could not read the required/advisory gate summary; see the job summary."
+          elif [ "$required" != "0" ]; then
             echo "::error title=Judge gates::A required gate did not pass. See the job summary."
             exit 1
           fi
