@@ -165,6 +165,18 @@ model, is recorded, debited and reported as `"0.000000"`. The usage row and
 the inline field always agree, and `pricing_source` still says the request was
 priced.
 
+Speech (`/audio/speech`) answers with audio bytes, so its cost rides the
+response headers instead: `Otari-Cost-USD` and `Otari-Pricing-Source` carry
+the same two values, under the same rule (both when the request was priced,
+neither when it was not), and `Otari-Usage-Unit` and `Otari-Usage-Units` name
+the meter the request was billed on and the count billed: the characters of
+`input` at a rate priced per character, or one request at a rate priced per
+request. The two usage headers are absent when nothing was billed, which is
+what a zero rate settles. A speech model with no rate is refused with `402`
+`pricing_required` under `require_pricing`, as the other priced endpoints are;
+see [Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit)
+for which rates price it.
+
 ### Who runs a built-in tool
 
 The `Otari-Code-Execution`, `Otari-Web-Search` and `Otari-Web-Fetch` request

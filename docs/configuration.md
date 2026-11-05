@@ -1135,11 +1135,12 @@ keeps no cost and the needs-pricing view lists it. A rate priced at zero
 everywhere settles such a request free, so a free moderation model is free. A
 measured unit the request cannot measure prices nothing either, such as a
 per-megapixel rate on an image whose `size` is `auto` or unset. With
-`require_pricing` on, image generation, embeddings, rerank and direct search
-refuse a rate that cannot price what they report, such as an `image` rate on
-embeddings or a `megapixel` rate on an image of no stated size, rather than
-serving it unpriced. Audio and moderations are exempt: they are served, and
-their row carries no cost. A missing cost is unknown, not free.
+`require_pricing` on, speech, image generation, embeddings, rerank and direct
+search refuse a rate that cannot price what they report, such as an `image`
+rate on embeddings, a `token` rate on speech or a `megapixel` rate on an image
+of no stated size, rather than serving it unpriced. Audio transcription and
+moderations are exempt: they are served, and their row carries no cost. A
+missing cost is unknown, not free.
 
 The unit names are singular, as models.dev writes them. Otari's earlier names,
 `tokens`, `requests` and `images`, are still read for one release, in this file
@@ -1154,7 +1155,10 @@ transcription model is priced on the tokens it reports.
 
 Image generation reserves the images asked for, at the `size` asked for,
 before dispatch, and settles on the images returned. Speech reserves the
-characters of its `input`, and moderations one request. Transcription holds
+characters of its `input` and answers with its settled cost on response
+headers, since its body is audio (see
+[Request ID and inline cost](api-reference.md#request-id-and-inline-cost)).
+Moderations reserve one request. Transcription holds
 nothing before dispatch, because the audio's length is not read here, so a
 priced transcription can exceed a budget by one request's price.
 

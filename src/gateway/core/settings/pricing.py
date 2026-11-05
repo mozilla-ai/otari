@@ -50,7 +50,8 @@ PRICE_PER_REQUEST_DESCRIPTION = (
 
 PRICE_UNIT_DESCRIPTION = (
     "What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a "
-    "moderation call, or a completion model billed per call, 'image' for image generation."
+    "moderation call, or a completion model billed per call, 'image' for image generation, "
+    "'character' for speech."
     " Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored "
     "and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release."
 )
@@ -207,7 +208,7 @@ class PricingSettings(BaseModel):
             "Reject requests for models, direct searches and gateway-run tools that have no configured pricing "
             "(fail-closed, default). When False, unpriced models are served and logged without cost (legacy "
             "behavior), and unpriced searches and tool calls are served at the cost their provider reports, if any. "
-            "Audio and moderation endpoints are always exempt: they have no token-based pricing."
+            "Audio transcription and moderation endpoints are always exempt: they have no token-based pricing."
         ),
     )
     default_pricing: Annotated[bool, Shown(SettingsGroup.METERING)] = Field(

@@ -137,7 +137,7 @@ from gateway.services.model_access import (
     resolve_request_allowlist,
     unresolvable_model_detail,
 )
-from gateway.services.pricing import can_price, price_usage
+from gateway.services.pricing import UsageCharge, can_price, price_usage
 from gateway.services.pricing_service import (
     ResolvedPricing,
     find_model_pricing,
@@ -328,6 +328,8 @@ class PassthroughOutcome(Generic[ResultT]):
     """The rate found for the request and where it came from, or ``None`` when there is none."""
     cost: Decimal | None = None
     """The cost written to this request's usage row, or ``None`` when it was not priced."""
+    charge: UsageCharge | None = None
+    """What the request settled at, its meters and charge lines included, or ``None`` when it was not priced."""
     deployment_charge: DeploymentCharge | None = None
     """How a deployment-paid request is charged, for work the route settles after this call, or ``None``."""
 
@@ -1040,6 +1042,7 @@ async def run_passthrough(
         workspace_id=workspace_id,
         pricing=found_pricing,
         cost=cost,
+        charge=charge,
         deployment_charge=deployment_charge,
     )
 
