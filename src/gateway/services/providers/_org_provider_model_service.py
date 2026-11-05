@@ -367,6 +367,7 @@ class OrgProviderModelService:
             if await self.models.get_by_model(key_id, name) is not None:
                 raise OrgProviderModelAlreadyOfferedError(key.provider, name)
             provider = key.provider
+            prefix = key.selector_prefix
             organization_id = key.organization_id
 
         defaults = await self._defaults_for(provider, [name])
@@ -379,7 +380,7 @@ class OrgProviderModelService:
                 [row] = await self._offer(
                     key_id=key_id,
                     organization_id=organization_id,
-                    provider=provider,
+                    prefix=prefix,
                     models=[name],
                     defaults=defaults,
                 )
@@ -550,10 +551,11 @@ class OrgProviderModelService:
         async with self.uow:
             key = await self._key_for_user(user, key_id)
             provider = key.provider
+            prefix = key.selector_prefix
             organization_id = key.organization_id
             offered_rows = list(await self.models.list_all_for_key(key_id))
             now = normalize_effective_at(None)
-            keys_by_model = {row.model: f"{provider}:{row.model}" for row in offered_rows}
+            keys_by_model = {row.model: f"{prefix}:{row.model}" for row in offered_rows}
             priced = await self.org_pricing.rates_in_effect(organization_id, keys_by_model.values(), now)
 
         # Everything this surface may still move: a rate it seeded itself, and a
@@ -571,9 +573,9 @@ class OrgProviderModelService:
             await self._key_for_user(user, key_id)
             now = normalize_effective_at(None)
             offered_rows = list(await self.models.list_all_for_key(key_id))
-            keys_by_model = {row.model: f"{provider}:{row.model}" for row in offered_rows}
+            keys_by_model = {row.model: f"{prefix}:{row.model}" for row in offered_rows}
             priced = await self.org_pricing.rates_in_effect(organization_id, keys_by_model.values(), now)
-            allowed = await self._seedable(organization_id, provider, candidates)
+            allowed = await self._seedable(organization_id, prefix, candidates)
 
             repriced: list[str] = []
             fresh: list[OrganizationModelPricing] = []
@@ -607,7 +609,7 @@ class OrgProviderModelService:
                 await self._offer(
                     key_id=key_id,
                     organization_id=organization_id,
-                    provider=provider,
+                    prefix=prefix,
                     models=added,
                     defaults=defaults,
                 )
@@ -619,7 +621,7 @@ class OrgProviderModelService:
         *,
         key_id: uuid.UUID,
         organization_id: uuid.UUID,
-        provider: str,
+        prefix: str,
         models: Sequence[str],
         defaults: dict[str, ModelPricing],
     ) -> Sequence[OrgProviderKeyModel]:
@@ -631,12 +633,12 @@ class OrgProviderModelService:
         if not models:
             return []
         now = normalize_effective_at(None)
-        keys_by_model = {model: f"{provider}:{model}" for model in models}
+        keys_by_model = {model: f"{prefix}:{model}" for model in models}
         priced = await self.org_pricing.rates_in_effect(organization_id, keys_by_model.values(), now)
         # A key a *table* prices is already answered; one only the dataset
         # answers is what this pass stores, so the two are not the same set.
         priced_by_a_table = {k for k, rate in priced.items() if rate.source != "defaults"}
-        allowed = await self._seedable(organization_id, provider, models)
+        allowed = await self._seedable(organization_id, prefix, models)
 
         seeded: dict[str, OrganizationModelPricing] = {}
         for model, model_key in keys_by_model.items():
@@ -664,7 +666,7 @@ class OrgProviderModelService:
         ]
         return await self.models.create_many(rows)
 
-    async def _seedable(self, organization_id: uuid.UUID, provider: str, models: Sequence[str]) -> set[str]:
+    async def _seedable(self, organization_id: uuid.UUID, prefix: str, models: Sequence[str]) -> set[str]:
         """Which of ``models`` this organization may hold its own rate for.
 
         A model the *deployment* supplies the credential for is priced by the
@@ -676,7 +678,7 @@ class OrgProviderModelService:
         """
         if not models:
             return set()
-        keys_by_model = {model: f"{provider}:{model}" for model in models}
+        keys_by_model = {model: f"{prefix}:{model}" for model in models}
         supplied = await self.org_pricing.deployment_supplied_keys(organization_id, keys_by_model.values())
         return {model for model, model_key in keys_by_model.items() if model_key not in supplied}
 
@@ -695,7 +697,7 @@ class OrgProviderModelService:
         if not rows:
             return {}
         now = normalize_effective_at(None)
-        keys_by_model = {row.model: f"{key.provider}:{row.model}" for row in rows}
+        keys_by_model = {row.model: f"{key.selector_prefix}:{row.model}" for row in rows}
         effective = await self.org_pricing.rates_in_effect(key.organization_id, keys_by_model.values(), now)
         return {
             model: _price_from(rate)

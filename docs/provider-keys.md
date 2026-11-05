@@ -27,6 +27,30 @@ which keys a workspace can use.
    as `production`, `staging` or `backup`.
 5. Paste the **API key** and click **Add provider key**.
 
+## Add a key for your own endpoint
+
+A key can point at a compatible endpoint other than the provider's own, such
+as an OpenAI-compatible host like Synthetic, or a vLLM or LM Studio server:
+enter its **API base URL** when you add the key. Such a key is a different
+service from the provider it speaks the protocol of, so requests name it by a
+**Request prefix** of its own rather than by the provider:
+
+```text
+synthetic:hf:Qwen/Qwen3.8-27B
+```
+
+The prefix is made from the key's name unless you enter one. It uses lowercase
+letters, digits, `.`, `_` and `-`, cannot be a provider's name (`openai`,
+`vllm`) or a provider instance the deployment configures, and is unique in the
+organization. It never changes once set, because your applications send it;
+renaming the key leaves it as it was.
+
+`openai:<model>` therefore never reaches a key with its own endpoint, even one
+of provider OpenAI: it reaches the organization's OpenAI keys without one, or
+the deployment's OpenAI. The key's models, its rates (**Set your rate**) and its
+usage are all listed under its prefix, and the key is never a provider's
+default (it is the only key its prefix names).
+
 ## Set a default key per provider
 
 If the organization has several keys for one provider, mark one as the default

@@ -151,6 +151,7 @@ from gateway.services.provider_kwargs import (
     ResolvedProvider,
     get_provider_kwargs,
     missing_credential,
+    org_key_slug_provider,
     require_declared_credential,
     resolve_provider_selector,
 )
@@ -234,6 +235,10 @@ async def resolve_provider_by_name(
     if provider in config.providers:
         impl = LLMProvider(config.provider_instance_type(provider))
         return impl, get_provider_kwargs(config, impl, instance=provider), False
+    if (slug_provider := org_key_slug_provider(provider, workspace_id)) is not None:
+        # A key with a custom endpoint, named by its slug: only that key serves it.
+        kwargs = get_provider_kwargs(config, slug_provider, instance=provider, workspace_id=workspace_id)
+        return slug_provider, kwargs, False
     implementation = hosted_implementation(provider)
     if implementation is not None and implementation != provider:
         # A hosted provider's own name, which an organization key for its
