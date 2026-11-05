@@ -2540,4 +2540,28 @@ class OrganizationService:
         )
 
 
-__all__ = ["InvitationAcceptance", "InvitationClaimSettings", "OrganizationService", "SignupRegistration"]
+def sso_blocks_membership(*, organization: Organization, user: User, linked_providers: frozenset[str]) -> bool:
+    """Whether this organization's SSO enforcement refuses this person from acting in it.
+
+    ``linked_providers`` is empty unless the person already holds a sign-in link to this
+    organization's own connection.
+
+    NOTE: Never true for the deployment's own master-key operator or for the organization's
+    chosen break-glass exception.
+    """
+    if not organization.sso_required:
+        return False
+    if user.email is None and user.oauth_provider is None:
+        return False
+    if organization.sso_break_glass_user_id == user.id:
+        return False
+    return not linked_providers
+
+
+__all__ = [
+    "InvitationAcceptance",
+    "InvitationClaimSettings",
+    "OrganizationService",
+    "SignupRegistration",
+    "sso_blocks_membership",
+]

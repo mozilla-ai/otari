@@ -397,6 +397,18 @@ class OIDCConnectionSecretRequiredError(TenancyValidationError):
         )
 
 
+class OIDCConnectionUnprovenError(TenancyValidationError):
+    """Enforcement is asked for before this organization's connection has signed anybody in.
+
+    An administrator cannot require a route nobody has proven works.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Nobody has signed in through this organization's connection yet, so there is nothing proven to require."
+        )
+
+
 class OIDCDiscoveryError(TenancyValidationError):
     """An organization's own OpenID Connect issuer could not be read into a usable configuration.
 
@@ -421,6 +433,20 @@ class OIDCSignInUnavailableError(TenancyNotFoundError):
 
     def __init__(self) -> None:
         super().__init__("No sign-in is available at this address")
+
+
+class SsoBreakGlassRequiredError(TenancyValidationError):
+    """Enforcement is asked for without naming an owner who keeps a non-SSO route, or waiving one.
+
+    An organization that wants no exception says so explicitly, so a request setting neither
+    cannot be a half-made decision.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Name one of this organization's owners to keep a non-SSO route, or waive that "
+            "exception explicitly, before requiring sign-in through this connection."
+        )
 
 
 class CurrentPasswordIncorrectError(TenancyValidationError):
@@ -641,6 +667,7 @@ __all__ = [
     "OIDCConnectionConflictError",
     "OIDCConnectionNotFoundError",
     "OIDCConnectionSecretRequiredError",
+    "OIDCConnectionUnprovenError",
     "OIDCDiscoveryError",
     "OIDCSignInUnavailableError",
     "PasskeyAlreadyRegisteredError",
@@ -657,6 +684,7 @@ __all__ = [
     "InvalidBlockedEmailEntryError",
     "SignInAddressRequiredError",
     "SignInBlockedError",
+    "SsoBreakGlassRequiredError",
     "TermsNotAcceptedError",
     "UnmodifiedPasswordError",
     "VerificationPasswordIncorrectError",

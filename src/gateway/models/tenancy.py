@@ -395,6 +395,29 @@ class Organization(OrganizationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtM
         ),
     )
 
+    sso_required: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+    # Null until an admin names a break-glass exception. Enabling enforcement requires this or an
+    # explicit waiver to be set, so a half-configured organization cannot exist.
+    #
+    # A second foreign key to user.id, needing the same explicit, named, altered column to stay
+    # droppable.
+    sso_break_glass_user_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            "sso_break_glass_user_id",
+            Uuid(),
+            ForeignKey(
+                "user.id",
+                name="fk_organization_sso_break_glass_user_id",
+                ondelete="SET NULL",
+                use_alter=True,
+            ),
+            nullable=True,
+            index=True,
+        ),
+    )
+    sso_break_glass_waived: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+
 
 class CallerWorkspaceMembershipPublic(SQLModel):
     """One workspace the caller belongs to, and their role in it.
