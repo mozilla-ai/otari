@@ -25,6 +25,8 @@ request's gateway-run tools, and for the deployment's at startup, and ``unpriced
 ``run_connection_test`` tests an instance with one search or fetch.
 ``web_search_configured`` answers whether the in-loop default yields a search, and ``warn_about_tool_instances``
 logs at startup what the instance rules let load but an operator should fix.
+``warn_about_legacy_search_settings`` logs at startup what the breaking release that removes the legacy SearXNG
+settings does with each value in effect, from ``LegacySearchValues`` read before and after the stored settings.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
 ``search_resolves`` and ``fetch_resolves`` whether a declared search or fetch finds anything to run on,
 ``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
@@ -98,6 +100,7 @@ from gateway.services.tools._direct_tool_call import (
     DirectToolUsage,
     WorkspaceWebPolicies,
 )
+from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
 from gateway.services.tools._native import (
@@ -222,6 +225,8 @@ __all__ = [
     "DirectToolService",
     "DirectToolUsage",
     "WorkspaceWebPolicies",
+    "LegacySearchValues",
+    "warn_about_legacy_search_settings",
     "MAX_TOOL_ITERATIONS_CAP",
     "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",

@@ -1378,13 +1378,18 @@ deleted. The release refuses to start:
 - while an instance inherits a value it cannot copy: a stored instance one from
   the configuration file or the environment, or an instance in the configuration
   file a stored one;
-- when a stored `web_search_url` cannot be converted: another tool named
-  `searxng`, with another address or engines, exists, or the new instance would
-  move the unnamed calls of `POST /api/v1/search` off the instance that serves
-  them.
+- when a stored `web_search_url` cannot be converted: another tool holds the
+  name `searxng` (a fetch tool, a stored tool otari cannot read, or a search tool
+  with another address or engines), or the new instance would move the unnamed
+  calls of `POST /api/v1/search` off the instance that serves them.
 
 Fix the stored values through the dashboard before upgrading: a refused start
 may already have migrated the database.
+
+Each start logs what that release does with the two settings in effect and with
+the `searxng` instances that inherit them, including deleting stored engines that
+neither a stored URL nor a stored instance uses. The warnings name settings and
+instances, never a value.
 
 Docker Compose sets `OTARI_WEB_SEARCH_URL` to the bundled SearXNG container
 unless the variable is set, even to an empty value. To move off it, declare the
@@ -1404,6 +1409,9 @@ The tool is priced on its own, not under `otari:web_search`: with
 `require_pricing`, the default, a request that declares web search on a key that
 counts toward budgets gets a 402 until the tool has a price, so set
 `price_per_call`, or price the tool through `/api/v1/pricing` or the dashboard.
+Each start writes `price_per_call` again, so keep the lasting rate there, or
+leave it out to keep one set through the API (see
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)).
 
 Leave `web_search_default_tool` out when the in-loop tool searches on
 `web_search_provider`, so it keeps doing so. Then turn the compose default off in

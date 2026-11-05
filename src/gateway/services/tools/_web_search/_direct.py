@@ -117,6 +117,17 @@ def _requires_key(provider: str) -> bool:
     return any_search.AnySearch.get_provider_metadata(provider).requires_api_key
 
 
+def unnamed_direct_search_tool(config: ToolSettings) -> str | None:
+    """The search instance a direct search that names none runs on, or ``None`` when that search is refused.
+
+    It is refused when there is no instance to pick, or when the one picked cannot run.
+    """
+    try:
+        return pick_direct_search_instance(config, None).name
+    except (SearchToolSelectionError, SearchToolMisconfiguredError):
+        return None
+
+
 def _default_instance(config: ToolSettings, instances: dict[str, ToolInstance]) -> str:
     """``web_search_default_tool`` when it names an instance any-search serves, else the only instance.
 

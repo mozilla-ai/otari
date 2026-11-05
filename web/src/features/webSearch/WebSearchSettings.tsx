@@ -185,7 +185,7 @@ export function WebSearchSettings({
       {legacy.some(isSet) ? (
         <SettingsGroup
           title="Legacy SearXNG backend"
-          description="Deprecated: a coming breaking release removes these settings. Move them to a searxng search tool with its own endpoint and engines, starred when the model searches on these settings, then clear these, here and in the configuration file or the environment."
+          description="Deprecated: a coming breaking release removes these settings. Move them to a searxng search tool with its own endpoint and engines, starred when the model searches on these settings, then clear these, here and in the configuration file or the environment. The gateway's log says at each start what that release does with them."
         >
           {legacy.map(renderField)}
         </SettingsGroup>

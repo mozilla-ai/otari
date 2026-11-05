@@ -543,9 +543,7 @@ class ToolSettings(BaseModel):
         return [
             name
             for name, entry in self.search_tools.items()
-            if isinstance(entry, dict)
-            and str(entry.get("provider") or name) in SEARCH_PROVIDERS_REQUIRING_API_BASE
-            and not str(entry.get("api_base") or "").strip()
+            if isinstance(entry, dict) and inherits_web_search_url(name, entry)
         ]
 
     def warn_about_half_configured_web_search(self) -> None:
@@ -586,10 +584,7 @@ class ToolSettings(BaseModel):
         """
         for name, entry in self.search_tools.items():
             validate_search_tool_entry(name, entry)
-            if not isinstance(entry, dict):
-                continue
-            provider = str(entry.get("provider") or name)
-            if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not str(entry.get("api_base") or "").strip():
+            if isinstance(entry, dict) and inherits_web_search_url(name, entry):
                 validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
 
     def validate_fetch_tools(self) -> None:
@@ -627,6 +622,23 @@ class ToolSettings(BaseModel):
             msg = f"web_search_provider must be one of {sorted(WEB_SEARCH_PROVIDERS)}, got '{value}'"
             raise ValueError(msg)
         return normalized
+
+
+def inherits_web_search_url(name: str, entry: Mapping[str, Any]) -> bool:
+    """Whether a search tool entry takes ``web_search_url`` as its address.
+
+    It does when its provider, its name when it names none, needs an address
+    and it declares no ``api_base`` of its own; a blank one counts as none.
+    """
+    return (
+        str(entry.get("provider") or name) in SEARCH_PROVIDERS_REQUIRING_API_BASE
+        and not str(entry.get("api_base") or "").strip()
+    )
+
+
+def inherits_web_search_engines(provider: str, options: Mapping[str, Any]) -> bool:
+    """Whether a search tool takes ``web_search_engines``: a provider that needs an address, and no ``engines`` key."""
+    return provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and "engines" not in options
 
 
 def default_api_base(settings: ToolSettings, provider: str) -> str | None:
