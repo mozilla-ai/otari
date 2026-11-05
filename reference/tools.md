@@ -8,8 +8,10 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 
 Code execution needs a sandbox: a `sandbox_url` for the default `protocol`
 provider, or a hosted `sandbox_provider` such as `e2b`, which needs none. Search
-needs a search provider (`web_search_provider` or `web_search_url`). Fetch runs
-in the gateway.
+needs a search tool (see [Search tools](https://docs.otari.ai/self-hosting/configuration#search-tools)), a
+workspace's [organization search key](#organization-search-keys), or a legacy
+setting: `web_search_provider` with its key, or the deprecated `web_search_url`.
+Fetch runs in the gateway.
 One request may declare any of them together, and MCP servers beside them: see
 [Combining tools](#combining-tools).
 
@@ -826,7 +828,9 @@ On the legacy settings, Otari reaches a licensed search API directly. Set
 `web_search_provider` to `tavily` or `brave` and `web_search_provider_api_key` to
 that provider's key; the key stays in the gateway process and never reaches a
 caller.
-`web_search_url` points at a SearXNG instance, such as the bundled one
+`web_search_url`, which is deprecated (see
+[The legacy SearXNG settings](https://docs.otari.ai/self-hosting/configuration#the-legacy-searxng-settings)),
+points at a SearXNG instance, such as the bundled one
 ([try it](#try-web-search-with-the-bundled-searxng)), which any-search's SearXNG
 adapter asks to search the engines in `web_search_engines`, else `duckduckgo`,
 `mojeek`, `qwant` and `wikipedia`; SearXNG skips a name it has no engine for,
@@ -994,7 +998,11 @@ For evaluation, the bundled SearXNG backend needs no key. Start it:
 docker compose --profile web-search up
 ```
 
-Then declare the tool on a request:
+While `OTARI_WEB_SEARCH_URL` is unset, Docker Compose points the deprecated
+`web_search_url` at it. With the variable empty, declare a `searxng` search tool
+instead, as
+[The legacy SearXNG settings](https://docs.otari.ai/self-hosting/configuration#the-legacy-searxng-settings)
+shows. Then declare the tool on a request:
 
 ```json
 {
@@ -1013,9 +1021,9 @@ provider for production. A runnable example lives under `demo/web-search/`.
 instead of waiting for a model to request one. Configure its named providers
 through [`search_tools`](https://docs.otari.ai/self-hosting/configuration#search-tools) or the Search tools API.
 
-A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
-search can share one backend. They remain distinct surfaces with separate
-pricing keys.
+A search tool named in `web_search_default_tool` serves model-initiated search
+and unnamed direct searches, so the two can share one backend. They remain
+distinct surfaces with separate pricing keys.
 
 A direct search that names no tool runs on the workspace's usable
 [organization search key](#organization-search-keys), if it has one, in place of

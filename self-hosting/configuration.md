@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/eca744ccf17f12679e3b10dc7fd5715d8dfbd5c8/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/6d39709590f70c27ab3273a6b1f9b2214c635662/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -796,7 +796,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/eca744ccf17f12679e3b10dc7fd5715d8dfbd5c8/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/6d39709590f70c27ab3273a6b1f9b2214c635662/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1354,8 +1354,72 @@ file or environment, then to the built-in default.
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
+### The legacy SearXNG settings
+
+`web_search_url` and `web_search_engines` are deprecated, and a coming breaking
+release removes them. `web_search_url` is the SearXNG instance the in-loop tool
+searches when no search instance is its default and no `web_search_provider`
+with its key is set, with the engines in `web_search_engines`, else
+`duckduckgo`, `mojeek`, `qwant` and `wikipedia`. A `searxng` instance without an
+`api_base` of its own inherits `web_search_url`, and one without an `engines`
+option inherits `web_search_engines` when it is set, else searches its SearXNG
+instance's own defaults.
+
+That release converts a value stored from the dashboard when that is
+unambiguous. A stored `web_search_url` becomes a stored instance named
+`searxng`, with the stored engines, else the four above, and
+`web_search_default_tool` names it when no default is in effect. A stored
+instance that inherits a stored value gets its own copy, and a stored
+`web_search_engines` that neither a stored URL nor a stored instance uses is
+deleted. The release refuses to start:
+
+- while a value is set in the configuration file or the environment, which otari
+  cannot rewrite, even beside a stored one;
+- while an instance inherits a value it cannot copy: a stored instance one from
+  the configuration file or the environment, or an instance in the configuration
+  file a stored one;
+- when a stored `web_search_url` cannot be converted: another tool named
+  `searxng`, with another address or engines, exists, or the new instance would
+  move the unnamed calls of `POST /api/v1/search` off the instance that serves
+  them.
+
+Fix the stored values through the dashboard before upgrading: a refused start
+may already have migrated the database.
+
+Docker Compose sets `OTARI_WEB_SEARCH_URL` to the bundled SearXNG container
+unless the variable is set, even to an empty value. To move off it, declare the
+instance, with the engines `web_search_engines` names, else the four above:
+
+```yaml
+search_tools:
+  local:
+    provider: searxng
+    api_base: "http://searxng:8080"
+    options: {engines: "duckduckgo,mojeek,qwant,wikipedia"}
+    price_per_call: 0   # USD; a SearXNG you run costs nothing
+web_search_default_tool: local
+```
+
+The tool is priced on its own, not under `otari:web_search`: with
+`require_pricing`, the default, a request that declares web search on a key that
+counts toward budgets gets a 402 until the tool has a price, so set
+`price_per_call`, or price the tool through `/api/v1/pricing` or the dashboard.
+
+Leave `web_search_default_tool` out when the in-loop tool searches on
+`web_search_provider`, so it keeps doing so. Then turn the compose default off in
+`.env`, and remove `web_search_engines` wherever it is set:
+
+```bash
+OTARI_WEB_SEARCH_URL=
+```
+
+A variable exported in the shell that runs Docker Compose wins over `.env`, so
+unset an exported `OTARI_WEB_SEARCH_URL` there too.
+
+### The older in-loop backend
+
 The older in-loop backend still serves some requests until it is removed: a
-search on the legacy settings, or on a Tavily or Brave organization key, and a
+search on `web_search_provider`, or on a Tavily or Brave organization key, and a
 request that declares only the fetch tool. `web_fetch_default_tool` governs every
 fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
 search instance serves the request: the older backend keeps its fixed limit of 10
@@ -1484,7 +1548,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
 - `code_execution_executor`
-- `web_search_url`
+- `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
 - `web_search_provider` and `web_search_provider_api_key`
 - `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
   (see [Search tools](#search-tools))
@@ -1591,7 +1655,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/eca744ccf17f12679e3b10dc7fd5715d8dfbd5c8/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/6d39709590f70c27ab3273a6b1f9b2214c635662/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback
