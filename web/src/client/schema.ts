@@ -706,6 +706,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/sso/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Callback Sso
+         * @description Exchange an authorization code and set the HttpOnly session cookie.
+         *
+         *     The session is bound to the identity the organization's connection resolves to. A refusal is
+         *     counted as a failed sign-in, and a sign-in that creates the account, or is the first way in to
+         *     one, is reported to ``GrowthSignalPort`` once it has committed.
+         *
+         *     **Maintenance mode freezes this.** A frozen deployment makes no outbound call and spends
+         *     nobody's authorization code.
+         */
+        post: operations["auth-callback_sso"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lookup Sso
+         * @description Say whether an organization's own connection admits a sign-in at this address.
+         *
+         *     An unknown domain, one no organization has proven, and a proven one whose organization holds
+         *     no enabled connection all answer alike: ``found`` is false and nothing else is named.
+         */
+        post: operations["auth-lookup_sso"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{slug}/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Authorize Sso
+         * @description Start a sign-in through the organization's own connection at ``slug``.
+         *
+         *     An unknown slug and a slug naming an organization with no enabled connection answer alike
+         *     (404), so this surface cannot be read as a directory of which organizations use Otari.
+         *
+         *     NOTE: This GET writes. It records a pending authorization and sets an HttpOnly cookie, both
+         *     scoped to this router's own path.
+         */
+        get: operations["auth-authorize_sso"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/verify-email": {
         parameters: {
             query?: never;
@@ -18850,6 +18926,117 @@ export interface components {
             tool_type: string | null;
         };
         /**
+         * SsoAuthorizeResponse
+         * @description Where to send the browser, and the state to check when it comes back.
+         */
+        SsoAuthorizeResponse: {
+            /**
+             * Authorization Url
+             * @description The identity provider's consent screen to navigate to.
+             */
+            authorization_url: string;
+            /**
+             * State
+             * @description An opaque CSRF value to keep for the length of the redirect and send back with the authorization code. The response also sets an HttpOnly cookie that the callback requires, so the exchange can only be completed from the browser this call was made from.
+             */
+            state: string;
+        };
+        /**
+         * SsoCallbackRequest
+         * @description The authorization code a provider handed the browser, for a sign-in through one organization's own connection.
+         *
+         *     No ``slug``: the pending authorization the ``state`` names already resolves to one connection,
+         *     so a browser cannot redeem a code against a connection other than the one that minted the state.
+         */
+        SsoCallbackRequest: {
+            /**
+             * Code
+             * @description The authorization code from the provider's redirect.
+             */
+            code: string;
+            /**
+             * Iss
+             * @description The 'iss' from the provider's redirect (RFC 9207), where it sent one. Checked against this connection's issuer when its discovery document advertises the parameter; a provider that does not advertise it sends none.
+             */
+            iss?: string | null;
+            /**
+             * State
+             * @description The 'state' from the provider's redirect, as issued by /authorize.
+             */
+            state: string;
+            /**
+             * Terms Accepted
+             * @description Whether the person accepted this deployment's terms before going to the provider. Required where the bootstrap reports a terms_url and the sign-in is the first way in to an account nobody has claimed yet; ignored otherwise.
+             * @default false
+             */
+            terms_accepted: boolean;
+        };
+        /**
+         * SsoLookupRequest
+         * @description An address to resolve an organization's own sign-in connection from.
+         */
+        SsoLookupRequest: {
+            /**
+             * Email
+             * @description The address to resolve an organization from.
+             */
+            email: string;
+        };
+        /**
+         * SsoLookupResponse
+         * @description Whether an organization's own connection admits a sign-in at this address.
+         *
+         *     An unknown domain, one no organization has proven, and a proven one whose organization holds
+         *     no enabled connection all answer alike: ``found`` is false and the other two fields are null,
+         *     so the response cannot be read as a directory of which organizations use Otari.
+         */
+        SsoLookupResponse: {
+            /**
+             * Found
+             * @description Whether an organization's own connection admits a sign-in at this address.
+             */
+            found: boolean;
+            /**
+             * Organization Name
+             * @description The organization's own name, set only when found.
+             */
+            organization_name?: string | null;
+            /**
+             * Slug
+             * @description The organization's slug, to start the sign-in with, set only when found.
+             */
+            slug?: string | null;
+        };
+        /**
+         * SsoSessionPublic
+         * @description A dashboard session minted by signing in through an organization's own connection.
+         */
+        SsoSessionPublic: {
+            /**
+             * Active Organization Id
+             * @description The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none.
+             */
+            active_organization_id: string | null;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the session cookie stops being accepted.
+             */
+            expires_at: string;
+            /**
+             * Password Removed
+             * @description Whether this sign-in removed a password the account held: the first provider sign-in on an address nobody had proven removes the password set before then.
+             * @default false
+             */
+            password_removed: boolean;
+            /**
+             * User Id
+             * Format: uuid
+             * @description The identity this session speaks for.
+             */
+            user_id: string;
+        };
+        /**
          * StoredCountryDatabasePublic
          * @description The country file stored in the database, which every replica reads.
          */
@@ -22543,6 +22730,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-callback_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SsoCallbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSessionPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-lookup_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SsoLookupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoLookupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-authorize_sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoAuthorizeResponse"];
                 };
             };
             /** @description Validation Error */
