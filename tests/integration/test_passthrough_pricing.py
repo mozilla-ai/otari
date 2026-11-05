@@ -132,6 +132,36 @@ def test_a_megapixel_rate_prices_nothing_an_image_of_no_stated_size(
     _settled(client, master_key_header, 0.0)
 
 
+_LARGE = {"resolution": {"equals": "2048x2048"}}
+
+
+@pytest.mark.parametrize(("size", "each", "rules"), [("2048x2048", "0.08", [[_LARGE]]), ("1024x1024", "0.04", [None])])
+def test_an_image_is_held_and_settled_at_the_price_its_size_meets(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    size: str,
+    each: str,
+    rules: list[Any],
+) -> None:
+    _price_rates(
+        client,
+        master_key_header,
+        "openai:dall-e-3",
+        {"image": {"output": {"price": 0.04, "unit": "image", "overrides": [{"when": _LARGE, "price": 0.08}]}}},
+    )
+    headers = _user_key(client, master_key_header)
+
+    with held_reservations() as held:
+        response = _generate(client, headers, _images(2), n=2, size=size)
+
+    assert response.status_code == 200, response.text
+    assert held == [2 * Decimal(each)]
+    row = _row(db_session_factory)
+    assert row.cost == 2 * Decimal(each)
+    assert [line.get("rules") for line in row.pricing_breakdown or []] == rules
+
+
 def _speak(client: TestClient, headers: dict[str, str], text: str) -> Any:
     with patch("gateway.api.routes.audio.aspeech", new=AsyncMock(return_value=b"audio")):
         return client.post(
