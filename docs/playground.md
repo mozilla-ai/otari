@@ -12,6 +12,8 @@ attached files and tools behave is in
 
 ## Test a single model
 
+![The Playground in Single mode, with the prompt box, the Tools menu and the model picker.](assets/screenshots/playground-single.png)
+
 1. From your workspace, open **Playground**.
 2. Make sure **Single** is selected.
 3. Choose a model from the dropdown below the prompt box.

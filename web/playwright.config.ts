@@ -147,7 +147,7 @@ export default defineConfig({
       // dropped from the run silently, with no warning and a green exit.
       // The screenshot suite is excluded because it has its own six projects
       // below; without this it would also run here, once, unthemed.
-      testIgnore: [/dashboard\.spec\.ts/, /screenshots\//],
+      testIgnore: [/dashboard\.spec\.ts/, /screenshots\//, /docs\//],
       dependencies: ["seed"],
       use: { ...devices["Desktop Chrome"] },
     },
@@ -163,6 +163,26 @@ export default defineConfig({
       testMatch: /parity\.models\.spec\.ts/,
       dependencies: ["seed"],
       use: { ...devices["Desktop Safari"] },
+    },
+    {
+      // The docs' images (e2e/docs/fixtures.ts). Each spec walks the steps a
+      // docs page gives, by the labels the page uses, and writes its captures
+      // into docs/assets/screenshots; a flow that no longer matches the page
+      // fails here. Seed only, like the screenshot projects, and each spec
+      // removes what it creates, so the parity flows never see it.
+      name: "docs",
+      testDir: "./e2e/docs",
+      dependencies: ["seed"],
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 800 },
+        // Sharp on the high-density screens most readers have.
+        deviceScaleFactor: 2,
+        colorScheme: "light",
+        locale: "en-US",
+        timezoneId: "UTC",
+        reducedMotion: "reduce",
+      },
     },
     ...screenshotProjects,
   ],

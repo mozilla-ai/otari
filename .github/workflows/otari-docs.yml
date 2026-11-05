@@ -19,6 +19,11 @@ name: Otari Docs
 # This repository is public, so that variable must not hold a share link. Its
 # endpoint pages read the otari-openapi-spec-preview specification, which GitBook
 # reads from the preview branch, so they show main's API rather than the release's.
+#
+# The dashboard screenshots under docs/assets/screenshots are taken again at
+# the tag before the site is built (the `docs` project in
+# web/playwright.config.ts), so the published images are the shipped
+# dashboard's. The committed copies are what a failed capture falls back to.
 
 on:
   release:
@@ -37,6 +42,8 @@ on:
       - 'scripts/prepare_gitbook_site.py'
       - 'tests/unit/test_gitbook_site.py'
       - 'tests/unit/test_docs_links.py'
+      - 'tests/unit/test_docs_screenshots.py'
+      - 'web/e2e/docs/**'
       - '.gitbook-branch-readme.md'
       - '.github/workflows/otari-docs.yml'
   workflow_dispatch:
@@ -68,7 +75,7 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Run docs tests
-        run: uv run pytest tests/unit/test_gitbook_site.py tests/unit/test_docs_links.py -v
+        run: uv run pytest tests/unit/test_gitbook_site.py tests/unit/test_docs_links.py tests/unit/test_docs_screenshots.py -v
 
       - name: Build the site
         run: python3 scripts/prepare_gitbook_site.py
@@ -80,7 +87,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v'))
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
@@ -130,6 +137,44 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ steps.tag.outputs.tag }}
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.14"
+
+      - name: Install Python deps
+        run: uv sync --dev --frozen
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 'lts/*'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web deps
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Not fatal: the pull request that changed a page already ran these
+      # flows, so a failure here is a flake, and publishing with the committed
+      # images beats not publishing.
+      - name: Capture the docs screenshots
+        id: screenshots
+        continue-on-error: true
+        working-directory: web
+        run: pnpm run docs:screenshots
+
+      - name: Report a failed capture
+        if: steps.screenshots.outcome == 'failure'
+        run: echo "::warning::The docs screenshots could not be captured, so the site publishes the committed ones."
 
       # Standard library only, so the runner's Python needs no project install.
       # NOTE: A release build runs that tag's own script, which may predate the
