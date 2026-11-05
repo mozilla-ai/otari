@@ -59,6 +59,8 @@ BUILTIN_FETCH_PROVIDER = "builtin"
 NO_SEARCH_DEFAULT = "none"
 # The ``allowed_tools`` entry that grants every search tool.
 ALL_SEARCH_TOOLS = "*"
+# Organization-key search has no configured instance. Colons cannot name fetch instances.
+ORGANIZATION_SEARCH_TOOL = "otari:web_search"
 # Names no instance may take, in any case: each already means something to a
 # default setting or an access list.
 RESERVED_INSTANCE_NAMES = frozenset({BUILTIN_FETCH, NO_SEARCH_DEFAULT, ALL_SEARCH_TOOLS})

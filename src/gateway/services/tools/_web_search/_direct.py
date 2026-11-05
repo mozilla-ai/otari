@@ -32,6 +32,7 @@ from gateway.core.config import API_ROOT
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     NO_SEARCH_DEFAULT,
+    ORGANIZATION_SEARCH_TOOL,
     ToolInstance,
     ToolKind,
     ToolSettings,
@@ -46,7 +47,6 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
-from gateway.services.tools._web_names import WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
@@ -98,7 +98,7 @@ def pick_direct_search_instance(
         search = resolve_search(config, None, requested=None, request_options=None, direct_credential=policy.credential)
         if search is not None:
             return ToolInstance(
-                name=WEB_SEARCH_TOOL_NAME,
+                name=ORGANIZATION_SEARCH_TOOL,
                 kind="search",
                 provider=search.provider,
                 library_backed=search.runner == "library",

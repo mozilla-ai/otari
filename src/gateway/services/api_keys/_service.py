@@ -52,6 +52,10 @@ class ApiKeyService:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         return await self._keys.get_workspace_id_for_key(key_id)
 
+    async def deactivate_self_service_keys(self, user_id: uuid.UUID) -> None:
+        """Revoke member-minted keys inside the identity deactivation transaction."""
+        await self._keys.deactivate_self_service_keys(str(user_id))
+
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""
         return await self._keys.get_key_ids_in_workspaces(workspace_ids)

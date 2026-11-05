@@ -5064,7 +5064,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"client_id\": \"string\",\n  \"redirect_uri\": \"string\",\n  \"state\": \"string\",\n  \"code_challenge\": \"string\",\n  \"code_challenge_method\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"client_id\": \"string\",\n  \"redirect_uri\": \"string\",\n  \"state\": \"string\",\n  \"code_challenge\": \"string\",\n  \"code_challenge_method\": \"S256\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Approve access to the caller's selected workspace, with normal budget enforcement.",
             "header": [
@@ -5104,10 +5104,15 @@
                 "v1",
                 "oauth",
                 "apps",
-                "clients",
-                ":client_id"
+                "clients"
               ],
               "query": [
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "client_id",
+                  "value": ""
+                },
                 {
                   "description": "",
                   "disabled": false,
@@ -5115,22 +5120,50 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/oauth/apps/clients/:client_id?redirect_uri=",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "client_id",
-                  "value": ""
-                }
-              ]
+              "raw": "{{baseUrl}}/api/v1/oauth/apps/clients?client_id=&redirect_uri="
             }
           }
         },
         {
           "name": "Exchange",
           "request": {
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "type": "text",
+                  "value": "authorization_code"
+                },
+                {
+                  "key": "client_id",
+                  "type": "text",
+                  "value": "string"
+                },
+                {
+                  "key": "redirect_uri",
+                  "type": "text",
+                  "value": "string"
+                },
+                {
+                  "key": "code",
+                  "type": "text",
+                  "value": "string"
+                },
+                {
+                  "key": "code_verifier",
+                  "type": "text",
+                  "value": "string"
+                }
+              ]
+            },
             "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
             "method": "POST",
             "url": {
               "host": [
@@ -5144,6 +5177,47 @@
                 "token"
               ],
               "raw": "{{baseUrl}}/api/v1/oauth/apps/token"
+            }
+          }
+        },
+        {
+          "name": "App Workspaces",
+          "request": {
+            "description": "List workspaces where the signed-in identity may authorize app access.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "oauth",
+                "apps",
+                "workspaces"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/oauth/apps/workspaces?search=&skip=&limit="
             }
           }
         }

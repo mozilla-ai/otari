@@ -42,6 +42,7 @@ from gateway.models.tools import WebTool
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
 from gateway.services.tools._web_access import web_access_disabled_refusal
 from gateway.services.tools._web_search import (
+    fetch_resolves,
     pick_direct_fetch_instance,
     pick_direct_search_instance,
     resolve_direct_fetch,
@@ -287,20 +288,27 @@ class DirectToolService:
         self._policies = policies
         self._web_client = web_client
 
-    async def available_defaults(
-        self, api_key: APIKey | None, policy: ResolvedWebSearchConfig | None
-    ) -> frozenset[WebTool]:
+    async def available_defaults(self, api_key: APIKey | None) -> frozenset[WebTool]:
         """Configured default direct tools allowed by the current key or inherited user grant.
 
         Selection and permission checks are the same ones used by search/fetch.
         Legacy tools available only inside a model request have no direct default.
         """
+        workspace_id = await self._ledger.workspace_of(api_key.id if api_key else None)
+        try:
+            policy = await self._policies.resolve(workspace_id, (WebTool.SEARCH, WebTool.FETCH))
+        except WebSearchPolicyResolutionFailedError:
+            return frozenset()
+        if policy is not None and not policy.enabled:
+            return frozenset()
         available: set[WebTool] = set()
         selectors: tuple[tuple[WebTool, ToolKind, Callable[[], ToolInstance]], ...] = (
             (WebTool.SEARCH, "search", lambda: pick_direct_search_instance(self._config, None, policy)),
             (WebTool.FETCH, "fetch", lambda: pick_direct_fetch_instance(self._config, None)),
         )
         for web_tool, kind, select in selectors:
+            if web_tool is WebTool.FETCH and not fetch_resolves(self._config, policy):
+                continue
             try:
                 tool = select()
             except TenancyError:
@@ -470,6 +478,16 @@ class DirectToolService:
                 workspace_id=workspace_id,
             ) from exc
 
+        if policy is not None and not policy.enabled:
+            refusal = web_access_disabled_refusal(policy_tools)
+            raise await refused(
+                refusal.message,
+                HTTPStatus.FORBIDDEN,
+                model=tool_name or _UNRESOLVED_TOOL,
+                provider=None,
+                workspace_id=workspace_id,
+            )
+
         # An unnamed search may run on the workspace's own key without a deployment tool.
         # Resolve that scope before choosing, and take no budget hold until both checks pass.
         try:
@@ -483,16 +501,6 @@ class DirectToolService:
                 workspace_id=workspace_id,
                 answer=_refusal_detail(exc),
             ) from exc
-
-        if policy is not None and not policy.enabled:
-            refusal = web_access_disabled_refusal(policy_tools)
-            raise await refused(
-                refusal.message,
-                HTTPStatus.FORBIDDEN,
-                model=tool.name,
-                provider=tool.provider,
-                workspace_id=workspace_id,
-            )
 
         try:
             call = resolve(tool, policy)

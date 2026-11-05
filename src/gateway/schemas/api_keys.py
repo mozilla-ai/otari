@@ -153,7 +153,7 @@ class AppAuthorizationParameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
     client_id: str = Field(min_length=1, max_length=128)
     redirect_uri: str = Field(max_length=2048)
-    state: str = Field(min_length=16, max_length=256, pattern=r"^[A-Za-z0-9._~-]+$")
+    state: str = Field(min_length=16, max_length=256, pattern=r"^[A-Za-z0-9._~+/=-]+$")
     code_challenge: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
     code_challenge_method: Literal["S256"]
     response_type: Literal["code"] = "code"

@@ -118,7 +118,6 @@ class _WorkspaceSwitches:
     code_execution: bool = True
     # What the web tools resolve on, with the workspace's own keys; ``None`` for the deployment's alone.
     search_policy: ResolvedWebSearchConfig | None = None
-    direct_available: frozenset[WebTool] = frozenset()
 
 
 async def _workspace_switches(
@@ -126,11 +125,10 @@ async def _workspace_switches(
     api_key: APIKey | None,
     web_policies: WorkspaceWebSearchPoliciesDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
-    direct_tools: DirectToolServiceDep,
 ) -> _WorkspaceSwitches:
     """The switches the request path applies to ``api_key``'s workspace, all on without a key."""
     if api_key is None:
-        return _WorkspaceSwitches(direct_available=await direct_tools.available_defaults(None, None))
+        return _WorkspaceSwitches()
     web, search_policy = await web_policies.access(api_key.workspace_id)
     return _WorkspaceSwitches(
         web=web,
@@ -138,7 +136,6 @@ async def _workspace_switches(
             api_key.workspace_id, pinnable_images=config.pinnable_sandbox_images()
         ),
         search_policy=search_policy,
-        direct_available=await direct_tools.available_defaults(api_key, search_policy),
     )
 
 
@@ -148,7 +145,9 @@ def _reason(configured: bool, workspace_allows: bool) -> ToolUnavailableReason |
     return None if workspace_allows else "workspace_disabled"
 
 
-def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[ManagedTool]:
+def _managed_tools(
+    config: GatewayConfig, switches: _WorkspaceSwitches, direct_available: frozenset[WebTool]
+) -> list[ManagedTool]:
     web_search = web_search_tool_definition()["function"]
     web_fetch = web_fetch_tool_definition()["function"]
     code_execution = code_execution_tool_definition()["function"]
@@ -165,7 +164,7 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
             id=Tool.WEB_FETCH,
             description=web_fetch["description"],
             available=can_web_fetch and switches.web,
-            direct_available=can_web_fetch and switches.web and WebTool.FETCH in switches.direct_available,
+            direct_available=WebTool.FETCH in direct_available,
             reason=_reason(can_web_fetch, switches.web),
             accepted_types=[str(Tool.WEB_FETCH)],
             input_schema=web_fetch["parameters"],
@@ -175,7 +174,7 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
             id=Tool.WEB_SEARCH,
             description=web_search["description"],
             available=can_web_search and switches.web,
-            direct_available=switches.web and WebTool.SEARCH in switches.direct_available,
+            direct_available=WebTool.SEARCH in direct_available,
             reason=_reason(can_web_search, switches.web),
             # Admission claims a provider's own search keywords only for a deployment that searches itself.
             accepted_types=web_search_declaration_forms(config) if deployment_searches else [str(Tool.WEB_SEARCH)],
@@ -213,5 +212,6 @@ async def list_tools(
     upstream provider untouched.
     """
     api_key, _ = auth
-    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies, direct_tools)
-    return ToolsResponse(data=_managed_tools(config, switches))
+    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies)
+    direct_available = await direct_tools.available_defaults(api_key)
+    return ToolsResponse(data=_managed_tools(config, switches, direct_available))

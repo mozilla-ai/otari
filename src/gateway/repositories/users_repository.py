@@ -309,12 +309,23 @@ class UserAccessRepository(BaseRepository[User, Never, Never]):
         super().__init__(uow, User)
 
     async def ensure_app_key_owner(self, user_id: str, alias: str) -> bool:
-        """Provision attribution if missing; never revive a revoked or blocked owner."""
-        existing = await self.db.get(User, user_id)
-        if existing is not None and (existing.deleted_at is not None or existing.blocked):
-            return False
-        await get_or_create_attribution_user(self.db, user_id=user_id, alias=alias)
-        return True
+        """Provision without revival and hold the owner through key issuance.
+
+        Deletion locks the same row before sweeping its keys. A competing creator
+        may win the insert, so read and lock its current state after the savepoint.
+        """
+        statement = (
+            select(User).where(User.user_id == user_id).with_for_update().execution_options(populate_existing=True)
+        )
+        owner = (await self.db.execute(statement)).scalar_one_or_none()
+        if owner is None:
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(User(user_id=user_id, alias=alias))
+            except IntegrityError:
+                pass
+            owner = (await self.db.execute(statement)).scalar_one()
+        return owner.deleted_at is None and not owner.blocked
 
     async def access_lists(self, user_id: str) -> AccessLists | None:
         """A user's access lists, or ``None`` when there is no such user."""

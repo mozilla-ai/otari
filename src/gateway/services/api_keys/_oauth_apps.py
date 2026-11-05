@@ -71,7 +71,10 @@ class OAuthAppService:
 
     def authorization_url(self, request: AppAuthorizationParameters) -> str:
         """Send a valid authorization request into the dashboard's existing sign-in and consent gate."""
-        self.details(request.client_id, request.redirect_uri)
+        try:
+            self.details(request.client_id, request.redirect_uri)
+        except TenancyValidationError:
+            raise OAuthAppGrantError("invalid_request", "Unknown app or redirect URI") from None
         return self.config.ui_link("/#/oauth/authorize?" + urlencode(request.model_dump()))
 
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
@@ -82,6 +85,9 @@ class OAuthAppService:
         async with self.uow:
             await self.grants.prune_expired(now)
         async with self.uow:
+            # The grant's identity FK also locks this row. Take it before the
+            # workspace, matching redemption and organization deletion.
+            await self.organizations.lock_identity(user.id)
             workspace = await self.workspaces.workspace_in_active_organization(
                 user=user, workspace_id=request.workspace_id
             )

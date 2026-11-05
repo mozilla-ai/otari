@@ -283,7 +283,10 @@ def test_key_issuance_failure_rolls_back_grant_consumption(
 )
 def test_malformed_callback_is_a_client_error(client: TestClient, world: _World, redirect: str) -> None:
     assert (
-        client.get(f"{API_ROOT}/oauth/apps/clients/thunderbolt", params={"redirect_uri": redirect}).status_code == 400
+        client.get(
+            f"{API_ROOT}/oauth/apps/clients", params={"client_id": "thunderbolt", "redirect_uri": redirect}
+        ).status_code
+        == 400
     )
     assert approve(client, world, redirect_uri=redirect).status_code == 400
 
@@ -473,7 +476,7 @@ def test_client_metadata_names_do_not_collide_with_protocol_endpoints(
     client: TestClient, test_config: GatewayConfig
 ) -> None:
     test_config.oauth_apps["authorize"] = OAuthAppConfig(name="Authorize", redirect_uris=[REDIRECT])
-    response = client.get(f"{API_ROOT}/oauth/apps/clients/authorize", params={"redirect_uri": REDIRECT})
+    response = client.get(f"{API_ROOT}/oauth/apps/clients", params={"client_id": "authorize", "redirect_uri": REDIRECT})
     assert response.status_code == 200
     assert response.json()["name"] == "Authorize"
 

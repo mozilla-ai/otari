@@ -12,7 +12,7 @@ import re
 from typing import Annotated, Any, Self
 from urllib.parse import SplitResult, urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, field_validator, model_validator
 
 from gateway.auth.models import API_KEY_PREFIX, MIN_API_KEY_LENGTH
 from gateway.core.settings.declarations import declaration_digest
@@ -181,6 +181,7 @@ def parse_oauth_redirect(value: str) -> SplitResult | None:
     if any(char in value for char in ("\\", "?", "#")):
         return None
     try:
+        HttpUrl(value)  # Validate browser host syntax without replacing the exact registered URI.
         parsed = urlsplit(value)
         port = parsed.port  # urlsplit alone accepts invalid and out-of-range ports.
     except ValueError:

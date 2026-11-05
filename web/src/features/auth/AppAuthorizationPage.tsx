@@ -1,39 +1,59 @@
 import { useState } from "react"
 import { FiArrowRight, FiCheck, FiCpu, FiGrid, FiShield } from "react-icons/fi"
+import type { Workspace } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
-import { Select } from "@/design-system/forms/Select"
+import { ComboBoxField } from "@/design-system/forms/ComboBoxField"
 import { ProductMark } from "@/design-system/ProductMark"
-import { useAuthorizeOAuthApp, useOAuthApp } from "@/shared/api/oauthApps"
-import { useWorkspaces } from "@/shared/api/workspaces"
+import {
+  useAuthorizeOAuthApp,
+  useOAuthApp,
+  useOAuthAppWorkspaces,
+} from "@/shared/api/oauthApps"
 import { LoginPageShell } from "./LoginPageShell"
 
 /** Consent stays behind the dashboard's normal session gate. */
 export function AppAuthorizationPage() {
   const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "")
-  const [workspaceId, setWorkspaceId] = useState("")
+  const [workspace, setWorkspace] = useState<Workspace>()
+  const [search, setSearch] = useState("")
   const app = useOAuthApp(
     params.get("client_id") ?? "",
     params.get("redirect_uri") ?? "",
   )
-  const workspaces = useWorkspaces(Boolean(app.data))
-  const approval = useAuthorizeOAuthApp(params)
-  const choices = workspaces.data ?? []
-  const selectedId = choices.some((workspace) => workspace.id === workspaceId)
-    ? workspaceId
-    : choices.length === 1
-      ? choices[0].id
-      : ""
-  const selectedWorkspace = choices.find(
-    (workspace) => workspace.id === selectedId,
+  const workspaces = useOAuthAppWorkspaces(
+    search,
+    Boolean(app.data) && !app.error,
   )
+  const approval = useAuthorizeOAuthApp(params)
+  const choices = workspaces.data?.data ?? []
+  const soleWorkspace =
+    !search && !workspaces.isPlaceholderData && workspaces.data?.count === 1
+      ? choices[0]
+      : undefined
+  const hasCompleteChoices =
+    !search &&
+    !workspaces.isPlaceholderData &&
+    workspaces.data?.count === choices.length
+  const selectedWorkspace =
+    soleWorkspace ??
+    (hasCompleteChoices
+      ? choices.find((choice) => choice.id === workspace?.id)
+      : workspace)
+  // Keep a chosen label after an empty search returns to the first page.
+  const options =
+    selectedWorkspace &&
+    !search &&
+    !choices.some((choice) => choice.id === selectedWorkspace.id)
+      ? [...choices, selectedWorkspace]
+      : choices
   const failure = app.error ?? workspaces.error ?? approval.error
   const loading =
     (app.isPending && !app.data) ||
     (Boolean(app.data) && workspaces.isPending && !workspaces.data)
   const deny = () => {
-    if (!app.data) return
+    if (!app.data || app.error) return
     const url = new URL(app.data.redirect_uri)
     url.searchParams.set("error", "access_denied")
     url.searchParams.set("state", params.get("state") ?? "")
@@ -70,7 +90,7 @@ export function AppAuthorizationPage() {
       </div>
       <ErrorBanner error={failure} />
       {loading && <PageLoading label="Loading connection details…" />}
-      {app.data && !loading && (
+      {app.data && !app.error && !loading && (
         <>
           <div className="flex flex-col gap-4 border-y border-border py-5">
             <h2 className="text-overline">What you’re allowing</h2>
@@ -101,7 +121,7 @@ export function AppAuthorizationPage() {
               </div>
             </div>
           </div>
-          {choices.length === 1 && selectedWorkspace ? (
+          {soleWorkspace && selectedWorkspace ? (
             <div className="flex flex-col gap-2">
               <h2 className="text-overline">Workspace</h2>
               <div className="flex items-center gap-3 border border-border-strong bg-background p-3">
@@ -118,16 +138,23 @@ export function AppAuthorizationPage() {
                 />
               </div>
             </div>
-          ) : choices.length > 1 ? (
-            <Select
+          ) : choices.length > 0 || search ? (
+            <ComboBoxField
               label="Workspace"
-              value={selectedId}
-              onChange={setWorkspaceId}
+              value={selectedWorkspace?.id ?? ""}
+              onChange={(id) =>
+                setWorkspace(options.find((choice) => choice.id === id))
+              }
+              onQueryChange={setSearch}
               placeholder="Choose a workspace"
-              options={choices.map((workspace) => ({
+              options={options.map((workspace) => ({
                 value: workspace.id,
                 label: workspace.name,
               }))}
+              isSourceEmpty={!search && choices.length === 0}
+              noMatchesMessage="No workspace matches your search."
+              emptyMessage="No workspaces available."
+              menuTrigger="input"
               isDisabled={approval.isPending}
             />
           ) : !workspaces.error ? (
@@ -142,9 +169,14 @@ export function AppAuthorizationPage() {
               fullWidth
               isPending={approval.isPending}
               isDisabled={
-                !selectedId || Boolean(workspaces.error) || approval.isPending
+                !selectedWorkspace ||
+                Boolean(workspaces.error) ||
+                workspaces.isFetching ||
+                approval.isPending
               }
-              onPress={() => approval.mutate(selectedId)}
+              onPress={() =>
+                selectedWorkspace && approval.mutate(selectedWorkspace.id)
+              }
             >
               Allow access{" "}
               <FiArrowRight className="size-4" aria-hidden="true" />

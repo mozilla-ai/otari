@@ -56,6 +56,14 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         result = await self.db.execute(select(APIKey.workspace_id).where(APIKey.id == key_id))
         return result.scalar_one_or_none()
 
+    async def deactivate_self_service_keys(self, user_id: str) -> None:
+        """Revoke keys this identity minted, including app keys, using immutable provenance."""
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.user_id == user_id, APIKey.self_service.is_(True))
+            .values(is_active=False, operator_disabled=True)
+        )
+
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))

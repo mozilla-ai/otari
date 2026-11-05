@@ -69,7 +69,8 @@ POST /api/v1/audio/speech
 POST /api/v1/audio/transcriptions
 
 [excluded]
-GET /api/v1/oauth/apps/clients/{client_id} # Browser app consent metadata
+GET /api/v1/oauth/apps/clients # Browser app consent metadata
+GET /api/v1/oauth/apps/workspaces # Browser app consent workspace selection
 GET /api/v1/oauth/apps/authorize # Browser authorization entry point
 POST /api/v1/oauth/apps/authorize # Browser session consent
 POST /api/v1/oauth/apps/token # Public PKCE credential delivery

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { apiFetch } from "@/shared/api/client"
@@ -30,8 +30,8 @@ function renderPage(
 ) {
   vi.mocked(apiFetch).mockImplementation(async (path) => {
     if (appError) throw appError
-    if (path.startsWith("/workspaces"))
-      return { data: workspaces, count: workspaces.length }
+    if (path.startsWith("/oauth/apps/workspaces"))
+      return { data: [...workspaces], count: workspaces.length }
     if (path === "/oauth/apps/authorize")
       return {
         redirect_uri:
@@ -45,7 +45,7 @@ function renderPage(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={bootstrap()}>
         <ThemeProvider>
@@ -54,6 +54,7 @@ function renderPage(
       </DeploymentProvider>
     </QueryClientProvider>,
   )
+  return { ...view, client }
 }
 
 beforeEach(() => {
@@ -105,7 +106,10 @@ it("requires a workspace choice when more than one is available", async () => {
   ])
   const button = await screen.findByRole("button", { name: "Allow access" })
   expect(button).toBeDisabled()
-  await userEvent.click(screen.getByRole("button", { name: /Workspace/ }))
+  await userEvent.type(
+    screen.getByRole("combobox", { name: "Workspace" }),
+    "Research",
+  )
   await userEvent.click(await screen.findByRole("option", { name: "Research" }))
   expect(button).toBeEnabled()
   await userEvent.click(button)
@@ -114,6 +118,75 @@ it("requires a workspace choice when more than one is available", async () => {
     .mocked(apiFetch)
     .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
   expect(JSON.parse(String(call?.[1]?.body)).workspace_id).toBe("two")
+})
+
+it.each([
+  { name: "none remain", remaining: [] },
+  {
+    name: "other choices remain",
+    remaining: [
+      { id: "three", name: "Engineering" },
+      { id: "four", name: "Design" },
+    ],
+  },
+])("clears an unavailable workspace when $name", async ({ remaining }) => {
+  const workspaces = [
+    { id: "one", name: "Personal" },
+    { id: "two", name: "Research" },
+  ]
+  const { client } = renderPage(workspaces)
+  const user = userEvent.setup()
+  await user.type(
+    await screen.findByRole("combobox", { name: "Workspace" }),
+    "Research",
+  )
+  await user.click(await screen.findByRole("option", { name: "Research" }))
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Allow access" })).toBeEnabled(),
+  )
+  await user.tab()
+
+  workspaces.splice(0, workspaces.length, ...remaining)
+  await act(async () => {
+    await client.invalidateQueries()
+  })
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Allow access" })).toBeDisabled(),
+  )
+  expect(screen.queryByDisplayValue("Research")).not.toBeInTheDocument()
+  expect(assign).not.toHaveBeenCalled()
+})
+
+it("replaces a removed selection with the current sole workspace", async () => {
+  const workspaces = [
+    { id: "one", name: "Personal" },
+    { id: "two", name: "Research" },
+  ]
+  const { client } = renderPage(workspaces)
+  const user = userEvent.setup()
+  await user.type(
+    await screen.findByRole("combobox", { name: "Workspace" }),
+    "Research",
+  )
+  await user.click(await screen.findByRole("option", { name: "Research" }))
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Allow access" })).toBeEnabled(),
+  )
+
+  workspaces.splice(0, workspaces.length, { id: "one", name: "Personal" })
+  await act(async () => {
+    await client.invalidateQueries()
+  })
+
+  expect(await screen.findByText("Personal")).toBeVisible()
+  expect(screen.queryByText("Research")).not.toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: "Allow access" }))
+  await waitFor(() => expect(assign).toHaveBeenCalled())
+  const approval = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
+  expect(JSON.parse(String(approval?.[1]?.body)).workspace_id).toBe("one")
 })
 
 it("explains missing workspace access and prevents approval", async () => {
@@ -164,7 +237,7 @@ it("keeps consent open and displays an authorization failure", async () => {
 it("keeps cancellation available if loading workspaces fails", async () => {
   renderPage()
   vi.mocked(apiFetch).mockImplementation(async (path) => {
-    if (path.startsWith("/workspaces"))
+    if (path.startsWith("/oauth/apps/workspaces"))
       throw new Error("Workspaces are unavailable")
     return {
       name: "Thunderbolt",
@@ -202,4 +275,92 @@ it("prevents repeated approval and cancellation while authorization is pending",
       "http://localhost:5199/oauth/otari?code=one&state=state-nonce",
   })
   await waitFor(() => expect(assign).toHaveBeenCalledTimes(1))
+})
+
+it("does not redirect or offer approval after cached app validation fails", async () => {
+  const { client } = renderPage()
+  expect(await screen.findByRole("button", { name: "Cancel" })).toBeEnabled()
+  vi.mocked(apiFetch).mockRejectedValue(new Error("App registration removed"))
+  await act(async () => {
+    await client.invalidateQueries()
+  })
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "App registration removed",
+  )
+  expect(
+    screen.queryByRole("button", { name: "Cancel" }),
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole("button", { name: "Allow access" }),
+  ).not.toBeInTheDocument()
+  expect(assign).not.toHaveBeenCalled()
+})
+
+it("passes slash-containing client ids as query parameters and preserves omitted response_type", async () => {
+  const params = new URLSearchParams(request)
+  params.set("client_id", "team/thunderbolt")
+  params.delete("response_type")
+  window.location.hash = `#/oauth/authorize?${params}`
+  renderPage()
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Allow access" }),
+  )
+  await waitFor(() => expect(assign).toHaveBeenCalled())
+  const metadata = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([path]) => path.startsWith("/oauth/apps/clients?"))
+  expect(
+    new URL(String(metadata?.[0]), "https://otari.example").searchParams.get(
+      "client_id",
+    ),
+  ).toBe("team/thunderbolt")
+  const approval = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
+  const body = JSON.parse(String(approval?.[1]?.body))
+  expect(body.client_id).toBe("team/thunderbolt")
+  expect(body).not.toHaveProperty("response_type")
+})
+
+it("searches beyond the first workspace page and retains the chosen workspace", async () => {
+  renderPage([{ id: "first", name: "First workspace" }])
+  vi.mocked(apiFetch).mockImplementation(async (path) => {
+    if (path.startsWith("/oauth/apps/workspaces")) {
+      const search = new URL(path, "https://otari.example").searchParams.get(
+        "search",
+      )
+      return search
+        ? { data: [{ id: "last", name: "Research" }], count: 1 }
+        : { data: [{ id: "first", name: "First workspace" }], count: 100001 }
+    }
+    if (path === "/oauth/apps/authorize")
+      return { redirect_uri: "http://localhost:5199/oauth/otari?code=grant" }
+    return {
+      name: "Thunderbolt",
+      redirect_uri: "http://localhost:5199/oauth/otari",
+    }
+  })
+  const user = userEvent.setup()
+  const input = await screen.findByRole("combobox", { name: "Workspace" })
+  await user.type(input, "Research")
+  await user.click(await screen.findByRole("option", { name: "Research" }))
+  await waitFor(() => expect(input).toHaveValue("Research"))
+  const button = screen.getByRole("button", { name: "Allow access" })
+  await waitFor(() => expect(button).toBeEnabled())
+  await user.click(button)
+  await waitFor(() => expect(assign).toHaveBeenCalled())
+  const approval = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
+  expect(JSON.parse(String(approval?.[1]?.body)).workspace_id).toBe("last")
+  const searches = vi
+    .mocked(apiFetch)
+    .mock.calls.filter(([path]) => path.startsWith("/oauth/apps/workspaces"))
+  expect(
+    searches.some(
+      ([path]) =>
+        new URL(path, "https://otari.example").searchParams.get("search") ===
+        "Research",
+    ),
+  ).toBe(true)
 })

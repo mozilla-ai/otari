@@ -34,7 +34,7 @@ DEFAULT_OUTPUT = REPO_ROOT / "docs" / "public" / "otari.postman_collection.json"
 # aligned with the documented curl examples.
 DEFAULT_BASE_URL = "http://localhost:8000"
 
-# Methods that carry a JSON request body worth templating.
+# Methods that carry a request body worth templating.
 BODY_METHODS = {"post", "put", "patch"}
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 
@@ -127,6 +127,8 @@ def example_for_schema(
         return schema["example"]
     if "default" in schema:
         return schema["default"]
+    if "const" in schema:
+        return schema["const"]
 
     for combiner in ("allOf", "anyOf", "oneOf"):
         if combiner in schema and schema[combiner]:
@@ -175,10 +177,10 @@ def example_for_schema(
     return None
 
 
-def request_body_example(operation: dict[str, Any], spec: dict[str, Any]) -> Any:
-    """Return the JSON example for an operation's request body, if any."""
+def request_body_example(operation: dict[str, Any], spec: dict[str, Any], media_type: str = "application/json") -> Any:
+    """Return an example for an operation's selected request body format, if any."""
     content = operation.get("requestBody", {}).get("content", {})
-    schema = content.get("application/json", {}).get("schema")
+    schema = content.get(media_type, {}).get("schema")
     if schema is None:
         return None
     return example_for_schema(schema, spec)
@@ -279,14 +281,26 @@ def build_item(path: str, method: str, operation: dict[str, Any], spec: dict[str
         request["description"] = description
 
     if method in BODY_METHODS:
-        body = EXAMPLE_BODY_OVERRIDES.get((method.upper(), path)) or request_body_example(operation, spec)
+        content = operation.get("requestBody", {}).get("content", {})
+        form_encoded = "application/x-www-form-urlencoded" in content and "application/json" not in content
+        media_type = "application/x-www-form-urlencoded" if form_encoded else "application/json"
+        body = EXAMPLE_BODY_OVERRIDES.get((method.upper(), path)) or request_body_example(operation, spec, media_type)
         if body is not None:
-            headers.append({"key": "Content-Type", "value": "application/json"})
-            request["body"] = {
-                "mode": "raw",
-                "raw": json.dumps(body, indent=2),
-                "options": {"raw": {"language": "json"}},
-            }
+            headers.append({"key": "Content-Type", "value": media_type})
+            if form_encoded:
+                request["body"] = {
+                    "mode": "urlencoded",
+                    "urlencoded": [
+                        {"key": key, "value": value if isinstance(value, str) else json.dumps(value), "type": "text"}
+                        for key, value in body.items()
+                    ],
+                }
+            else:
+                request["body"] = {
+                    "mode": "raw",
+                    "raw": json.dumps(body, indent=2),
+                    "options": {"raw": {"language": "json"}},
+                }
 
     return {"name": name, "request": request}
 

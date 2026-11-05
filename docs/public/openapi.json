@@ -2060,7 +2060,7 @@
           "state": {
             "maxLength": 256,
             "minLength": 16,
-            "pattern": "^[A-Za-z0-9._~-]+$",
+            "pattern": "^[A-Za-z0-9._~+/=-]+$",
             "title": "State",
             "type": "string"
           },
@@ -38119,7 +38119,7 @@
             "schema": {
               "maxLength": 256,
               "minLength": 16,
-              "pattern": "^[A-Za-z0-9._~-]+$",
+              "pattern": "^[A-Za-z0-9._~+/=-]+$",
               "title": "State",
               "type": "string"
             }
@@ -38157,13 +38157,26 @@
           }
         ],
         "responses": {
-          "200": {
+          "302": {
+            "description": "Continue to dashboard sign-in and consent.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Bad Request"
           },
           "422": {
             "content": {
@@ -38176,14 +38189,7 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
+        "security": [],
         "summary": "Authorization Redirect",
         "tags": [
           "oauth-apps"
@@ -38238,16 +38244,18 @@
         ]
       }
     },
-    "/api/v1/oauth/apps/clients/{client_id}": {
+    "/api/v1/oauth/apps/clients": {
       "get": {
         "description": "Validate the app and redirect before the dashboard offers consent.",
         "operationId": "oauth-apps-app_details",
         "parameters": [
           {
-            "in": "path",
+            "in": "query",
             "name": "client_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Client Id",
               "type": "string"
             }
@@ -38285,14 +38293,7 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
+        "security": [],
         "summary": "App Details",
         "tags": [
           "oauth-apps"
@@ -38345,6 +38346,75 @@
             "description": "Validation Error"
           }
         },
+        "security": [],
+        "summary": "Exchange",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
+    "/api/v1/oauth/apps/workspaces": {
+      "get": {
+        "description": "List workspaces where the signed-in identity may authorize app access.",
+        "operationId": "oauth-apps-app_workspaces",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
         "security": [
           {
             "ApiKeyAuth": []
@@ -38353,7 +38423,7 @@
             "XApiKeyAuth": []
           }
         ],
-        "summary": "Exchange",
+        "summary": "App Workspaces",
         "tags": [
           "oauth-apps"
         ]

@@ -21,7 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.api.deps import get_api_key_service
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     BootstrapOperatorProtectedError,
     DeploymentAdministrationUnavailableError,
@@ -533,12 +535,15 @@ async def test_a_non_operator_is_told_the_surface_does_not_exist(async_db: Async
     """404 and not 403: the dashboard's `apiFetch` drops the session on a 403."""
     outsider, _ = await _identity(async_db, full_name="Ada Lovelace")
     service = DeploymentUserService(async_db)
+    uow = UnitOfWork(async_db)
 
     assert await service.has_administration_access(outsider) is False
     with pytest.raises(DeploymentAdministrationUnavailableError):
         await service.list_users(actor=outsider)
     with pytest.raises(DeploymentAdministrationUnavailableError):
         await service.update_user(
+            uow=uow,
+            api_keys=get_api_key_service(uow),
             actor=outsider,
             user_id=outsider.id,
             request=DeploymentUserUpdateRequest(is_superuser=True),
@@ -574,16 +579,21 @@ async def test_another_operator_cannot_deactivate_or_demote_the_bootstrap_identi
     await _mark_bootstrap(async_db, anchor)
     second, _ = await _identity(async_db, full_name="Root", is_superuser=True)
     service = DeploymentUserService(async_db)
+    uow = UnitOfWork(async_db)
 
     for request in (
         DeploymentUserUpdateRequest(is_active=False),
         DeploymentUserUpdateRequest(is_superuser=False),
     ):
         with pytest.raises(BootstrapOperatorProtectedError):
-            await service.update_user(actor=second, user_id=anchor.id, request=request)
+            await service.update_user(
+                actor=second, user_id=anchor.id, request=request, uow=uow, api_keys=get_api_key_service(uow)
+            )
 
     # Granting is unguarded, which is what lets an operator repair a cleared flag.
     granted = await service.update_user(
+        uow=uow,
+        api_keys=get_api_key_service(uow),
         actor=second,
         user_id=anchor.id,
         request=DeploymentUserUpdateRequest(is_superuser=True),
@@ -598,21 +608,28 @@ async def test_the_service_refuses_the_two_shapes_the_routes_also_refuse(
 ) -> None:
     operator, _ = await _identity(async_db, full_name="Root", is_superuser=True)
     service = DeploymentUserService(async_db)
+    uow = UnitOfWork(async_db)
 
     with pytest.raises(EmptyDeploymentUserUpdateError):
         await service.update_user(
+            uow=uow,
+            api_keys=get_api_key_service(uow),
             actor=operator,
             user_id=operator.id,
             request=DeploymentUserUpdateRequest(),
         )
     with pytest.raises(DeploymentUserSelfChangeError):
         await service.update_user(
+            uow=uow,
+            api_keys=get_api_key_service(uow),
             actor=operator,
             user_id=operator.id,
             request=DeploymentUserUpdateRequest(is_active=False),
         )
     with pytest.raises(DeploymentUserNotFoundError):
         await service.update_user(
+            uow=uow,
+            api_keys=get_api_key_service(uow),
             actor=operator,
             user_id=uuid.uuid4(),
             request=DeploymentUserUpdateRequest(is_active=False),
