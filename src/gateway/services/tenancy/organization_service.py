@@ -956,6 +956,7 @@ class OrganizationService:
         *,
         user: User,
         organization_id: uuid.UUID,
+        blocked: Callable[[Organization], Awaitable[bool]] | None = None,
     ) -> OrganizationMembershipContextPublic:
         """Point the caller's identity at another organization they belong to.
 
@@ -970,6 +971,8 @@ class OrganizationService:
         indistinguishable from an id that was never issued. That is the same
         rule ``resolve_visible_workspace`` follows, and it is the whole of the
         tenant boundary on the one endpoint that names an organization.
+        ``blocked`` additionally refuses switching into an organization whose
+        own SSO enforcement refuses the caller, with the same not-found answer.
 
         Switching to the organization already active is allowed and is a no-op
         write: a switcher that re-sent the current row should not have to be
@@ -983,6 +986,8 @@ class OrganizationService:
             # Only reachable if the organization was deleted between the two
             # reads. Reported as the same not-found the membership check gives,
             # since from the caller's side it is the same answer.
+            raise OrganizationNotFoundError(organization_id)
+        if blocked is not None and await blocked(organization):
             raise OrganizationNotFoundError(organization_id)
 
         await self.users.set_active_organization(user, organization.id)

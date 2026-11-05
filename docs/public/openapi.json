@@ -42939,7 +42939,7 @@
     },
     "/api/v1/organizations/me/switch": {
       "post": {
-        "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists.",
+        "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists, and for one whose own SSO enforcement refuses the caller.",
         "operationId": "organizations-switch_active_organization",
         "requestBody": {
           "content": {
