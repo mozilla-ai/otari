@@ -52,6 +52,44 @@ export interface UrlState<K extends string> {
   patch: (updates: Partial<Record<K, string | number | string[]>>) => void
 }
 
+/**
+ * The readers of {@link UrlState} over a parsed query string, for a page
+ * rendered without a router that still takes its state from a link.
+ */
+export function readUrlState<K extends string>(
+  search: DashboardSearch,
+  defaults: Record<K, string>,
+): Pick<UrlState<K>, "get" | "getAll" | "getNumber"> {
+  return {
+    get: (key) => first(search[key]) ?? defaults[key],
+    // Values are trimmed and blanks dropped, so `?model=` or `?model=%20` reads
+    // as no filter rather than a filter on whitespace (which would match nothing
+    // and look like an empty result set). The default applies only when the key
+    // is absent entirely: present-but-blank is a cleared filter, the same
+    // reading `get` gives it.
+    getAll: (key) => {
+      const raw = search[key]
+      if (raw === undefined) {
+        return defaults[key] ? [defaults[key]] : []
+      }
+      return (Array.isArray(raw) ? raw : [raw])
+        .map((value) => value.trim())
+        .filter((value) => value !== "")
+    },
+    // A present but non-numeric param (e.g. a hand-edited `?size=abc`) falls
+    // back to the key's default, not 0: a 0 page size would send `limit=0` and
+    // 422.
+    getNumber: (key) => {
+      const parsed = Number.parseInt(first(search[key]) ?? "", 10)
+      if (!Number.isNaN(parsed)) {
+        return parsed
+      }
+      const fallback = Number.parseInt(defaults[key], 10)
+      return Number.isNaN(fallback) ? 0 : fallback
+    },
+  }
+}
+
 export function useUrlState<K extends string>(
   defaults: Record<K, string>,
   {
@@ -80,39 +118,8 @@ export function useUrlState<K extends string>(
     [tracked, untracked, router],
   )
 
-  const get = useCallback(
-    (key: K) => first(search[key]) ?? defaults[key],
-    [search, defaults],
-  )
-
-  // Values are trimmed and blanks dropped, so `?model=` or `?model=%20` reads as no
-  // filter rather than a filter on whitespace (which would match nothing and look
-  // like an empty result set). The default applies only when the key is absent
-  // entirely: present-but-blank is a cleared filter, the same reading `get` gives it.
-  const getAll = useCallback(
-    (key: K) => {
-      const raw = search[key]
-      if (raw === undefined) {
-        return defaults[key] ? [defaults[key]] : []
-      }
-      return (Array.isArray(raw) ? raw : [raw])
-        .map((value) => value.trim())
-        .filter((value) => value !== "")
-    },
-    [search, defaults],
-  )
-
-  const getNumber = useCallback(
-    (key: K) => {
-      // A present but non-numeric param (e.g. a hand-edited `?size=abc`) must fall
-      // back to the key's default, not 0: a 0 page size would send `limit=0` and 422.
-      const parsed = Number.parseInt(first(search[key]) ?? "", 10)
-      if (!Number.isNaN(parsed)) {
-        return parsed
-      }
-      const fallback = Number.parseInt(defaults[key], 10)
-      return Number.isNaN(fallback) ? 0 : fallback
-    },
+  const { get, getAll, getNumber } = useMemo(
+    () => readUrlState(search, defaults),
     [search, defaults],
   )
 
