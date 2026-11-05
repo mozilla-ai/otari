@@ -330,6 +330,7 @@ def test_moderations_cost_tracked_with_pricing(
             "model_key": "openai:omni-moderation-latest",
             "input_price_per_million": 2.0,
             "output_price_per_million": 0.0,
+            "unit": "request",
         },
         headers=master_key_header,
     )
@@ -370,6 +371,7 @@ def test_moderations_billing_meters_tracked_with_pricing(
             "model_key": "openai:omni-moderation-latest",
             "input_price_per_million": 2.0,
             "output_price_per_million": 0.0,
+            "unit": "request",
         },
         headers=master_key_header,
     )
@@ -405,7 +407,7 @@ def test_moderations_unpriced_records_no_charge_lines(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """An unpriced moderation is free by design, so it records no charge line."""
+    """An unpriced moderation is recorded with no cost: unknown, not free."""
     with patch(
         "gateway.api.routes.moderations.amoderation",
         new_callable=AsyncMock,
@@ -422,7 +424,7 @@ def test_moderations_unpriced_records_no_charge_lines(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
     )
     latest = usage_resp.json()[0]
-    assert latest["cost"] == 0.0
+    assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
 
@@ -487,7 +489,7 @@ def test_moderations_ignores_models_dev_defaults(
     )
     latest = usage_resp.json()[0]
     assert latest["model"] == "gpt-4o"
-    assert latest["cost"] == 0.0
+    assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
 
@@ -505,6 +507,7 @@ def test_moderations_priced_row_records_its_rate_provenance(
             "model_key": "openai:omni-moderation-latest",
             "input_price_per_million": 2.0,
             "output_price_per_million": 0.0,
+            "unit": "request",
         },
         headers=master_key_header,
     )

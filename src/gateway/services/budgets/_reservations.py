@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -48,7 +48,7 @@ from gateway.services.budgets._scoped_enforcement import (
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
 from gateway.services.budgets._scoped_enforcement import settle as settle_scoped
-from gateway.services.pricing import has_completion_meter, price_usage
+from gateway.services.pricing import Quantities, Slot, has_completion_meter, price_usage
 from gateway.services.pricing_service import find_model_pricing, is_free_pricing, search_unit_cost
 from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
@@ -550,6 +550,22 @@ def count_estimate(pricing: ModelPricing | None, *, meter: str, count: int) -> D
     """What a request billed by ``count`` under ``meter`` holds: exactly what that count settles at."""
     clamped = min(max(count, 0), MAX_REPORTED_UNITS)
     charge = price_usage(pricing, tokens=None, units={meter: clamped})
+    return charge.cost if charge is not None else ZERO
+
+
+def report_estimate(
+    pricing: ModelPricing | None, *, slot: Slot | None, quantities: Quantities, units: Mapping[str, int]
+) -> Decimal:
+    """What a request holds for what it says it will report: exactly what that report settles at.
+
+    ``quantities`` is what the request measures in each unit, ``units`` the
+    counts it reports, and ``slot`` the slot of the rate it bills under. A
+    quantity the rate prices nothing of holds nothing, as an unpriced
+    request does.
+    """
+    clamped = {meter: min(max(count, 0), MAX_REPORTED_UNITS) for meter, count in units.items()}
+    measured = {unit: max(Decimal(quantity), ZERO) for unit, quantity in quantities.items()}
+    charge = price_usage(pricing, tokens=None, units=clamped, quantities=measured, slot=slot)
     return charge.cost if charge is not None else ZERO
 
 

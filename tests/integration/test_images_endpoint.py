@@ -200,13 +200,14 @@ def test_images_cost_tracked_with_pricing(
     api_key_obj: dict[str, Any],
 ) -> None:
     """POST /api/v1/images/generations calculates cost when model pricing exists."""
-    # Set up pricing: input_price_per_million is repurposed as price-per-image
+    # An image rate is USD per million images: $0.04 an image.
     client.post(
         f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:dall-e-3",
-            "input_price_per_million": 0.04,
+            "input_price_per_million": 40000,
             "output_price_per_million": 0.0,
+            "unit": "image",
         },
         headers=master_key_header,
     )
@@ -228,7 +229,7 @@ def test_images_cost_tracked_with_pricing(
     assert len(image_logs) >= 1
     assert image_logs[0]["cost"] is not None
     assert image_logs[0]["cost"] > 0
-    # Cost should be n_images * input_price_per_million = 2 * 0.04 = 0.08
+    # Two images at $0.04 each.
     assert image_logs[0]["cost"] == pytest.approx(0.08)
     # DALL-E sends no usage, so the response gets one holding just the settled cost.
     assert resp.json()["usage"] == {"cost_usd": "0.080000", "pricing_source": "deployment"}
@@ -259,7 +260,12 @@ def test_images_still_served_when_the_inline_cost_cannot_be_attached(
     """A failure attaching the cost returns the provider's body and counts the cost as unattached."""
     client.post(
         f"{API_ROOT}/pricing",
-        json={"model_key": "openai:dall-e-3", "input_price_per_million": 0.04, "output_price_per_million": 0.0},
+        json={
+            "model_key": "openai:dall-e-3",
+            "input_price_per_million": 40000,
+            "output_price_per_million": 0.0,
+            "unit": "image",
+        },
         headers=master_key_header,
     )
     with (
@@ -290,8 +296,9 @@ def test_images_billing_meters_tracked_with_pricing(
         f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:dall-e-3",
-            "input_price_per_million": 0.04,
+            "input_price_per_million": 40000,
             "output_price_per_million": 0.0,
+            "unit": "image",
         },
         headers=master_key_header,
     )
@@ -313,7 +320,9 @@ def test_images_billing_meters_tracked_with_pricing(
     assert len(logs) >= 1
     assert logs[0]["billing_meters"] == {"images": 2}
     breakdown = logs[0]["pricing_breakdown"]
-    assert breakdown == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": pytest.approx(0.08)}]
+    assert breakdown == [
+        {"meter": "images", "units": 2, "unit": "image", "unit_rate": 0.04, "cost": pytest.approx(0.08)}
+    ]
 
 
 def test_images_ignores_models_dev_defaults(

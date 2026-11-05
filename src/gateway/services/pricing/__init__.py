@@ -19,6 +19,8 @@ from gateway.services.pricing._tool_pricing import (
     tool_rate_lookup,
 )
 from gateway.services.pricing._usage_pricing import (
+    MEASURED_UNITS,
+    Slot,
     UsageCharge,
     billed_search_units,
     can_price,
@@ -62,6 +64,7 @@ __all__ = [
     "BUNDLED_SNAPSHOT_NAME",
     "DeploymentPricingService",
     "MAX_RATE_PER_MILLION",
+    "MEASURED_UNITS",
     "MAX_RESIDENT_GENERATIONS",
     "ModelsDevPrice",
     "ModelsDevPriceIndex",
@@ -70,6 +73,7 @@ __all__ = [
     "PriceTimeline",
     "PROVIDER_TOOL_LIST_PRICES",
     "Quantities",
+    "Slot",
     "ToolCharges",
     "ToolRate",
     "ToolRateLookup",

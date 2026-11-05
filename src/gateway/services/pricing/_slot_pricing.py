@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from gateway.core.metered_pricing import Direction, UnitRate, charge_unit, quantize_cost, slot_price, unit_rate
 from gateway.models.pricing import ModelPricing
-from gateway.services.pricing._usage_pricing import UsageCharge
+from gateway.services.pricing._charge import UsageCharge
 from gateway.types.models_dev import parse_pricing
 from gateway.types.price_unit import PRICE_UNITS, PriceUnit
 

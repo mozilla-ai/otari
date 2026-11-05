@@ -11,8 +11,8 @@ from decimal import Decimal
 
 from gateway.core.metered_pricing import UnitRate
 from gateway.models.pricing import ModelPricing
+from gateway.services.pricing._charge import UsageCharge
 from gateway.services.pricing._slot_pricing import UNIT_METER, estimate_slot_cost, price_slot, slot_rate
-from gateway.services.pricing._usage_pricing import UsageCharge
 
 # The meter a video's length is reported under on its usage row.
 VIDEO_SECONDS = UNIT_METER["second"]
