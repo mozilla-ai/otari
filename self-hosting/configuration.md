@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/2de06618bc4f6c8acaa4d07c7aee0452ef014aa9/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/0e244373df3b39b199bc7dcf1798769cffd03c2c/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -796,7 +796,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/2de06618bc4f6c8acaa4d07c7aee0452ef014aa9/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/0e244373df3b39b199bc7dcf1798769cffd03c2c/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1012,10 +1012,8 @@ the default it shadows, so a config-file price that has fallen behind the
 provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
 
-Each stored rate also carries its `unit` (`token`, `request` or `image`, or
-one of the units under
-[Per-request pricing](#per-request-pricing-audio-moderations-rerank-and-completion-models))
-and its `origin` (`config` or `api`), so a rate the config file re-seeds on
+Each stored rate also carries its `unit` (one of the units under
+[Each endpoint in its unit](#each-endpoint-in-its-unit)) and its `origin` (`config` or `api`), so a rate the config file re-seeds on
 every restart is distinguishable from one set in the dashboard.
 
 ### A public catalog
@@ -1088,12 +1086,14 @@ pricing:
         output: {price: 0.04, unit: image}
 ```
 
-That row stores `unit: image` and `input_price_per_million: 40000`, as the
-per-image section below says. Every row reads back with both: one set through
-the per-million fields shows them in `rates` too, in the slot its unit
-chooses. Billing reads the per-million fields in this release, and the
-videos endpoint reads a `video` output price per second
-([Videos](https://docs.otari.ai/reference#videos)):
+That row stores `unit: image` and `input_price_per_million: 40000`. Every row
+reads back with both: one set through the per-million fields shows them in
+`rates` too, in the slot its unit chooses. Each endpoint reads the slot it
+bills under ([Each endpoint in its unit](#each-endpoint-in-its-unit)), so a
+per-megapixel image price, a per-minute audio price and a per-second video
+price are each read from their slot, and a `web_search` price prices the
+searches a model's provider runs itself
+([Searches a provider runs itself](https://docs.otari.ai/reference/gateway/tools#searches-a-provider-runs-itself)):
 
 ```yaml
 pricing:
@@ -1103,26 +1103,43 @@ pricing:
         output: {price: 0.4, unit: second}
 ```
 
-The other prices a block holds are stored for the meters a later release
-gives them.
+The `overrides` and `multipliers` a block holds are stored and not yet
+applied: the base price is read.
 
-### Per-request pricing (audio, moderations, rerank, and completion models)
+### Each endpoint in its unit
 
-A rate's `unit` decides what it bills. A rate in `token` bills the tokens the
-provider reports, a rate in `image` bills each image returned, and a rate in
-`request` bills each request (or each search unit, for rerank). The rate reuses
-`input_price_per_million`, always per million: USD per million tokens, requests
-or images. A $0.04 image is `input_price_per_million: 40000`. A rate never bills
-a count of another unit, so a per-request price is never read as a price per
-image.
+A rate's `unit` decides what it bills, and the slot of its `rates` block an
+endpoint bills under decides which price it reads. A rate in `token` bills the
+tokens the provider reports, a rate in `request` bills each request (or each
+search unit, for rerank), and a rate in a measured unit bills the quantity the
+endpoint measured in it. The per-million fields are always per million: USD
+per million tokens, requests or images, so a $0.04 image is
+`input_price_per_million: 40000`, which is what the dashboard stores when you
+enter $40 per 1,000 images. A `rates` price is per its unit as published. A
+rate never bills a count of another unit, so a per-request price is never read
+as a price per image, and a token price is never read as a price per request.
 
-| Endpoint | What it reports | Rates that price it |
-|---|---|---|
-| Embeddings | Input tokens | `token`; `request` bills one request |
-| Rerank | Search units, and tokens where the provider reports them | `request` per search unit, or `token` |
-| Image generation | Images returned, and tokens for a token-billed model such as `gpt-image-1` | `image` per image, `request` per request, or `token` |
-| Audio transcription | One request, and tokens for a token-billed model such as `gpt-4o-transcribe` | `request`, or `token` |
-| Audio speech, moderations | One request | `request` |
+| Endpoint | Slot | What it measures or reports | Rates that price it |
+|---|---|---|---|
+| Embeddings | none | Input tokens | `token`; `request` bills one request |
+| Rerank | none | Search units, and tokens where the provider reports them | `request` per search unit, or `token` |
+| Image generation and edits | `image` output | Images returned, their megapixels from the `size` asked for, and tokens for a token-billed model such as `gpt-image-1` | `image` per image, `megapixel` per megapixel, `request` per request, or `token` |
+| Audio transcription | `audio` input | The length the provider reports, and tokens for a token-billed model such as `gpt-4o-transcribe` | `second` per second, `minute` per minute, `request`, or `token` |
+| Audio speech | `text` input | The characters of `input` | `character` per million characters, or `request` |
+| Moderations | `text` input | One request | `request`; a rate priced at zero settles free |
+| Videos | `video` output | The seconds the job reports | `second` per second ([Videos](https://docs.otari.ai/reference#videos)) |
+
+A `token` rate is read as tokens on every endpoint. An endpoint that reports no
+tokens (a `dall-e-3` image, a moderation) is unpriced at a token rate: the row
+keeps no cost and the needs-pricing view lists it. A rate priced at zero
+everywhere settles such a request free, so a free moderation model is free. A
+measured unit the request cannot measure prices nothing either, such as a
+per-megapixel rate on an image whose `size` is `auto` or unset. With
+`require_pricing` on, image generation, embeddings, rerank and direct search
+refuse a rate that cannot price what they report, such as an `image` rate on
+embeddings or a `megapixel` rate on an image of no stated size, rather than
+serving it unpriced. Audio and moderations are exempt: they are served, and
+their row carries no cost. A missing cost is unknown, not free.
 
 The unit names are singular, as models.dev writes them. Otari's earlier names,
 `tokens`, `requests` and `images`, are still read for one release, in this file
@@ -1130,30 +1147,16 @@ and on the pricing API, and read as `token`, `request` and `image`: a rate sent
 as `unit: requests` is stored and served as `unit: request`. The next release
 refuses the old names; see [Upgrading](#upgrading).
 
-A rate in `token` on image generation, audio or moderations is read in that
-endpoint's per-call unit (raw USD per image, or USD per million requests) and
-logs a warning once per model. Set `unit: image` or `unit: request` on those
-rates: a later release reads a `token` rate there strictly, as tokens. A
-token-billed model (`gpt-image-1`, `gpt-4o-transcribe`) can be priced in
-`token`, because its tokens are recorded on the usage row.
+The catalog prices each slot in its unit, so a catalog price reaches every
+endpoint: `whisper-1` is priced per minute of audio and `tts-1` per character
+of text, with no text token price at all, and a token-billed image or
+transcription model is priced on the tokens it reports.
 
-A flat per-image or per-request rate cannot follow what the caller chooses: an
-image's size and quality, or an audio file's length. Set it at the dearest
-option you allow.
-
-A rate can also name `character`, `megapixel`, `second`, `minute` or
-`web_search`, the units models.dev prices some models in (a character or token
-price is per million, a search price per 1,000, and the rest per one). They are
-stored ahead of their meters: a rate in one of them prices nothing yet, so a
-budgeted request on such a rate is refused under `require_pricing` as any
-unpriced request is, and the refusal names the unit. With `require_pricing`
-off, the request is served and its usage row carries no cost. Such a rate is
-never billed as tokens. A later release gives each unit a meter.
-
-An unpriced request on audio or moderations is served at zero cost. Image
-generation, embeddings, rerank and direct search are subject to
-`require_pricing`, which also refuses a rate that cannot price the endpoint,
-such as an `image` rate on embeddings, rather than serving it unpriced.
+Image generation reserves the images asked for, at the `size` asked for,
+before dispatch, and settles on the images returned. Speech reserves the
+characters of its `input`, and moderations one request. Transcription holds
+nothing before dispatch, because the audio's length is not read here, so a
+priced transcription can exceed a budget by one request's price.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:
@@ -1244,17 +1247,6 @@ the flat amount too, so `stream_missing_usage_policy` does not apply to it.
 `require_pricing` treats the model like any other completion model, and the
 default-pricing fallback never supplies a per-request rate, so a per-request
 model needs its own pricing row.
-
-### Per-image pricing (image generation)
-
-An `image` rate is USD per million images, like a request rate: $0.04 an image
-is `input_price_per_million: 40000`, which is what the dashboard stores when you
-enter $40 per 1,000 images.
-
-Image generation reserves the requested image count before dispatch at an
-`image` rate, then settles on the images the provider returned. Audio holds
-nothing before dispatch, so a priced audio request can exceed a budget by one
-request's price.
 
 ## Search tools
 
@@ -1599,7 +1591,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/2de06618bc4f6c8acaa4d07c7aee0452ef014aa9/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/0e244373df3b39b199bc7dcf1798769cffd03c2c/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

@@ -180,7 +180,7 @@ the Requests view's "Price this model", offered on a served request that carried
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
 an image generation or edit. What each unit bills is in
-[Per-request pricing](https://docs.otari.ai/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Each endpoint in its unit](https://docs.otari.ai/self-hosting/configuration#each-endpoint-in-its-unit).
 
 ## Playground
 
