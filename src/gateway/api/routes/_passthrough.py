@@ -933,7 +933,7 @@ async def run_passthrough(
                     pricing_provenance(found_pricing)
                 )
             if charge.meters:
-                usage_log.billing_meters, usage_log.pricing_breakdown = charge.meters, charge.lines
+                usage_log.billing_meters, usage_log.pricing_breakdown = dict(charge.meters), charge.lines
 
         if deployment_charge is not None:
             await deployment_charge.settle(

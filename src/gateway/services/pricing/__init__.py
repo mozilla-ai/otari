@@ -1,6 +1,13 @@
 """The pricing domain: which meter a rate prices, what an attempt costs at it, and the models.dev default prices."""
 
 from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
+from gateway.services.pricing._slot_pricing import (
+    UNIT_METER,
+    Quantities,
+    estimate_slot_cost,
+    price_slot,
+    slot_rate,
+)
 from gateway.services.pricing._tool_pricing import (
     PROVIDER_TOOL_LIST_PRICES,
     ToolCharges,
@@ -62,9 +69,11 @@ __all__ = [
     "PriceTier",
     "PriceTimeline",
     "PROVIDER_TOOL_LIST_PRICES",
+    "Quantities",
     "ToolCharges",
     "ToolRate",
     "ToolRateLookup",
+    "UNIT_METER",
     "UnpricedToolLabel",
     "UsageCharge",
     "VIDEO_SECONDS",
@@ -82,9 +91,11 @@ __all__ = [
     "paid_by_the_deployment",
     "parse_rate",
     "estimate_settles",
+    "estimate_slot_cost",
     "estimate_video_cost",
     "has_completion_meter",
     "price_completion",
+    "price_slot",
     "price_usage",
     "price_video",
     "request_rate",
@@ -92,6 +103,7 @@ __all__ = [
     "resolve_as_of",
     "select_generation",
     "set_accepted_generations",
+    "slot_rate",
     "tool_rate_lookup",
     "validated_units",
     "video_rate",
