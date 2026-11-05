@@ -368,7 +368,7 @@ class ToolSettings(BaseModel):
         description=(
             "Deprecated, and removed by a coming breaking release: use a search tool with provider "
             "searxng and its own api_base. The SearXNG instance otari_web_search searches when no "
-            "search tool is its default and no web_search_provider is set, and the api_base of a searxng "
+            "search tool is its default and no web_search_provider with its key is set, and the api_base of a searxng "
             "search tool that sets none. "
             "docker-compose sets it to the bundled SearXNG container unless OTARI_WEB_SEARCH_URL is "
             "set, even to an empty value."

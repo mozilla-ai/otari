@@ -33,8 +33,8 @@ services:
       - OTARI_WEB_FETCH_ENABLED=${OTARI_WEB_FETCH_ENABLED:-}
       # Deprecated, with OTARI_WEB_SEARCH_ENGINES below: the SearXNG instance
       # the model searches when no search tool is its default, the bundled
-      # `searxng` profile container unless set. To move off them, add a
-      # `searxng` search tool to config.yml with api_base
+      # `searxng` container (the `web-search` profile) unless set. To move
+      # off them, add a `searxng` search tool to config.yml with api_base
       # http://searxng:8080 and an engines option, name it in
       # web_search_default_tool, then set OTARI_WEB_SEARCH_URL= to an empty
       # value in .env, which turns this default off. See

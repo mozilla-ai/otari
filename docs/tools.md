@@ -8,8 +8,10 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 
 Code execution needs a sandbox: a `sandbox_url` for the default `protocol`
 provider, or a hosted `sandbox_provider` such as `e2b`, which needs none. Search
-needs a search tool (see [Search tools](configuration.md#search-tools)), or the
-legacy `web_search_provider` with its key. Fetch runs in the gateway.
+needs a search tool (see [Search tools](configuration.md#search-tools)), a
+workspace's [organization search key](#organization-search-keys), or a legacy
+setting: `web_search_provider` with its key, or the deprecated `web_search_url`.
+Fetch runs in the gateway.
 One request may declare any of them together, and MCP servers beside them: see
 [Combining tools](#combining-tools).
 
@@ -996,9 +998,11 @@ For evaluation, the bundled SearXNG backend needs no key. Start it:
 docker compose --profile web-search up
 ```
 
-Docker Compose points the deprecated `web_search_url` at it;
+While `OTARI_WEB_SEARCH_URL` is unset, Docker Compose points the deprecated
+`web_search_url` at it. With the variable empty, declare a `searxng` search tool
+instead, as
 [The legacy SearXNG settings](configuration.md#the-legacy-searxng-settings)
-shows the search tool that replaces it. Then declare the tool on a request:
+shows. Then declare the tool on a request:
 
 ```json
 {

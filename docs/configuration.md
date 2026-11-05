@@ -1358,10 +1358,12 @@ as unset, with a warning at startup, or from the refresh that first finds it so.
 
 `web_search_url` and `web_search_engines` are deprecated, and a coming breaking
 release removes them. `web_search_url` is the SearXNG instance the in-loop tool
-searches when no search instance is its default and no `web_search_provider` is
-set, with the engines in `web_search_engines`, else `duckduckgo`, `mojeek`,
-`qwant` and `wikipedia`. A `searxng` instance without an `api_base` or an
-`engines` option of its own inherits them.
+searches when no search instance is its default and no `web_search_provider`
+with its key is set, with the engines in `web_search_engines`, else
+`duckduckgo`, `mojeek`, `qwant` and `wikipedia`. A `searxng` instance without an
+`api_base` of its own inherits `web_search_url`, and one without an `engines`
+option inherits `web_search_engines` when it is set, else searches its SearXNG
+instance's own defaults.
 
 That release converts a value stored from the dashboard when that is
 unambiguous. A stored `web_search_url` becomes a stored instance named
@@ -1385,7 +1387,7 @@ may already have migrated the database.
 
 Docker Compose sets `OTARI_WEB_SEARCH_URL` to the bundled SearXNG container
 unless the variable is set, even to an empty value. To move off it, declare the
-instance and make it the default:
+instance, with the engines `web_search_engines` names, else the four above:
 
 ```yaml
 search_tools:
@@ -1396,11 +1398,16 @@ search_tools:
 web_search_default_tool: local
 ```
 
-Then turn the compose default off in `.env`:
+Leave `web_search_default_tool` out when the in-loop tool searches on
+`web_search_provider`, so it keeps doing so. Then turn the compose default off in
+`.env`, and remove `web_search_engines` wherever it is set:
 
 ```bash
 OTARI_WEB_SEARCH_URL=
 ```
+
+A variable exported in the shell that runs Docker Compose wins over `.env`, so
+unset an exported `OTARI_WEB_SEARCH_URL` there too.
 
 ### The older in-loop backend
 
