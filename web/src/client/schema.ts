@@ -2186,6 +2186,11 @@ export interface paths {
          *     - Master key: the ``user`` field is required and names an existing user.
          *     - API key: usage and spend go to the key's own user. A ``user`` naming a
          *       different user is refused with 403, or ignored when mismatch rejection is off.
+         *
+         *     A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+         *     USD string) and `pricing_source`, as a chat completion does; a provider that
+         *     sends no `usage` gets one holding just those two fields. An unpriced
+         *     response carries neither.
          */
         post: operations["images-edit_image"];
         delete?: never;
@@ -2211,6 +2216,11 @@ export interface paths {
          *     - Master key + user field: Use specified user (must exist)
          *     - API key + user field: Use specified user (must exist)
          *     - API key without user field: Use the shared "default" user
+         *
+         *     A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+         *     USD string) and `pricing_source`, as a chat completion does; a provider that
+         *     sends no `usage` gets one holding just those two fields. An unpriced
+         *     response carries neither.
          */
         post: operations["images-create_image"];
         delete?: never;

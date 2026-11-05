@@ -25,6 +25,7 @@ from typing import Any, ClassVar
 
 from any_llm import LLMProvider
 from any_llm.types.completion import CreateEmbeddingResponse
+from any_llm.types.image import ImagesResponse
 from any_llm.types.rerank import RerankResponse as ProviderRerankResponse
 
 from gateway.core.config import GatewayConfig
@@ -36,7 +37,7 @@ from gateway.repositories.inference import InferenceRepositories
 from gateway.schemas.inference import CountryDatabaseStatus, EmbeddingResponse, RerankResponse
 from gateway.services.inference._country_database import CountryDatabaseStore, CountryLimitedProviders
 from gateway.services.inference._embeddings import embedding_provider_options
-from gateway.services.inference._passthrough_responses import embeddings_response, rerank_response
+from gateway.services.inference._passthrough_responses import embeddings_response, images_response, rerank_response
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -241,6 +242,16 @@ class InferenceService:
     ) -> EmbeddingResponse:
         """The embeddings response the gateway publishes for ``result``, in OpenAI's shape with the inline cost."""
         return embeddings_response(result, pricing=pricing, cost=cost)
+
+    @staticmethod
+    def images_response(
+        result: ImagesResponse,
+        *,
+        pricing: ResolvedPricing | None,
+        cost: Decimal | None,
+    ) -> dict[str, Any]:
+        """The images response the gateway publishes for ``result``: the provider's body with the inline cost."""
+        return images_response(result, pricing=pricing, cost=cost)
 
     @staticmethod
     def is_enabled(config: GatewayConfig) -> bool:
