@@ -1,8 +1,8 @@
 """One request combining the gateway's web search, web fetch, code execution sandbox and MCP servers.
 
 The code execution port is faked at the composition root and the MCP pool at the
-pipeline, while the web retrieval backend runs with only its search and its page
-fetch patched, so the real admission, backends, combined pool and tool loops run.
+pipeline, while the search runs on a ``fake`` search instance and the fetch with only
+its page read patched, so the real admission, backends, combined pool and tool loops run.
 The provider is scripted to call every declared tool in one round and answer in the next.
 """
 
@@ -68,13 +68,14 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
 )
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 from gateway.types.code_execution import ResultBlock
 
-from .conftest import MODEL_NAME
+from .conftest import MODEL_NAME, admitted_search_spy
 
 _MCP_TOOL = "lookup"
+# The hit carries its page text, so a search reads no page and every page read is a fetch call.
+_HITS = [{"url": "https://python.org", "title": "Python", "text": "3.14"}]
 _MCP_SERVER = {"name": "docs", "url": "http://127.0.0.1:9999/mcp"}
 _SEARCH = {"type": "otari_web_search"}
 _FETCH = {"type": "otari_web_fetch"}
@@ -140,11 +141,8 @@ class _Backends:
     port: _Port = field(default_factory=_Port)
     mcp_tools: tuple[str, ...] = (_MCP_TOOL,)
     mcp_calls: list[str] = field(default_factory=list)
-    searches: AsyncMock = field(
-        default_factory=lambda: AsyncMock(
-            return_value=[{"url": "https://python.org", "title": "Python", "content": "3.14"}]
-        )
-    )
+    # The searches the backend ran: the fixture replaces it with a spy on the real backend.
+    searches: AsyncMock = field(default_factory=AsyncMock)
     fetches: AsyncMock = field(default_factory=lambda: AsyncMock(return_value=_page()))
 
 
@@ -202,9 +200,14 @@ def _fake_mcp_pool(backends: _Backends) -> Callable[..., Any]:
 
 
 @pytest.fixture
-def backends(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig, tmp_path: Path) -> Iterator[_Backends]:
+def backends(
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+    tmp_path: Path,
+    serve_search_on_fake: Callable[..., None],
+) -> Iterator[_Backends]:
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://web-search.invalid")
+    serve_search_on_fake({"hits": _HITS})
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     # The local file store writes the sandbox's output files under the working directory.
     monkeypatch.chdir(tmp_path)
@@ -212,11 +215,10 @@ def backends(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig, tmp_pa
     with (
         patch("gateway.container.build_code_execution_port", new=lambda _config, **_kwargs: seen.port),
         patch("gateway.api.routes._pipeline.MCPClientPool", new=_fake_mcp_pool(seen)),
-        patch.object(WebRetrievalBackend, "_search", new=seen.searches),
+        admitted_search_spy() as searches,
         patch.object(WebFetchService, "fetch", new=seen.fetches),
-        # A search reads each hit's page through the same service; these hits keep their snippets.
-        patch.object(WebFetchService, "fetch_for_search", new=AsyncMock(side_effect=OSError)),
     ):
+        seen.searches = searches
         yield seen
 
 

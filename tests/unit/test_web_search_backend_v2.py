@@ -784,6 +784,8 @@ def test_a_request_option_the_provider_does_not_take_is_refused_and_a_workspace_
 
 def test_the_legacy_settings_resolve_to_no_in_loop_search_on_the_libraries() -> None:
     assert resolve_in_loop_search(GatewayConfig(web_search_url="http://searxng:8080"), None) is None
+    legacy_pair = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
+    assert resolve_in_loop_search(legacy_pair, None) is None
     assert resolve_in_loop_search(GatewayConfig(), None) is None
 
 

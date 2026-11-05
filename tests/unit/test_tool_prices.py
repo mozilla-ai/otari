@@ -220,6 +220,12 @@ def test_a_search_on_the_legacy_settings_is_checked_on_its_tools_own_row() -> No
     assert configured_tools_to_price(config) == [_SEARCH_ON_ITS_OWN_ROW]
 
 
+def test_a_search_on_the_legacy_provider_pair_is_checked_on_its_tools_own_row() -> None:
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
+
+    assert configured_tools_to_price(config) == [_SEARCH_ON_ITS_OWN_ROW]
+
+
 def test_a_tool_the_deployment_cannot_run_is_not_checked() -> None:
     assert configured_tools_to_price(GatewayConfig(web_search_default_tool="none")) == []
 
