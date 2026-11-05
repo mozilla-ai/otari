@@ -140,8 +140,8 @@ def _priced_body(outcome: PassthroughOutcome[ImagesResponse]) -> dict[str, Any]:
         return outcome.result.model_dump()
     try:
         body = InferenceService.images_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
-    except Exception as exc:
-        logger.warning("Failed to attach inline cost: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - the image is served and paid for; never fail it over the cost
+        logger.warning("Failed to attach inline cost: %s", exc, exc_info=True)
         record_inline_cost_settlement("unattached")
         return outcome.result.model_dump()
     record_inline_cost_settlement("attached")

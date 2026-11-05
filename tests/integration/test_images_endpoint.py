@@ -251,6 +251,35 @@ def test_images_without_pricing_carry_no_inline_cost(
     assert resp.json()["usage"] is None
 
 
+def test_images_still_served_when_the_inline_cost_cannot_be_attached(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """A failure attaching the cost returns the provider's body and counts the cost as unattached."""
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": "openai:dall-e-3", "input_price_per_million": 0.04, "output_price_per_million": 0.0},
+        headers=master_key_header,
+    )
+    with (
+        patch(
+            "gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=_mock_images_response()
+        ),
+        patch("gateway.api.routes.images.InferenceService.images_response", side_effect=ValueError("bad cost")),
+        patch("gateway.api.routes.images.record_inline_cost_settlement") as settlement,
+    ):
+        resp = client.post(
+            f"{API_ROOT}/images/generations",
+            json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert resp.json()["usage"] is None
+    assert len(resp.json()["data"]) == 1
+    settlement.assert_called_once_with("unattached")
+
+
 def test_images_billing_meters_tracked_with_pricing(
     client: TestClient,
     master_key_header: dict[str, str],
