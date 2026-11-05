@@ -90,7 +90,11 @@ budget already at its cap is refused as `has exceeded budget limit`.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests
-already in flight when it runs out.
+already in flight when it runs out. What each of them holds in dollars is what
+it can measure before the call: image generation the images asked for at the
+`size` asked for, speech the characters of its input, moderations one request,
+and transcription nothing, because the audio's length is not read here
+([Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit)).
 
 ### Per-minute limits
 
