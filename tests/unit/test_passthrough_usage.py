@@ -5,6 +5,7 @@ from any_llm.types.audio import Transcription
 from any_llm.types.completion import CreateEmbeddingResponse, Embedding, Usage
 from any_llm.types.image import Image, ImagesResponse
 from any_llm.types.rerank import RerankMeta, RerankResponse, RerankResult, RerankUsage
+from any_llm.types.video import VideoJob
 from openai.types.audio.transcription import UsageDuration, UsageTokens
 from openai.types.images_response import Usage as ImageUsage
 from openai.types.images_response import UsageInputTokensDetails
@@ -17,6 +18,7 @@ from gateway.services.inference import (
     one_request_usage,
     rerank_usage,
     transcription_usage,
+    video_usage,
 )
 
 
@@ -115,3 +117,9 @@ def test_speech_and_moderations_report_one_request() -> None:
         input_tokens=0, output_tokens=0, total_tokens=0, units={"requests": 1}
     )
     assert moderation_usage(object()) == ReportedUsage(output_tokens=0, units={"requests": 1})
+
+
+def test_a_video_job_reports_nothing_billable_when_it_starts() -> None:
+    job = VideoJob(id="video_1", model="veo-3.0-generate-001", status="queued")
+
+    assert video_usage(job) == ReportedUsage(input_tokens=0, output_tokens=0, total_tokens=0)

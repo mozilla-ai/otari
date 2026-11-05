@@ -143,6 +143,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "rerank.router": _DATA_PLANE,
     "responses.router": _DATA_PLANE,
     "search.router": _DATA_PLANE,
+    "videos.router": _DATA_PLANE,
     "auth_oauth.router": _PUBLIC_AUTH,
     "auth_password_reset.router": _PUBLIC_AUTH,
     "auth_session.router": _PUBLIC_AUTH,

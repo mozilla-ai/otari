@@ -125,7 +125,6 @@ from gateway.services.inference import (
     decision_body,
     describe_port_error,
     is_provider_credential_rejection,
-    is_upstream_request_fault,
     reported_charge,
     request_decision,
     resolve_decision_provider,
@@ -170,19 +169,25 @@ ResultT = TypeVar("ResultT")
 
 
 def provider_call_failure(exc: Exception) -> HTTPException:
-    """The answer to a failed provider call.
+    """The answer to a failed provider call on a job's lifecycle.
 
-    A rejected credential is a 424, and a 403 that rejects the request itself the
-    caller's 400 with the provider's sentence, as on the completion routes.
-    Anything else is a 502.
+    A rejected credential is a 424. Any failure the classifier can name (a
+    rejected request, a rate limit, a timeout) answers with its mapped status
+    and detail, as on the completion routes, so a caller corrects a request or
+    backs off rather than reading a 502. Anything else is a 502.
     """
-    if is_upstream_request_fault(exc) and (mapping := classify_provider_error(exc)) is not None:
-        return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
     if is_provider_credential_rejection(exc):
         return HTTPException(
             status_code=status.HTTP_424_FAILED_DEPENDENCY,
             detail=PROVIDER_CREDENTIALS_DETAIL,
             headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
+        )
+    mapping = classify_provider_error(exc)
+    if mapping is not None:
+        return HTTPException(
+            status_code=mapping.status_code,
+            detail=mapping.detail,
+            headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
         )
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM provider error")
 
@@ -315,10 +320,16 @@ class PassthroughOutcome(Generic[ResultT]):
     """The resolved selector the call was dispatched against."""
     headers: dict[str, str]
     """The request id and rate-limit headers, for routes that build their own response object."""
+    user_id: str
+    """The user the request was billed to, whose rows it wrote."""
+    workspace_id: uuid.UUID
+    """The workspace its rows were written in."""
     pricing: ResolvedPricing | None = None
     """The rate found for the request and where it came from, or ``None`` when there is none."""
     cost: Decimal | None = None
     """The cost written to this request's usage row, or ``None`` when it was not priced."""
+    deployment_charge: DeploymentCharge | None = None
+    """How a deployment-paid request is charged, for work the route settles after this call, or ``None``."""
 
 
 async def run_passthrough(
@@ -340,6 +351,7 @@ async def run_passthrough(
     billing: PassthroughBilling,
     map_provider_error: Callable[[Exception], HTTPException | None] | None = None,
     refuse_model: Callable[[ResolvedProvider], HTTPException | None] | None = None,
+    refuse_unpriced: Callable[[ModelPricing | None], HTTPException | None] | None = None,
     request_params: Collection[str] = (),
     reserve_before_resolve: bool = False,
     relabel: bool = True,
@@ -395,6 +407,11 @@ async def run_passthrough(
             to, checked after every gate and before the provider is called.
             The refusal is recorded and the reservation refunded, as for a
             gate's own.
+        refuse_unpriced: Route-specific refusal of the rate found for the
+            model, checked after ``refuse_model`` with the rate a hosted
+            dispatch settles at. For an endpoint priced from the rates block
+            rather than through a meter, which the ``require_pricing`` gate
+            cannot check.
         request_params: The names of the request fields the caller set. A
             provider SDK refusing one of them as an unexpected keyword answers
             400 naming it; any other unexpected keyword stays a 502.
@@ -829,6 +846,11 @@ async def run_passthrough(
         raise await _refuse(
             reservation, resolved, refused_model.status_code, str(refused_model.detail), **(refused_model.headers or {})
         )
+    refused_rate = refuse_unpriced(pricing) if refuse_unpriced is not None else None
+    if refused_rate is not None:
+        raise await _refuse(
+            reservation, resolved, refused_rate.status_code, str(refused_rate.detail), **(refused_rate.headers or {})
+        )
 
     # Already resolved above (needed there for organization-scoped provider
     # credentials); reused here rather than re-derived, since it is fixed for
@@ -918,7 +940,7 @@ async def run_passthrough(
                 cost,
                 model=resolved.model,
                 description=f"{resolved.instance}:{resolved.model}",
-                expects_cost=True,
+                expects_cost=not billing.bills_on_completion,
                 savepoint=db.begin_nested,
             )
         record_attempt(
@@ -1016,8 +1038,11 @@ async def run_passthrough(
         result=result,
         resolved=resolved,
         headers=headers,
+        user_id=user_id,
+        workspace_id=workspace_id,
         pricing=found_pricing,
         cost=cost,
+        deployment_charge=deployment_charge,
     )
 
 

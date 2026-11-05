@@ -56,6 +56,7 @@ from gateway.services.inference._passthrough_usage import (
     ONE_REQUEST_BILLING,
     RERANK_BILLING,
     TRANSCRIPTION_BILLING,
+    VIDEO_BILLING,
     PassthroughBilling,
     ReportedUsage,
     embedding_usage,
@@ -64,6 +65,7 @@ from gateway.services.inference._passthrough_usage import (
     one_request_usage,
     rerank_usage,
     transcription_usage,
+    video_usage,
 )
 from gateway.services.inference._responses_bridge import (
     REASONING_ITEM_ID_PREFIX,
@@ -107,10 +109,11 @@ from gateway.services.inference._upstream_user import (
     upstream_user_identifier,
     with_upstream_user,
 )
-from gateway.services.inference._videos import VideoJobService
+from gateway.services.inference._videos import CompletedVideoUsage, VideoJobService, VideoRateLookup
 
 __all__ = [
     "CONVERSATION_CACHE_KEY_FIELD",
+    "CompletedVideoUsage",
     "admit_deployment_paid",
     "describe_port_error",
     "EMBEDDINGS_BILLING",
@@ -122,6 +125,7 @@ __all__ = [
     "UPSTREAM_USER_FIELD",
     "RERANK_BILLING",
     "TRANSCRIPTION_BILLING",
+    "VIDEO_BILLING",
     "PassthroughBilling",
     "Admission",
     "BlockedCaller",
@@ -175,6 +179,7 @@ __all__ = [
     "upstream_user_identifier",
     "usage_unreported",
     "transcription_usage",
+    "video_usage",
     "uses_chat_completions_bridge",
     "with_responses_instance",
     "with_upstream_user",
@@ -198,4 +203,5 @@ __all__ = [
     "upstream_exception_shape",
     "upstream_retry_after",
     "VideoJobService",
+    "VideoRateLookup",
 ]

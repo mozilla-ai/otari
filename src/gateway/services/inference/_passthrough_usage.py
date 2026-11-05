@@ -8,6 +8,7 @@ from any_llm.types.audio import Transcription
 from any_llm.types.completion import CreateEmbeddingResponse
 from any_llm.types.image import ImagesResponse
 from any_llm.types.rerank import RerankResponse
+from any_llm.types.video import VideoJob
 
 from gateway.services.pricing import billed_search_units
 
@@ -75,6 +76,11 @@ def moderation_usage(_result: object) -> ReportedUsage:
     return ReportedUsage(output_tokens=0, units={"requests": 1})
 
 
+def video_usage(_job: VideoJob) -> ReportedUsage:
+    """No tokens and no count: a video is billed by its length when it completes, not when it starts."""
+    return ReportedUsage(input_tokens=0, output_tokens=0, total_tokens=0)
+
+
 @dataclass(frozen=True)
 class PassthroughBilling:
     """How a pass-through endpoint is billed: what its result reports, and what that means unpriced.
@@ -83,12 +89,15 @@ class PassthroughBilling:
     is called, which is what the ``require_pricing`` gate checks a rate against.
     ``unpriced_is_free`` settles an attempt no rate prices at $0 rather than
     leaving it unpriced, the documented convention of the per-request endpoints.
+    ``bills_on_completion`` says the result is a job priced when it completes,
+    so a start that prices nothing is not a request served free.
     """
 
     report: Callable[[Any], ReportedUsage]
     meter: str | None
     reports_tokens: bool
     unpriced_is_free: bool = False
+    bills_on_completion: bool = False
 
 
 EMBEDDINGS_BILLING = PassthroughBilling(report=embedding_usage, meter=None, reports_tokens=True)
@@ -103,3 +112,4 @@ ONE_REQUEST_BILLING = PassthroughBilling(
 MODERATION_BILLING = PassthroughBilling(
     report=moderation_usage, meter="requests", reports_tokens=False, unpriced_is_free=True
 )
+VIDEO_BILLING = PassthroughBilling(report=video_usage, meter=None, reports_tokens=False, bills_on_completion=True)

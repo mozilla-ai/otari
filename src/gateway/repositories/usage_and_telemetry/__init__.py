@@ -7,6 +7,15 @@ from gateway.repositories.usage_and_telemetry.usage_log_repository import (
     UsageLogRepository,
     UsageScope,
     new_usage_row,
+    settled_job_row,
 )
 
-__all__ = ["RequestRows", "ServedTraffic", "UsageFilters", "UsageLogRepository", "UsageScope", "new_usage_row"]
+__all__ = [
+    "RequestRows",
+    "ServedTraffic",
+    "UsageFilters",
+    "UsageLogRepository",
+    "UsageScope",
+    "new_usage_row",
+    "settled_job_row",
+]
