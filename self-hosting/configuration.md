@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/6d39709590f70c27ab3273a6b1f9b2214c635662/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/6411148cfd202199e58b64009b6a522b7f1359ef/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -796,7 +796,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/6d39709590f70c27ab3273a6b1f9b2214c635662/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/6411148cfd202199e58b64009b6a522b7f1359ef/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1378,13 +1378,18 @@ deleted. The release refuses to start:
 - while an instance inherits a value it cannot copy: a stored instance one from
   the configuration file or the environment, or an instance in the configuration
   file a stored one;
-- when a stored `web_search_url` cannot be converted: another tool named
-  `searxng`, with another address or engines, exists, or the new instance would
-  move the unnamed calls of `POST /api/v1/search` off the instance that serves
-  them.
+- when a stored `web_search_url` cannot be converted: another tool holds the
+  name `searxng` (a fetch tool, a stored tool otari cannot read, or a search tool
+  with another address or engines), or the new instance would move the unnamed
+  calls of `POST /api/v1/search` off the instance that serves them.
 
 Fix the stored values through the dashboard before upgrading: a refused start
 may already have migrated the database.
+
+Each start logs what that release does with the two settings in effect and with
+the `searxng` instances that inherit them, including deleting stored engines that
+neither a stored URL nor a stored instance uses. The warnings name settings and
+instances, never a value.
 
 Docker Compose sets `OTARI_WEB_SEARCH_URL` to the bundled SearXNG container
 unless the variable is set, even to an empty value. To move off it, declare the
@@ -1404,6 +1409,9 @@ The tool is priced on its own, not under `otari:web_search`: with
 `require_pricing`, the default, a request that declares web search on a key that
 counts toward budgets gets a 402 until the tool has a price, so set
 `price_per_call`, or price the tool through `/api/v1/pricing` or the dashboard.
+Each start writes `price_per_call` again, so keep the lasting rate there, or
+leave it out to keep one set through the API (see
+[Pricing a gateway-run tool](https://docs.otari.ai/reference/gateway/tools#pricing-a-gateway-run-tool)).
 
 Leave `web_search_default_tool` out when the in-loop tool searches on
 `web_search_provider`, so it keeps doing so. Then turn the compose default off in
@@ -1655,7 +1663,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/6d39709590f70c27ab3273a6b1f9b2214c635662/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/6411148cfd202199e58b64009b6a522b7f1359ef/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

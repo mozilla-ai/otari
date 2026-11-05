@@ -57,5 +57,5 @@ belong to its own user.
 A dashboard session authorizes the management API, not inference; see
 [Dashboard sessions and identity](https://docs.otari.ai/self-hosting/sign-in#dashboard-sessions-and-identity).
 
-The generated [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/6d39709590f70c27ab3273a6b1f9b2214c635662/docs/public/openapi.json) is the source of
+The generated [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/6411148cfd202199e58b64009b6a522b7f1359ef/docs/public/openapi.json) is the source of
 truth for endpoint schemas.
