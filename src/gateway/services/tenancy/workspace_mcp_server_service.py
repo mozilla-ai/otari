@@ -53,6 +53,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerCheckBusyError,
     WorkspaceMcpServerGrantNotFoundError,
     WorkspaceMcpServerGrantSubjectError,
+    WorkspaceMcpServerKeyNotFoundError,
     WorkspaceMcpServerLimitReachedError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
@@ -1095,7 +1096,7 @@ class WorkspaceMcpServerService:
         """Whether a key of the workspace may call ``tool`` on a server, and which rule decides.
 
         Raises:
-            WorkspaceMcpServerGrantSubjectError: the key is not of this workspace.
+            WorkspaceMcpServerKeyNotFoundError: the key is not of this workspace.
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         server = await self._get_or_404(resolved_workspace_id, server_id)
@@ -1119,7 +1120,7 @@ class WorkspaceMcpServerService:
         """Which rule decides a key's access to a server: its grant, its owner's, or ``everyone_tools``."""
         found = await self._key_service().summaries_in_workspace(workspace_id, [api_key_id])
         if not found:
-            raise WorkspaceMcpServerGrantSubjectError(f"Key '{api_key_id}' is not a key of this workspace")
+            raise WorkspaceMcpServerKeyNotFoundError(api_key_id)
         return _decide(found[0], server, await WorkspaceMcpServerGrantRepository(self.db).for_server(server.id))
 
     async def key_access(
@@ -1128,12 +1129,12 @@ class WorkspaceMcpServerService:
         """What one key of the workspace reaches on each of its stored servers, oldest server first.
 
         Raises:
-            WorkspaceMcpServerGrantSubjectError: the key is not of this workspace.
+            WorkspaceMcpServerKeyNotFoundError: the key is not of this workspace.
         """
         resolved_workspace_id = await self._require_management(user, workspace_id)
         found = await self._key_service().summaries_in_workspace(resolved_workspace_id, [api_key_id])
         if not found:
-            raise WorkspaceMcpServerGrantSubjectError(f"Key '{api_key_id}' is not a key of this workspace")
+            raise WorkspaceMcpServerKeyNotFoundError(api_key_id)
         key = found[0]
         servers = (
             (

@@ -38,6 +38,13 @@ class WorkspaceMcpServerGrantNotFoundError(TenancyNotFoundError):
         super().__init__(f"MCP server grant {grant_id} not found")
 
 
+class WorkspaceMcpServerKeyNotFoundError(TenancyNotFoundError):
+    """A key looked up for its access to a workspace's servers is not a key of that workspace."""
+
+    def __init__(self, api_key_id: str):
+        super().__init__(f"Key '{api_key_id}' is not a key of this workspace")
+
+
 class WorkspaceMcpServerGrantSubjectError(TenancyValidationError):
     """A grant names a key or user outside the server's workspace, or would pass a server's grant cap."""
 

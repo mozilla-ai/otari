@@ -7078,7 +7078,7 @@ export interface paths {
          *
          *     For each server, oldest first: the rule that decides (the key's own grant, its owner's, or the
          *     server's `everyone_tools`) and that rule's tool patterns, beside the server's own `allowed_tools`
-         *     ceiling. A key of another workspace is refused with a 400.
+         *     ceiling. A key of another workspace is answered with a 404.
          */
         get: operations["mcp-servers-get_workspace_mcp_key_access"];
         put?: never;
@@ -7164,7 +7164,7 @@ export interface paths {
          *
          *     Applies the same order a request does: the server must be enabled and its `allowed_tools`
          *     must include the tool, then the key's own grant decides, else its owner's, else the
-         *     server's `everyone_tools`. A key of another workspace is refused with a 400.
+         *     server's `everyone_tools`. A key of another workspace is answered with a 404.
          */
         get: operations["mcp-servers-check_workspace_mcp_server_access"];
         put?: never;

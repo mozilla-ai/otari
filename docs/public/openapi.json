@@ -52988,7 +52988,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access": {
       "get": {
-        "description": "What one key reaches on each of the workspace's MCP servers.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nFor each server, oldest first: the rule that decides (the key's own grant, its owner's, or the\nserver's `everyone_tools`) and that rule's tool patterns, beside the server's own `allowed_tools`\nceiling. A key of another workspace is refused with a 400.",
+        "description": "What one key reaches on each of the workspace's MCP servers.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nFor each server, oldest first: the rule that decides (the key's own grant, its owner's, or the\nserver's `everyone_tools`) and that rule's tool patterns, beside the server's own `allowed_tools`\nceiling. A key of another workspace is answered with a 404.",
         "operationId": "mcp-servers-get_workspace_mcp_key_access",
         "parameters": [
           {
@@ -53307,7 +53307,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/access/check": {
       "get": {
-        "description": "Whether a key may call a tool on a server, and which rule decides.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nApplies the same order a request does: the server must be enabled and its `allowed_tools`\nmust include the tool, then the key's own grant decides, else its owner's, else the\nserver's `everyone_tools`. A key of another workspace is refused with a 400.",
+        "description": "Whether a key may call a tool on a server, and which rule decides.\n\nOrganization owners/admins or this workspace's owners/admins.\n\nApplies the same order a request does: the server must be enabled and its `allowed_tools`\nmust include the tool, then the key's own grant decides, else its owner's, else the\nserver's `everyone_tools`. A key of another workspace is answered with a 404.",
         "operationId": "mcp-servers-check_workspace_mcp_server_access",
         "parameters": [
           {

@@ -627,7 +627,7 @@ def test_test_access_says_which_rule_decides(
         params={"api_key_id": "no-such-key", "tool": "x"},
         headers=master_key_header,
     )
-    assert unknown.status_code == 400
+    assert unknown.status_code == 404
 
 
 def test_a_keys_summary_covers_every_server_of_its_workspace(
@@ -653,7 +653,7 @@ def test_a_keys_summary_covers_every_server_of_its_workspace(
         ["search"],
         ["search"],
     )
-    assert client.get(f"{_servers(workspace)}/keys/no-such-key/access", headers=master_key_header).status_code == 400
+    assert client.get(f"{_servers(workspace)}/keys/no-such-key/access", headers=master_key_header).status_code == 404
 
 
 def test_a_member_without_a_key_can_be_given_a_rule_and_an_outsider_cannot(

@@ -116,7 +116,7 @@ async def get_workspace_mcp_key_access(
 
     For each server, oldest first: the rule that decides (the key's own grant, its owner's, or the
     server's `everyone_tools`) and that rule's tool patterns, beside the server's own `allowed_tools`
-    ceiling. A key of another workspace is refused with a 400.
+    ceiling. A key of another workspace is answered with a 404.
     """
     return await service.key_access(user=current_identity, workspace_id=workspace_id, api_key_id=api_key_id)
 
@@ -218,7 +218,7 @@ async def check_workspace_mcp_server_access(
 
     Applies the same order a request does: the server must be enabled and its `allowed_tools`
     must include the tool, then the key's own grant decides, else its owner's, else the
-    server's `everyone_tools`. A key of another workspace is refused with a 400.
+    server's `everyone_tools`. A key of another workspace is answered with a 404.
     """
     return await service.check_access(
         user=current_identity, workspace_id=workspace_id, server_id=server_id, api_key_id=api_key_id, tool=tool
