@@ -222,6 +222,7 @@ def test_a_search_on_the_legacy_provider_pair_is_checked_on_its_tools_own_row() 
 
 def test_a_tool_the_deployment_cannot_run_is_not_checked() -> None:
     assert configured_tools_to_price(GatewayConfig(web_search_default_tool="none")) == []
+    assert configured_tools_to_price(GatewayConfig(search_tools={"local": {"provider": "searxng"}})) == []
 
 
 def test_a_search_on_the_legacy_url_is_checked_on_otari_web_search_and_its_pages_on_the_fetch_tools_row() -> None:

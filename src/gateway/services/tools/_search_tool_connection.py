@@ -152,7 +152,8 @@ async def _test_inheriting_search(
     if resolved is None:
         # Unreachable: a named instance resolves or raises.
         raise SearchToolRefusedError(f"Search tool '{name}' is not configured correctly.")
-    inherited = replace(instance, api_base=resolved.api_base, options=resolved.options)
+    count = {} if resolved.max_results is None else {"max_results": resolved.max_results}
+    inherited = replace(instance, api_base=resolved.api_base, options={**resolved.options, **count})
     return await _test_with_library(inherited, query=query, url=None, client=client)
 
 

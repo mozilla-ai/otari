@@ -1058,6 +1058,8 @@ def test_a_searxng_instance_is_tested_through_its_adapter(
         "characters": None,
     }
     assert str(requests[0].url).startswith("http://searxng:8080/search")
+    capped = {**searxng, "options": {"max_results": 1}}
+    assert _test(client, master_key_header, query="otari", **capped).json()["hits"] == 1
     assert _test(client, master_key_header, query="broken", **searxng).json()["error"] == "http_error"
     assert _test(client, master_key_header, query="slow", **searxng).json()["error"] == "timeout"
     # A port that does not parse passes the shape check, and fails the call, not the route.

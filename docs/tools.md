@@ -282,8 +282,7 @@ cannot be read is neither billed nor counted. Pages read on an
 `org:<provider>` and priced under `otari:web_fetch`. A search the older
 backend runs (`web_search_provider` with its key, or a Tavily or Brave
 organization key) reads its pages on the built-in fetcher and records no fetch, until that
-backend is removed. A `web_search_url` search runs on any-search's SearXNG
-adapter, so its pages are fetches like any other search's. With `require_pricing` on, a search whose pages would be
+backend is removed. With `require_pricing` on, a search whose pages would be
 read through a fetch instance with no price is refused with `402` before it
 runs, the detail naming that instance's row; a search the older backend runs
 is not, since it records no fetch. `web_search_extract: false` turns the
