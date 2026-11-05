@@ -139,6 +139,7 @@ from gateway.core.error_codes import (
     PROVIDER_NOT_CONFIGURED,
     PROVIDER_STREAM_INTERRUPTED,
     UNSUPPORTED_CONTENT,
+    UNSUPPORTED_PARAMETER,
     UPSTREAM_RATE_LIMITED,
     WRONG_MODEL_TYPE,
     error_code_of,
@@ -229,7 +230,7 @@ from gateway.services.budgets import (
     reserve_budget,
     settle_abandoned_stream,
 )
-from gateway.services.catalog import not_chat_detail, organization_offerings
+from gateway.services.catalog import metadata_entry, not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
     ContainerLease,
     SandboxContainerRegistry,
@@ -577,6 +578,14 @@ def _is_unsupported_feature_error(exc: BaseException) -> bool:
     return any(isinstance(candidate, unsupported_types) for candidate in upstream_exception_chain(exc))
 
 
+def unsupported_parameter_name(exc: BaseException) -> str | None:
+    """The parameter any-llm said the provider cannot express, or ``None`` when it named none."""
+    for candidate in upstream_exception_chain(exc):
+        if isinstance(candidate, UnsupportedParameterError):
+            return candidate.parameter_name
+    return None
+
+
 def _unsupported_feature_detail(exc: BaseException) -> str:
     """Return one actionable reason for a locally rejected request feature."""
     for candidate in upstream_exception_chain(exc):
@@ -897,6 +906,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
     if status_code == status.HTTP_400_BAD_REQUEST and _is_image_input_rejection(exc):
         return error_headers(UNSUPPORTED_CONTENT)
+    if status_code == status.HTTP_400_BAD_REQUEST and unsupported_parameter_name(exc) is not None:
+        return error_headers(UNSUPPORTED_PARAMETER)
     missing = missing_credential(exc)
     if missing is not None and status_code == missing.status_code:
         return error_headers(missing.code)
@@ -6262,9 +6273,32 @@ def _failover_kwargs(
         fields = with_request_fields(config, attempt.instance, fields, ctx.request_extras)
         call_kwargs = with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
         refuse_container_on_deployment_credential(adapter, call_kwargs, deployment_paid=attempt.deployment_paid)
-        return call_kwargs
+        return _without_unused_reasoning_effort(attempt, call_kwargs)
 
     return _build
+
+
+def _without_unused_reasoning_effort(attempt: Attempt, call_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Leave ``reasoning_effort`` off a fallback candidate that models.dev says does not reason.
+
+    The caller of a routing policy did not pick the candidate, and the effort is
+    only a hint, so a model with nothing to tune is sent the request without it
+    rather than counted as failed for it. A model models.dev does not describe
+    is sent the field as asked. The model is looked up under the provider it is
+    dispatched to, because an instance's name (a hosted provider's, an owned
+    endpoint's) need not name one.
+    """
+    if call_kwargs.get("reasoning_effort") is None:
+        return call_kwargs
+    entry = metadata_entry(cached_models_dev_catalog(), attempt.provider.value, attempt.model)
+    if entry is None or entry.reasoning:
+        return call_kwargs
+    logger.debug(
+        "Dropped reasoning_effort for a model that does not reason instance=%s model=%s",
+        attempt.instance,
+        attempt.model,
+    )
+    return {key: value for key, value in call_kwargs.items() if key != "reasoning_effort"}
 
 
 def _model_admission(ctx: RequestContext) -> AdmitAttempt | None:

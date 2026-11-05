@@ -30,6 +30,7 @@ from gateway.core.error_codes import (
     CONTEXT_LENGTH_EXCEEDED,
     PROVIDER_CREDENTIAL_REJECTED,
     UNSUPPORTED_CONTENT,
+    UNSUPPORTED_PARAMETER,
     error_code_of,
     error_headers,
 )
@@ -104,6 +105,11 @@ def no_attempt_accepts_images_detail(tried: int) -> str:
     return f"None of the models tried accepts image content ({tried} attempts)."
 
 
+def no_attempt_accepts_parameters_detail(parameters: Sequence[str], tried: int) -> str:
+    """400 detail for a request carrying a parameter that no attempt's provider can express."""
+    return f"None of the models tried accepts {', '.join(parameters)} ({tried} attempts)."
+
+
 def no_attempt_served_detail(tried: int) -> str:
     """502 detail for a request no attempt could serve, because none of them knew the model."""
     return f"No model could serve the request ({tried} attempts)."
@@ -152,6 +158,15 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=no_attempt_accepts_images_detail(len(errors)),
             headers=error_headers(UNSUPPORTED_CONTENT),
+        )
+    if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_PARAMETER}:
+        from gateway.api.routes._pipeline import unsupported_parameter_name
+
+        named = {name for name in map(unsupported_parameter_name, errors) if name is not None}
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=no_attempt_accepts_parameters_detail(sorted(named), len(errors)),
+            headers=error_headers(UNSUPPORTED_PARAMETER),
         )
     # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
     # The status cannot tell them apart, so such a plan blames the request.
