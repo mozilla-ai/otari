@@ -225,9 +225,11 @@ read-only.
   so renaming a server keeps them, and deleting the server, the key or the user
   deletes them.
 - **Servers named in a request.** `mcp_servers` in a completion request names a server
-  by URL, which no ACL covers. A workspace allows it by default; turning off
-  `request_mcp_servers_allowed` with `PATCH /api/v1/workspaces/{workspace_id}` refuses
-  such a request with a `400`, so that a workspace's ACLs cannot be stepped around.
+  by URL, which no ACL covers, so a workspace refuses such a request with a `400`
+  unless `request_mcp_servers_allowed` is on, and a new workspace starts with it off,
+  so that its ACLs cannot be stepped around. Turn it on with
+  `PATCH /api/v1/workspaces/{workspace_id}`. A workspace that existed before the ACLs
+  did, which includes the default workspace an install migrates into, keeps it on.
   The switch covers a provider's own remote MCP too: a Responses tool of
   `type: "mcp"`, or a Gemini tool carrying `mcp_servers` (`mcpServers`), asks the
   provider to dial a server, so it is refused the same way. A Gemini field that

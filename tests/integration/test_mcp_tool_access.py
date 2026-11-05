@@ -982,6 +982,18 @@ def test_a_workspace_can_refuse_servers_a_request_names_itself(
     assert "does not let a request name MCP servers" in refused.text
 
 
+def test_a_new_workspace_refuses_servers_a_request_names_until_turned_on(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, api_key_obj: dict[str, Any]
+) -> None:
+    """The migration kept the workspaces it found on; one created after it starts off."""
+    created = client.post(f"{API_ROOT}/workspaces", json={"name": "Locked"}, headers=master_key_header)
+    existing = client.get(f"{API_ROOT}/workspaces/{_workspace_id(test_db, api_key_obj)}", headers=master_key_header)
+
+    assert created.status_code in (200, 201), created.text
+    assert created.json()["request_mcp_servers_allowed"] is False
+    assert existing.json()["request_mcp_servers_allowed"] is True
+
+
 def test_the_switch_also_refuses_an_mcp_server_the_provider_would_dial(
     client: TestClient,
     master_key_header: dict[str, str],

@@ -1,9 +1,10 @@
 """Add access lists to stored MCP servers.
 
-``everyone_tools`` on workspace_mcp_servers defaults to every tool, and
-``request_mcp_servers_allowed`` on workspace defaults true, so every stored
-server stays reachable by every key of its workspace, and a request may still
-name its own servers, as before. ``workspace_mcp_server_grants`` starts empty,
+``everyone_tools`` on workspace_mcp_servers defaults to every tool, so every
+stored server stays reachable by every key of its workspace.
+``request_mcp_servers_allowed`` on workspace is backfilled true, so a request
+in an existing workspace may still name its own servers, as before, while a
+workspace created later starts with it off. ``workspace_mcp_server_grants`` starts empty,
 and so does ``read_tools``, so an ``@read`` rule allows nothing until a
 manager labels a server's read tools.
 
@@ -31,8 +32,10 @@ def upgrade() -> None:
     op.add_column("workspace_mcp_servers", sa.Column("read_tools", sa.JSON(), nullable=False, server_default="[]"))
     op.add_column(
         "workspace",
-        sa.Column("request_mcp_servers_allowed", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("request_mcp_servers_allowed", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
+    workspace = sa.table("workspace", sa.column("request_mcp_servers_allowed", sa.Boolean()))
+    op.execute(workspace.update().values(request_mcp_servers_allowed=True))
     op.create_table(
         "workspace_mcp_server_grants",
         sa.Column("id", sa.Uuid(), nullable=False),

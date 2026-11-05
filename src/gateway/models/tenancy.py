@@ -971,7 +971,7 @@ class WorkspacePublic(WorkspaceBase):
         ),
     )
     request_mcp_servers_allowed: bool = Field(
-        default=True, description="Whether this workspace's keys may name MCP servers by URL in a request."
+        default=False, description="Whether this workspace's keys may name MCP servers by URL in a request."
     )
     created_at: datetime
     updated_at: datetime | None = None
@@ -1010,9 +1010,10 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     trace_content_enabled: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
     # A workspace may narrow the deployment's ``trace_content_tool_output``, never widen it, so on by default.
     trace_content_tool_output: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
-    # On as before stored-server access lists existed: a workspace that locks its
-    # stored servers down turns it off, or a key could name any server by URL.
-    request_mcp_servers_allowed: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
+    # Off for a new workspace, so its stored servers' access lists cannot be stepped
+    # around by naming a server by URL. The migration that added it kept existing
+    # workspaces on, as they were before the access lists.
+    request_mcp_servers_allowed: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
 
 
 class WorkspaceMemberBase(SQLModel):

@@ -27787,7 +27787,7 @@
             "type": "string"
           },
           "request_mcp_servers_allowed": {
-            "default": true,
+            "default": false,
             "description": "Whether this workspace's keys may name MCP servers by URL in a request.",
             "title": "Request Mcp Servers Allowed",
             "type": "boolean"

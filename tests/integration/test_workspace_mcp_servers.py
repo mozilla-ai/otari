@@ -1600,22 +1600,22 @@ async def test_the_master_key_and_a_session_reach_every_stored_server(async_db: 
     assert [(config.name, config.caller_tool_patterns) for config in configs] == [("shared", None), ("private", None)]
 
 
-async def test_a_declared_server_is_refused_where_the_workspace_turned_them_off(async_db: AsyncSession) -> None:
+async def test_a_declared_server_is_refused_until_the_workspace_turns_them_on(async_db: AsyncSession) -> None:
     organization, workspace, shared, _ = await _two_servers(async_db)
     mine = [McpServerConfig(name="mine", url="https://93.184.216.36/mcp")]
     key = await _key(async_db, workspace.id)
 
-    configs = await _admit(async_db, workspace.id, organization.id, key=key, inline=mine, ids=[shared])
-    assert [config.name for config in configs] == ["mine", "shared"]
-    assert configs[0].caller_tool_patterns is None, "no rule matches a request's own server"
-
-    workspace.request_mcp_servers_allowed = False
-    await async_db.flush()
     with pytest.raises(HTTPException) as refused:
         await _admit(async_db, workspace.id, organization.id, key=key, inline=mine)
     assert refused.value.status_code == 400
     assert "does not let a request name MCP servers" in refused.value.detail
     assert [c.name for c in await _admit(async_db, workspace.id, organization.id, key=None, inline=mine)] == ["mine"]
+
+    workspace.request_mcp_servers_allowed = True
+    await async_db.flush()
+    configs = await _admit(async_db, workspace.id, organization.id, key=key, inline=mine, ids=[shared])
+    assert [config.name for config in configs] == ["mine", "shared"]
+    assert configs[0].caller_tool_patterns is None, "no rule matches a request's own server"
 
 
 async def test_a_key_denied_a_disabled_server_gets_the_unknown_answer(async_db: AsyncSession) -> None:

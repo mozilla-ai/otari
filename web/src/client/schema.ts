@@ -20301,7 +20301,7 @@ export interface components {
             /**
              * Request Mcp Servers Allowed
              * @description Whether this workspace's keys may name MCP servers by URL in a request.
-             * @default true
+             * @default false
              */
             request_mcp_servers_allowed: boolean;
             /**
