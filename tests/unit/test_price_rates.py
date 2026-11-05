@@ -22,6 +22,7 @@ from gateway.types.price_rates import (
     load_rates,
     rates_from_columns,
     rates_with_columns,
+    stored_rates,
 )
 from gateway.types.price_unit import PRICE_UNITS, PriceUnit
 
@@ -476,7 +477,36 @@ def test_a_cache_only_object_in_another_unit_is_refused_beside_a_priced_one() ->
 def test_a_null_inside_a_condition_is_kept_as_given() -> None:
     block = {"multipliers": [{"when": {"service_tier": {"equals": None}}, "factor": 1.5}]}
 
-    assert RatesDocument.model_validate(block).document() == block
+    assert stored_rates(block).document() == block
+
+
+def test_a_stored_rule_on_a_modality_reads_back_as_stored() -> None:
+    block = {
+        "video": {"output": {"price": 0.1, "unit": "second", "overrides": [{"when": {"tide": {"gt": 1}}, "price": 2}]}}
+    }
+
+    assert stored_rates(block).document() == block
+    with pytest.raises(ValidationError, match="when.tide is not a condition models.dev lists"):
+        RatesDocument.model_validate(block)
+
+
+@pytest.mark.parametrize("operand", [float("nan"), float("inf"), float("-inf"), Decimal("NaN")])
+def test_a_condition_on_a_number_that_is_not_finite_is_refused(operand: float | Decimal) -> None:
+    block = {
+        "text": {"input": {"price": 1}},
+        "multipliers": [{"when": {"not": {"context": {"gt": operand}}}, "factor": 2}],
+    }
+
+    with pytest.raises(ValidationError, match="context"):
+        RatesDocument.model_validate(block)
+
+
+def test_a_stored_rule_on_a_condition_not_known_here_reads_back() -> None:
+    block = {"text": {"input": {"price": 1}}, "multipliers": [{"when": {"tide": {"gt": 1}}, "factor": 2}]}
+
+    assert stored_rates(block).document() == block
+    with pytest.raises(ValidationError, match="when.tide is not a condition models.dev lists"):
+        RatesDocument.model_validate(block)
 
 
 def test_a_price_that_rounds_to_a_zero_column_is_refused() -> None:
@@ -500,3 +530,43 @@ def test_the_column_paths_name_the_prices_the_columns_read(
     pricing, _ = parse_pricing(document, units=PRICE_UNITS, path="rates")
 
     assert column_paths(pricing) == paths
+
+
+@pytest.mark.parametrize(
+    "when",
+    [
+        {"service_tier": {"equals": "flex"}},
+        {"context": {"gt": 200000}, "service_tier": {"in": ["flex", "priority"]}},
+        {"all": [{"utc_hours": {"gte": "01:00"}}, {"utc_hours": {"lt": "04:00"}}]},
+        {"not": {"region": {"equals": "global"}}},
+        {"keyterms_prompt": {"min_items": 1}},
+        {"generate_audio": {"equals": True}},
+    ],
+)
+def test_a_rule_on_a_condition_models_dev_lists_is_taken(when: dict[str, Any]) -> None:
+    document = {"text": {"input": {"price": 1, "overrides": [{"when": when, "price": 2}]}}}
+
+    assert RatesDocument.model_validate(document).document() == document
+
+
+@pytest.mark.parametrize(
+    ("when", "reason"),
+    [
+        ({"moon": {"equals": 1}}, "when.moon is not a condition models.dev lists"),
+        ({"any": [{"moon": {"equals": 1}}]}, "when.any[0].moon is not a condition models.dev lists"),
+        ({"all": {"context": {"gt": 1}}}, "when.all is not a list of conditions"),
+        ({"context": {"gt": 1, "lt": 9}}, "when.context is not one operator and its operand"),
+        ({"context": 5}, "when.context is not one operator and its operand"),
+        ({"context": {"over": 5}}, "when.context uses over, which is not an operator models.dev lists"),
+        ({"context": {"gt": True}}, "when.context gives gt an operand it cannot take"),
+        ({"service_tier": {"in": "flex"}}, "when.service_tier gives in an operand it cannot take"),
+        ({"keyterms_prompt": {"min_items": -1}}, "when.keyterms_prompt gives min_items an operand it cannot take"),
+    ],
+)
+def test_a_rule_on_a_condition_models_dev_does_not_allow_is_refused(when: dict[str, Any], reason: str) -> None:
+    override = {"text": {"input": {"price": 1, "overrides": [{"when": when, "price": 2}]}}}
+    multiplier = {"text": {"input": {"price": 1}}, "multipliers": [{"when": when, "factor": 2}]}
+
+    for document in (override, multiplier):
+        with pytest.raises(ValidationError, match=reason.replace("[", r"\[").replace("]", r"\]")):
+            RatesDocument.model_validate(document)
