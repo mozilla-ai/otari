@@ -231,6 +231,16 @@ def columns_from_rates(document: Mapping[str, Any]) -> RateColumns:
         raise ValueError(f"rates cannot be read: {'; '.join(issues.examples)}")
     if issues.unknown_units:
         raise ValueError(f"rates name a unit not known here: {', '.join(issues.unknown_units)}")
+    return columns_from_pricing(pricing)
+
+
+def columns_from_pricing(pricing: ModelsDevPricing) -> RateColumns:
+    """The six columns a parsed ``cost`` block gives, as :func:`columns_from_rates` reads them from a document.
+
+    Raises:
+        ValueError: The block prices nothing a column can hold, prices text
+            input and output in different units, or holds a rate no column can.
+    """
     for slot in _READ_ORDER:
         given, made = _prices_in(pricing, slot)
         priced = [price for price in (given, made) if price is not None and price.price is not None]

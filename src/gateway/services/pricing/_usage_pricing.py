@@ -3,12 +3,13 @@
 The rate's ``unit`` chooses the meter, through one table, :data:`METERS`. A
 ``token`` rate prices tokens, an ``image`` rate an ``images`` count, and a
 ``request`` rate a ``requests`` or ``search_units`` count, or one request for
-an attempt that reported neither. The one exception is a ``token`` rate on an
-endpoint billed per image or per request, which is read in that endpoint's
-unit, as the configuration guide documented before the rate's unit decided.
-Settlement prices through :func:`price_usage`, and the ``require_pricing``
-gate asks :func:`can_price` the same table, so a rate the gate admits is one
-settlement prices. A unit with no row prices nothing.
+an attempt that reported neither. An endpoint that bills under one slot of
+the rate's block (``image`` output, ``audio`` input) is priced at that slot
+first: a slot in a measured unit prices the quantity the attempt measured in
+it, and nothing else, while a slot in tokens or requests, or none, falls to
+the table. Settlement prices through :func:`price_usage`, and the
+``require_pricing`` gate asks :func:`can_price` the same rule, so a rate the
+gate admits is one settlement prices. A unit with no row prices nothing.
 """
 
 from collections.abc import Callable, Mapping
@@ -19,8 +20,10 @@ from math import ceil, isfinite
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.metered_pricing import (
+    RATE_FIELDS,
     BillableUsage,
     ChargeLine,
+    Direction,
     calculate_metered_cost,
     meter_cost,
     price_billable_usage,
@@ -29,27 +32,35 @@ from gateway.core.metered_pricing import (
     quantize_cost,
     to_decimal,
 )
-from gateway.log_config import logger
 from gateway.models.pricing import MAX_REPORTED_UNITS, UNIT_METERS, ModelPricing
+from gateway.services.pricing._charge import UsageCharge
+from gateway.services.pricing._slot_pricing import Quantities, price_slot, slot_rate
 from gateway.types.price_unit import PriceUnit
+
+__all__ = [
+    "MEASURED_UNITS",
+    "METERS",
+    "Meter",
+    "Slot",
+    "UsageCharge",
+    "billed_search_units",
+    "can_price",
+    "estimate_settles",
+    "has_completion_meter",
+    "meter_for",
+    "price_completion",
+    "price_usage",
+    "request_rate",
+    "validated_units",
+]
 
 _REQUESTS, _SEARCH_UNITS, _IMAGES = UNIT_METERS
 
-# The (model key, meter) pairs read in the endpoint's unit that have already been warned about.
-_LEGACY_WARNED: set[tuple[str, str]] = set()
+# The slot of a rate's block an endpoint bills under: a modality and a direction.
+Slot = tuple[str, Direction]
 
-
-@dataclass(frozen=True)
-class UsageCharge:
-    """What an attempt settled at: the cost, rounded once, and the meters and charge lines that explain it.
-
-    A free attempt carries no meter and no line, so a breakdown never explains a
-    charge that did not happen.
-    """
-
-    cost: Decimal
-    meters: dict[str, int]
-    lines: list[ChargeLine]
+# The units an endpoint measures a quantity in, rather than reports as tokens or a count.
+MEASURED_UNITS: frozenset[PriceUnit] = frozenset({"image", "character", "megapixel", "second", "minute", "web_search"})
 
 
 @dataclass(frozen=True)
@@ -98,11 +109,16 @@ def price_usage(
     *,
     tokens: BillableUsage | None,
     units: Mapping[str, object],
+    quantities: Quantities | None = None,
+    slot: Slot | None = None,
 ) -> UsageCharge | None:
     """What one successful attempt costs at ``rate``, or ``None`` when ``rate`` prices nothing it reported.
 
-    A ``token`` rate on an attempt that reported images or requests is read in
-    that unit, warning once per model and meter that the rate should name it.
+    ``slot`` names the slot of the rate's block the endpoint bills under, and
+    ``quantities`` what it measured, in each unit it can. A slot priced in a
+    measured unit prices the quantity in that unit, or nothing when the
+    attempt did not measure it. A rate in tokens or requests prices what the
+    attempt reported, as :data:`METERS` says.
 
     Raises:
         ValueError: ``units`` carries an invalid count (see :func:`validated_units`).
@@ -110,6 +126,8 @@ def price_usage(
     counts = validated_units(units)
     if rate is None:
         return None
+    if slot is not None and _measured_slot(rate, slot) is not None:
+        return price_slot(rate, *slot, quantities or {})
     row = meter_for(rate)
     return row.charge(rate, counts, tokens) if row is not None else None
 
@@ -117,9 +135,10 @@ def price_usage(
 def has_completion_meter(rate: ModelPricing | None) -> bool:
     """Whether a completion can be settled at ``rate``: per request, or by the token meters.
 
-    A rate in another unit (``second``, ``minute``) is stored ahead of its meter,
-    so a completion at it is unpriced: refused under ``require_pricing``, and
-    otherwise served and recorded with no cost. It is never billed as tokens.
+    A rate in another unit (``second``, ``minute``) prices a quantity a
+    completion does not measure, so a completion at it is unpriced: refused
+    under ``require_pricing``, and otherwise served and recorded with no cost.
+    It is never billed as tokens.
     """
     if rate is None:
         return False
@@ -156,16 +175,38 @@ def price_completion(
     return calculate_metered_cost(rate, usage)
 
 
-def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: bool) -> bool:
+def can_price(
+    rate: ModelPricing | None,
+    *,
+    meter: str | None,
+    reports_tokens: bool,
+    slot: Slot | None = None,
+    measures: frozenset[PriceUnit] = frozenset(),
+) -> bool:
     """Whether ``rate`` could price an attempt that reports ``meter`` and, when ``reports_tokens``, tokens.
 
-    The ``require_pricing`` gate asks this before dispatch, so a rate the
-    endpoint's report cannot meet is refused rather than settled unpriced.
+    ``slot`` and ``measures`` say which slot the endpoint bills under and which
+    units it measures, so a slot in a measured unit is admitted only when the
+    endpoint measures that unit. The ``require_pricing`` gate asks this before
+    dispatch, so a rate the endpoint's report cannot meet is refused rather
+    than settled unpriced.
     """
-    if rate is None or to_decimal(rate.input_price_per_million) is None:
+    input_rate = to_decimal(rate.input_price_per_million) if rate is not None else None
+    if rate is None or input_rate is None:
         return False
+    if slot is not None and (found := _measured_slot(rate, slot)) is not None:
+        return found in measures
     row = meter_for(rate)
-    return row is not None and row.admits(meter, reports_tokens=reports_tokens)
+    if row is None:
+        return False
+    # A free token rate settles free whatever the attempt reports, so it prices any attempt.
+    return row.admits(meter, reports_tokens=reports_tokens) or (row.tokens and _free(rate, input_rate))
+
+
+def _measured_slot(rate: ModelPricing, slot: Slot) -> PriceUnit | None:
+    """The measured unit ``rate`` prices ``slot`` in, or ``None`` when the slot is in tokens, requests, or absent."""
+    found = slot_rate(rate, *slot)
+    return found.unit if found is not None and found.unit in MEASURED_UNITS else None
 
 
 def request_rate(rate: ModelPricing | None) -> Decimal:
@@ -198,11 +239,6 @@ def _image_rate(rate: ModelPricing) -> Decimal | None:
     return meter_cost(1, per_million) if per_million is not None else None
 
 
-def _legacy_image_rate(rate: ModelPricing) -> Decimal | None:
-    # A token rate on image generation was documented as raw USD per image.
-    return to_decimal(rate.input_price_per_million)
-
-
 def _per_unit(meter: str, count: int, unit_rate: Decimal | None) -> UsageCharge | None:
     # An unusable rate prices nothing: settling it at $0 would serve the attempt free.
     if unit_rate is None:
@@ -216,17 +252,25 @@ def _per_unit(meter: str, count: int, unit_rate: Decimal | None) -> UsageCharge 
     return UsageCharge(cost, {meter: count}, [line])
 
 
-def _charge_tokens(rate: ModelPricing, counts: dict[str, int], tokens: BillableUsage | None) -> UsageCharge | None:
-    for meter, unit_rate in ((_IMAGES, _legacy_image_rate), (_REQUESTS, _request_rate)):
-        if meter in counts:
-            _warn_legacy(rate, meter)
-            return _per_unit(meter, counts[meter], unit_rate(rate))
-    if to_decimal(rate.input_price_per_million) is None:
+def _charge_tokens(rate: ModelPricing, _: dict[str, int], tokens: BillableUsage | None) -> UsageCharge | None:
+    input_rate = to_decimal(rate.input_price_per_million)
+    if input_rate is None:
         return None
     if tokens is None or (tokens.total_input_tokens <= 0 and tokens.completion_tokens <= 0):
-        return None
+        # Nothing times a zero rate is nothing, so a free model settles free with no tokens reported.
+        return UsageCharge(Decimal(0), {}, []) if _free(rate, input_rate) else None
     cost, meters, lines = price_billable_usage(rate, tokens)
     return UsageCharge(cost, meters, lines)
+
+
+def _free(rate: ModelPricing, input_rate: Decimal) -> bool:
+    """Whether every price ``rate`` holds is zero: the base rates, the cache rates and each tier's."""
+    if input_rate != 0:
+        return False
+    others = [to_decimal(getattr(rate, name)) for name in RATE_FIELDS if name != "input_price_per_million"]
+    for tier in getattr(rate, "pricing_tiers", None) or []:
+        others.extend(to_decimal(tier.get(name)) for name in RATE_FIELDS)
+    return all(price is None or price == 0 for price in others)
 
 
 def _charge_requests(rate: ModelPricing, counts: dict[str, int], _: BillableUsage | None) -> UsageCharge | None:
@@ -238,13 +282,12 @@ def _charge_images(rate: ModelPricing, counts: dict[str, int], _: BillableUsage 
     return _per_unit(_IMAGES, counts[_IMAGES], _image_rate(rate)) if _IMAGES in counts else None
 
 
-# The meter each unit prices by. A unit with no row (``second``, ``minute``) is
-# stored ahead of its meter and prices nothing; a new unit is one row here.
-# An ``image`` rate on a completion is read in tokens, as it always was.
+# The meter each unit prices by. A unit with no row is a measured one, priced
+# only through the slot an endpoint bills under; a new unit is one row here or
+# one measure there. An ``image`` rate on a completion is read in tokens, as it
+# always was.
 METERS: dict[PriceUnit, Meter] = {
-    "token": Meter(
-        reads=(_IMAGES, _REQUESTS), tokens=True, needs_report=True, settles_completion=True, charge=_charge_tokens
-    ),
+    "token": Meter(reads=(), tokens=True, needs_report=True, settles_completion=True, charge=_charge_tokens),
     "request": Meter(
         reads=(_REQUESTS, _SEARCH_UNITS),
         tokens=False,
@@ -259,21 +302,3 @@ METERS: dict[PriceUnit, Meter] = {
 def meter_for(rate: ModelPricing) -> Meter | None:
     """The meter ``rate``'s unit prices by, or ``None`` when no meter reads that unit."""
     return METERS.get(rate.unit or "token")
-
-
-def _warn_legacy(rate: ModelPricing, meter: str) -> None:
-    key = (rate.model_key, meter)
-    if key in _LEGACY_WARNED:
-        return
-    _LEGACY_WARNED.add(key)
-    if meter == _IMAGES:
-        # An images rate is per million images, where this one is read as raw USD per image.
-        fix = "set its unit to image and multiply its input price by 1,000,000"
-    else:
-        fix = "set its unit to request, keeping its price"
-    logger.warning(
-        "Pricing %s is a token rate read per %s; %s, as a later release reads it strictly",
-        rate.model_key,
-        "image" if meter == _IMAGES else "request",
-        fix,
-    )

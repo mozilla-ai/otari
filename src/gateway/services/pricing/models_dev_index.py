@@ -28,6 +28,7 @@ from gateway.types.models_dev import (
     models_dev_provider_ids,
     parse_catalog,
 )
+from gateway.types.price_rates import RateColumns, columns_from_pricing
 
 REFERENCE_PREFIX = "models.dev:"
 
@@ -87,6 +88,14 @@ class ModelsDevPrice:
     canonical_model_id: str | None
     pricing: ModelsDevPricing | None = None
     """Every price the document gives the model, in its unit; ``None`` for a v1 entry."""
+    slot_columns: RateColumns | None = None
+    """The columns of the one slot the block prices, for a model with no text price; ``None`` otherwise.
+
+    A transcription model priced per minute of audio and a speech model priced
+    per character of text have no text token price, so the rate columns read
+    the slot the block does price, in its unit. A block whose text price is
+    half given is never read this way: a missing text rate is not free.
+    """
 
     @property
     def reference(self) -> str:
@@ -95,7 +104,7 @@ class ModelsDevPrice:
 
     @property
     def priced(self) -> bool:
-        return self.input is not None or self.output is not None
+        return self.input is not None or self.output is not None or self.slot_columns is not None
 
     def pricing_tiers(self) -> list[dict[str, float | int]]:
         """The tiers in the ``pricing_tiers`` column shape, rates as JSON numbers."""
@@ -112,7 +121,9 @@ class ModelsDevPrice:
         ]
 
     def price_signature(self) -> tuple[object, ...]:
-        return (self.input, self.output, self.cache_read, self.cache_write, self.tiers)
+        slot = self.slot_columns
+        in_slot = None if slot is None else (slot.unit, slot.input_price_per_million, slot.output_price_per_million)
+        return (self.input, self.output, self.cache_read, self.cache_write, self.tiers, in_slot)
 
 
 def parse_rate(value: object) -> Decimal | None:
@@ -164,6 +175,17 @@ def _tiers(cost: ModelsDevCost) -> tuple[PriceTier, ...]:
     return tuple(by_threshold[threshold] for threshold in sorted(by_threshold))
 
 
+def _slot_columns(pricing: ModelsDevPricing | None, rates: Mapping[str, Decimal]) -> RateColumns | None:
+    """The columns of the one measured slot ``pricing`` prices, for a block with no text price."""
+    if pricing is None or (rates.get("input") is not None and rates.get("output") is not None):
+        return None
+    try:
+        columns = columns_from_pricing(pricing)
+    except ValueError:
+        return None
+    return columns if columns.unit not in ("token", "request") else None
+
+
 def _entry(provider: ModelsDevProvider, model: ModelsDevModel) -> ModelsDevPrice:
     cost = model.cost or ModelsDevCost(rates=ModelsDevRates())
     rates = _rates(cost.rates)
@@ -181,6 +203,7 @@ def _entry(provider: ModelsDevProvider, model: ModelsDevModel) -> ModelsDevPrice
         provider_doc=provider.doc,
         canonical_model_id=model.canonical_model_id,
         pricing=model.pricing,
+        slot_columns=_slot_columns(model.pricing, rates),
     )
 
 
@@ -351,10 +374,13 @@ class ModelsDevPriceIndex:
             return None
         vendor = (candidates[0].canonical_model_id or "").partition("/")[0]
         agreed = min(candidates, key=lambda c: (c.provider_id != vendor, c.provider_id, c.model_id))
-        # The text prices agree; the rest of a block (a web search price, an
-        # image price) is one host's, so it is given only where every host's is the same.
+        # The prices agree; the rest of a block (a web search price, an image
+        # price) is one host's, so it is given only where every host's is the
+        # same. An entry priced in a slot alone has no price without its block.
         same_block = all(c.pricing == agreed.pricing for c in candidates)
-        return agreed if same_block else replace(agreed, pricing=None)
+        if same_block:
+            return agreed
+        return None if agreed.slot_columns is not None else replace(agreed, pricing=None)
 
 
 def _utc(moment: datetime) -> datetime:

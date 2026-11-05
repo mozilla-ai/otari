@@ -69,7 +69,7 @@ The organization view contains tenant-wide administration:
 
 | Page | What it is | Rules |
 | --- | --- | --- |
-| Usage | Organization-wide usage | [Workspace-scoped spend](organizations-and-workspaces.md#workspace-scoped-spend) |
+| Usage | Organization-wide usage | [Workspace-scoped spend](workspaces.md#workspace-scoped-spend) |
 | Workspaces, Members | Workspaces and organization members, with invitations | [Organization](#organization) |
 | Email domains | Domains whose colleagues join automatically | [Email-domain auto-join](members.md#email-domain-auto-join) |
 | Spend and budgets | Budgets and the spend ceilings holding them | [Budgets](budgets.md) |
@@ -180,7 +180,7 @@ the Requests view's "Price this model", offered on a served request that carried
 (a failed attempt billed nothing, so its error is the guide instead), which
 opens per request for a rerank, audio or moderation request and per image for
 an image generation or edit. What each unit bills is in
-[Per-request pricing](configuration.md#per-request-pricing-audio-moderations-rerank-and-completion-models).
+[Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit).
 
 ## Playground
 

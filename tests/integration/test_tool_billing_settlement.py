@@ -1112,6 +1112,46 @@ async def test_an_operator_rate_wins_over_the_list_price(async_db: AsyncSession)
 
 
 @pytest.mark.asyncio
+async def test_the_models_own_search_price_prices_the_searches_its_provider_ran(async_db: AsyncSession) -> None:
+    """The model's rate carries a web search price per thousand, which prices the searches with default pricing off."""
+    async_db.add(
+        ModelPricing(
+            model_key="anthropic:claude-haiku-4-5",
+            input_price_per_million=1.0,
+            output_price_per_million=5.0,
+            rates={"text": {"input": {"price": 1}, "output": {"price": 5}}, "web_search": {"price": 20}},
+        )
+    )
+    await async_db.commit()
+
+    row = await _settle_provider_searches(async_db, 2)
+
+    assert _search_line(row)["unit_rate"] == pytest.approx(0.02)
+    assert _search_line(row)["cost"] == pytest.approx(0.04)
+    assert row.cost == Decimal("0.000035") + Decimal("0.04")
+
+
+@pytest.mark.asyncio
+async def test_an_operator_search_row_wins_over_the_models_own_search_price(async_db: AsyncSession) -> None:
+    async_db.add(
+        ModelPricing(
+            model_key="anthropic:claude-haiku-4-5",
+            input_price_per_million=1.0,
+            output_price_per_million=5.0,
+            rates={"text": {"input": {"price": 1}, "output": {"price": 5}}, "web_search": {"price": 20}},
+        )
+    )
+    async_db.add(
+        ModelPricing(model_key="anthropic:web_search", input_price_per_million=5_000.0, output_price_per_million=0.0)
+    )
+    await async_db.commit()
+
+    row = await _settle_provider_searches(async_db, 1)
+
+    assert _search_line(row)["unit_rate"] == pytest.approx(0.005)
+
+
+@pytest.mark.asyncio
 async def test_without_default_pricing_or_a_rate_the_searches_stay_on_the_row_unpriced(async_db: AsyncSession) -> None:
     row = await _settle_provider_searches(async_db, 1)
 

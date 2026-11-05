@@ -1,3 +1,7 @@
+---
+icon: key
+---
+
 # Provider keys
 
 Provider keys are the upstream credentials Otari uses to call LLM providers

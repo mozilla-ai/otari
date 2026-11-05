@@ -39,6 +39,16 @@ class NullGrowthSignalAdapter(GrowthSignalPort):
     ) -> None:
         return None
 
+    async def record_sign_in(
+        self,
+        *,
+        background_tasks: BackgroundTasks,
+        user_id: uuid.UUID,
+        email: str,
+        signed_in_at: datetime,
+    ) -> None:
+        return None
+
     async def record_activation(
         self,
         *,

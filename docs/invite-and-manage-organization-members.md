@@ -1,3 +1,7 @@
+---
+icon: people
+---
+
 # Invite and manage organization members
 
 Owners and admins invite people to the organization and choose which workspaces
@@ -24,5 +28,5 @@ row.
 Owners and admins manage the organization: its workspaces, provider keys,
 guardrails, pricing and members, and they see all of its usage. Members and
 viewers use the workspaces they are assigned to. The full table is in
-[Roles](organizations-and-workspaces.md#roles), and bulk invitations and
+[Roles](workspaces.md#roles), and bulk invitations and
 email-domain auto-join in [Members and invitations](members.md).

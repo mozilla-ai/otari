@@ -2186,6 +2186,11 @@ export interface paths {
          *     - Master key: the ``user`` field is required and names an existing user.
          *     - API key: usage and spend go to the key's own user. A ``user`` naming a
          *       different user is refused with 403, or ignored when mismatch rejection is off.
+         *
+         *     A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+         *     USD string) and `pricing_source`, as a chat completion does; a provider that
+         *     sends no `usage` gets one holding just those two fields. An unpriced
+         *     response carries neither.
          */
         post: operations["images-edit_image"];
         delete?: never;
@@ -2211,6 +2216,11 @@ export interface paths {
          *     - Master key + user field: Use specified user (must exist)
          *     - API key + user field: Use specified user (must exist)
          *     - API key without user field: Use the shared "default" user
+         *
+         *     A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+         *     USD string) and `pricing_source`, as a chat completion does; a provider that
+         *     sends no `usage` gets one holding just those two fields. An unpriced
+         *     response carries neither.
          */
         post: operations["images-create_image"];
         delete?: never;
@@ -3743,6 +3753,9 @@ export interface paths {
          *     deployment settles the upstream bill, so its rate is the deployment price
          *     list's rather than a tenant's.
          *
+         *     A rate on a tool the deployment's own account runs, a search or fetch tool's
+         *     or ``otari:code_execution``, is refused with a 403 for the same reason.
+         *
          *     The key is normalized to its canonical ``instance:model`` form first, the same
          *     call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
          *     rather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and
@@ -3774,9 +3787,9 @@ export interface paths {
          *     keeps the cost it was billed, because a settled cost is stored on the usage
          *     row rather than recomputed.
          *
-         *     Refused with a 403 on the same deployment-supplied-model rule the create path
-         *     carries, so a row stored before that rule existed cannot be edited into a rate
-         *     nobody could create today, and with a 403 for a rate the deployment operator
+         *     Refused with a 403 on the same deployment-supplied rules the create path
+         *     carries, so an edit cannot store a rate a create would refuse, and with a
+         *     403 for a rate the deployment operator
          *     set, which only the operator may change.
          */
         put: operations["organization-pricing-replace_organization_pricing"];
@@ -26964,7 +26977,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationModelPricingPublic"];
                 };
             };
-            /** @description The deployment holds the credential that serves the model. */
+            /** @description The deployment holds the credential that serves the model, or runs the tool on its own account. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -27013,7 +27026,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrganizationModelPricingPublic"];
                 };
             };
-            /** @description The deployment serves the model, or the deployment operator set the rate. */
+            /** @description The deployment serves the model or runs the tool, or the deployment operator set the rate. */
             403: {
                 headers: {
                     [name: string]: unknown;

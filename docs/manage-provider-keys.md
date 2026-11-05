@@ -1,3 +1,8 @@
+---
+description: Add provider keys at the organization level, then control which workspaces can use them.
+icon: key
+---
+
 # Manage provider keys
 
 A provider key is the credential Otari uses to call a model provider, such as

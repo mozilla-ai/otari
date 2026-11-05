@@ -171,6 +171,25 @@ describe("PublicCatalogPage", () => {
     ).toBe(false)
   })
 
+  it("opens filtered on the list a link names", async () => {
+    const fetchMock = mockApi()
+    window.location.hash = "#/models?provider=mistral&provider=nebius&q=glm"
+    renderPage()
+
+    await screen.findByRole("list", { name: "Models" })
+    const requested = fetchMock.mock.calls
+      .map(([url]) => new URL(String(url), "http://localhost"))
+      .filter((url) => url.pathname.endsWith("/catalog/models"))
+    expect(requested.length).toBeGreaterThan(0)
+    for (const url of requested) {
+      expect(url.searchParams.getAll("provider")).toEqual(["mistral", "nebius"])
+      expect(url.searchParams.get("search")).toBe("glm")
+    }
+    expect(screen.getByRole("searchbox", { name: /search/i })).toHaveValue(
+      "glm",
+    )
+  })
+
   it("shows a model's offerings without the links that need a session", async () => {
     mockApi()
     renderPage("z-ai/glm-5.3")
