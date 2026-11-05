@@ -48,7 +48,7 @@ class UsageCharge:
     """
 
     cost: Decimal
-    meters: dict[str, int]
+    meters: Mapping[str, int | float]
     lines: list[ChargeLine]
 
 

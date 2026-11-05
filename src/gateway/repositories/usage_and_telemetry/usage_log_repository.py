@@ -84,7 +84,7 @@ def settled_job_row(
     counts_toward_budget: bool,
     deployment_paid: bool,
     cost: Decimal | None,
-    billing_meters: dict[str, int] | None,
+    billing_meters: dict[str, int | float] | None,
     pricing_breakdown: list[ChargeLine] | None,
     pricing_source: str | None,
     pricing_reference: str | None,

@@ -2453,7 +2453,7 @@ class _VideoUsageWriter:
             counts_toward_budget=usage.counts_toward_budget,
             deployment_paid=usage.deployment_paid,
             cost=usage.cost,
-            billing_meters=charge.meters if charge is not None and charge.meters else None,
+            billing_meters=dict(charge.meters) if charge is not None and charge.meters else None,
             pricing_breakdown=charge.lines if charge is not None and charge.lines else None,
             pricing_source=source,
             pricing_reference=reference,
