@@ -480,7 +480,8 @@ async def test_a_failed_search_on_the_legacy_provider_pair_is_counted_but_never_
     row = _latest_row(db_session_factory, user_id)
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"] == {"billed": 0, "errors": 1}
     assert not any(entry["meter"] == "web_search_calls" for entry in (row.pricing_breakdown or []))
-    assert _spend(db_session_factory, user_id) - before == pytest.approx(float(row.cost or 0), rel=1e-6)
+    assert row.cost is not None and row.cost > 0, "the model calls are charged"
+    assert _spend(db_session_factory, user_id) - before == pytest.approx(float(row.cost), rel=1e-6)
     user = client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header).json()
     assert user["reserved"] == pytest.approx(0.0), "the search's hold was released at settlement"
 
