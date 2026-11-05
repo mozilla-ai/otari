@@ -147,6 +147,7 @@ from gateway.core.error_codes import (
 )
 from gateway.core.metered_pricing import (
     ChargeLine,
+    billable_usage_of,
     priced_per_request,
     quantize_cost,
 )
@@ -287,7 +288,13 @@ from gateway.services.model_access import (
 )
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.policy_store import resolve_effective_policy
-from gateway.services.pricing import ModelSearchRate, estimate_settles, model_search_rate, price_completion
+from gateway.services.pricing import (
+    ModelSearchRate,
+    PriceFacts,
+    estimate_settles,
+    model_search_rate,
+    price_completion,
+)
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     RequestPrices,
@@ -2398,7 +2405,8 @@ async def _grow_reservation(
             ctx.reservation,
             estimate=repriced + ctx.tool_hold,
             model=f"{instance}:{model}",
-            model_is_free=is_free_pricing(pricing),
+            # A free row whose rules price this request is held to the dollar budget.
+            model_is_free=is_free_pricing(pricing) and repriced == 0,
             strategy=ctx.config.budget_strategy,
         )
     except HTTPException as exc:
@@ -3173,7 +3181,8 @@ async def resolve_request_context(
                         api_key=api_key, provider_instance=gate_instance, workspace_id=workspace_id
                     ),
                     organization_id=organization_id,
-                    model_is_free=is_free_pricing(gate_pricing),
+                    # A free row whose rules price this request is held to the dollar budget.
+                    model_is_free=is_free_pricing(gate_pricing) and estimate == 0,
                     reservation_ttl_sec=config.budget_reservation_ttl_sec,
                     reserved_output_tokens=estimate_inputs.get_reserved_output_tokens(gate_pricing),
                 )
@@ -4724,6 +4733,11 @@ async def _unpriced_tool(ctx: RequestContext, tools: Sequence[PricedTool]) -> Pr
 # ---------------------------------------------------------------------------
 
 
+def request_started(row: UsageLog) -> datetime:
+    """When the request ``row`` records started: the row's stamp, less the time the request took."""
+    return row.timestamp - timedelta(milliseconds=row.latency_ms or 0)
+
+
 def _elapsed_ms(started_at: float | None) -> int | None:
     """Milliseconds elapsed since a monotonic ``started_at`` reading.
 
@@ -4993,6 +5007,7 @@ async def record_usage(
     # row did not finish, so it is billed on its estimated tokens alone.
     succeeded = error is None and not incomplete
     resolved: ResolvedPricing | None = None
+    facts = PriceFacts(at=request_started(usage_log))
     if usage_data or succeeded or cost_override is not None:
         # The organization comes off the key, via the workspace already resolved
         # for the row above, so a settled cost uses the same rate the admission
@@ -5012,7 +5027,7 @@ async def record_usage(
             )
         priced: tuple[Decimal, dict[str, int], list[ChargeLine]] | None = None
         if resolved is not None:
-            priced = price_completion(resolved.pricing, usage_data, succeeded=succeeded)
+            priced = price_completion(resolved.pricing, usage_data, succeeded=succeeded, facts=facts)
             if priced is None and usage_data and not priced_per_request(resolved.pricing):
                 _warn_unpriced_model(f"{provider}:{model}" if provider else model, unit=resolved.pricing.unit)
         elif usage_data:
@@ -5053,7 +5068,14 @@ async def record_usage(
         db,
         usage_log,
         tool_tally,
-        model_search_rate=model_search_rate(resolved.pricing, resolved.source) if resolved is not None else None,
+        model_search_rate=model_search_rate(
+            resolved.pricing,
+            resolved.source,
+            # The search is priced at the context the completion's tokens are.
+            facts=replace(facts, context=billable_usage_of(usage_data).total_input_tokens if usage_data else None),
+        )
+        if resolved is not None
+        else None,
     )
     if usage_log.cost is not None:
         usage_log.calculated_at = usage_log.timestamp

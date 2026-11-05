@@ -16,7 +16,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.inference_exceptions import VideoJobNotFoundError
 from gateway.log_config import logger
 from gateway.repositories.inference import VideoJobRepository
-from gateway.services.pricing import price_video
+from gateway.services.pricing import PriceFacts, price_video
 
 if TYPE_CHECKING:
     import uuid
@@ -227,7 +227,8 @@ class VideoJobService:
             record.provider, record.model, organization_id=organization_id, deployment_paid=deployment_paid
         )
         pricing = found.pricing if found is not None else None
-        charge = price_video(pricing, seconds) if seconds is not None and seconds >= 0 else None
+        facts = PriceFacts(at=record.created_at)
+        charge = price_video(pricing, seconds, facts=facts) if seconds is not None and seconds >= 0 else None
         if seconds is not None and charge is None:
             logger.warning(
                 "Video job %s on %s:%s completed with no per-second video price; it stays unbilled until one is set",

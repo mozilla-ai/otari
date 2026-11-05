@@ -1245,6 +1245,27 @@ async def test_the_models_own_search_price_prices_the_searches_its_provider_ran(
 
 
 @pytest.mark.asyncio
+async def test_the_searches_its_provider_ran_reach_the_context_the_completion_reached(async_db: AsyncSession) -> None:
+    long = {"context": {"gt": 5}}
+    async_db.add(
+        ModelPricing(
+            model_key="anthropic:claude-haiku-4-5",
+            input_price_per_million=1.0,
+            output_price_per_million=5.0,
+            rates={
+                "text": {"input": {"price": 1}, "output": {"price": 5}},
+                "web_search": {"price": 20, "overrides": [{"when": long, "price": 40}]},
+            },
+        )
+    )
+    await async_db.commit()
+
+    row = await _settle_provider_searches(async_db, 2)
+
+    assert _search_line(row)["unit_rate"] == pytest.approx(0.04)
+
+
+@pytest.mark.asyncio
 async def test_an_operator_search_row_wins_over_the_models_own_search_price(async_db: AsyncSession) -> None:
     async_db.add(
         ModelPricing(
