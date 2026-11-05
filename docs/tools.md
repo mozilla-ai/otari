@@ -181,9 +181,10 @@ pricing API stores the value in `input_price_per_million`, so one cent per call
 is `10000`. `GET /api/v1/search-tools` (`?kind=fetch` for the fetch tools) gives
 each tool's `price_per_call`, the dollars a call settles at on the deployment's
 own account when its provider reports no cost, and `price_source`, the row it
-comes from: `own`, the tool's own row; `config`, that row, set by
-`price_per_call` in `config.yml`; `old_key`, its old `<provider>:<instance>` row;
-or `none`, with a null `price_per_call`. An override the operator set for one
+comes from: `own`, the tool's own row; `config`, that row while the tool's
+`config.yml` entry sets `price_per_call`, which each start writes to it again;
+`old_key`, its old `<provider>:<instance>` row; or `none`, with a null
+`price_per_call`. An override the operator set for one
 organization prices that organization's calls instead.
 
 With `require_pricing: true`, a gateway-run tool whose calls no row would price

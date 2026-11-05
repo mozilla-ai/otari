@@ -305,9 +305,9 @@ class StoredSearchToolSchema(pydantic.BaseModel):
         return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config, **fields)
 
 
-# Where a listed tool's price comes from: its own price row, that row as its
-# config.yml entry's ``price_per_call`` sets it, its old ``<provider>:<name>``
-# row, or no row.
+# Where a listed tool's price comes from: its own price row, that row while its
+# config.yml entry sets ``price_per_call``, its old ``<provider>:<name>`` row,
+# or no row.
 ToolPriceSource = Literal["own", "config", "old_key", "none"]
 
 _PRICE_PER_CALL_DESCRIPTION = (
@@ -317,9 +317,9 @@ _PRICE_PER_CALL_DESCRIPTION = (
 )
 _PRICE_SOURCE_DESCRIPTION = (
     "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', "
-    "that row, set by price_per_call on the tool's config.yml entry, which each start writes again when the rate "
-    "in force differs; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of "
-    "its own; 'none', no row."
+    "that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the "
+    "rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old "
+    "<provider>:<name> row, which prices it while it has no row of its own; 'none', no row."
 )
 
 

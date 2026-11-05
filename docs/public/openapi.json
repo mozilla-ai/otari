@@ -5278,7 +5278,7 @@
             "title": "Price Per Call"
           },
           "price_source": {
-            "description": "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row, set by price_per_call on the tool's config.yml entry, which each start writes again when the rate in force differs; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.",
+            "description": "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.",
             "enum": [
               "own",
               "config",
@@ -12199,7 +12199,7 @@
             "title": "Price Per Call"
           },
           "price_source": {
-            "description": "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row, set by price_per_call on the tool's config.yml entry, which each start writes again when the rate in force differs; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.",
+            "description": "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.",
             "enum": [
               "own",
               "config",
