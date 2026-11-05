@@ -1369,8 +1369,9 @@ That release converts a value stored from the dashboard when that is
 unambiguous. A stored `web_search_url` becomes a stored instance named
 `searxng`, with the stored engines, else the four above, and
 `web_search_default_tool` names it when no default is in effect. A stored
-instance that inherits a stored value gets its own copy. The release refuses to
-start:
+instance that inherits a stored value gets its own copy, and a stored
+`web_search_engines` that neither a stored URL nor a stored instance uses is
+deleted. The release refuses to start:
 
 - while a value is set in the configuration file or the environment, which otari
   cannot rewrite, even beside a stored one;

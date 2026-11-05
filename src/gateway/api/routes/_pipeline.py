@@ -524,8 +524,8 @@ SANDBOX_UNREACHABLE_DETAIL = (
 )
 SANDBOX_UNAVAILABLE_DETAIL = "code_execution sandbox temporarily unavailable. Retry later."
 WEB_SEARCH_UNREACHABLE_DETAIL = (
-    "web_search backend unreachable. Check the search URL in the dashboard's Tools "
-    "settings, or OTARI_WEB_SEARCH_URL, and that the backend is running."
+    "web_search backend unreachable. Check the deployment's web search settings, and that the search "
+    "provider is reachable."
 )
 
 
