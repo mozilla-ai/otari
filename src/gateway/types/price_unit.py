@@ -11,9 +11,11 @@ singular, so a v2 price's ``unit`` is a ``PriceUnit`` as the document writes it.
 there: it is the ``web_search.price`` field, USD per 1,000 searches.
 """
 
-from typing import Annotated, Literal, get_args
+from typing import Annotated, Literal, cast, get_args
 
 from pydantic import BeforeValidator
+
+from gateway.types.models_dev import MODELS_DEV_UNITS
 
 PriceUnit = Literal[
     "token",
@@ -55,3 +57,11 @@ def current_unit_name(value: object) -> object:
 # A unit as a request body or the config file may still spell it. The schema it
 # publishes is ``PriceUnit``'s, so a generated client learns the current names only.
 AcceptedPriceUnit = Annotated[PriceUnit, BeforeValidator(current_unit_name)]
+
+
+def models_dev_unit(value: str | None) -> PriceUnit | None:
+    """The unit a v2 price names, or ``None`` for one no meter knows, so a new unit is never billed as tokens."""
+    unit = value or "token"
+    if unit not in MODELS_DEV_UNITS:
+        return None
+    return cast(PriceUnit, unit)

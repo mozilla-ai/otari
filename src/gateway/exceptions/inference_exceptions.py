@@ -38,6 +38,13 @@ class CountryDatabaseNotFoundError(TenancyNotFoundError):
         super().__init__("No country file is stored")
 
 
+class VideoJobNotFoundError(TenancyNotFoundError):
+    """No video job with this id was started here, or not by this caller in this workspace."""
+
+    def __init__(self, video_id: str) -> None:
+        super().__init__(f"Video '{video_id}' not found")
+
+
 class CountryDatabaseInUseError(TenancyConflictError):
     """The stored country file is the only country source a list of supported countries has."""
 

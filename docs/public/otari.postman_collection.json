@@ -13083,6 +13083,126 @@
     {
       "item": [
         {
+          "name": "List Videos",
+          "request": {
+            "description": "The caller's video jobs, newest first, from the gateway's own records.\n\nA key sees the jobs its user started in its workspace; the master key sees\nevery job. The records say what the gateway knows without asking a\nprovider; a job's status is ``GET /api/v1/videos/{video_id}``'s.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "videos"
+              ],
+              "query": [
+                {
+                  "description": "How many of the newest jobs to list",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/videos?limit="
+            }
+          }
+        },
+        {
+          "name": "Create Video",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}"
+            },
+            "description": "Start a video generation job.\n\nThe job is returned at once. Poll ``GET /api/v1/videos/{video_id}`` until\nits status is ``completed``, then fetch the video from\n``GET /api/v1/videos/{video_id}/content``. The model must have a per-second\nvideo price, from the catalog or set through the pricing API; one with none\nis refused with 402. The length asked for is reserved against the budget at\nthat price while the job starts, and the job is billed when a retrieval\nfinds it completed. A provider that renders inside this call returns the\njob already completed, billed, and ready for its content.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "videos"
+              ],
+              "raw": "{{baseUrl}}/api/v1/videos"
+            }
+          }
+        },
+        {
+          "name": "Retrieve Video",
+          "request": {
+            "description": "The job's status, from its record once it completed, else from the provider that runs it.\n\nThe first retrieval that finds the job completed bills its length at the\nmodel's per-second video price. A key reads only the jobs its user started\nin its workspace; the master key reads any job.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "videos",
+                ":video_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/videos/:video_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "video_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Retrieve Video Content",
+          "request": {
+            "description": "The finished video's bytes, in the provider's media type.\n\nReads the job first, so a completed job is billed here as it would be on\n``GET /api/v1/videos/{video_id}``. A job still running, or one that failed,\nis a 409 naming its status.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "videos",
+                ":video_id",
+                "content"
+              ],
+              "raw": "{{baseUrl}}/api/v1/videos/:video_id/content",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "video_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "videos"
+    },
+    {
+      "item": [
+        {
           "name": "List Workspaces",
           "request": {
             "description": "List the workspaces the caller can see in their organization.",

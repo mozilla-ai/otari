@@ -5,11 +5,12 @@ from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import partial
 from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import Depends, HTTPException, Query, Request, status
-from sqlalchemy import ColumnElement, Select, select, update
+from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
@@ -51,6 +52,7 @@ from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
@@ -97,6 +99,7 @@ from gateway.repositories.traces import TracesRepositories
 from gateway.repositories.usage_and_telemetry import (
     UsageLogRepository,
     new_usage_row,
+    settled_job_row,
 )
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import (
@@ -124,6 +127,7 @@ from gateway.services.budgets import (
     BudgetService,
     ReservationHandle,
     reconcile_reservation,
+    record_external_spend,
     refund_reservation,
     reserve_budget,
 )
@@ -134,12 +138,15 @@ from gateway.services.files import FileBackends, FileService, SandboxFileBridge,
 from gateway.services.health_checks import HealthCheckService
 from gateway.services.identity import IdentityService
 from gateway.services.inference import (
+    CompletedVideoUsage,
     DeploymentCharge,
     InferenceService,
+    VideoJobService,
+    VideoRateLookup,
     admit_deployment_paid,
     describe_port_error,
 )
-from gateway.services.log_writer import LogWriter
+from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
@@ -152,7 +159,10 @@ from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
 from gateway.services.pricing_service import (
     RequestPrices,
+    ResolvedPricing,
     model_context_window,
+    pricing_provenance,
+    resolve_model_pricing,
     resolve_tool_rate,
 )
 from gateway.services.providers import (
@@ -212,8 +222,7 @@ from gateway.services.tools import (
     web_search_configured,
 )
 from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
-from gateway.services.usage_admin_service import usage_in
-from gateway.services.usage_and_telemetry import UsageService
+from gateway.services.usage_and_telemetry import UsageScope, UsageService
 from gateway.services.workspace_scope import (
     default_workspace_id,
     organization_for_key_id,
@@ -2335,13 +2344,17 @@ def get_automatic_router(request: Request) -> AutomaticRouter:
     return router
 
 
+def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
+    """Build the usage service on the request's Unit of Work; its labels come from the key and user domains."""
+    return UsageService(uow, UsageLogRepository(uow), keys=get_api_key_service(uow), users=get_user_access(uow))
+
+
+UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
+
+
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
     """Build the routing service, and the usage and key services it reads through, on the request's Unit of Work."""
-    return RoutingService(
-        config,
-        UsageService(uow, UsageLogRepository(uow)),
-        get_api_key_service(uow),
-    )
+    return RoutingService(config, get_usage_service(uow), get_api_key_service(uow))
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
@@ -2410,6 +2423,85 @@ def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable
 async def get_log_writer(request: Request) -> LogWriter:
     writer: LogWriter = request.app.state.log_writer
     return writer
+
+
+class _VideoUsageWriter:
+    """Writes the row that settles a completed video job in the claim's own transaction.
+
+    The log writer would write it on a connection of its own, which a SQLite
+    file refuses while the claim holds the write lock, and a batching writer
+    may drop after accepting. The row is staged on the settlement's session
+    instead, and reported to the usage signal port once that commit has landed,
+    as the signaling writer reports a row it accepted.
+    """
+
+    def __init__(self, uow: UnitOfWork, signal: UsageSignalPort) -> None:
+        self._rows = UsageLogRepository(uow)
+        self._signal = signal
+        self._facts: dict[str, RecordedUsage] = {}
+
+    async def record(self, usage: CompletedVideoUsage) -> None:
+        charge = usage.charge
+        pricing = usage.pricing if charge is not None else None
+        source, reference, effective_at = pricing_provenance(pricing) if pricing is not None else (None, None, None)
+        row = settled_job_row(
+            workspace_id=usage.workspace_id,
+            api_key_id=usage.api_key_id,
+            user_id=usage.user_id,
+            model=usage.model,
+            provider=usage.provider,
+            endpoint=usage.endpoint,
+            counts_toward_budget=usage.counts_toward_budget,
+            deployment_paid=usage.deployment_paid,
+            cost=usage.cost,
+            billing_meters=charge.meters if charge is not None and charge.meters else None,
+            pricing_breakdown=charge.lines if charge is not None and charge.lines else None,
+            pricing_source=source,
+            pricing_reference=reference,
+            pricing_effective_at=effective_at,
+        )
+        self._facts[usage.video_id] = recorded_usage(row)
+        await self._rows.add(row)
+
+    async def recorded(self, usage: CompletedVideoUsage) -> None:
+        facts = self._facts.pop(usage.video_id, None)
+        if facts is None:
+            return
+        try:
+            await self._signal.usage_recorded(facts)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+
+
+def _video_rate_lookup(db: AsyncSession) -> VideoRateLookup:
+    """The rate a video job settles at, read on the request's session."""
+
+    async def rate(
+        provider: str, model: str, *, organization_id: uuid.UUID | None, deployment_paid: bool
+    ) -> ResolvedPricing | None:
+        return await resolve_model_pricing(
+            db, provider, model, organization_id=organization_id, deployment_paid=deployment_paid
+        )
+
+    return rate
+
+
+def get_video_job_service(request: Request, uow: UnitOfWorkDep, db: PortSessionDep) -> VideoJobService:
+    """Build the video job service on the request's Unit of Work.
+
+    Its settlement row and the spend it folds land on the request's session, in
+    the commit that claims the job.
+    """
+    return VideoJobService(
+        uow,
+        InferenceRepositories.on(uow).video_jobs,
+        usage=_VideoUsageWriter(uow, get_container(request).resolve(UsageSignalPort, db)),
+        fold_spend=partial(record_external_spend, db),
+        rate=_video_rate_lookup(db),
+    )
+
+
+VideoJobServiceDep = Annotated[VideoJobService, Depends(get_video_job_service)]
 
 
 def get_file_store(request: Request) -> FileStoragePort:
@@ -2499,12 +2591,12 @@ def _caller_workspace_query(organization_id: CallerOrganization) -> Select[uuid.
 CallerWorkspaceQuery = Annotated[Select[uuid.UUID], Depends(_caller_workspace_query)]
 
 
-def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]:
+def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> UsageScope:
     """The usage rows an operator's usage reads cover: those of the caller's organization."""
-    return usage_in(workspaces)
+    return UsageScope(workspaces=workspaces)
 
 
-CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
+CallerUsageScope = Annotated[UsageScope, Depends(_caller_usage_scope)]
 
 
 async def get_deployment_trace_scope(
@@ -2744,6 +2836,7 @@ __all__ = [
     "OptionalFileServiceDep",
     "OverviewServiceDep",
     "RoutingServiceDep",
+    "UsageServiceDep",
     "VisibleWorkspaces",
     "VisibleWorkspacesDep",
     "GrowthSignalPortDep",

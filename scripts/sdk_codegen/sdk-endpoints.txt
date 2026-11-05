@@ -82,6 +82,11 @@ GET /api/v1/mcp/servers/{mcp_server_id}/tools       # not yet wrapped
 POST /api/v1/mcp/execute                            # not yet wrapped
 # Image edits: no SDK shell wraps the multipart upload yet.
 POST /api/v1/images/edits                 # not yet wrapped
+# Videos: no SDK shell wraps the job routes yet.
+POST /api/v1/videos                       # not yet wrapped
+GET /api/v1/videos                        # not yet wrapped
+GET /api/v1/videos/{video_id}             # not yet wrapped
+GET /api/v1/videos/{video_id}/content     # not yet wrapped
 # Files API: added to the gateway spec, not yet wrapped by any SDK shell.
 POST /api/v1/files                       # not yet wrapped
 GET /api/v1/files                        # not yet wrapped

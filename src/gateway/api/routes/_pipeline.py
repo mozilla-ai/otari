@@ -218,6 +218,7 @@ from gateway.rate_limit import (
     rate_limit_headers,
 )
 from gateway.schemas.inference import SettledCost
+from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 from gateway.services.api_keys import names_end_user, resolve_user_id
 from gateway.services.budgets import (
     ZERO,
@@ -364,7 +365,6 @@ from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSe
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,
-    TOOL_METER_NAMESPACE,
     ToolUsageTally,
 )
 from gateway.services.tools import (

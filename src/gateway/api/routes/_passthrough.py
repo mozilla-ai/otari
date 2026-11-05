@@ -36,7 +36,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Generic, Protocol, TypeVar
 
-from any_llm.exceptions import AnyLLMError
+from any_llm import LLMProvider
+from any_llm.exceptions import AnyLLMError, MissingApiKeyError, UnsupportedProviderError
 from fastapi import Depends, HTTPException, Request, Response, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,7 +92,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, BillingPort, InsufficientFundsError
-from gateway.ports.model_provider_port import HostedAccessDeniedError
+from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import check_rate_limit, rate_limit_headers
 from gateway.schemas.inference import DecisionRequest, DecisionResponse
 from gateway.services.api_keys import (
@@ -124,6 +125,7 @@ from gateway.services.inference import (
     billed_model,
     decision_body,
     describe_port_error,
+    is_provider_credential_rejection,
     reported_charge,
     request_decision,
     resolve_decision_provider,
@@ -146,7 +148,9 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import (
+    MissingCredential,
     ResolvedProvider,
+    get_provider_kwargs,
     missing_credential,
     require_declared_credential,
     resolve_provider_selector,
@@ -155,6 +159,7 @@ from gateway.services.providers import (
     CountryGate,
     CountryNotServedError,
     ensure_provider_country,
+    hosted_implementation,
     serve_on_hosted_provider,
     unpriced_model_refusal,
 )
@@ -162,6 +167,116 @@ from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAI
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
+
+
+def provider_call_failure(exc: Exception) -> HTTPException:
+    """The answer to a failed provider call on a job's lifecycle.
+
+    A rejected credential is a 424. Any failure the classifier can name (a
+    rejected request, a rate limit, a timeout) answers with its mapped status
+    and detail, as on the completion routes, so a caller corrects a request or
+    backs off rather than reading a 502. Anything else is a 502.
+    """
+    if is_provider_credential_rejection(exc):
+        return HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail=PROVIDER_CREDENTIALS_DETAIL,
+            headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
+        )
+    mapping = classify_provider_error(exc)
+    if mapping is not None:
+        return HTTPException(
+            status_code=mapping.status_code,
+            detail=mapping.detail,
+            headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+        )
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM provider error")
+
+
+def parse_provider(provider: str) -> LLMProvider:
+    """Parse a provider string into an LLMProvider enum, raising 400 on invalid values."""
+    try:
+        return LLMProvider.from_string(provider)
+    except UnsupportedProviderError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+
+async def resolve_provider_by_name(
+    config: GatewayConfig,
+    provider: str,
+    *,
+    port: ModelProviderPort,
+    organization_id: uuid.UUID | None,
+    country_gate: CountryGate,
+    workspace_id: uuid.UUID | None = None,
+) -> tuple[LLMProvider, dict[str, Any], bool]:
+    """Resolve a provider named on its own into (implementation, kwargs, deployment-paid).
+
+    ``provider`` is a configured instance name (resolved to its ``provider_type``
+    with the instance's credentials), a hosted provider's name, or a real
+    any-llm provider: what a job's creation echoed back as its ``provider``.
+    ``workspace_id`` reaches ``get_provider_kwargs`` unchanged, consulted only
+    when ``provider`` names no configured instance, so a job created against an
+    organization key stays reachable by every later call on it. A lifecycle
+    call passes the job's own stored workspace, not necessarily the caller's,
+    so credentials resolve from the organization that created the job even for
+    a master-key or cross-workspace call. A provider nothing declared is served
+    on the deployment's own credential where one serves it, as the creation
+    was. ``country_gate`` holds the call to the countries the provider serves,
+    as it held the creation.
+    """
+    try:
+        ensure_provider_country(config, country_gate, provider)
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, provider, noun="Provider") from exc
+    if provider in config.providers:
+        impl = LLMProvider(config.provider_instance_type(provider))
+        return impl, get_provider_kwargs(config, impl, instance=provider), False
+    implementation = hosted_implementation(provider)
+    if implementation is not None and implementation != provider:
+        # A hosted provider's own name, which an organization key for its
+        # implementation would send to another endpoint.
+        impl = LLMProvider(implementation)
+        kwargs = get_provider_kwargs(config, impl, instance=provider)
+    else:
+        impl = parse_provider(provider)
+        kwargs = get_provider_kwargs(config, impl, workspace_id=workspace_id)
+    try:
+        served = await serve_on_hosted_provider(
+            config,
+            port,
+            ResolvedProvider(instance=provider, provider=impl, model="", kwargs=kwargs),
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            any_model=True,
+            country_gate=country_gate,
+        )
+    except HostedAccessDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=model_not_allowed_detail(provider),
+            headers=error_headers(MODEL_NOT_ALLOWED),
+        ) from exc
+    except CountryNotServedError as exc:
+        raise country_not_supported(exc.gate, provider, noun="Provider") from exc
+    except Exception as exc:
+        raise hosted_credential_unusable(provider, exc) from exc
+    if served is not None:
+        return served.provider, served.kwargs, True
+    try:
+        require_declared_credential(config, provider, impl, kwargs)
+    except MissingApiKeyError as exc:
+        raise missing_credential_error(MissingCredential.from_error(exc)) from exc
+    return impl, kwargs, False
+
+
+def hosted_credential_unusable(provider: str, exc: Exception) -> HTTPException:
+    """The 502 for a port that failed to resolve a credential, logged by class: its message may carry a row."""
+    logger.error("ModelProviderPort failed to resolve a credential for %s: %s", provider, describe_port_error(exc))
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL)
 
 
 def resolve_passthrough_user_id(
@@ -206,10 +321,16 @@ class PassthroughOutcome(Generic[ResultT]):
     """The resolved selector the call was dispatched against."""
     headers: dict[str, str]
     """The request id and rate-limit headers, for routes that build their own response object."""
+    user_id: str
+    """The user the request was billed to, whose rows it wrote."""
+    workspace_id: uuid.UUID
+    """The workspace its rows were written in."""
     pricing: ResolvedPricing | None = None
     """The rate found for the request and where it came from, or ``None`` when there is none."""
     cost: Decimal | None = None
     """The cost written to this request's usage row, or ``None`` when it was not priced."""
+    deployment_charge: DeploymentCharge | None = None
+    """How a deployment-paid request is charged, for work the route settles after this call, or ``None``."""
 
 
 async def run_passthrough(
@@ -231,6 +352,7 @@ async def run_passthrough(
     billing: PassthroughBilling,
     map_provider_error: Callable[[Exception], HTTPException | None] | None = None,
     refuse_model: Callable[[ResolvedProvider], HTTPException | None] | None = None,
+    refuse_unpriced: Callable[[ModelPricing | None], HTTPException | None] | None = None,
     request_params: Collection[str] = (),
     reserve_before_resolve: bool = False,
     relabel: bool = True,
@@ -286,6 +408,11 @@ async def run_passthrough(
             to, checked after every gate and before the provider is called.
             The refusal is recorded and the reservation refunded, as for a
             gate's own.
+        refuse_unpriced: Route-specific refusal of the rate found for the
+            model, checked after ``refuse_model`` with the rate a hosted
+            dispatch settles at. For an endpoint priced from the rates block
+            rather than through a meter, which the ``require_pricing`` gate
+            cannot check.
         request_params: The names of the request fields the caller set. A
             provider SDK refusing one of them as an unexpected keyword answers
             400 naming it; any other unexpected keyword stays a 502.
@@ -721,6 +848,11 @@ async def run_passthrough(
         raise await _refuse(
             reservation, resolved, refused_model.status_code, str(refused_model.detail), **(refused_model.headers or {})
         )
+    refused_rate = refuse_unpriced(pricing) if refuse_unpriced is not None else None
+    if refused_rate is not None:
+        raise await _refuse(
+            reservation, resolved, refused_rate.status_code, str(refused_rate.detail), **(refused_rate.headers or {})
+        )
 
     # Already resolved above (needed there for organization-scoped provider
     # credentials); reused here rather than re-derived, since it is fixed for
@@ -811,7 +943,7 @@ async def run_passthrough(
                 tools=NO_TOOLS,
                 model=resolved.model,
                 description=f"{resolved.instance}:{resolved.model}",
-                expects_cost=True,
+                expects_cost=not billing.bills_on_completion,
                 savepoint=db.begin_nested,
             )
         record_attempt(
@@ -909,8 +1041,11 @@ async def run_passthrough(
         result=result,
         resolved=resolved,
         headers=headers,
+        user_id=user_id,
+        workspace_id=workspace_id,
         pricing=found_pricing,
         cost=cost,
+        deployment_charge=deployment_charge,
     )
 
 

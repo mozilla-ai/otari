@@ -1,11 +1,13 @@
-"""Users' model and search tool access lists, which a key's own lists may only narrow."""
+"""Users' model and search tool access lists, which a key's own lists may only narrow, and their display names."""
+
+from collections.abc import Collection
 
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.users_repository import AccessLists
 
 
 class UserAccess:
-    """Read users' access lists. The reads run in the caller's Unit of Work block."""
+    """Read users' access lists and aliases. The reads run in the caller's Unit of Work block."""
 
     def __init__(self, repositories: OrganizationRepositories) -> None:
         self._users = repositories.users
@@ -17,3 +19,7 @@ class UserAccess:
     async def live_lists(self) -> dict[str, AccessLists]:
         """Every live user's access lists, by user id."""
         return await self._users.live_access_lists()
+
+    async def aliases(self, user_ids: Collection[str]) -> dict[str, str | None]:
+        """Each of these users that has a row, deleted or not, to its alias."""
+        return await self._users.aliases(user_ids)

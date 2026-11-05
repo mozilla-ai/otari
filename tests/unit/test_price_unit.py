@@ -14,6 +14,7 @@ from gateway.types.price_unit import (
     RETIRED_UNIT_NAMES,
     AcceptedPriceUnit,
     current_unit_name,
+    models_dev_unit,
 )
 
 SPEC = Path(__file__).resolve().parents[2] / "docs" / "public" / "openapi.json"
@@ -52,6 +53,26 @@ def test_the_reader_knows_every_models_dev_unit() -> None:
 def test_every_models_dev_unit_is_a_price_unit_spelled_the_same() -> None:
     """One vocabulary: the document's name is the stored name, with no map between them."""
     assert set(MODELS_DEV_UNITS) <= set(PRICE_UNITS)
+    assert [models_dev_unit(value) for value in MODELS_DEV_UNITS] == list(MODELS_DEV_UNITS)
+
+
+@pytest.mark.parametrize(
+    ("value", "unit"),
+    [
+        (None, "token"),
+        ("", "token"),
+        ("token", "token"),
+        ("second", "second"),
+        # Otari's own unit, the field that is not a unit, and the retired plurals are not the document's.
+        ("request", None),
+        ("web_search", None),
+        ("tokens", None),
+        ("images", None),
+        ("a-unit-models-dev-adds-later", None),
+    ],
+)
+def test_a_models_dev_unit_names_otari_unit(value: str | None, unit: str | None) -> None:
+    assert models_dev_unit(value) == unit
 
 
 def test_a_retired_name_has_a_current_one_and_nothing_else_is_touched() -> None:

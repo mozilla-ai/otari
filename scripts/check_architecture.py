@@ -1337,9 +1337,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
-            "gateway/api/routes/organization_usage.py",
             "gateway/api/routes/scoped_budgets.py",
-            "gateway/api/routes/usage.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/overview/overview_repository.py",
             "gateway/repositories/users_repository.py",
@@ -1439,6 +1437,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.inference.StoredCountryDatabase": {
         "repository": "gateway/repositories/inference/country_database_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.inference.VideoJobRecord": {
+        "repository": "gateway/repositories/inference/video_job_repository.py",
         "baseline": (),
     },
     "gateway.models.platform.RuntimeSetting": {
@@ -1757,8 +1759,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/batches.py",
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/code_execution.py",
-            "gateway/api/routes/organization_usage.py",
-            "gateway/api/routes/usage.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/users_repository.py",
             "gateway/services/external_usage_service.py",
@@ -1772,8 +1772,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/budgets.py",
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
-            "gateway/api/routes/organization_usage.py",
-            "gateway/api/routes/usage.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/budgets/budget_repository.py",
             "gateway/repositories/budgets/end_user_repository.py",
