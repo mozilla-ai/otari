@@ -28,17 +28,14 @@ fetch a workspace's organization fetch key served is priced under
 after the budget checks; a key exempt from budgets is still served.
 """
 
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request, Response
 
 from gateway.api.deps import DirectToolServiceDep, verify_api_key_or_master_key
-from gateway.api.request_id import set_request_id
-from gateway.core.config import END_USER_BUDGET_HEADER
+from gateway.api.routes._helpers import answer_direct_tool_call
 from gateway.models.api_keys import APIKey
 from gateway.schemas.tools import FetchRequest, FetchResponse
-from gateway.services.tools import DirectCaller
 
 router = APIRouter(tags=["fetch"])
 
@@ -132,17 +129,10 @@ async def _dispatch_fetch(
     auth_result: tuple[APIKey | None, bool],
     service: DirectToolServiceDep,
 ) -> FetchResponse:
-    api_key, is_master_key = auth_result
-    request_id = str(uuid.uuid4())
-    set_request_id(raw_request, response, request_id)
-    caller = DirectCaller(
-        api_key=api_key,
-        is_master_key=is_master_key,
+    return await answer_direct_tool_call(
+        raw_request,
+        response,
+        auth_result=auth_result,
         user=request.user,
-        end_user_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
-        request_id=request_id,
+        run=lambda caller: service.fetch(request, caller=caller, tool_name=tool_name, endpoint=FETCH_ENDPOINT),
     )
-    outcome = await service.fetch(request, caller=caller, tool_name=tool_name, endpoint=FETCH_ENDPOINT)
-    for name, value in outcome.headers.items():
-        response.headers[name] = value
-    return outcome.response
