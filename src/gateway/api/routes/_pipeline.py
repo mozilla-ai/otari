@@ -198,7 +198,7 @@ from gateway.models.tools import (
     ResolvedWebSearchConfig,
     WebTool,
 )
-from gateway.models.usage import UsageLog
+from gateway.models.usage import StreamCutBy, UsageLog
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, BillingPort, InsufficientFundsError
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
@@ -227,6 +227,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
     settle_abandoned_stream,
+    settle_cut_stream,
 )
 from gateway.services.catalog import not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
@@ -253,6 +254,7 @@ from gateway.services.inference import (
     is_empty_completion,
     is_provider_billing_error,
     is_provider_credential_rejection,
+    is_provider_cut,
     is_upstream_connect_failure,
     is_upstream_request_fault,
     is_upstream_stream_interrupted,
@@ -2241,6 +2243,7 @@ def _row_status(*, error: str | None, attribution: RoutingAttribution | None, in
     """The status to record: ``success``, ``error``, ``absorbed``, or ``incomplete``.
 
     ``incomplete`` is a stream the client abandoned before the provider reported usage, billed on an estimate.
+    A stream the provider cut is an ``error`` whether or not an estimate bills it.
 
     A failed attempt that a policy recovered from is ``absorbed``, never ``error``.
     Every error metric in the product counts ``status == "error"`` exactly, so
@@ -4830,6 +4833,7 @@ async def record_usage(
     safety_identifier: str | None = None,
     upstream_attempt: bool = True,
     incomplete: bool = False,
+    stream_cut_by: StreamCutBy | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -4916,6 +4920,7 @@ async def record_usage(
         endpoint=endpoint,
         status=_row_status(error=error, attribution=attribution, incomplete=incomplete),
         error_message=_stored_error_message(error),
+        stream_cut_by=stream_cut_by,
         status_code=status_code,
         latency_ms=latency_ms,
         ttft_ms=ttft_ms,
@@ -5754,14 +5759,30 @@ async def open_stream(
 
 
 def _streamed_text_chars(chunk: Any) -> int:
-    """Characters of output text a Chat chunk or a Responses event carries."""
+    """Characters of output text a Chat chunk, a Responses event or a Messages event carries."""
     if choices := getattr(chunk, "choices", None):
         text = getattr(getattr(choices[0], "delta", None), "content", None)
     elif str(getattr(chunk, "type", "")).endswith("output_text.delta"):
         text = getattr(chunk, "delta", None)
+    elif getattr(chunk, "type", None) == "content_block_delta" and (delta := getattr(chunk, "delta", None)) is not None:
+        text = getattr(delta, "text", None) if getattr(delta, "type", None) == "text_delta" else None
     else:
         return 0
     return len(text) if isinstance(text, str) else 0
+
+
+def _is_final_usage(chunk: Any) -> bool:
+    """Whether a chunk that carries usage carries the provider's last word on it.
+
+    A Chat chunk's usage is final on an empty-choices usage chunk or one that finishes a choice, a Messages
+    event's on ``message_delta`` (``message_start`` reports only the input), and a Responses event's on the
+    event that ends the response.
+    """
+    kind = str(getattr(chunk, "type", ""))
+    if kind:
+        return kind in {"message_delta", "response.completed", "response.incomplete", "response.failed"}
+    choices = getattr(chunk, "choices", None)
+    return not choices or any(getattr(choice, "finish_reason", None) for choice in choices)
 
 
 def build_streaming_response(
@@ -5851,6 +5872,9 @@ def build_streaming_response(
     # cleanly. The generator hands only a completed stream's usage to a callback.
     reported_usage: CompletionUsage | None = None
     streamed_chars = 0
+    # Whether reported_usage includes the provider's final report, as opposed to only the input it
+    # announced when the stream began.
+    usage_is_final = False
 
     def _on_first_chunk() -> None:
         nonlocal first_chunk_at
@@ -5859,11 +5883,12 @@ def build_streaming_response(
             automatic_observation.first_response()
 
     def _extract_usage(chunk: ChunkT) -> CompletionUsage | None:
-        nonlocal reported_usage, streamed_chars
+        nonlocal reported_usage, streamed_chars, usage_is_final
         streamed_chars += _streamed_text_chars(chunk)
         chunk_usage = adapter.extract_stream_usage(chunk)
         if chunk_usage:
             reported_usage = chunk_usage if reported_usage is None else merge_stream_usage(reported_usage, chunk_usage)
+            usage_is_final = usage_is_final or _is_final_usage(chunk)
         return chunk_usage
 
     async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
@@ -6038,8 +6063,25 @@ def build_streaming_response(
                 tool_tally is not None and not tool_tally.is_empty(),
                 request_id,
             )
+        # A stream the provider cut after it started answering owes for the output already sent,
+        # which the provider never reported: bill an estimate. The row stays an error.
+        provider_cut = (
+            first_chunk_at is not None and not isinstance(exc, _GATEWAY_SIDE_FAILURES) and is_provider_cut(exc)
+        )
+        cut = (
+            settle_cut_stream(
+                policy=config.stream_missing_usage_policy,
+                prompt_chars=prompt_chars,
+                streamed_chars=streamed_chars,
+                reported_usage=reported_usage,
+                usage_is_final=usage_is_final,
+            )
+            if provider_cut
+            else None
+        )
+        billed_usage = cut if cut is not None else reported_usage
         if rate_limit_grant is not None:
-            await rate_limit_grant.settle(_settled_tokens(reported_usage))
+            await rate_limit_grant.settle(_settled_tokens(billed_usage))
         logged = await record_usage(
             db=db,
             log_writer=log_writer,
@@ -6048,9 +6090,10 @@ def build_streaming_response(
             provider=provider,
             endpoint=adapter.endpoint,
             user_id=user_id,
-            usage_override=reported_usage,
+            usage_override=billed_usage,
             error=failure_error_message(exc),
             status_code=failure_status_code(exc),
+            stream_cut_by="provider" if provider_cut else None,
             latency_ms=_elapsed_ms(started_at),
             ttft_ms=_ttft_ms(started_at, first_chunk_at),
             counts_toward_budget=_handle_counts_toward_budget(reservation),
@@ -6061,6 +6104,7 @@ def build_streaming_response(
             tags=tags,
             source_label=source_label,
             safety_identifier=safety_identifier,
+            prices=prices,
             deployment_paid=deployment_paid,
         )
         if reservation is not None:
@@ -6068,9 +6112,9 @@ def build_streaming_response(
             # owes for them, and a refund would release the hold without recording
             # that spend. This is also where the streaming tool-iteration cap
             # lands, since the cap is raised inside the generator.
-            await _charge(logged, expects_cost=reported_usage is not None)
+            await _charge(logged, expects_cost=billed_usage is not None)
             if failed_cost := logged.cost:
-                await reconcile_reservation(db, reservation, failed_cost, actual_tokens=_settled_tokens(reported_usage))
+                await reconcile_reservation(db, reservation, failed_cost, actual_tokens=_settled_tokens(billed_usage))
             else:
                 await refund_reservation(db, reservation)
 
@@ -6108,6 +6152,7 @@ def build_streaming_response(
                 usage_override=row.usage,
                 error=row.error,
                 incomplete=row.incomplete,
+                stream_cut_by="client",
                 latency_ms=_elapsed_ms(started_at),
                 ttft_ms=_ttft_ms(started_at, first_chunk_at),
                 counts_toward_budget=_handle_counts_toward_budget(reservation),
@@ -6186,18 +6231,18 @@ async def _prepared(
         raise domain_error(adapter, exc) from exc
 
 
+_GATEWAY_SIDE_FAILURES: tuple[type[BaseException], ...] = (
+    HTTPException,
+    asyncio.CancelledError,
+    MaxToolIterationsExceeded,
+    SandboxNotReachableError,
+    WebSearchNotReachableError,
+)
+
+
 def _automatic_unhealthy(exc: BaseException) -> bool:
     """Identify upstream failures that trigger cooldown, excluding local refusals and cancellation."""
-    if isinstance(
-        exc,
-        (
-            HTTPException,
-            asyncio.CancelledError,
-            MaxToolIterationsExceeded,
-            SandboxNotReachableError,
-            WebSearchNotReachableError,
-        ),
-    ):
+    if isinstance(exc, _GATEWAY_SIDE_FAILURES):
         return False
     kind, code = upstream_exception_shape(exc)
     return (

@@ -480,6 +480,47 @@ def settle_abandoned_stream(
     )
 
 
+def settle_cut_stream(
+    *,
+    policy: str,
+    prompt_chars: int | None,
+    streamed_chars: int,
+    reported_usage: CompletionUsage | None,
+    usage_is_final: bool,
+) -> CompletionUsage | None:
+    """The usage a stream the provider cut owes, or None when the row keeps what the provider reported.
+
+    Only the ``estimate`` policy bills one. The output is estimated from the text
+    streamed to the client, never projected to a full completion. A provider that
+    reported usage before the cut keeps its prompt tokens (Anthropic reports input in
+    ``message_start``), and its completion tokens are raised to the estimate when the
+    text streamed outweighs what it reported. A usage report the provider marked final
+    always wins.
+    """
+    if policy != "estimate":
+        return None
+    if reported_usage is None:
+        return estimate_abandoned_stream_usage(policy=policy, prompt_chars=prompt_chars, streamed_chars=streamed_chars)
+    if usage_is_final:
+        return None
+    streamed_tokens = estimate_output_tokens(streamed_chars)
+    reported_output = reported_usage.completion_tokens or 0
+    if streamed_tokens <= reported_output:
+        return None
+    prompt_tokens = reported_usage.prompt_tokens or (
+        estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0)
+        if prompt_chars is not None
+        else 0
+    )
+    return reported_usage.model_copy(
+        update={
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": streamed_tokens,
+            "total_tokens": prompt_tokens + streamed_tokens,
+        }
+    )
+
+
 def estimate_cost(
     pricing: ModelPricing | None,
     *,

@@ -13,6 +13,7 @@ import httpx
 import httpx2
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
 from anthropic import APITimeoutError as _AnthropicAPITimeoutError
+from any_llm.exceptions import AnyLLMError
 from openai import APIConnectionError as _OpenAIAPIConnectionError
 from openai import APITimeoutError as _OpenAIAPITimeoutError
 
@@ -529,6 +530,20 @@ def is_upstream_stream_interrupted(exc: BaseException) -> bool:
             ),
         )
         for link in _causal_chain(exc)
+    )
+
+
+def is_provider_cut(exc: BaseException) -> bool:
+    """Whether a stream failed because the provider ended it, not because of a fault of the gateway's own.
+
+    A dropped or incomplete stream, a mid-stream timeout, and a failure the provider reports with an HTTP
+    status or through any-llm. An error that is none of these (a bug while formatting a chunk, a guardrail, a database
+    failure) is the gateway's own.
+    """
+    return (
+        is_upstream_stream_interrupted(exc)
+        or upstream_exception_shape(exc) != (None, None)
+        or any(isinstance(link, AnyLLMError) for link in upstream_exception_chain(exc))
     )
 
 

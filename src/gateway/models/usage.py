@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -13,6 +13,9 @@ from gateway.models.money import UsdCost
 
 # Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
 PRICING_REFERENCE_MAX_LENGTH = 511
+
+# Who ended a stream before it completed.
+StreamCutBy = Literal["provider", "client"]
 
 # ``usage_logs.source`` on a row this gateway served itself. Any other value is usage
 # imported through the external-events or OTLP ingest, which reserves this one so an
@@ -172,6 +175,13 @@ class UsageLog(Base):
     # request.
     status: Mapped[str] = mapped_column()
     error_message: Mapped[str | None] = mapped_column()
+    # Who ended a stream before it completed: "provider" (the upstream dropped it or
+    # failed mid-stream) or "client" (the caller disconnected). Null for every other
+    # row, and for rows written before the column existed: null reads as "not cut".
+    # It lets a stream cut by the provider be listed for a refund or a report without
+    # substring-matching ``error_message``. A provider-cut row is an "error" and may carry
+    # estimated tokens and cost, billed under ``stream_missing_usage_policy`` "estimate".
+    stream_cut_by: Mapped[str | None] = mapped_column(String(16))
 
     # Routing attribution. All nullable: a request that named a plain model was not
     # routed through a policy, and null reads correctly as exactly that.
@@ -252,6 +262,7 @@ class UsageLog(Base):
             "cost": self.cost,
             "status": self.status,
             "error_message": self.error_message,
+            "stream_cut_by": self.stream_cut_by,
             "status_code": self.status_code,
             "latency_ms": self.latency_ms,
             "provider_latency_ms": self.provider_latency_ms,
