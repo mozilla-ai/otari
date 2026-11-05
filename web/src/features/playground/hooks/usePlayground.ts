@@ -208,8 +208,8 @@ export function usePlayground() {
   /** Put both panels back to empty, keeping whichever models they hold. */
   const clearPanels = useCallback(() => {
     stop()
-    setPanelA((prev) => ({ ...prev, turns: [] }))
-    setPanelB((prev) => ({ ...prev, turns: [] }))
+    setPanelA((prev) => ({ ...prev, turns: [], sessionId: undefined }))
+    setPanelB((prev) => ({ ...prev, turns: [], sessionId: undefined }))
     invalidateSavedState()
   }, [stop, invalidateSavedState])
 
@@ -391,9 +391,21 @@ export function usePlayground() {
 
       // Both comparison panels receive the same question and stream independently.
       await Promise.all([
-        streamReply(setPanelA, panelA.model, [...panelA.turns, turn]),
+        streamReply(
+          setPanelA,
+          panelA.model,
+          [...panelA.turns, turn],
+          panelA.sessionId,
+        ),
         ...(isComparing && panelB.model
-          ? [streamReply(setPanelB, panelB.model, [...panelB.turns, turn])]
+          ? [
+              streamReply(
+                setPanelB,
+                panelB.model,
+                [...panelB.turns, turn],
+                panelB.sessionId,
+              ),
+            ]
           : []),
       ])
     },
@@ -417,7 +429,7 @@ export function usePlayground() {
       const base = turnsForRegenerate(panel.turns)
       if (base[base.length - 1]?.role !== "user") return
       invalidateSavedState()
-      void streamReply(setPanel, panel.model, base)
+      void streamReply(setPanel, panel.model, base, panel.sessionId)
     },
     [streamReply, invalidateSavedState],
   )
@@ -599,8 +611,13 @@ export function usePlayground() {
       // answers a different prompt from the one beside it, and the rating would
       // be a judgment over an unequal contest. A saved transcript is still in
       // the history.
-      setPanelA((prev) => ({ ...prev, turns: [] }))
-      setPanelB((prev) => ({ ...prev, model: "", turns: [] }))
+      setPanelA((prev) => ({ ...prev, turns: [], sessionId: undefined }))
+      setPanelB((prev) => ({
+        ...prev,
+        model: "",
+        turns: [],
+        sessionId: undefined,
+      }))
       invalidateSavedState()
     }
   }
@@ -627,7 +644,7 @@ export function usePlayground() {
     if (pendingModelChange === undefined) return
     stop()
     setPanelA({ ...EMPTY_PANEL, model: pendingModelChange })
-    setPanelB((prev) => ({ ...prev, turns: [] }))
+    setPanelB((prev) => ({ ...prev, turns: [], sessionId: undefined }))
     invalidateSavedState()
     setPendingModelChange(undefined)
   }

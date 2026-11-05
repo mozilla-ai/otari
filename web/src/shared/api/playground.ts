@@ -457,6 +457,8 @@ export interface StreamChatParams {
    * to keep content for anything to be stored.
    */
   capturePrompts?: boolean
+  /** Sent as `Otari-Conversation-Id`, so the conversation's requests share one session trace. */
+  conversationId?: string
   onDelta: (delta: StreamDelta) => void
   onUsage?: (usage: StreamUsage) => void
   /** Aborts the request; the Stop control and unmounting both use it. */
@@ -482,6 +484,7 @@ export async function streamPlaygroundChat({
   messages,
   tools,
   capturePrompts = false,
+  conversationId,
   onDelta,
   onUsage,
   signal,
@@ -503,7 +506,10 @@ export async function streamPlaygroundChat({
     {
       method: "POST",
       body: JSON.stringify(body),
-      headers: capturePrompts ? { "Otari-Trace-Content": "keep" } : undefined,
+      headers: {
+        ...(capturePrompts ? { "Otari-Trace-Content": "keep" } : {}),
+        ...(conversationId ? { "Otari-Conversation-Id": conversationId } : {}),
+      },
       signal,
     },
   )

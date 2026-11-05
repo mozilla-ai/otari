@@ -24,11 +24,15 @@ import type {
 type SetPanel = Dispatch<SetStateAction<PanelState>>
 
 export interface PlaygroundStream {
-  /** Stream a fresh reply onto `turns`, which must end in a question. */
+  /**
+   * Stream a fresh reply onto `turns`, which must end in a question. Without a
+   * `sessionId` the panel starts a new session and keeps its id.
+   */
   streamReply: (
     setPanel: SetPanel,
     model: string,
     turns: ChatTurn[],
+    sessionId?: string,
   ) => Promise<void>
   /** Abort every reply in flight. Safe to call when none is. */
   stop: () => void
@@ -89,13 +93,20 @@ export function usePlaygroundStream(params: {
   }, [])
 
   const streamReply = useCallback(
-    async (setPanel: SetPanel, model: string, turns: ChatTurn[]) => {
+    async (
+      setPanel: SetPanel,
+      model: string,
+      turns: ChatTurn[],
+      sessionId?: string,
+    ) => {
       const controller = new AbortController()
       inFlightRef.current.add(controller)
+      const conversationId = sessionId ?? `playground-${crypto.randomUUID()}`
 
       setPanel((prev) => ({
         ...prev,
         turns,
+        sessionId: conversationId,
         isAwaitingFirstToken: true,
         isStreaming: true,
       }))
@@ -140,6 +151,7 @@ export function usePlaygroundStream(params: {
           messages: wireMessages(turns),
           tools,
           capturePrompts,
+          conversationId,
           signal: controller.signal,
           onDelta: (delta) => {
             // A tool call is not a token: time to first token stays the time to

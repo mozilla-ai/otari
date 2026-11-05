@@ -568,6 +568,42 @@ describe("sending a question", () => {
     ).toBe("keep")
   })
 
+  it("sends one conversation id per chat, and a new one after New chat", async () => {
+    mockApi()
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+    const conversationId = (call: number) =>
+      new Headers(stream.mock.calls[call]?.[1]?.headers).get(
+        "Otari-Conversation-Id",
+      )
+    const send = async (text: string, replies: number) => {
+      await user.type(screen.getByLabelText("Message"), text)
+      await user.click(screen.getByRole("button", { name: "Send message" }))
+      await waitFor(() =>
+        expect(screen.getAllByText("ok")).toHaveLength(replies),
+      )
+    }
+
+    await screen.findByLabelText("Message")
+    await send("hi", 1)
+    await send("and again", 2)
+    expect(conversationId(0)).toMatch(/^playground-/)
+    expect(conversationId(1)).toBe(conversationId(0))
+
+    await user.click(screen.getByRole("button", { name: "New chat" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "New chat",
+      }),
+    )
+    await send("fresh", 1)
+    expect(stream).toHaveBeenCalledTimes(3)
+    expect(conversationId(2)).toMatch(/^playground-/)
+    expect(conversationId(2)).not.toBe(conversationId(0))
+  })
+
   it("offers no prompt capture where the deployment keeps no content", async () => {
     mockApi()
     renderPage()
