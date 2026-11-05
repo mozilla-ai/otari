@@ -11,12 +11,12 @@ from gateway.models.money import as_float
 from gateway.repositories.budgets import BudgetRepositories, CeilingUsage, LimitUsage, ScopeIdSets
 from gateway.schemas.budgets import KeyBudgetPublic, KeyLimitPublic
 from gateway.services.budgets._periods import period_window
-from gateway.services.budgets._scoped_enforcement import SCOPE_PRECEDENCE
+from gateway.services.budgets._scoped_enforcement import SCOPE_PRECEDENCE, identity_uuid
 from gateway.services.organizations import UserAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 
-# Ceilings a key shares with everyone else in its workspace or organization. A key
-# holder reads how much room they leave, never how much the others have spent.
+# Ceilings a key shares with everyone else in its workspace or organization: a key
+# holder reads how much room they leave, not their limit or the others' spend.
 _SHARED_SCOPES = frozenset({SCOPE_WORKSPACE, SCOPE_ORGANIZATION})
 
 _USER_SCOPE = "user"
@@ -89,7 +89,7 @@ class _KeyLimits:
         """The scopes a request with this key bills to, resolved as the budget gate resolves them."""
         workspace_id = api_key.workspace_id
         organization_id = await self._organizations.get_organization_id_for_workspace(workspace_id)
-        identity = _identity(api_key.user_id)
+        identity = None if api_key.user_id is None else identity_uuid(api_key.user_id)
         workspace_member_id: uuid.UUID | None = None
         organization_member_id: uuid.UUID | None = None
         if identity is not None and organization_id is not None:
@@ -103,16 +103,6 @@ class _KeyLimits:
             workspace_member_ids=() if workspace_member_id is None else (str(workspace_member_id),),
             api_key_ids=(api_key.id,),
         )
-
-
-def _identity(user_id: str | None) -> uuid.UUID | None:
-    """The tenancy identity behind a key's owner; a plain gateway user has none, and so no memberships."""
-    if user_id is None:
-        return None
-    try:
-        return uuid.UUID(user_id)
-    except ValueError:
-        return None
 
 
 def _public(limit: LimitUsage, now: datetime) -> KeyLimitPublic:

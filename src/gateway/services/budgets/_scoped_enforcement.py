@@ -107,7 +107,7 @@ class ApplicableBudget:
         return _SCOPE_SUBJECT.get(self.scope_type, "Budget")
 
 
-def _identity_uuid(user_id: str) -> uuid.UUID | None:
+def identity_uuid(user_id: str) -> uuid.UUID | None:
     """The tenancy identity behind a billed user, when there is one.
 
     ``users.user_id`` is a free-form string, and the attribution row minted for a
@@ -136,7 +136,7 @@ async def _resolve_identities(
     """
     workspace_id = scope.workspace_id or await resolve_workspace_id(db, scope.api_key)
     owner = scope.api_key.user_id if scope.api_key is not None and scope.api_key.user_id else user_id
-    identity = _identity_uuid(owner)
+    identity = identity_uuid(owner)
     workspace_member_id: uuid.UUID | None = None
     org_member_id: uuid.UUID | None = None
 
@@ -450,6 +450,7 @@ __all__ = [
     "blocked_axis",
     "get_provider_ceilings",
     "get_scope_ceilings",
+    "identity_uuid",
     "refused_axis",
     "release",
     "reserve",
