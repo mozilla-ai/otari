@@ -2,7 +2,7 @@
 
 from gateway.services.catalog._aliases import hide_alias_target
 from gateway.services.catalog._dated import dated_builds
-from gateway.services.catalog._limits import ModelArchitecture, apply_model_metadata, model_capabilities
+from gateway.services.catalog._limits import ModelArchitecture, apply_model_metadata
 from gateway.services.catalog._metadata import load_catalog_metadata, metadata_entry
 from gateway.services.catalog._model_type import (
     catalog_model_type,
@@ -52,7 +52,6 @@ __all__ = [
     "hide_alias_target",
     "load_catalog_metadata",
     "metadata_entry",
-    "model_capabilities",
     "model_selector_for_slug",
     "model_type",
     "not_chat_detail",

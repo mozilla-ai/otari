@@ -6,7 +6,6 @@ import pytest
 from any_llm import LLMProvider
 
 from gateway.api.routes import _pipeline
-from gateway.core.config import GatewayConfig
 from gateway.types.attempt import Attempt
 from gateway.types.models_dev import parse_catalog
 
@@ -27,13 +26,20 @@ def _catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_pipeline, "cached_models_dev_catalog", lambda: _CATALOG)
 
 
-def _sent(model: str, **fields: Any) -> dict[str, Any]:
-    attempt = Attempt(position=1, instance="groq", provider=LLMProvider.GROQ, model=model, kwargs={})
-    return _pipeline._without_unused_reasoning_effort(GatewayConfig(), attempt, {"model": model, **fields})
+def _sent(model: str, *, instance: str = "groq", **fields: Any) -> dict[str, Any]:
+    attempt = Attempt(position=1, instance=instance, provider=LLMProvider.GROQ, model=model, kwargs={})
+    return _pipeline._without_unused_reasoning_effort(attempt, {"model": model, **fields})
 
 
 def test_a_model_that_does_not_reason_is_sent_no_effort() -> None:
     assert _sent("llama-3.3-70b-versatile", reasoning_effort="low") == {"model": "llama-3.3-70b-versatile"}
+
+
+def test_an_instance_named_for_no_provider_is_looked_up_under_its_provider() -> None:
+    """A hosted provider or owned endpoint can be named anything; the call still goes to Groq."""
+    assert _sent("llama-3.3-70b-versatile", instance="team-groq", reasoning_effort="low") == {
+        "model": "llama-3.3-70b-versatile"
+    }
 
 
 def test_a_reasoning_model_keeps_the_effort() -> None:

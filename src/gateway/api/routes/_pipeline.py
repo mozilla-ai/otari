@@ -229,7 +229,7 @@ from gateway.services.budgets import (
     reserve_budget,
     settle_abandoned_stream,
 )
-from gateway.services.catalog import model_capabilities, not_chat_detail, organization_offerings
+from gateway.services.catalog import metadata_entry, not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
     ContainerLease,
     SandboxContainerRegistry,
@@ -906,7 +906,7 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
     if status_code == status.HTTP_400_BAD_REQUEST and _is_image_input_rejection(exc):
         return error_headers(UNSUPPORTED_CONTENT)
-    if status_code == status.HTTP_400_BAD_REQUEST and _is_unsupported_feature_error(exc):
+    if status_code == status.HTTP_400_BAD_REQUEST and unsupported_parameter_name(exc) is not None:
         return error_headers(UNSUPPORTED_PARAMETER)
     missing = missing_credential(exc)
     if missing is not None and status_code == missing.status_code:
@@ -6273,25 +6273,25 @@ def _failover_kwargs(
         fields = with_request_fields(config, attempt.instance, fields, ctx.request_extras)
         call_kwargs = with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
         refuse_container_on_deployment_credential(adapter, call_kwargs, deployment_paid=attempt.deployment_paid)
-        return _without_unused_reasoning_effort(config, attempt, call_kwargs)
+        return _without_unused_reasoning_effort(attempt, call_kwargs)
 
     return _build
 
 
-def _without_unused_reasoning_effort(
-    config: GatewayConfig, attempt: Attempt, call_kwargs: dict[str, Any]
-) -> dict[str, Any]:
+def _without_unused_reasoning_effort(attempt: Attempt, call_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Leave ``reasoning_effort`` off a fallback candidate that models.dev says does not reason.
 
     The caller of a routing policy did not pick the candidate, and the effort is
     only a hint, so a model with nothing to tune is sent the request without it
     rather than counted as failed for it. A model models.dev does not describe
-    is sent the field as asked.
+    is sent the field as asked. The model is looked up under the provider it is
+    dispatched to, because an instance's name (a hosted provider's, an owned
+    endpoint's) need not name one.
     """
     if call_kwargs.get("reasoning_effort") is None:
         return call_kwargs
-    capabilities = model_capabilities(config, cached_models_dev_catalog(), f"{attempt.instance}:{attempt.model}")
-    if capabilities is None or "reasoning" in capabilities.supported_parameters:
+    entry = metadata_entry(cached_models_dev_catalog(), attempt.provider.value, attempt.model)
+    if entry is None or entry.reasoning:
         return call_kwargs
     logger.debug(
         "Dropped reasoning_effort for a model that does not reason instance=%s model=%s",

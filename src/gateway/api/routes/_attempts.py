@@ -107,8 +107,6 @@ def no_attempt_accepts_images_detail(tried: int) -> str:
 
 def no_attempt_accepts_parameters_detail(parameters: Sequence[str], tried: int) -> str:
     """400 detail for a request carrying a parameter that no attempt's provider can express."""
-    if not parameters:
-        return f"None of the models tried accepts a parameter the request carries ({tried} attempts)."
     return f"None of the models tried accepts {', '.join(parameters)} ({tried} attempts)."
 
 

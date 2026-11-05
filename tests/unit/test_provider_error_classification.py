@@ -668,7 +668,7 @@ def test_attempts_that_all_refuse_a_parameter_share_one_400_naming_each() -> Non
     errors = [
         UnsupportedParameterError("reasoning_effort", "bedrock"),
         UnsupportedParameterError("response_format", "bedrock"),
-        NotImplementedError(_CONTEXT_MANAGEMENT_MSG),
+        UnsupportedParameterError("response_format", "anthropic"),
     ]
 
     rejection = get_shared_rejection(errors)
@@ -677,6 +677,14 @@ def test_attempts_that_all_refuse_a_parameter_share_one_400_naming_each() -> Non
     assert rejection.status_code == 400
     assert rejection.detail == "None of the models tried accepts reasoning_effort, response_format (3 attempts)."
     assert rejection.headers == {"Otari-Error-Code": "unsupported_parameter"}
+
+
+def test_a_refusal_naming_no_parameter_carries_no_code() -> None:
+    """An operation or feature a provider lacks (rerank, context_management) is no parameter to name."""
+    exc = NotImplementedError(_CONTEXT_MANAGEMENT_MSG)
+
+    assert classify_provider_error(exc) is not None
+    assert provider_error_headers(exc, 400) is None
 
 
 def test_a_parameter_refusal_beside_another_rejection_shares_the_generic_400() -> None:
