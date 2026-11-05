@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 from starlette.types import Message
 
-from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER
+from gateway.api.request_id import set_request_id
+from gateway.core.config import CONVERSATION_HEADER, END_USER_BUDGET_HEADER, ROUTER_HEADER
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
 from gateway.core.env import otari_env
 from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
@@ -29,14 +30,17 @@ from gateway.services.guardrails import (
 )
 from gateway.services.inference import is_retry_futile, request_country_gate
 from gateway.services.routing import RoutingSignal
+from gateway.services.tools import DirectCaller
 from gateway.services.traces import RequestTrace, TraceService, TraceWriter
 from gateway.services.url_safety import UnsafeURLError
 from gateway.services.workspace_scope import default_workspace_id
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
+    from gateway.models.api_keys import APIKey
     from gateway.services.provider_kwargs import MissingCredential
     from gateway.services.providers import CountryGate
+    from gateway.services.tools import DirectToolOutcome
 
 
 GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
@@ -437,3 +441,28 @@ def country_not_supported(gate: CountryGate, selector: str, *, noun: str = "Mode
         detail=gate.refusal_detail(selector, noun=noun),
         headers=error_headers(COUNTRY_NOT_SUPPORTED),
     )
+
+
+async def answer_direct_tool_call[T](
+    raw_request: Request,
+    response: Response,
+    *,
+    auth_result: tuple[APIKey | None, bool],
+    user: str | None,
+    run: Callable[[DirectCaller], Awaitable[DirectToolOutcome[T]]],
+) -> T:
+    """Run a direct tool call for the authenticated caller under a fresh request id, and answer with its headers."""
+    api_key, is_master_key = auth_result
+    request_id = str(uuid.uuid4())
+    set_request_id(raw_request, response, request_id)
+    caller = DirectCaller(
+        api_key=api_key,
+        is_master_key=is_master_key,
+        user=user,
+        end_user_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
+        request_id=request_id,
+    )
+    outcome = await run(caller)
+    for name, value in outcome.headers.items():
+        response.headers[name] = value
+    return outcome.response

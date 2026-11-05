@@ -47,7 +47,7 @@ from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
-from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
@@ -71,6 +71,8 @@ from gateway.repositories.providers import (
     HostedProviderRepository,
     OrgProviderKeyModelRepository,
     ProviderEndpointRepository,
+    WorkspaceHostedAccessRepository,
+    WorkspaceProviderPolicyRepository,
 )
 from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.routing import AgentRecommenderRepository
@@ -160,7 +162,10 @@ from gateway.services.providers import (
     OrgProviderModelService,
     ProviderEndpointService,
     ScheduledRun,
+    WorkspaceHostedAccessService,
+    hosted_models_for,
     refresh_provider_endpoint_cache,
+    refresh_workspace_hosted_access_cache,
 )
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import (
@@ -199,6 +204,7 @@ from gateway.services.tools import (
     DirectToolService,
     DirectToolUsage,
     SearchToolService,
+    ToolRateInForce,
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
@@ -213,6 +219,7 @@ from gateway.services.workspace_scope import (
     organization_for_key_id,
     workspace_for_key_id,
 )
+from gateway.types.tool_charges import InstanceRateKey
 from gateway.types.traces import (
     ContentCapture,
     ContentReader,
@@ -1722,6 +1729,50 @@ def get_provider_endpoint_service(
 ProviderEndpointServiceDep = Annotated[ProviderEndpointService, Depends(get_provider_endpoint_service)]
 
 
+def get_workspace_access(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
+) -> WorkspaceAccess:
+    """Build the workspace visibility and management checks on the request's session."""
+    return WorkspaceAccess(db, organizations)
+
+
+WorkspaceAccessDep = Annotated[WorkspaceAccess, Depends(get_workspace_access)]
+
+
+def get_workspace_hosted_access_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    access: WorkspaceAccessDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
+    model_provider: RequestSessionModelProviderPortDep,
+) -> WorkspaceHostedAccessService:
+    """Build the workspace hosted provider access service on the request's unit of work.
+
+    The hosted port answers which providers an organization may use, and the
+    organization's own keys which of them a workspace never asks the port
+    about. Both are other domains' answers, handed in as callables.
+    """
+
+    async def hosted_models(organization_id: uuid.UUID | None) -> HostedModels:
+        return await hosted_models_for(model_provider, organization_id=organization_id)
+
+    async def byo_providers(workspace_id: uuid.UUID) -> frozenset[str]:
+        return await org_provider_keys.get_workspace_byo_providers(workspace_id=workspace_id)
+
+    return WorkspaceHostedAccessService(
+        uow,
+        rules=WorkspaceHostedAccessRepository(uow),
+        policies=WorkspaceProviderPolicyRepository(uow),
+        access=access,
+        hosted_models=hosted_models,
+        byo_providers=byo_providers,
+        refresh_cache=lambda: refresh_workspace_hosted_access_cache(uow),
+    )
+
+
+WorkspaceHostedAccessServiceDep = Annotated[WorkspaceHostedAccessService, Depends(get_workspace_hosted_access_service)]
+
+
 def get_web_search_key_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1833,12 +1884,20 @@ def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
     return run
 
 
+async def _deployment_tool_rate(session: AsyncSession, rate_key: InstanceRateKey) -> ToolRateInForce | None:
+    """The rate one of the deployment's search or fetch tools settles at on its own account, as settlement reads it."""
+    rate = await resolve_tool_rate(session, [rate_key], deployment_paid=True)
+    if rate is None:
+        return None
+    return ToolRateInForce(rate.unit_rate, under_old_key=rate.old_key)
+
+
 def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config: GatewayConfig) -> SearchToolService:
     """Build the search-tool service on ``uow``.
 
     ``session`` is the session ``uow`` runs on. The runtime tool settings are
     read and staged through it, so a default a create stores lands in the
-    create's commit.
+    create's commit, and the price list is read through it.
     """
     return SearchToolService(
         uow,
@@ -1846,6 +1905,7 @@ def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config:
         tools=SearchToolRepository(uow),
         read_settings=lambda: load_overrides(session, report_invalid=False),
         stage_setting=lambda key, value: stage_override(session, key, value),
+        read_rate=lambda rate_key: _deployment_tool_rate(session, rate_key),
     )
 
 

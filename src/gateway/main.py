@@ -55,6 +55,7 @@ from gateway.core.feature import CoreFeature, Worker
 from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
+from gateway.exceptions.tools_exceptions import DirectToolCallError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
@@ -125,12 +126,15 @@ from gateway.services.providers import (
     hosted_implementation,
     load_hosted_names_at_startup,
     load_provider_endpoints_at_startup,
+    load_workspace_hosted_access_at_startup,
     refuse_unsafe_configured_endpoints,
     reset_hosted_name_index,
     reset_provider_endpoint_cache,
+    reset_workspace_hosted_access_cache,
     run_catalog_updater,
     run_hosted_name_refresher,
     run_provider_endpoint_refresher,
+    run_workspace_hosted_access_refresher,
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
 from gateway.services.routing import (
@@ -512,6 +516,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         "provider endpoint",
         lambda _config, _container: run_provider_endpoint_refresher(),
         reset_provider_endpoint_cache,
+    ),
+    _LifespanWorker(
+        "workspace hosted provider access",
+        lambda _config, _container: run_workspace_hosted_access_refresher(),
+        reset_workspace_hosted_access_cache,
     ),
     _LifespanWorker(
         "hosted provider name", lambda config, _container: run_hosted_name_refresher(config), reset_hosted_name_index
@@ -1009,6 +1018,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # vendor handshake.
         await load_guardrail_runner_at_startup()
         await load_provider_endpoints_at_startup()
+        await load_workspace_hosted_access_at_startup()
         await load_stored_country_database_at_startup(config)
         if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
             await load_sandbox_credentials_at_startup(config.effective_sandbox_provider())
@@ -1128,7 +1138,7 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
     )
 
 
-async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
+async def _tenancy_error_handler(request: Request, exc: Exception) -> Response:
     """Render a tenancy domain error as the status it carries.
 
     One handler for the whole family, so a service keeps raising domain errors
@@ -1146,6 +1156,12 @@ async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
     """
     if not isinstance(exc, TenancyError):  # pragma: no cover - registered for TenancyError only
         raise exc
+    if isinstance(exc, DirectToolCallError):
+        # The direct tool service wrote this answer for the caller, 5xx included, and its
+        # headers carry the refusal's code or a provider failure's safe fields.
+        code = error_code_of(exc.headers)
+        body = {"detail": exc.message} if code is None else {"detail": exc.message, "code": code}
+        return with_request_id(request, JSONResponse(body, status_code=exc.status_code, headers=exc.headers))
     if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
         logger.error("Tenancy request failed: %s", exc.message)
         return JSONResponse(

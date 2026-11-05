@@ -208,6 +208,23 @@ test.describe("organization rail", () => {
     await captureScreenshot(page, "workspaces")
   })
 
+  test("workspace providers", async ({ page }) => {
+    // A workspace's own page on its Providers tab, reached from the list the
+    // way an admin reaches it, so the capture needs no workspace id up front.
+    await login(page)
+    await gotoRoute(page, "/workspaces")
+    // Scoped to the page body: the rail's own links name workspaces too.
+    await page
+      .getByRole("main")
+      .getByRole("link")
+      .filter({ hasText: /workspace/i })
+      .first()
+      .click()
+    await page.getByRole("button", { name: "Providers" }).click()
+    await expect(page.getByRole("region", { name: "Providers" })).toBeVisible()
+    await captureScreenshot(page, "workspace-providers")
+  })
+
   test("organization providers", async ({ page }) => {
     // An organization's rate is set on the model row under the provider that
     // serves it, so this page is where pricing is captured.

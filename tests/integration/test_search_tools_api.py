@@ -318,6 +318,119 @@ _INHERITED_URL = "http://searxng.internal:8080"
 
 
 @pytest.fixture
+def priced_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """Four config-file search tools: one priced by its price_per_call, three with no price in the file."""
+    tools = {
+        "file-priced": {"provider": "fake", "price_per_call": 0.003},
+        "file-own": {"provider": "fake"},
+        "file-old": {"provider": "fake"},
+        "file-none": {"provider": "fake"},
+    }
+    yield from build_test_client(test_config.model_copy(update={"search_tools": tools}))
+
+
+def _price(client: TestClient, headers: dict[str, str], *, kind: str, model_key: str, per_call: float) -> None:
+    body = {
+        "kind": kind,
+        "model_key": model_key,
+        "input_price_per_million": per_call * 1_000_000,
+        "output_price_per_million": 0,
+        "unit": "request",
+    }
+    resp = client.post(f"{API_ROOT}/pricing", json=body, headers=headers)
+    assert resp.status_code in (200, 201), resp.text
+
+
+def _prices(client: TestClient, headers: dict[str, str], kind: str = "search") -> dict[str, tuple[Any, Any]]:
+    listed = client.get(f"{API_ROOT}/search-tools", params={"kind": kind}, headers=headers).json()
+    return {
+        f"{where}:{tool['name']}": (tool["price_per_call"], tool["price_source"])
+        for where in ("config", "stored")
+        for tool in listed[where]
+    }
+
+
+def test_the_listing_gives_each_tool_the_rate_its_calls_settle_at_and_its_row(
+    priced_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client, headers = priced_client, master_key_header
+    _price(client, headers, kind="search", model_key="file-own", per_call=0.004)
+    _price(client, headers, kind="model", model_key="fake:file-old", per_call=0.002)
+    # An override the operator set for one organization prices only that organization's calls.
+    override = {
+        "kind": "search",
+        "model_key": "file-own",
+        "input_price_per_million": 1_000,
+        "output_price_per_million": 0,
+        "unit": "request",
+    }
+    resp = client.post(f"{API_ROOT}/organizations/me/pricing", json=override, headers=headers)
+    assert resp.status_code == 201, resp.text
+
+    assert _prices(client, headers) == {
+        "config:file-none": (None, "none"),
+        "config:file-old": (0.002, "old_key"),
+        "config:file-own": (0.004, "own"),
+        "config:file-priced": (0.003, "config"),
+    }
+
+    # A rate written through the API stays config.yml's to set: the next start writes price_per_call again.
+    _price(client, headers, kind="search", model_key="file-priced", per_call=0.006)
+    assert _prices(client, headers)["config:file-priced"] == (0.006, "config")
+
+    # A stored tool shadowing the entry takes its name's row, and no start writes the entry's price.
+    created = _create(client, headers, name="file-priced", provider="fake", api_base=None)
+    assert created.status_code == 201, created.text
+    assert "price_source" not in created.json()
+    shadowed = _prices(client, headers)
+    assert shadowed["stored:file-priced"] == (0.006, "own")
+    assert shadowed["config:file-priced"] == (0.006, "own")
+
+    # A tool's own row wins over its old key.
+    _price(client, headers, kind="search", model_key="file-old", per_call=0.005)
+    assert _prices(client, headers)["config:file-old"] == (0.005, "own")
+
+
+@pytest.fixture
+def priced_fetch_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """Two config-file fetch tools priced by their price_per_call, one of them free."""
+    tools = {
+        "file-fetch": {"provider": "fake", "price_per_call": 0.002},
+        "free-fetch": {"provider": "fake", "price_per_call": 0},
+    }
+    yield from build_test_client(test_config.model_copy(update={"fetch_tools": tools}))
+
+
+def test_the_fetch_listing_gives_a_config_file_fetch_tool_its_price_per_call(
+    priced_fetch_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    assert _prices(priced_fetch_client, master_key_header, "fetch") == {
+        "config:builtin_fetch": (0.0, "own"),
+        "config:file-fetch": (0.002, "config"),
+        "config:free-fetch": (0.0, "config"),
+    }
+
+
+def test_the_fetch_listing_prices_builtin_fetch_and_stored_fetch_tools(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    created = _create(client, master_key_header, name="fake-fetch", kind="fetch", provider="fake", api_base=None)
+    assert created.status_code == 201, created.text
+    # A migration prices builtin_fetch at $0 on a database where nothing did.
+    assert _prices(client, master_key_header, "fetch") == {
+        "config:builtin_fetch": (0.0, "own"),
+        "stored:fake-fetch": (None, "none"),
+    }
+
+    _price(client, master_key_header, kind="fetch", model_key="builtin_fetch", per_call=0.0002)
+    _price(client, master_key_header, kind="fetch", model_key="fake-fetch", per_call=0.001)
+    assert _prices(client, master_key_header, "fetch") == {
+        "config:builtin_fetch": (0.0002, "own"),
+        "stored:fake-fetch": (0.001, "own"),
+    }
+
+
+@pytest.fixture
 def catalog_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
     """The shared config, plus a URL a searxng tool inherits and one fetch tool."""
     config = test_config.model_copy(

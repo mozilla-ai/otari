@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { type ReactNode, useEffect, useRef } from "react"
 
 /**
  * The classes of a tab, for a `Tab` and for a tab that has to be another
@@ -46,8 +46,17 @@ export function Tab({
   describedBy?: string
   children: ReactNode
 }) {
+  const ref = useRef<HTMLButtonElement>(null)
+  // The row scrolls rather than wrapping, so on a phone the active tab can sit
+  // past its edge, opened from a link, with nothing to say it is there.
+  useEffect(() => {
+    if (isActive) {
+      ref.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
+    }
+  }, [isActive])
   return (
     <button
+      ref={ref}
       type="button"
       aria-pressed={isActive}
       aria-disabled={isDisabled || undefined}

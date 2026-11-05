@@ -245,6 +245,29 @@ def test_a_keyless_endpoint_never_falls_back_to_the_deployment_key(
     assert call["api_key"] not in {"sk-operator", "sk-deployment"}
 
 
+def test_a_workspace_requiring_zero_data_retention_refuses_its_own_endpoint_and_a_configured_instance(
+    client: TestClient,
+) -> None:
+    """Neither can be declared zero data retention, so neither serves a workspace that requires it."""
+    headers = _user_with_key(client, "alice")
+    assert _create(client, user_id="alice", api_key="sk-alice-1234").status_code == 201
+    [workspace] = client.get(f"{API_ROOT}/workspaces", headers=HEADERS).json()["data"]
+    policy = client.put(
+        f"{API_ROOT}/workspaces/{workspace['id']}/provider-policy",
+        json={"require_zero_data_retention": True},
+        headers=HEADERS,
+    )
+    assert policy.status_code == 200, policy.text
+
+    owned, owned_calls = _chat(client, headers, "my-vllm:qwen3")
+    configured, configured_calls = _chat(client, headers, "openai:gpt-4o")
+
+    assert owned.status_code == 403, owned.text
+    assert configured.status_code == 403, configured.text
+    assert owned_calls == []
+    assert configured_calls == []
+
+
 def test_default_params_go_beneath_the_callers_fields(client: TestClient) -> None:
     headers = _user_with_key(client, "alice")
     defaults = {"chat_template_kwargs": {"enable_thinking": False}, "temperature": 0.1}

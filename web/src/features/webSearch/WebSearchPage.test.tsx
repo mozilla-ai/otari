@@ -38,6 +38,8 @@ const SEARCH_TOOLS: SearchToolsResponse = {
       decryptable: true,
       shadows_config: false,
       updated_at: "2026-10-20T10:00:00",
+      price_per_call: 0.005,
+      price_source: "own",
     },
   ],
   config: [
@@ -48,9 +50,29 @@ const SEARCH_TOOLS: SearchToolsResponse = {
       api_base: "http://searxng:8080",
       has_api_key: false,
       shadowed: false,
+      price_per_call: null,
+      price_source: "none",
     },
   ],
 }
+
+/** The search listing, with `local` priced as the gateway gives it. */
+const withLocalPrice = (
+  price_per_call: number,
+  price_source: "own" | "config" | "old_key",
+): SearchToolsResponse => ({
+  ...SEARCH_TOOLS,
+  config: [{ ...SEARCH_TOOLS.config[0], price_per_call, price_source }],
+})
+
+/** The search listing, with `exa` priced as the gateway gives it. */
+const withExaPrice = (
+  price_per_call: number,
+  price_source: "own" | "old_key",
+): SearchToolsResponse => ({
+  ...SEARCH_TOOLS,
+  stored: [{ ...SEARCH_TOOLS.stored[0], price_per_call, price_source }],
+})
 
 const FETCH_TOOLS: SearchToolsResponse = {
   stored: [
@@ -62,6 +84,8 @@ const FETCH_TOOLS: SearchToolsResponse = {
       options: {},
       decryptable: true,
       shadows_config: false,
+      price_per_call: 0.001,
+      price_source: "own",
     },
   ],
   config: [
@@ -71,6 +95,8 @@ const FETCH_TOOLS: SearchToolsResponse = {
       provider: "builtin",
       has_api_key: false,
       shadowed: false,
+      price_per_call: null,
+      price_source: "none",
     },
   ],
 }
@@ -157,6 +183,8 @@ function mockApi(
   opts: {
     operator?: boolean
     requirePricing?: boolean
+    /** The search tools as the listing gives them, prices included. */
+    searchTools?: SearchToolsResponse
     /** The rates in force, keyed `kind:model_key`; anything else answers 404. */
     rates?: Record<string, PricingResponse>
     settings?: Record<string, ToolSettingField["value"]>
@@ -174,7 +202,6 @@ function mockApi(
   let priceFailures = opts.priceFailsOnce ? 1 : 0
   const rates = opts.rates ?? {
     "model:otari:web_search": rate("otari:web_search", 0.01),
-    "search:exa": rate("exa", 0.005, "search"),
   }
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
@@ -222,7 +249,9 @@ function mockApi(
         )
       }
       return jsonResponse(
-        path.searchParams.get("kind") === "fetch" ? FETCH_TOOLS : SEARCH_TOOLS,
+        path.searchParams.get("kind") === "fetch"
+          ? FETCH_TOOLS
+          : (opts.searchTools ?? SEARCH_TOOLS),
       )
     }
     if (path.pathname.startsWith(`${API_ROOT}/search-tools/`)) {
@@ -281,6 +310,35 @@ const findRow = async (table: string, name: string) => {
   const row = cell.closest('[role="row"]')
   if (!(row instanceof HTMLElement)) throw new Error(`no row for ${name}`)
   return row
+}
+
+const reads = (requests: Request[], path: string) =>
+  requests.filter(
+    (request) =>
+      request.method === "GET" &&
+      new URL(request.url, "http://localhost").pathname.startsWith(
+        `${API_ROOT}${path}`,
+      ),
+  )
+
+const listingReads = (requests: Request[]) =>
+  requests.filter(
+    (request) =>
+      request.method === "GET" &&
+      new URL(request.url, "http://localhost").pathname ===
+        `${API_ROOT}/search-tools`,
+  )
+
+/** Confirms a removal once the dialog has checked the tool's old price key. */
+const confirmRemoval = async (
+  user: ReturnType<typeof userEvent.setup>,
+  confirm: HTMLElement,
+) => {
+  const button = within(confirm).getByRole("button", {
+    name: "Remove permanently",
+  })
+  await waitFor(() => expect(button).toBeEnabled())
+  await user.click(button)
 }
 
 const writes = (requests: Request[], method: string, path: string) =>
@@ -344,6 +402,24 @@ describe("WebSearchPage", () => {
     expect(await within(builtin).findByText("Unpriced")).toBeInTheDocument()
 
     expect(await screen.findByText(/require_pricing is on/)).toBeInTheDocument()
+  })
+
+  it("takes each tool's price from the listing, and reads only the organization keys' rows", async () => {
+    const requests = mockApi()
+    await renderPage()
+
+    const tabstack = await findRow("Fetch tools", "tabstack")
+    expect(await within(tabstack).findByText("$0.001")).toBeInTheDocument()
+    await findRow("Fetch tools", "Fetch on organization keys")
+
+    expect(
+      reads(requests, "/pricing")
+        .map((request) => new URL(request.url, "http://localhost").pathname)
+        .sort(),
+    ).toEqual([
+      `${API_ROOT}/pricing/otari%3Aweb_fetch`,
+      `${API_ROOT}/pricing/otari%3Aweb_search`,
+    ])
   })
 
   it("stars a tool as the model's default, and stops using it", async () => {
@@ -524,9 +600,10 @@ describe("WebSearchPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Remove exa" }))
     const confirm = await screen.findByRole("alertdialog")
-    await user.click(
-      within(confirm).getByRole("button", { name: "Remove permanently" }),
-    )
+    expect(
+      within(confirm).queryByText(/The price stored under exa:exa stays/),
+    ).not.toBeInTheDocument()
+    await confirmRemoval(user, confirm)
 
     await waitFor(() =>
       expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
@@ -538,17 +615,18 @@ describe("WebSearchPage", () => {
   })
 
   it.each([
-    ["when it is the tool's price", {}],
-    [
-      "beside the tool's own price",
-      { "search:exa": rate("exa", 0.005, "search") },
-    ],
+    ["when it is the tool's price", withExaPrice(0.004, "old_key")],
+    ["beside the tool's own price", SEARCH_TOOLS],
   ])(
     "names, and keeps, the price under a removed tool's old key %s",
-    async (_, own) => {
+    async (_, searchTools) => {
       const user = userEvent.setup()
       const requests = mockApi({
-        rates: { "model:exa:exa": rate("exa:exa", 0.004), ...own },
+        searchTools,
+        rates: {
+          "model:otari:web_search": rate("otari:web_search", 0.01),
+          "model:exa:exa": rate("exa:exa", 0.004),
+        },
       })
       await renderPage()
 
@@ -561,9 +639,7 @@ describe("WebSearchPage", () => {
           /The price stored under exa:exa stays/,
         ),
       ).toBeInTheDocument()
-      await user.click(
-        within(confirm).getByRole("button", { name: "Remove permanently" }),
-      )
+      await confirmRemoval(user, confirm)
 
       await waitFor(() =>
         expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
@@ -572,6 +648,25 @@ describe("WebSearchPage", () => {
       expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
     },
   )
+
+  it("says when it could not check the removed tool's old key, and still removes it", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ failingReads: ["model:exa:exa"] })
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Remove exa" }))
+    const confirm = await screen.findByRole("alertdialog")
+    expect(
+      await within(confirm).findByText(
+        /Could not check for a price stored under exa:exa/,
+      ),
+    ).toBeInTheDocument()
+    await confirmRemoval(user, confirm)
+
+    await waitFor(() =>
+      expect(writes(requests, "DELETE", "/search-tools/exa")).toHaveLength(1),
+    )
+  })
 
   it("configures a stored tool by sending only what changed", async () => {
     const user = userEvent.setup()
@@ -738,15 +833,11 @@ describe("WebSearchPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Remove exa" }))
     const confirm = await screen.findByRole("alertdialog")
-    await user.click(
-      within(confirm).getByRole("button", { name: "Remove permanently" }),
-    )
+    await confirmRemoval(user, confirm)
     await waitFor(() =>
       expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
     )
-    await user.click(
-      within(confirm).getByRole("button", { name: "Remove permanently" }),
-    )
+    await confirmRemoval(user, confirm)
 
     await waitFor(() =>
       expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(2),
@@ -784,6 +875,7 @@ describe("WebSearchPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Edit the price of local" }),
     )
+    const listed = listingReads(requests).length
     await user.type(await screen.findByLabelText(/Price per call, USD/), "0.07")
     await user.click(screen.getByRole("button", { name: "Save" }))
 
@@ -797,23 +889,18 @@ describe("WebSearchPage", () => {
         unit: "request",
       }),
     )
+    // The listing carries the price, so it is read again.
+    await waitFor(() =>
+      expect(listingReads(requests).length).toBeGreaterThan(listed),
+    )
   })
 
   it("leaves a rate config.yml sets to config.yml", async () => {
-    mockApi({
-      rates: {
-        "search:local": pricingResponse({
-          model_key: "local",
-          kind: "search",
-          input_price_per_million: 3000,
-          unit: "request",
-          origin: "config",
-        }),
-      },
-    })
+    mockApi({ searchTools: withLocalPrice(0.003, "config") })
     await renderPage()
 
     const local = await findRow("Search tools", "local")
+    expect(await within(local).findByText("$0.003")).toBeInTheDocument()
     expect(
       await within(local).findByText("Price in config.yml"),
     ).toBeInTheDocument()
@@ -824,7 +911,7 @@ describe("WebSearchPage", () => {
 
   it("shows the rate a tool is still priced at under its old key", async () => {
     mockApi({
-      rates: { "model:searxng:local": rate("searxng:local", 0.002) },
+      searchTools: withLocalPrice(0.002, "old_key"),
       requirePricing: true,
     })
     await renderPage()
@@ -835,24 +922,4 @@ describe("WebSearchPage", () => {
       within(local).getByText("Under its old price key"),
     ).toBeInTheDocument()
   })
-
-  it.each([
-    ["its own rate", "search:local"],
-    ["the rate under its old key", "model:searxng:local"],
-  ])(
-    "calls a tool unreadable, not unpriced, when %s could not be read",
-    async (_, failing) => {
-      mockApi({
-        failingReads: [failing],
-        requirePricing: true,
-      })
-      await renderPage()
-
-      const local = await findRow("Search tools", "local")
-      expect(
-        await within(local).findByText("Could not read"),
-      ).toBeInTheDocument()
-      expect(within(local).queryByText("Unpriced")).not.toBeInTheDocument()
-    },
-  )
 })

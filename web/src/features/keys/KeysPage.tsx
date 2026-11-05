@@ -78,6 +78,7 @@ import {
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 import { ExpiryFields } from "./ExpiryFields"
 import { FederationRulesDialog } from "./FederationRulesDialog"
 import { KeyActionsMenu } from "./KeyActionsMenu"
@@ -751,11 +752,11 @@ function CreateKeyDialog({
             }}
           />
           <ToolScopeControl
-            title="Restrict this key's search tools"
+            title="Restrict this key's search and fetch tools"
             description={
               isDeploymentWide
-                ? "Which search tools this key may run on /v1/search. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can never exceed its owner's."
-                : "Which search tools this key may run on /v1/search. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can never exceed yours."
+                ? "Which search and fetch tools this key may run on /v1/search and /v1/fetch. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can never exceed its owner's."
+                : "Which search and fetch tools this key may run on /v1/search and /v1/fetch. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can never exceed yours."
             }
             inheritLabel={
               isDeploymentWide ? "Inherit owner's tools" : "Inherit your tools"
@@ -837,10 +838,12 @@ function RegeneratedSecretDialog({
 }
 
 function EditKeyForm({
+  isOpen,
   isDeploymentWide,
   apiKey,
   onClose,
 }: {
+  isOpen: boolean
   isDeploymentWide: boolean
   apiKey: ApiKey
   onClose: () => void
@@ -975,7 +978,7 @@ function EditKeyForm({
 
   return (
     <FormDialog
-      isOpen
+      isOpen={isOpen}
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
@@ -1041,11 +1044,11 @@ function EditKeyForm({
         }}
       />
       <ToolScopeControl
-        title="Restrict this key's search tools"
+        title="Restrict this key's search and fetch tools"
         description={
           isDeploymentWide
-            ? "Which search tools this key may run on /v1/search. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). It can never exceed its owner's."
-            : "Which search tools this key may run on /v1/search. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). It can never exceed yours."
+            ? "Which search and fetch tools this key may run on /v1/search and /v1/fetch. Left on Inherit, it takes its owner's list. With no list on either, it follows its model access, or its owner's when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). It can never exceed its owner's."
+            : "Which search and fetch tools this key may run on /v1/search and /v1/fetch. Left on Inherit, it takes your list. With no list on either, it follows its model access, or yours when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). It can never exceed yours."
         }
         inheritLabel={
           isDeploymentWide ? "Inherit owner's tools" : "Inherit your tools"
@@ -1270,7 +1273,10 @@ export function KeysPage() {
   // which affordances it draws, are both undecided until the organization
   // context answers, and a disabled query reports `isLoading` false.
   const loading = !scope.isReady || keys.isLoading
-  const editingKey = rows.find((apiKey) => apiKey.id === editing)
+  const editingTarget = useHeldDialogTarget(
+    rows.find((apiKey) => apiKey.id === editing),
+  )
+  const editingKey = editingTarget.held
   const showOnboarding = !loading && rows.length === 0
   const selection = useTableSelection()
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
@@ -1710,12 +1716,14 @@ export function KeysPage() {
         memberLabels={memberLabels}
         returnFocusRef={createButtonRef}
       />
-      {/* Keyed on the row id: the fields seed from `apiKey` on mount only, so
-          the next Edit has to arrive at a fresh form rather than the last key's
-          values, which would PATCH the wrong row. */}
+      {/* Keyed on the row id and the opening: the fields seed from `apiKey` on
+          mount only, so the next Edit has to arrive at a fresh form rather than
+          the last key's values, which would PATCH the wrong row. Kept mounted
+          through the exit, which `isOpen` plays. */}
       {editingKey ? (
         <EditKeyForm
-          key={editingKey.id}
+          key={`${editingKey.id}:${editingTarget.generation}`}
+          isOpen={editingTarget.isOpen}
           isDeploymentWide={isDeploymentWide}
           apiKey={editingKey}
           onClose={() => setEditing(undefined)}

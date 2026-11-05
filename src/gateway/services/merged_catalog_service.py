@@ -31,7 +31,7 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
 from gateway.services.catalog import ModelArchitecture, ModelType, apply_model_metadata, load_catalog_metadata
-from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
+from gateway.services.model_access import is_model_allowed, resolve_request_allowlist, workspace_serves_target
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
 from gateway.services.policy_store import effective_policies
 from gateway.services.pricing_service import (
@@ -51,6 +51,7 @@ from gateway.services.provider_kwargs import (
     normalize_pricing_key,
     split_selector,
 )
+from gateway.services.providers import narrow_hosted_models, workspace_requires_zero_data_retention
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_model_access import (
@@ -598,6 +599,7 @@ async def catalog_scope(
     anonymous: bool = False,
     model_provider: ModelProviderPort | None,
     include_offered: bool = True,
+    workspace_id: uuid.UUID | None = None,
 ) -> CatalogScope:
     """Returns what this caller may be shown, by how they authenticated.
 
@@ -605,6 +607,8 @@ async def catalog_scope(
     A master key, and a session that operates the deployment, are unrestricted.
     Any other session gets what its organization can reach,
     and the workspace-scoped rows only for workspaces it may see.
+    A session that names ``workspace_id`` gets what that workspace may call,
+    an operator's included, the way a key in it would.
     A visitor to the public catalog gets the configured instances and what the
     hosted port advertises to every organization.
     ``include_offered=False`` leaves out the organization's offered models, for
@@ -630,7 +634,7 @@ async def catalog_scope(
             deployment_key_models=hosted_models,
         )
     if session_identity is not None:
-        if await DeploymentUserService(db).has_administration_access(session_identity):
+        if workspace_id is None and await DeploymentUserService(db).has_administration_access(session_identity):
             # Unrestricted, and still carrying its *own* organization's offered
             # models. Not every organization's, which would cross the tenant line
             # the rest of this function draws, and not none: on a deployment with
@@ -664,7 +668,9 @@ async def catalog_scope(
                 deployment_key_models=deployment_key_models,
                 hosted_keys=_listed_hosted_keys(deployment_key_models),
             )
-        scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
+        scope = await resolve_session_catalog_scope(
+            db, config, user=session_identity, model_provider=model_provider, workspace_id=workspace_id
+        )
         return CatalogScope(
             allowlist=scope.allowlist,
             reads_workspace_layer=scope.reads_default_workspace,
@@ -678,6 +684,8 @@ async def catalog_scope(
     workspace_id = api_key.workspace_id if api_key is not None else None
     organization_id = None if workspace_id is None else await organization_for_workspace_id(db, workspace_id)
     hosted_models = await resolve_hosted_models(model_provider, None if is_master_key else organization_id)
+    if not is_master_key:
+        hosted_models = narrow_hosted_models(hosted_models, workspace_id)
     withheld_providers: frozenset[str] = frozenset()
     deployment_hosts = frozenset[str]()
     if not is_master_key:
@@ -740,6 +748,8 @@ class MergedCatalog:
     """The models.dev catalog the limits were read from, for a reader that joins more of it."""
     alias_targets: set[str] = field(default_factory=set)
     """Canonical keys of the caller's alias targets, whether or not the listing withheld them."""
+    requires_zero_data_retention: bool = False
+    """The workspace this was built for refuses every offering not declared zero data retention."""
 
 
 async def build_merged_catalog(
@@ -754,6 +764,7 @@ async def build_merged_catalog(
     model_provider: ModelProviderPort | None,
     include_offered: bool = True,
     withhold_alias_targets: bool = True,
+    workspace_id: uuid.UUID | None = None,
 ) -> MergedCatalog:
     """Merge discovery, stored prices, defaults, aliases and policies for one caller.
 
@@ -791,6 +802,7 @@ async def build_merged_catalog(
         anonymous=anonymous,
         model_provider=model_provider,
         include_offered=include_offered,
+        workspace_id=workspace_id,
     )
     pricing_map = await get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
@@ -988,6 +1000,23 @@ async def build_merged_catalog(
 
         merged = {mid: obj for mid, obj in merged.items() if _permitted(mid)}
 
+    # The workspace's own narrowing reaches an alias or a policy only through its
+    # target, which the scope above never sees, so each is judged by the gate
+    # dispatch applies to that target.
+    narrowing_workspace = caller_workspace_id if session_identity is None else workspace_id
+    if narrowing_workspace is not None and provider is None:
+        named = {alias: [aliases[alias]] for alias in aliases if alias in merged}
+        named.update({name: list(spec.static_selectors()) for name, spec in dynamic_policies.items() if name in merged})
+        merged = {
+            mid: obj
+            for mid, obj in merged.items()
+            if mid not in named
+            or any(
+                workspace_serves_target(config, narrowing_workspace, normalize_pricing_key(config, target))
+                for target in named[mid]
+            )
+        }
+
     for obj in merged.values():
         mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
 
@@ -999,6 +1028,9 @@ async def build_merged_catalog(
         deployment_key_models=scope.deployment_key_models,
         models_dev=models_dev,
         alias_targets=targets,
+        # Only a session naming a workspace asks for one workspace's view.
+        requires_zero_data_retention=session_identity is not None
+        and workspace_requires_zero_data_retention(workspace_id),
     )
 
 
@@ -1010,6 +1042,7 @@ async def build_real_model_catalog(
     session_identity: TenancyUser | None,
     anonymous: bool = False,
     model_provider: ModelProviderPort | None,
+    workspace_id: uuid.UUID | None = None,
 ) -> MergedCatalog:
     """The merged catalog for a view that lists real models and never an alias.
 
@@ -1024,6 +1057,7 @@ async def build_real_model_catalog(
         anonymous=anonymous,
         model_provider=model_provider,
         withhold_alias_targets=False,
+        workspace_id=workspace_id,
     )
 
 
@@ -1097,6 +1131,15 @@ class ZeroDataRetention:
         if served_on == "organization":
             return instance in self.organization
         return False
+
+
+def withholds_offering(merged: MergedCatalog, *, zero_data_retention: bool) -> bool:
+    """Whether an offering is left out of ``merged``'s grouped view for the workspace it was built for.
+
+    A workspace requiring zero data retention is shown no offering that is not
+    declared it, since dispatch refuses every one of them.
+    """
+    return merged.requires_zero_data_retention and not zero_data_retention
 
 
 async def viewer_zero_data_retention(

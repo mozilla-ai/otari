@@ -403,6 +403,34 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  it("still finds a provider by the name the gateway gives it", async () => {
+    mockApi({
+      catalog: [
+        { id: "deepinfra", name: "Deep Infra" },
+        { id: "azure", name: "Azure" },
+        { id: "azureopenai", name: "Azure" },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    const box = screen.getByRole("combobox", { name: "Provider" })
+    await user.click(box)
+    expect(
+      await screen.findByRole("option", { name: "Azure AI Foundry" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: "Azure OpenAI" }),
+    ).toBeInTheDocument()
+    await user.type(box, "deep infra")
+    expect(
+      await screen.findByRole("option", { name: "DeepInfra" }),
+    ).toBeInTheDocument()
+  })
+
   it("asks Bedrock for its region by name and sends it in client_args", async () => {
     const requests = mockApi({ catalog: [{ id: "bedrock", name: "Bedrock" }] })
     const user = userEvent.setup()
@@ -412,7 +440,9 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(
+      await screen.findByRole("option", { name: "Amazon Bedrock" }),
+    )
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
     // Not called an API key here: Bedrock's credential is a bearer token or an
     // IAM secret, depending on which shape the organization uses.
@@ -446,7 +476,9 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(
+      await screen.findByRole("option", { name: "Amazon Bedrock" }),
+    )
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
 
     const submit = screen.getByRole("button", {
@@ -482,7 +514,9 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(
+      await screen.findByRole("option", { name: "Amazon Bedrock" }),
+    )
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
     await user.type(
       screen.getByRole("textbox", { name: /AWS region/ }),

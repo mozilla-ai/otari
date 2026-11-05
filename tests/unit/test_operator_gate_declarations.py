@@ -133,6 +133,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "code_execution.router": _DATA_PLANE,
     "embeddings.router": _DATA_PLANE,
     "decisions.router": _DATA_PLANE,
+    "fetch.router": _DATA_PLANE,
     "files.router": _DATA_PLANE,
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,

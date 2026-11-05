@@ -1876,6 +1876,12 @@
                   "value": ""
                 },
                 {
+                  "description": "For a signed-in caller, list only what a request billed to this workspace may call, with its own disabled keys and model lists applied. A workspace the caller cannot see answers 404. Ignored for an API key, which already names its workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Number of matching models to skip.",
                   "disabled": true,
                   "key": "skip",
@@ -1978,7 +1984,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&zero_data_retention=&released_within_days=&sort=&direction=&include_facets="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&workspace_id=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&type=&min_context=&max_input=&pricing=&source=&zero_data_retention=&released_within_days=&sort=&direction=&include_facets="
             }
           }
         },
@@ -1999,7 +2005,15 @@
                 "models",
                 ":model_id"
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models/:model_id",
+              "query": [
+                {
+                  "description": "For a signed-in caller, only the offerings a request billed to this workspace may call.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/catalog/models/:model_id?workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2596,6 +2610,85 @@
         }
       ],
       "name": "feedback"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Fetch",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"max_chars\": 20000,\n  \"url\": \"https://example.com/article\"\n}"
+            },
+            "description": "Fetch one page through a configured fetch tool.\n\nThe tool is taken from ``fetch_tool_name``, which may be omitted: the\ndeployment's ``web_fetch_default_tool`` then serves, else ``builtin_fetch``,\nthe gateway's own fetcher. Such a call runs on the workspace's organization\nfetch key when it has one. While the deployment's ``web_fetch_enabled`` is\noff, the call is refused, as ``otari_web_fetch`` is. The URL must pass the\nworkspace's domain lists and the gateway's own checks: a public http or\nhttps URL that names no private address. The built-in fetcher also checks\nwhere each host resolves.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "fetch"
+              ],
+              "raw": "{{baseUrl}}/api/v1/fetch"
+            }
+          }
+        },
+        {
+          "name": "Create Fetch For Tool",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"max_chars\": 20000,\n  \"url\": \"https://example.com/article\"\n}"
+            },
+            "description": "Fetch one page through the fetch tool named in the path.\n\nIdentical to ``POST /api/v1/fetch`` except that the path names the tool,\nwhich then runs on its own key. Any ``fetch_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "fetch",
+                ":fetch_tool_name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/fetch/:fetch_tool_name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "fetch_tool_name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "fetch"
     },
     {
       "item": [
@@ -13534,6 +13627,191 @@
         }
       ],
       "name": "workspace-code-execution-policy"
+    },
+    {
+      "item": [
+        {
+          "name": "List Workspace Hosted Providers",
+          "request": {
+            "description": "Every hosted provider this workspace's organization may use, with what this workspace keeps of it.\n\nAny member of the workspace may read it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "hosted-providers"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/hosted-providers",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Hosted Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Switch a hosted provider off for this workspace, or narrow it to some of its models.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. It can only narrow what the organization may use: a model the\ndeployment does not serve on the provider is refused with 400. Sending the\ninherited state (enabled, every model) is a reset.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "hosted-providers",
+                ":provider"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/hosted-providers/:provider",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reset Workspace Hosted Provider",
+          "request": {
+            "description": "Drop this workspace's rule for a hosted provider, so it inherits the provider whole. Idempotent.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "hosted-providers",
+                ":provider"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/hosted-providers/:provider",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Workspace Provider Policy",
+          "request": {
+            "description": "What this workspace requires of every provider serving it. Any member of the workspace may read it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-policy"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-policy",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Provider Policy",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"require_zero_data_retention\": false\n}"
+            },
+            "description": "Require zero data retention of every provider serving this workspace, or stop requiring it.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. Required, a request is refused with 403 on an organization key or a\nhosted provider not declared zero data retention, and on any provider\nconfigured in config.yml or endpoint the workspace or its users own,\nneither of which can be declared.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-policy"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-policy",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspace-hosted-providers"
     },
     {
       "item": [

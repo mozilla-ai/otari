@@ -40,6 +40,8 @@ from gateway.models.provider_keys import (
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services import merged_catalog_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.providers import _workspace_hosted_access as workspace_hosted_access
+from gateway.services.providers._workspace_hosted_access import WorkspaceHostedRule
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
 from .conftest import shared_test_config
@@ -573,6 +575,78 @@ def test_a_hosted_provider_is_listed_for_a_member_of_an_organization_holding_no_
     assert listed[_LISTED_AS[_MISTRAL_MODEL]]["deployment_managed"] is True, "the deployment pays the mistral bill"
     assert listed[_LISTED_AS[_OPENAI_MODEL]]["deployment_managed"] is False, "alpha's own key pays the openai bill"
     assert port.asked_for == [world.alpha], "the port is asked for the caller's organization, once"
+
+
+def test_a_hosted_provider_the_members_workspace_switched_off_is_not_listed_to_them(
+    client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The workspace's own rule narrows the member's catalog the way it narrows dispatch; an owner still sees it."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    monkeypatch.setattr(
+        workspace_hosted_access,
+        "_rules",
+        {world.workspaces["alpha_one"]: {"mistral": WorkspaceHostedRule(enabled=False, models=None)}},
+    )
+
+    assert _LISTED_AS[_MISTRAL_MODEL] not in _catalog_as(client, world, "alpha_member")
+    assert _LISTED_AS[_MISTRAL_MODEL] in _catalog_as(client, world, "alpha_owner")
+
+
+def _grouped_for_workspace(
+    client: TestClient, world: _World, who: str, workspace_id: uuid.UUID
+) -> tuple[int, set[str]]:
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
+    try:
+        response = client.get(f"{API_ROOT}/catalog/models", params={"workspace_id": str(workspace_id)})
+        if response.status_code != status.HTTP_200_OK:
+            return response.status_code, set()
+        return response.status_code, {
+            selector for model in response.json()["models"] for selector in model["selectors"]
+        }
+    finally:
+        client.cookies.clear()
+
+
+@pytest.mark.parametrize("who", ["alpha_owner", "superuser"])
+def test_naming_a_workspace_lists_only_what_that_workspace_may_call(
+    client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch, who: str
+) -> None:
+    """An owner, and an operator, otherwise see the whole organization; one workspace's rule narrows that view."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    monkeypatch.setattr(
+        workspace_hosted_access,
+        "_rules",
+        {world.workspaces["alpha_one"]: {"mistral": WorkspaceHostedRule(enabled=False, models=None)}},
+    )
+
+    _, narrowed = _grouped_for_workspace(client, world, who, world.workspaces["alpha_one"])
+    _, other = _grouped_for_workspace(client, world, who, world.workspaces["alpha_two"])
+
+    assert _MISTRAL_MODEL not in narrowed
+    assert _OPENAI_MODEL in narrowed
+    assert _MISTRAL_MODEL in other
+
+
+def test_a_workspace_requiring_zero_data_retention_lists_no_undeclared_offering(
+    client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither alpha's own openai key nor the hosted mistral is declared, so neither is listed for alpha_one."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    monkeypatch.setattr(
+        workspace_hosted_access, "_zero_retention_workspaces", frozenset({world.workspaces["alpha_one"]})
+    )
+
+    _, required = _grouped_for_workspace(client, world, "alpha_owner", world.workspaces["alpha_one"])
+    _, other = _grouped_for_workspace(client, world, "alpha_owner", world.workspaces["alpha_two"])
+
+    assert _OPENAI_MODEL not in required
+    assert _MISTRAL_MODEL not in required
+    assert _OPENAI_MODEL in other
+
+
+def test_naming_another_organizations_workspace_is_not_found(client: TestClient, world: _World) -> None:
+    status_code, _ = _grouped_for_workspace(client, world, "alpha_owner", world.workspaces["beta_one"])
+    assert status_code == status.HTTP_404_NOT_FOUND
 
 
 def test_a_hosted_provider_the_organization_also_holds_a_key_for_is_the_organizations_to_price(

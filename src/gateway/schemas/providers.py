@@ -175,6 +175,9 @@ class WorkspaceProviderKeyOverridePublic(SQLModel):
     # fetching it per key turns one read into one per key. Empty is the common
     # answer and means every model the key serves, never none of them.
     allowed_models: list[str]
+    # The organization's declaration on the key, so a workspace that requires
+    # zero data retention can be shown which of its keys that leaves.
+    zero_data_retention: bool = False
 
 
 class WorkspaceProviderKeyOverridesPublic(SQLModel):
@@ -964,6 +967,59 @@ class HostedAvailableModelsPublic(SQLModel):
     discovery_unsupported: bool = False
 
 
+class WorkspaceHostedProviderAccessRequest(SQLModel):
+    """What one workspace may do with one hosted provider. Replaces whatever it stored before."""
+
+    enabled: bool = Field(description="False switches the provider off for this workspace.")
+    models: list[str] | None = Field(
+        default=None,
+        max_length=1000,
+        description=(
+            "The models this workspace may call on the provider. Null for every model the deployment serves on it, "
+            "including ones added later. A list must name at least one model."
+        ),
+    )
+
+
+class WorkspaceHostedProviderPublic(SQLModel):
+    """One hosted provider as one workspace sees it."""
+
+    provider: str = Field(description="The hosted provider's name, as a request's selector prefix spells it.")
+    enabled: bool
+    models: list[str] | None = Field(description="This workspace's model list, or null for every served model.")
+    customized: bool = Field(description="Whether this workspace stores a departure from full inheritance.")
+    served_models: list[str] | None = Field(
+        description=(
+            "The models the deployment serves on the provider for this organization, or null for any priced one."
+        ),
+    )
+    served_by_own_key: bool = Field(
+        description="Whether the workspace calls this provider on the organization's own key, so this row is not used."
+    )
+    zero_data_retention: bool = Field(
+        default=False, description="Whether the deployment declares this provider keeps no prompt or completion data."
+    )
+
+
+class WorkspaceHostedProvidersPublic(SQLModel):
+    data: list[WorkspaceHostedProviderPublic]
+
+
+class WorkspaceProviderPolicyRequest(SQLModel):
+    """What one workspace requires of every provider serving it."""
+
+    require_zero_data_retention: bool = Field(
+        description=(
+            "Refuse every provider not declared zero data retention: an organization key or a hosted provider "
+            "nobody declared, and every provider configured in config.yml or endpoint the workspace owns."
+        )
+    )
+
+
+class WorkspaceProviderPolicyPublic(SQLModel):
+    require_zero_data_retention: bool
+
+
 __all__ = [
     "DeploymentProviderMigrationOutcome",
     "DeploymentProviderMigrationPublic",
@@ -1002,6 +1058,11 @@ __all__ = [
     "ProviderEndpointUpdateRequest",
     "ProviderEndpointsPublic",
     "WorkspaceProviderKeyOverridePublic",
+    "WorkspaceHostedProviderAccessRequest",
+    "WorkspaceHostedProviderPublic",
+    "WorkspaceHostedProvidersPublic",
+    "WorkspaceProviderPolicyPublic",
+    "WorkspaceProviderPolicyRequest",
     "WorkspaceProviderKeyOverrideRequest",
     "WorkspaceProviderKeyOverridesPublic",
     "WorkspaceProviderModelRestrictionRequest",

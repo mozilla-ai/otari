@@ -1473,6 +1473,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Fetch
+         * @description Fetch one page through a configured fetch tool.
+         *
+         *     The tool is taken from ``fetch_tool_name``, which may be omitted: the
+         *     deployment's ``web_fetch_default_tool`` then serves, else ``builtin_fetch``,
+         *     the gateway's own fetcher. Such a call runs on the workspace's organization
+         *     fetch key when it has one. While the deployment's ``web_fetch_enabled`` is
+         *     off, the call is refused, as ``otari_web_fetch`` is. The URL must pass the
+         *     workspace's domain lists and the gateway's own checks: a public http or
+         *     https URL that names no private address. The built-in fetcher also checks
+         *     where each host resolves.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user, as
+         *       on chat completions.
+         */
+        post: operations["fetch-create_fetch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fetch/{fetch_tool_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Fetch For Tool
+         * @description Fetch one page through the fetch tool named in the path.
+         *
+         *     Identical to ``POST /api/v1/fetch`` except that the path names the tool,
+         *     which then runs on its own key. Any ``fetch_tool_name`` in the body is
+         *     ignored.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user, as
+         *       on chat completions.
+         */
+        post: operations["fetch-create_fetch_for_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/files": {
         parameters: {
             query?: never;
@@ -6966,6 +7043,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/hosted-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Hosted Providers
+         * @description Every hosted provider this workspace's organization may use, with what this workspace keeps of it.
+         *
+         *     Any member of the workspace may read it.
+         */
+        get: operations["workspace-hosted-providers-list_workspace_hosted_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/hosted-providers/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Workspace Hosted Provider
+         * @description Switch a hosted provider off for this workspace, or narrow it to some of its models.
+         *
+         *     An organization owner/admin, or an owner/admin of this workspace, may write
+         *     it. It can only narrow what the organization may use: a model the
+         *     deployment does not serve on the provider is refused with 400. Sending the
+         *     inherited state (enabled, every model) is a reset.
+         */
+        put: operations["workspace-hosted-providers-set_workspace_hosted_provider"];
+        post?: never;
+        /**
+         * Reset Workspace Hosted Provider
+         * @description Drop this workspace's rule for a hosted provider, so it inherits the provider whole. Idempotent.
+         */
+        delete: operations["workspace-hosted-providers-reset_workspace_hosted_provider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/mcp-servers": {
         parameters: {
             query?: never;
@@ -7277,6 +7405,36 @@ export interface paths {
          * @description Remove one model from this workspace's allow-list for a key. Idempotent.
          */
         delete: operations["provider-keys-remove_workspace_provider_key_model_restriction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Provider Policy
+         * @description What this workspace requires of every provider serving it. Any member of the workspace may read it.
+         */
+        get: operations["workspace-hosted-providers-get_workspace_provider_policy"];
+        /**
+         * Set Workspace Provider Policy
+         * @description Require zero data retention of every provider serving this workspace, or stop requiring it.
+         *
+         *     An organization owner/admin, or an owner/admin of this workspace, may write
+         *     it. Required, a request is refused with 403 on an organization key or a
+         *     hosted provider not declared zero data retention, and on any provider
+         *     configured in config.yml or endpoint the workspace or its users own,
+         *     neither of which can be declared.
+         */
+        put: operations["workspace-hosted-providers-set_workspace_provider_policy"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -8978,6 +9136,56 @@ export interface components {
             invited: components["schemas"]["InviteOrganizationMemberResultPublic"][];
         };
         /**
+         * CacheRates
+         * @description The cache prices of a price, in its unit.
+         */
+        "CacheRates-Input": {
+            /** @description The prices of explicit caching, where apart. */
+            explicit?: components["schemas"]["CacheRates-Input"] | null;
+            /**
+             * Read
+             * @description Price of a cached read.
+             */
+            read?: number | null;
+            /**
+             * Storage
+             * @description Price of cache storage.
+             */
+            storage?: number | null;
+            /**
+             * Write
+             * @description Price of a cache write: one price, or one per TTL with the default TTL first.
+             */
+            write?: number | {
+                [key: string]: number;
+            } | null;
+        };
+        /**
+         * CacheRates
+         * @description The cache prices of a price, in its unit.
+         */
+        "CacheRates-Output": {
+            /** @description The prices of explicit caching, where apart. */
+            explicit?: components["schemas"]["CacheRates-Output"] | null;
+            /**
+             * Read
+             * @description Price of a cached read.
+             */
+            read?: number | null;
+            /**
+             * Storage
+             * @description Price of cache storage.
+             */
+            storage?: number | null;
+            /**
+             * Write
+             * @description Price of a cache write: one price, or one per TTL with the default TTL first.
+             */
+            write?: number | {
+                [key: string]: number;
+            } | null;
+        };
+        /**
          * CallToolResult
          * @description The server's response to a tool call.
          *
@@ -9860,6 +10068,17 @@ export interface components {
             kind: "search" | "fetch";
             /** Name */
             name: string;
+            /**
+             * Price Per Call
+             * @description USD for one call on the deployment's own account when the provider reports no cost of its own, from the deployment's price list. An override the operator set for one organization prices that organization's calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused.
+             */
+            price_per_call: number | null;
+            /**
+             * Price Source
+             * @description Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.
+             * @enum {string}
+             */
+            price_source: "own" | "config" | "old_key" | "none";
             /** Provider */
             provider: string;
             /**
@@ -10118,7 +10337,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.
+             * @description Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, [] = no tool, or search and fetch tool names ('*' for every tool). A model wildcard never grants a tool.
              */
             allowed_tools?: string[] | null;
             /**
@@ -10254,7 +10473,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.
+             * @description Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, [] = no tool, or search and fetch tool names ('*' for every tool). A key can only narrow your own tool access.
              */
             allowed_tools?: string[] | null;
             /**
@@ -10449,7 +10668,7 @@ export interface components {
             allowed_models?: string[] | null;
             /**
              * Allowed Tools
-             * @description Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).
+             * @description Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: null = the search tools allowed_models grants, [] = no tool, or search and fetch tool names ('*' for every tool).
              */
             allowed_tools?: string[] | null;
             /**
@@ -11575,6 +11794,110 @@ export interface components {
              * @default Bearer
              */
             token_type: string;
+        };
+        /**
+         * FetchRequest
+         * @description A direct fetch request: one page, read through the deployment's fetch tool or the one named.
+         * @example {
+         *       "max_chars": 20000,
+         *       "url": "https://example.com/article"
+         *     }
+         */
+        FetchRequest: {
+            /**
+             * Fetch Tool Name
+             * @description Configured fetch tool to run on, builtin_fetch included. Optional: the deployment's web_fetch_default_tool serves, else builtin_fetch. Ignored on POST /api/v1/fetch/{fetch_tool_name}.
+             */
+            fetch_tool_name?: string | null;
+            /**
+             * Include Raw
+             * @description Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw holds only content_kind and redirect_count.
+             * @default false
+             */
+            include_raw: boolean;
+            /**
+             * Max Chars
+             * @description Cut the page text to this many characters. Unset, the tool's own max_chars option applies, else the provider's own limits.
+             */
+            max_chars?: number | null;
+            /**
+             * Provider Options
+             * @description Native options for the provider that serves the call, under the provider's own names, as GET /api/v1/search-tools/providers?kind=fetch lists them. An option the provider does not take from a request is refused with a 400. On a call that names no tool they go to whichever provider serves it, so name the tool when they are meant for one provider.
+             */
+            provider_options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Url
+             * @description The page to fetch: one public http or https URL.
+             */
+            url: string;
+            /**
+             * User
+             * @description User ID for usage attribution
+             */
+            user?: string | null;
+        };
+        /**
+         * FetchResponse
+         * @description A completed direct fetch: one page's text and where it came from.
+         */
+        FetchResponse: {
+            /**
+             * Content Type
+             * @description The page's content type; empty when the provider does not report one.
+             * @default
+             */
+            content_type: string;
+            /**
+             * Fetch Tool
+             * @description The configured fetch tool that served the request
+             */
+            fetch_tool: string;
+            /**
+             * Final Url
+             * @description Where the page was found after redirects. The URL asked for when the provider does not report where a redirect led (reports_final_url in the provider catalog).
+             */
+            final_url: string;
+            /**
+             * Object
+             * @default fetch
+             * @constant
+             */
+            object: "fetch";
+            /**
+             * Published
+             * @description When the page was published, where the provider reports it.
+             */
+            published?: string | null;
+            /**
+             * Raw
+             * @description The provider's whole response, untouched; only when the request set include_raw.
+             */
+            raw?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Text
+             * @description The page's text, as the provider extracted it.
+             */
+            text: string;
+            /**
+             * Title
+             * @description The page's title; empty when the provider gave none.
+             * @default
+             */
+            title: string;
+            /**
+             * Truncated
+             * @description Whether text is less than the whole page: the body or the extracted text hit a limit of the provider's, or max_chars cut it.
+             */
+            truncated: boolean;
+            /**
+             * Url
+             * @description The URL fetched, as asked, in canonical form.
+             */
+            url: string;
         };
         /**
          * GateDefinitionRequest
@@ -12966,6 +13289,64 @@ export interface components {
              * @description Human-friendly display name.
              */
             name: string;
+        };
+        /**
+         * ListedSearchToolSchema
+         * @description A stored instance as the listing shows it: with what one of its calls costs.
+         */
+        ListedSearchToolSchema: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Decryptable
+             * @default true
+             */
+            decryptable: boolean;
+            /**
+             * Fetch Tool
+             * @description A search instance's enrichment fetch instance. Null means the fetch default enriches it.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description Whether this is a search or a fetch instance.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Price Per Call
+             * @description USD for one call on the deployment's own account when the provider reports no cost of its own, from the deployment's price list. An override the operator set for one organization prices that organization's calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused.
+             */
+            price_per_call: number | null;
+            /**
+             * Price Source
+             * @description Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.
+             * @enum {string}
+             */
+            price_source: "own" | "config" | "old_key" | "none";
+            /** Provider */
+            provider: string;
+            /**
+             * Shadows Config
+             * @description True when a config-file search tool of the same name exists; the stored one is in effect.
+             * @default false
+             */
+            shadows_config: boolean;
+            /** Timeout */
+            timeout?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * MailSettings
@@ -14950,6 +15331,8 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
              * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
@@ -15002,6 +15385,8 @@ export interface components {
             output_price_per_million: number;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates: components["schemas"]["RatesDocument-Output"];
             /** Unit */
             unit: string;
             /**
@@ -15069,6 +15454,8 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
              * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
@@ -15965,6 +16352,8 @@ export interface components {
             price_per_request?: number | null;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates: components["schemas"]["RatesDocument-Output"];
             /**
              * Unit
              * @description What the rates are per: token for a model, request or image for a non-token endpoint.
@@ -16499,6 +16888,76 @@ export interface components {
         RateLimitRulesPublic: {
             /** Rules */
             rules: components["schemas"]["RateLimitRulePublic"][];
+        };
+        /**
+         * RateMultiplier
+         * @description A factor applied to every price, or to the prices it names, when a condition holds.
+         */
+        RateMultiplier: {
+            /**
+             * Factor
+             * @description One factor for every price, or an object naming the prices.
+             */
+            factor: number | {
+                [key: string]: unknown;
+            };
+            /**
+             * When
+             * @description The condition, as models.dev writes it.
+             */
+            when: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RateOverride
+         * @description The prices that replace a price's own when a condition holds.
+         */
+        "RateOverride-Input": {
+            cache?: components["schemas"]["CacheRates-Input"] | null;
+            /** Price */
+            price?: number | null;
+            /** Reasoning */
+            reasoning?: number | null;
+            /**
+             * When
+             * @description The condition, as models.dev writes it.
+             */
+            when: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RateOverride
+         * @description The prices that replace a price's own when a condition holds.
+         */
+        "RateOverride-Output": {
+            cache?: components["schemas"]["CacheRates-Output"] | null;
+            /** Price */
+            price?: number | null;
+            /** Reasoning */
+            reasoning?: number | null;
+            /**
+             * When
+             * @description The condition, as models.dev writes it.
+             */
+            when: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RatesDocument
+         * @description A ``cost`` block on the wire: each other key is a modality (``text``, ``image``, ``audio``, ``video``).
+         */
+        "RatesDocument-Input": {
+            /** Multipliers */
+            multipliers?: components["schemas"]["RateMultiplier"][];
+            web_search?: components["schemas"]["UnitRate-Input"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        "RatesDocument-Output": {
+            [key: string]: unknown;
         };
         /**
          * RecommendationRefusal
@@ -17382,7 +17841,7 @@ export interface components {
             /** Config */
             config: components["schemas"]["ConfigSearchToolSchema"][];
             /** Stored */
-            stored: components["schemas"]["StoredSearchToolSchema"][];
+            stored: components["schemas"]["ListedSearchToolSchema"][];
         };
         /**
          * SelectorIndexResponse
@@ -17539,6 +17998,8 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /** @description Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both. */
+            rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
              * @description What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.
@@ -18285,6 +18746,54 @@ export interface components {
             units: number;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * UnitRate
+         * @description One price: of a modality's input or output, or of web search.
+         */
+        "UnitRate-Input": {
+            cache?: components["schemas"]["CacheRates-Input"] | null;
+            /** Overrides */
+            overrides?: components["schemas"]["RateOverride-Input"][];
+            /**
+             * Price
+             * @description USD per the unit's published quantity.
+             */
+            price?: number | null;
+            /**
+             * Reasoning
+             * @description Price of reasoning tokens, where apart.
+             */
+            reasoning?: number | null;
+            /**
+             * Unit
+             * @description What the price is per; token when omitted.
+             */
+            unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
+        };
+        /**
+         * UnitRate
+         * @description One price: of a modality's input or output, or of web search.
+         */
+        "UnitRate-Output": {
+            cache?: components["schemas"]["CacheRates-Output"] | null;
+            /** Overrides */
+            overrides?: components["schemas"]["RateOverride-Output"][];
+            /**
+             * Price
+             * @description USD per the unit's published quantity.
+             */
+            price?: number | null;
+            /**
+             * Reasoning
+             * @description Price of reasoning tokens, where apart.
+             */
+            reasoning?: number | null;
+            /**
+             * Unit
+             * @description What the price is per; token when omitted.
+             */
+            unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
         };
         /**
          * UpdateBudgetRequest
@@ -19382,6 +19891,66 @@ export interface components {
             name: string;
         };
         /**
+         * WorkspaceHostedProviderAccessRequest
+         * @description What one workspace may do with one hosted provider. Replaces whatever it stored before.
+         */
+        WorkspaceHostedProviderAccessRequest: {
+            /**
+             * Enabled
+             * @description False switches the provider off for this workspace.
+             */
+            enabled: boolean;
+            /**
+             * Models
+             * @description The models this workspace may call on the provider. Null for every model the deployment serves on it, including ones added later. A list must name at least one model.
+             */
+            models?: string[] | null;
+        };
+        /**
+         * WorkspaceHostedProviderPublic
+         * @description One hosted provider as one workspace sees it.
+         */
+        WorkspaceHostedProviderPublic: {
+            /**
+             * Customized
+             * @description Whether this workspace stores a departure from full inheritance.
+             */
+            customized: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Models
+             * @description This workspace's model list, or null for every served model.
+             */
+            models: string[] | null;
+            /**
+             * Provider
+             * @description The hosted provider's name, as a request's selector prefix spells it.
+             */
+            provider: string;
+            /**
+             * Served By Own Key
+             * @description Whether the workspace calls this provider on the organization's own key, so this row is not used.
+             */
+            served_by_own_key: boolean;
+            /**
+             * Served Models
+             * @description The models the deployment serves on the provider for this organization, or null for any priced one.
+             */
+            served_models: string[] | null;
+            /**
+             * Zero Data Retention
+             * @description Whether the deployment declares this provider keeps no prompt or completion data.
+             * @default false
+             */
+            zero_data_retention: boolean;
+        };
+        /** WorkspaceHostedProvidersPublic */
+        WorkspaceHostedProvidersPublic: {
+            /** Data */
+            data: components["schemas"]["WorkspaceHostedProviderPublic"][];
+        };
+        /**
          * WorkspaceMcpServerCheckRequest
          * @description Connection details to check without storing them, for a form to test before it saves.
          *
@@ -19700,6 +20269,11 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+            /**
+             * Zero Data Retention
+             * @default false
+             */
+            zero_data_retention: boolean;
         };
         /**
          * WorkspaceProviderKeyOverrideRequest
@@ -19732,6 +20306,22 @@ export interface components {
         WorkspaceProviderModelRestrictionsPublic: {
             /** Models */
             models: string[];
+        };
+        /** WorkspaceProviderPolicyPublic */
+        WorkspaceProviderPolicyPublic: {
+            /** Require Zero Data Retention */
+            require_zero_data_retention: boolean;
+        };
+        /**
+         * WorkspaceProviderPolicyRequest
+         * @description What one workspace requires of every provider serving it.
+         */
+        WorkspaceProviderPolicyRequest: {
+            /**
+             * Require Zero Data Retention
+             * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns.
+             */
+            require_zero_data_retention: boolean;
         };
         /** WorkspacePublic */
         WorkspacePublic: {
@@ -21649,6 +22239,8 @@ export interface operations {
                 at_context?: number | null;
                 /** @description Case-insensitive text in a model's name, vendor, id, selectors, or provider instances. */
                 search?: string | null;
+                /** @description For a signed-in caller, list only what a request billed to this workspace may call, with its own disabled keys and model lists applied. A workspace the caller cannot see answers 404. Ignored for an API key, which already names its workspace. */
+                workspace_id?: string | null;
                 /** @description Number of matching models to skip. */
                 skip?: number;
                 /** @description Maximum number of models to return. */
@@ -21708,7 +22300,10 @@ export interface operations {
     };
     "catalog-get_catalog_model": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description For a signed-in caller, only the offerings a request billed to this workspace may call. */
+                workspace_id?: string | null;
+            };
             header?: never;
             path: {
                 model_id: string;
@@ -22276,6 +22871,75 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "fetch-create_fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FetchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "fetch-create_fetch_for_tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Configured fetch tool to run on, builtin_fetch included */
+                fetch_tool_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FetchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -31781,6 +32445,105 @@ export interface operations {
             };
         };
     };
+    "workspace-hosted-providers-list_workspace_hosted_providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceHostedProvidersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-hosted-providers-set_workspace_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceHostedProviderAccessRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceHostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-hosted-providers-reset_workspace_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceHostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "mcp-servers-list_workspace_mcp_servers": {
         parameters: {
             query?: {
@@ -32490,6 +33253,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-hosted-providers-get_workspace_provider_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProviderPolicyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-hosted-providers-set_workspace_provider_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceProviderPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProviderPolicyPublic"];
                 };
             };
             /** @description Validation Error */

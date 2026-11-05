@@ -615,6 +615,16 @@ export type WorkspaceProviderKeyOverride =
 export type SetWorkspaceProviderKeyOverrideRequest =
   Schemas["WorkspaceProviderKeyOverrideRequest"]
 
+// One hosted provider as one workspace sees it: on or off, and narrowed to
+// `models` or not (`null` is every model the deployment serves on it).
+// `customized` says the workspace stores a departure; `served_models` is null
+// where the deployment advertises no roster for the provider.
+export type WorkspaceHostedProvider = Schemas["WorkspaceHostedProviderPublic"]
+export type SetWorkspaceHostedProviderRequest =
+  Schemas["WorkspaceHostedProviderAccessRequest"]
+// What one workspace requires of every provider serving it.
+export type WorkspaceProviderPolicy = Schemas["WorkspaceProviderPolicyPublic"]
+
 // The first-request setup guide's state, and the API key it issues. The wire
 // names carry the platform's "activation" vocabulary (see
 // `src/gateway/services/tenancy/workspace_activation_service.py`); the

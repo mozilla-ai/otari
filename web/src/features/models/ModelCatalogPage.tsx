@@ -64,6 +64,7 @@ import {
 } from "@/shared/helpers/format"
 import type { DashboardSearch } from "@/shared/helpers/search"
 import { useUrlState } from "@/shared/helpers/urlState"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 
 // The catalog, grouped by model: a rail of filters on the left, and on the
@@ -636,14 +637,22 @@ export function ModelCatalogView({
     SORT_OPTIONS.find((option) => option.value === sort) ?? SORT_OPTIONS[0]
   const ordering = view === "table" ? tableSort : sortChoice
   const search = useDebounced(filters.query, 200)
+  // What the selected workspace may call, its own disabled providers and model
+  // lists applied, rather than everything the organization reaches. Held until
+  // the selection is known, so the page never shows the wider list first.
+  const workspace = useSelectedWorkspace()
   const catalog = useCatalog(
-    catalogRequest(
-      { ...filters, query: search },
-      ordering.column,
-      ordering.direction,
-      page,
-      pageSize,
-    ),
+    {
+      ...catalogRequest(
+        { ...filters, query: search },
+        ordering.column,
+        ordering.direction,
+        page,
+        pageSize,
+      ),
+      workspace_id: workspace.selected?.workspace_id,
+    },
+    workspace.isSettled,
   )
   const pageRows = catalog.data?.models ?? []
   const count = catalog.data?.count ?? 0

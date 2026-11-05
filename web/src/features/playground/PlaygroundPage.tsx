@@ -182,7 +182,7 @@ export function PlaygroundPage() {
           />
           <div ref={follow.setEndMarker} aria-hidden className="h-0" />
           <div
-            className={`${playground.isComparing ? "w-full" : CHAT_COLUMN} -mb-5 sticky bottom-0 z-10 mt-auto bg-background pt-7 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:-mb-6 md:pb-6`}
+            className={`${playground.isComparing ? "w-full" : CHAT_COLUMN} -mb-5 sticky bottom-0 z-10 mt-auto bg-background pt-7 pb-5 md:-mb-6 md:pb-6`}
           >
             {playground.haveBothAnswered &&
             playground.ratingState !== "dismissed" ? (

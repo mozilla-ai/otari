@@ -1,5 +1,6 @@
 """Request and response shapes for the caller's grouped model catalog."""
 
+import uuid
 from enum import StrEnum
 from typing import Literal
 
@@ -100,6 +101,14 @@ class CatalogQuery(BaseModel):
         default=None,
         max_length=200,
         description="Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
+    )
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "For a signed-in caller, list only what a request billed to this workspace may call, with its "
+            "own disabled keys and model lists applied. A workspace the caller cannot see answers 404. "
+            "Ignored for an API key, which already names its workspace."
+        ),
     )
     skip: int = Field(default=0, ge=0, description="Number of matching models to skip.")
     limit: int = Field(default=100, ge=1, le=1000, description="Maximum number of models to return.")

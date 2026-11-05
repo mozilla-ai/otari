@@ -30,6 +30,7 @@ function override(
     cache_write_price_per_million: null,
     pricing_tiers: [],
     unit: "token",
+    rates: {},
     effective_from: new Date(NOW - HOUR).toISOString(),
     effective_to: null,
     created_at: new Date(NOW - HOUR).toISOString(),

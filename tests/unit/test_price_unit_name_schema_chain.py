@@ -117,7 +117,8 @@ def test_the_default_follows_on_both_tables(sqlite_before: tuple[Config, Engine]
         columns = {column["name"]: column for column in inspect(engine).get_columns(table)}
         assert columns["unit"]["default"] == "'token'", table
         assert columns["unit"]["nullable"] is False, table
-        assert set(columns) == set(SQLModel.metadata.tables[table].columns.keys()), table
+        # The model has since gained ``rates``, which this revision predates.
+        assert set(columns) == set(SQLModel.metadata.tables[table].columns.keys()) - {"rates"}, table
     with engine.begin() as connection:
         connection.execute(
             text(

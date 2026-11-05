@@ -32,15 +32,42 @@ key. How a workspace picks among several keys is in
 
 ## Control workspace access
 
-Open **Organization**, then **Workspaces**, and click **Edit** (the pencil icon)
-on the workspace. For each provider key you can choose:
+Open **Organization**, then **Workspaces**, select the workspace, and open its
+**Providers** tab. Every provider the workspace could call is listed there:
+the organization's own keys first, then the
+deployment's [hosted providers](hosted-providers.md#workspace-access). A
+provider with several keys, or a key and a hosted provider, is one row that
+opens to show each of them. Past eight providers, a search and an **All**,
+**Customized** or **Off** filter narrow the list. Each row has a switch, a
+**Models** control and a menu (**⋯**):
 
-- **Follow the organization**: use the key as the organization's defaults
-  decide.
-- **Never use this key**: the workspace cannot use that key.
-- **Always use this key**: the workspace always uses that key. You can restrict
-  it further to specific models of that provider: pick each one under
-  **Allow a model** and click **Allow**.
+- Turn the switch off and the workspace cannot use that key or hosted provider.
+- **Models** opens a dialog. Choose **All models, including ones added later**,
+  or **Only these models** and select the models the workspace may call. The
+  models are listed under their vendor, since one provider can serve several
+  (Together serves DeepSeek, Meta and Qwen models): a vendor's box selects all
+  of its models, and opening the vendor picks some of them. A list with no
+  model in it cannot be saved: to block a provider, turn its switch off.
+- Where the organization holds several keys for one provider, **Always use this
+  key** in a key's menu pins it for the workspace, whatever the organization's
+  default.
+- A row you changed is marked **Customized**. **Reset**, in its menu, returns
+  it to what the organization decides.
+
+**Require zero data retention**, at the top of the tab, holds the workspace to
+providers declared to keep no prompts or completions
+([Zero data retention](hosted-providers.md#zero-data-retention)). With it on,
+a request is refused with `403` on an organization key or a hosted provider
+that is not declared, and on any provider configured in `config.yml` or
+endpoint the workspace or its users registered, neither of which can be
+declared. The rows it blocks say so, and **Models** lists only
+declared offerings for the workspace.
+
+A new workspace starts with every row as the organization decides, so a
+workspace only differs from its organization where an admin changed it.
+
+**Models** lists what the workspace selected in the switcher may call, with
+these settings applied, whatever your role in the organization.
 
 ## Rotate a provider key
 
@@ -51,9 +78,9 @@ time, so your applications' API keys need no change.
 2. In **Organization**, then **Providers**, click **Add provider key**, select
    the same provider, give it a distinct name, and paste the new key.
 3. Make the new key the provider's default with its **star icon**.
-4. For each workspace that pins the old key, click **Edit** and select **Always
-   use this key** for the new one. A workspace keeps using a pinned key after
-   the organization default changes.
+4. For each workspace that pins the old key, open its **Providers** tab and select
+   **Always use this key** in the new key's menu (**⋯**). A workspace keeps
+   using a pinned key after the organization default changes.
 5. Send a test request from each affected workspace and confirm it in **Usage**.
 6. **Archive** the old key in Otari (an archived key can then be deleted), then
    revoke it with the provider.

@@ -7,6 +7,7 @@ import {
   hasUnpricedRow,
   pairWithRates,
   parsePerCallPrice,
+  perCallText,
   type RateRead,
   toPerCall,
 } from "./toolRates"
@@ -21,6 +22,13 @@ describe("per-call rates", () => {
 
   it.each(["", "1e3", "0x10", "-1", ".5", "abc"])("refuses %j", (text) => {
     expect(parsePerCallPrice(text)).toBeUndefined()
+  })
+
+  it("writes a rate out in full, never in exponent form", () => {
+    expect(perCallText(0.0000005)).toBe("0.0000005")
+    expect(perCallText(0.005)).toBe("0.005")
+    expect(perCallText(1)).toBe("1")
+    expect(perCallText(0)).toBe("0")
   })
 })
 

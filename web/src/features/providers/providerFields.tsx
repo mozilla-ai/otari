@@ -14,7 +14,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useProviderCatalog } from "@/shared/api/providers"
-import { providerDisplayName } from "@/shared/helpers/providers"
+import { providerCatalogName } from "@/shared/helpers/providers"
 
 import {
   type CredentialFieldValues,
@@ -219,16 +219,16 @@ export function ProviderComboBox({
           .filter((provider) => !excludeIds?.includes(provider.id))
           .map((provider) => ({
             id: provider.id,
-            // The catalog falls back to the bare id when models.dev has no
-            // name for a provider (`xai`), so spell it as the rest of the
-            // dashboard does.
-            name:
-              provider.name === provider.id
-                ? providerDisplayName(provider.id)
-                : provider.name,
+            name: providerCatalogName(provider.id, provider.name),
+            // Our name replaces the gateway's, so keep the gateway's findable:
+            // "copilot" still reaches GitHub Models.
+            alias: provider.name,
           }))
       : []
-    return [...extra, ...catalogOptions]
+    return [
+      ...extra.map((option) => ({ ...option, alias: undefined })),
+      ...catalogOptions,
+    ]
   }, [catalog.data, extra, includeCatalog, excludeIds])
 
   // Seed the input with the selected option's display name. The field owns its
@@ -248,7 +248,8 @@ export function ProviderComboBox({
     (option) =>
       !query ||
       option.name.toLowerCase().includes(query) ||
-      option.id.toLowerCase().includes(query),
+      option.id.toLowerCase().includes(query) ||
+      option.alias?.toLowerCase().includes(query),
   )
 
   // Both gated on `includeCatalog`: a picker offering only the API dialects must
@@ -268,6 +269,9 @@ export function ProviderComboBox({
   return (
     <ComboBox.Root
       allowsEmptyCollection
+      // `visible` is already filtered above, on the id and the gateway name as
+      // well as ours; the default filter would match our name alone.
+      defaultFilter={() => true}
       // Opening on focus makes this read as a pick-from-a-list control rather
       // than a free-text field, but an autofocused instance opens its list on
       // mount: measured in jsdom, `autoFocus` leaves the input

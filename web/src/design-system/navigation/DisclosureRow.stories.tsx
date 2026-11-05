@@ -105,6 +105,40 @@ export const Open: Story = {
   ),
 }
 
+/**
+ * `chevronPlacement="start"`: the chevron before the label, as a tree draws it,
+ * for a row whose panel holds rows like the ones around it, so the open state
+ * reads where the eye starts the row.
+ */
+export const ChevronAtStart: Story = {
+  render: () => (
+    <SettingsGroup isBounded>
+      <DisclosureRow
+        label="anthropic"
+        trailing={
+          <span className="text-caption text-subtle">2 keys · hosted</span>
+        }
+        chevronPlacement="start"
+        isOpen
+        onToggle={() => {}}
+      >
+        <div className="flex flex-col divide-y divide-border-subtle border-l-2 border-border-strong bg-surface-subtle">
+          <SettingRow
+            isNested
+            label="team"
+            control={<Toggle label="team" isSelected onChange={() => {}} />}
+          />
+          <SettingRow
+            isNested
+            label="backup"
+            control={<Toggle label="backup" isSelected onChange={() => {}} />}
+          />
+        </div>
+      </DisclosureRow>
+    </SettingsGroup>
+  ),
+}
+
 /** Without `help` or `trailing`, which is the least a row can carry. */
 export const LabelOnly: Story = {
   render: () => {

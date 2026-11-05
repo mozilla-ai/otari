@@ -21,6 +21,7 @@ import {
   ORGANIZATION_PRICING,
   ORGANIZATION_PROVIDER_MODELS,
   PRICING,
+  SEARCH_TOOLS,
 } from "@/shared/api/queryKeys"
 
 const fetchAllPricing = () => fetchAllRows<PricingResponse>("/pricing")
@@ -76,6 +77,8 @@ export function useSetPricing() {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      // The search and fetch tool listing carries each tool's price.
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
     },
   })
 }
@@ -101,6 +104,8 @@ export function useDeletePricing() {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      // The search and fetch tool listing carries each tool's price.
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
     },
   })
 }

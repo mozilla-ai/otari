@@ -288,3 +288,56 @@ class ConfiguredProviderImport(Base):
 
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class WorkspaceHostedProviderAccess(Base):
+    """One workspace's narrowing of a hosted provider its organization may use.
+
+    No row means the workspace inherits the provider whole, which is every
+    workspace's state until an admin changes it. A row either switches the
+    provider off for the workspace (``enabled`` false) or narrows it to
+    ``models``; ``models`` is null for every model the deployment serves on it.
+    A row in the inherited state is never stored: the service deletes it.
+
+    ``provider`` is the hosted provider's name, not a foreign key, for the same
+    reason as ``HostedProviderModel.provider``: a hosted provider declared in
+    configuration has no row of its own.
+    """
+
+    __tablename__ = "workspace_hosted_provider_access"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "provider", name="uq_workspace_hosted_provider_access_workspace_provider"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64))
+    enabled: Mapped[bool] = mapped_column(default=True)
+    models: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
+
+
+class WorkspaceProviderPolicy(Base):
+    """What one workspace requires of every provider that serves it.
+
+    No row requires nothing. ``require_zero_data_retention`` refuses every source
+    not declared zero data retention: an organization key or a hosted provider
+    whose operator did not declare it, and every configured instance, which
+    cannot be declared at all.
+    """
+
+    __tablename__ = "workspace_provider_policies"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    require_zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )

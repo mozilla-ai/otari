@@ -56,7 +56,7 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.money import as_float, to_usd, to_usd_or_none
-from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource, rates_of
 from gateway.models.provider_keys import (
     OrgProviderKey,
     OrgProviderKeyModel,
@@ -184,6 +184,7 @@ def _seeded_row(
         cache_write_price_per_million=to_usd_or_none(as_float(default.cache_write_price_per_million)),
         pricing_tiers=list(default.pricing_tiers or []),
         unit=default.unit or "token",
+        rates=rates_of(default),
         origin=SEED_ORIGIN,
         effective_from=effective_from,
         effective_to=None,
@@ -202,6 +203,7 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.cache_read_price_per_million = to_usd_or_none(as_float(default.cache_read_price_per_million))
     row.cache_write_price_per_million = to_usd_or_none(as_float(default.cache_write_price_per_million))
     row.pricing_tiers = list(default.pricing_tiers or [])
+    row.rates = rates_of(default)
 
 
 def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> dict[str, ModelPricing]:
@@ -380,7 +382,6 @@ class OrgProviderModelService:
                     provider=provider,
                     models=[name],
                     defaults=defaults,
-                    user=user,
                 )
             except OfferedModelConflict as conflict:
                 # The pre-check above races the insert, and the unique index is
@@ -609,7 +610,6 @@ class OrgProviderModelService:
                     provider=provider,
                     models=added,
                     defaults=defaults,
-                    user=user,
                 )
         await self.refresh_overlay()
         return sorted(repriced)
@@ -622,7 +622,6 @@ class OrgProviderModelService:
         provider: str,
         models: Sequence[str],
         defaults: dict[str, ModelPricing],
-        user: User,
     ) -> Sequence[OrgProviderKeyModel]:
         """Record models as offered, seeding a rate where one is missing and permitted.
 

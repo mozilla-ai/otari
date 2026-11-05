@@ -122,7 +122,7 @@ defines its own list. A missing list allows any model, an empty list allows none
 and entries may use provider wildcards such as `openai:*`.
 
 Search and fetch tools have a list of their own, `allowed_tools`, which governs
-`POST /api/v1/search`; the in-loop `otari_web_search` and
+`POST /api/v1/search` and `POST /api/v1/fetch`; the in-loop `otari_web_search` and
 `otari_web_fetch` tools, which run on the same tools, do not read it. Its entries
 are search or fetch tool names, as `search_tools`, `fetch_tools` or the dashboard
 names them, `builtin_fetch` for the gateway's own fetcher, or `*` for every tool,

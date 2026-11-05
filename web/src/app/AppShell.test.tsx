@@ -603,7 +603,7 @@ describe("the rail's closing rules", () => {
   // unconditional one, mirroring the scope band at the head of the rail, so the
   // footer's is the one that gives way.
   const footerOf = (container: HTMLElement) =>
-    container.querySelector('[class*="pb-[env(safe-area-inset-bottom)]"]')
+    container.querySelector('[class*="-mx-3 flex flex-col gap-1 px-3 pt-1"]')
 
   it("keeps the footer rule where a row sits below it", async () => {
     mockMatchMedia(false)

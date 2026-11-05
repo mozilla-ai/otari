@@ -68,7 +68,11 @@ from gateway.services.inference import (
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import MissingCredential
-from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
+from gateway.services.upstream_redaction import (
+    MAX_EXPOSED_DETAIL_CHARS,
+    redact_upstream_message,
+    redacted_upstream_detail,
+)
 from gateway.streaming import OPENAI_STREAM_FORMAT, IncompleteStreamError, openai_error_event
 
 _RAW = "raw provider detail SECRET token=abc123"
@@ -796,6 +800,29 @@ def test_redaction_keeps_the_part_that_explains_the_rejection() -> None:
     assert "max_tokens" in redacted
     assert "8192" in redacted
     assert "claude-opus-5" in redacted
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("sk-ant-abcdefghijklmnopqrstuvwxyz0123456789", id="only a credential"),
+        pytest.param("https://proxy.internal.example/v1 123456789012", id="only a url and an account id"),
+        pytest.param("messages: please summarize this", id="a payload echo"),
+    ],
+)
+def test_redacted_detail_falls_back_when_nothing_explanatory_survives(raw: str) -> None:
+    """A message that redaction empties, or leaves as placeholders alone, tells
+    the caller nothing, so the fixed detail is returned in its place."""
+    assert redacted_upstream_detail(raw, "fallback detail") == "fallback detail"
+
+
+def test_redacted_detail_keeps_the_redacted_explanation() -> None:
+    raw = "Invalid key sk-ant-abcdefghijklmnopqrstuvwxyz0123456789: max_tokens too large"
+    detail = redacted_upstream_detail(raw, "fallback detail")
+    assert detail == redact_upstream_message(raw)
+    assert "max_tokens too large" in detail
+    assert "abcdefghijklmnopqrstuvwxyz" not in detail
 
 
 def test_exposed_detail_is_length_capped() -> None:

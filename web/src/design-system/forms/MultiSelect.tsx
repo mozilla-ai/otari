@@ -395,7 +395,7 @@ export function MultiSelect({
           // pushes down rather than moving the control it grew from.
           <ul
             aria-label={`${label}, selected`}
-            className="flex list-none flex-wrap gap-x-2 gap-y-1.5 pt-0.5"
+            className="flex list-none flex-wrap gap-x-2 gap-y-1.5 pt-0.5 pointer-coarse:gap-y-5 pointer-coarse:pt-1"
           >
             {value.map((id) => (
               <li key={id}>

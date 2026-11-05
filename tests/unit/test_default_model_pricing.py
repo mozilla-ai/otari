@@ -333,3 +333,31 @@ def test_the_bundled_snapshot_serves_when_nothing_was_accepted() -> None:
     assert pricing is not None
     assert pricing.input_price_per_million > 0
     assert pricing.output_price_per_million > 0
+
+
+def test_a_default_from_a_v2_catalog_carries_the_cost_block_as_rates() -> None:
+    """The block a seeded row stores, beside the per-million columns the index derives from it."""
+    import json
+    from pathlib import Path
+
+    from gateway.types.models_dev import parse_catalog_v2
+
+    sample = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_v2_sample.json"
+    document = json.loads(sample.read_text("utf-8"))
+    index = ModelsDevPriceIndex.from_catalog(parse_catalog_v2(document))
+    set_accepted_generations(
+        [PriceGeneration(effective_at=datetime(2020, 1, 1, tzinfo=UTC), index=index)], complete=False
+    )
+
+    pricing = default_model_pricing("openai", "gpt-4o", NOW)
+
+    assert pricing is not None
+    assert pricing.rates == document["openai"]["models"]["gpt-4o"]["cost"]
+    assert pricing.input_price_per_million == Decimal("2.5")
+
+
+def test_a_default_from_a_v1_catalog_carries_no_block() -> None:
+    pricing = default_model_pricing("openai", "gpt-4.1", NOW)
+
+    assert pricing is not None
+    assert pricing.rates is None
