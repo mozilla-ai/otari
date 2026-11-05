@@ -172,7 +172,7 @@ def instance_name_problems(name: str) -> list[str]:
 
 
 def _validate_transport(section: str, name: str, api_base: Any, api_key: Any) -> None:
-    if not api_key or not api_base:
+    if not api_key or not str(api_base or "").strip():
         return
     try:
         scheme = urlsplit(str(api_base).strip()).scheme.lower()
@@ -540,7 +540,7 @@ class ToolSettings(BaseModel):
             for name, entry in self.search_tools.items()
             if isinstance(entry, dict)
             and str(entry.get("provider") or name) in SEARCH_PROVIDERS_REQUIRING_API_BASE
-            and not entry.get("api_base")
+            and not str(entry.get("api_base") or "").strip()
         ]
 
     def warn_about_half_configured_web_search(self) -> None:
@@ -584,7 +584,7 @@ class ToolSettings(BaseModel):
             if not isinstance(entry, dict):
                 continue
             provider = str(entry.get("provider") or name)
-            if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
+            if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not str(entry.get("api_base") or "").strip():
                 validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
 
     def validate_fetch_tools(self) -> None:

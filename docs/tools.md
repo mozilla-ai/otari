@@ -264,11 +264,10 @@ funds paid in, and so is a direct search on one of the deployment's tools.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
-search instance. A search on the legacy settings or on a Tavily or Brave
-organization key is labeled `otari:web_search`: `web_search_url` searches on
-any-search's SearXNG adapter, and the older backend runs the rest. Searches a
-model's provider runs itself carry the provider's label, as the next section
-says.
+search instance. A search on the legacy settings, or on a Tavily, Brave or
+SearXNG organization key, which the older backend still runs, is labeled
+`otari:web_search`. Searches a model's provider runs itself carry the provider's
+label, as the next section says.
 
 The pages a search reads to enrich its results are fetches on the fetch
 instance that read them, `builtin_fetch` included: each page that comes back is
@@ -280,8 +279,8 @@ their pages cost the instance's rate, up to one page per result. A page that
 cannot be read is neither billed nor counted. Pages read on an
 [organization fetch key](#organization-search-keys) are labeled
 `org:<provider>` and priced under `otari:web_fetch`. A search the older
-backend runs (`web_search_provider` with its key, or a Tavily or Brave
-organization key) reads its pages on the built-in fetcher and records no fetch, until that
+backend runs (the legacy settings, or a Tavily, Brave or SearXNG organization
+key) reads its pages on the built-in fetcher and records no fetch, until that
 backend is removed. With `require_pricing` on, a search whose pages would be
 read through a fetch instance with no price is refused with `402` before it
 runs, the detail naming that instance's row; a search the older backend runs
@@ -826,10 +825,10 @@ On the legacy settings, Otari reaches a licensed search API directly. Set
 `web_search_provider` to `tavily` or `brave` and `web_search_provider_api_key` to
 that provider's key; the key stays in the gateway process and never reaches a
 caller.
-`web_search_url` points at a SearXNG instance, such as the bundled one
-([try it](#try-web-search-with-the-bundled-searxng)), which any-search's SearXNG
-adapter searches with the engines in `web_search_engines`, else `duckduckgo`,
-`mojeek`, `qwant` and `wikipedia`; a configured provider wins over it.
+`web_search_url` points at a backend exposing a SearXNG-compatible
+`/search?format=json` endpoint, such as the bundled SearXNG
+([try it](#try-web-search-with-the-bundled-searxng)), and a configured provider
+wins over it.
 
 When content extraction is enabled, Otari retrieves each result through its
 bounded public-web client. It validates and pins the resolved address before
@@ -842,9 +841,8 @@ Otari extracts HTML, textual formats (including Markdown, JSON, XML, and
 JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
 single-worker process with fixed time, memory, queue, page, and intermediate
 output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
-unextractable results fall back to the search provider's snippet. Page text
-the provider already returned, such as Tavily's on the legacy settings, is used
-and not fetched again.
+unextractable results fall back to the search provider's snippet. A provider's
+own `extracted_content` still takes precedence and is not fetched locally.
 
 Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
 including any truncation notice. The 1,500-character per-result content limit
@@ -920,9 +918,8 @@ kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
-  `GET /api/v1/search-tools/providers` lists, or `tavily` or `brave`. A
-  `searxng` key names its own instance in `api_base`, since a key never takes
-  the deployment's `web_search_url`;
+  `GET /api/v1/search-tools/providers` lists other than `searxng`, or `tavily` or
+  `brave`;
 - a `fetch` key serves the fetch tool and the enrichment of search hits. Its
   provider is one `GET /api/v1/search-tools/providers?kind=fetch` lists.
 

@@ -168,6 +168,16 @@ def test_search_is_configured_when_the_in_loop_default_yields_one(settings: dict
     assert web_search_configured(GatewayConfig(**settings)) is configured
 
 
+def test_a_blank_api_base_inherits_web_search_url_even_beside_a_key() -> None:
+    config = GatewayConfig(
+        search_tools={"local": {"provider": "searxng", "api_key": "k", "api_base": " "}},
+        web_search_url="https://searxng.example",
+    )
+    config.validate_search_tools()
+    assert config.search_tools_without_backend_url() == []
+    assert effective_search_instances(config)["local"].api_base is None
+
+
 def test_a_single_instance_any_search_does_not_serve_configures_nothing() -> None:
     assert web_search_configured(_with_stored(GatewayConfig(), local=_RETIRED)) is False
 
