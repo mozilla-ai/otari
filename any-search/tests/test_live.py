@@ -46,6 +46,8 @@ EXPECTED: dict[str, Expected] = {
     # Mojeek returns no page text, so the snippet is all a hit says; it dates hits by default (date=1).
     "mojeek": Expected(reports_cost=False, dated={}, snippets=True),
     # Serply returns Google's snippet and no page text, and dates no hit.
+    # Searched where SEARXNG_BASE_URL names an instance.
+    "searxng": Expected(reports_cost=False, dated={}, snippets=True),
     "serply": Expected(reports_cost=False, snippets=True),
     # Synthetic returns page text and no snippet; it dates hits by default.
     "synthetic": Expected(reports_cost=False, dated={}),
@@ -53,9 +55,10 @@ EXPECTED: dict[str, Expected] = {
 
 
 def _require_key(provider: str) -> None:
-    env_key = AnySearch.get_provider_metadata(provider).env_key
-    if env_key and not os.environ.get(env_key):
-        pytest.skip(f"{env_key} is not set")
+    metadata = AnySearch.get_provider_metadata(provider)
+    for variable in (metadata.env_key, metadata.env_api_base):
+        if variable and not os.environ.get(variable):
+            pytest.skip(f"{variable} is not set")
 
 
 def test_every_production_provider_says_what_it_must_return() -> None:

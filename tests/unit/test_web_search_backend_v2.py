@@ -782,11 +782,22 @@ def test_a_request_option_the_provider_does_not_take_is_refused_and_a_workspace_
     assert dict(search.search.options) == {"hits": _HITS, "cost": 0.01}
 
 
-def test_the_legacy_settings_resolve_to_no_in_loop_search_on_the_libraries() -> None:
-    assert resolve_in_loop_search(GatewayConfig(web_search_url="http://searxng:8080"), None) is None
+def test_the_legacy_provider_pair_resolves_to_no_in_loop_search_on_the_libraries() -> None:
     legacy_pair = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
     assert resolve_in_loop_search(legacy_pair, None) is None
     assert resolve_in_loop_search(GatewayConfig(), None) is None
+
+
+def test_the_legacy_url_resolves_to_in_loop_search_on_searxngs_adapter() -> None:
+    in_loop = resolve_in_loop_search(GatewayConfig(web_search_url="http://searxng:8080"), None)
+
+    assert in_loop is not None
+    assert (in_loop.search.provider, in_loop.search.runner, in_loop.search.label) == (
+        "searxng",
+        "library",
+        "otari:web_search",
+    )
+    assert in_loop.enrichment.name == "builtin_fetch"
 
 
 def _context(config: GatewayConfig, *, search: bool, fetch: bool, entry: dict[str, Any] | None = None) -> ToolContext:

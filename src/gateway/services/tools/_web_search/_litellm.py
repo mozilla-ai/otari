@@ -140,6 +140,7 @@ def _none(_query: SearchQuery, _options: Mapping[str, Any]) -> dict[str, Any]:
 
 _MAPPINGS: dict[str, _Mapping] = {
     "exa": _Mapping(native=_exa_options, filters_domains=True, bounds_text=True, date_fields=("publishedDate",)),
+    "searxng": _Mapping(native=_none, filters_domains=False, bounds_text=False, date_fields=("publishedDate",)),
 }
 # A provider with no native equivalents: the hits are filtered and cut here, and the country is left out.
 _NO_EQUIVALENTS = _Mapping(native=_none, filters_domains=False, bounds_text=False, date_fields=())

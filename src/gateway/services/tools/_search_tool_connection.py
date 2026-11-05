@@ -1,15 +1,15 @@
 """Connection tests for search and fetch instances: one search or one fetch, reported without its content.
 
-An instance is tested as the resolver will call it: a provider any-search or
-any-fetch serves through the library, and a ``searxng`` instance, until
-any-search has its adapter, through the direct endpoint's old client, both on
-the app's web provider client. ``builtin_fetch`` fetches as a fetch tool call
+An instance is tested as the resolver will call it, through any-search or
+any-fetch on the app's web provider client; a ``searxng`` instance with what
+it inherits from the legacy settings (contract C8). ``builtin_fetch`` fetches as a fetch tool call
 does: through any-fetch, on the built-in fetcher's own retrieval client, with
 no domain policy and no private hosts. The answer says whether the call worked,
 the error's tag when it did not, and how many hits or characters came back.
 """
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -19,7 +19,7 @@ import any_search
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import (
     BUILTIN_FETCH_PROVIDER,
-    SEARCH_PROVIDERS_WITHOUT_ADAPTER,
+    SEARCH_PROVIDERS_REQUIRING_API_BASE,
     ToolInstance,
     ToolKind,
     effective_fetch_instances,
@@ -35,7 +35,7 @@ from gateway.log_config import logger
 from gateway.schemas.tools import SearchToolTestResponse
 from gateway.services.tools._search_tool_writes import check_tool_entry, check_tool_name_is_free, check_tool_write
 from gateway.services.tools._web_fetch import retrieval_client
-from gateway.services.tools._web_search import SearchQuery, resolve_search
+from gateway.services.tools._web_search import resolve_search
 from gateway.services.web_retrieval_policy import DomainPolicy
 
 
@@ -137,13 +137,11 @@ async def _test_builtin_fetch(config: GatewayConfig, url: str) -> SearchToolTest
     return SearchToolTestResponse(ok=True, characters=len(page.text))
 
 
-async def _test_with_old_client(
-    config: GatewayConfig, name: str, entry: Mapping[str, Any], query: str, client: httpx.AsyncClient
+async def _test_inheriting_search(
+    config: GatewayConfig, instance: ToolInstance, entry: Mapping[str, Any], query: str, client: httpx.AsyncClient
 ) -> SearchToolTestResponse:
-    """One search through the direct endpoint's old client, which serves SearXNG until any-search does."""
-    # Imported here: the old client's module imports this package's root, which imports this module.
-    from gateway.services.search_backend import SearchProviderError, run_search, search_tool
-
+    """One search on an instance that can inherit the legacy settings, with what it inherits."""
+    name = instance.name
     try:
         # Resolved as the direct endpoint resolves it, against this entry alone,
         # so an unsaved one inherits web_search_url and the engines the same way.
@@ -154,11 +152,9 @@ async def _test_with_old_client(
     if resolved is None:
         # Unreachable: a named instance resolves or raises.
         raise SearchToolRefusedError(f"Search tool '{name}' is not configured correctly.")
-    try:
-        outcome = await run_search(search_tool(resolved), SearchQuery(query=query), client=client)
-    except SearchProviderError as exc:
-        return SearchToolTestResponse(ok=False, error=exc.tag)
-    return SearchToolTestResponse(ok=True, hits=len(outcome.results))
+    count = {} if resolved.max_results is None else {"max_results": resolved.max_results}
+    inherited = replace(instance, api_base=resolved.api_base, options={**resolved.options, **count})
+    return await _test_with_library(inherited, query=query, url=None, client=client)
 
 
 async def run_connection_test(
@@ -174,8 +170,8 @@ async def run_connection_test(
 
     A provider is called through ``client``, the app's; ``builtin_fetch`` through its own retrieval client.
     """
-    if instance.kind == "search" and instance.provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
-        response = await _test_with_old_client(config, instance.name, entry, str(query), client)
+    if instance.kind == "search" and instance.provider in SEARCH_PROVIDERS_REQUIRING_API_BASE:
+        response = await _test_inheriting_search(config, instance, entry, str(query), client)
     elif instance.provider == BUILTIN_FETCH_PROVIDER:
         response = await _test_builtin_fetch(config, str(url))
     else:

@@ -53,7 +53,6 @@ from gateway.core.settings.tools import (
     BUILTIN_FETCH_PROVIDER,
     PROVIDER_DEFAULT_OPTIONS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
-    SEARCH_PROVIDERS_WITHOUT_ADAPTER,
     WEB_SEARCH_PROVIDERS,
     SynthesizedSearchInstance,
     ToolInstance,
@@ -90,8 +89,8 @@ from gateway.types.tool_charges import (
 )
 
 # What runs a resolved call: one of the libraries, or the old code, which in
-# the loop is the old backend and on the direct endpoint the old SearXNG client
-# or the organization key's own search.
+# the loop is the old backend and on the direct endpoint the organization key's
+# own search.
 Runner = Literal["library", "old"]
 
 # How long a call may take when its instance sets no timeout: 30 seconds on
@@ -339,8 +338,10 @@ def _search_on_instance(
         request=request,
     )
     api_base = _base(instance.api_base or default_api_base(config, instance.provider))
-    if runner == "old" and (instance.provider not in SEARCH_PROVIDERS_WITHOUT_ADAPTER or not api_base):
-        # A provider no code here serves any more, or a searxng instance with no address of its own or to inherit.
+    if runner == "old" or (
+        any_search.AnySearch.get_provider_metadata(instance.provider).requires_api_base and not api_base
+    ):
+        # A provider no code here serves, or one needing an address with none of its own or to inherit.
         raise SearchToolMisconfiguredError(instance.name)
     try:
         # Load checks the instance's own base; an inherited one is checked here.
@@ -410,16 +411,15 @@ def _search_on_credential(
         metadata = any_search.AnySearch.get_provider_metadata(provider)
         requires_key, default_base = metadata.requires_api_key, metadata.default_api_base
         requires_base = metadata.requires_api_base and not default_base
-    elif provider in (*WEB_SEARCH_PROVIDERS, *SEARCH_PROVIDERS_WITHOUT_ADAPTER):
-        # Tavily, Brave and SearXNG until their adapters exist.
+    elif provider in WEB_SEARCH_PROVIDERS:
+        # Tavily and Brave, which any-search has no adapter for.
         runner = "old"
-        requires_key, default_base = provider in WEB_SEARCH_PROVIDERS, None
-        requires_base = provider in SEARCH_PROVIDERS_REQUIRING_API_BASE
+        requires_key, default_base, requires_base = True, None, False
     else:
         _ignore(credential, "search")
         return None
     _check(credential, requires_key=requires_key, requires_base=requires_base)
-    if runner == "old" and provider in WEB_SEARCH_PROVIDERS and _base(credential.api_base):
+    if runner == "old" and _base(credential.api_base):
         # The old code calls Tavily and Brave at their public endpoints, where the key would go instead.
         raise WebSearchCredentialRefusedError(
             provider, f"names a base URL, which this gateway's {provider} client cannot use"

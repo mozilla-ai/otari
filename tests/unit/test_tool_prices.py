@@ -214,12 +214,6 @@ def test_the_fetch_tool_that_reads_the_deployments_pages_is_named_for_the_startu
     assert enriching_fetch_tool(GatewayConfig(web_search_default_tool="none")) is None
 
 
-def test_a_search_on_the_legacy_settings_is_checked_on_its_tools_own_row() -> None:
-    config = GatewayConfig(web_search_url="http://searxng:8080")
-
-    assert configured_tools_to_price(config) == [_SEARCH_ON_ITS_OWN_ROW]
-
-
 def test_a_search_on_the_legacy_provider_pair_is_checked_on_its_tools_own_row() -> None:
     config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
 
@@ -228,6 +222,16 @@ def test_a_search_on_the_legacy_provider_pair_is_checked_on_its_tools_own_row() 
 
 def test_a_tool_the_deployment_cannot_run_is_not_checked() -> None:
     assert configured_tools_to_price(GatewayConfig(web_search_default_tool="none")) == []
+    assert configured_tools_to_price(GatewayConfig(search_tools={"local": {"provider": "searxng"}})) == []
+
+
+def test_a_search_on_the_legacy_url_is_checked_on_otari_web_search_and_its_pages_on_the_fetch_tools_row() -> None:
+    config = GatewayConfig(web_search_url="http://searxng:8080")
+
+    assert configured_tools_to_price(config) == [
+        PricedTool(WEB_SEARCH_TOOL_NAME, "otari:web_search", ("otari:web_search",), True),
+        replace(_BUILTIN_FETCH, name=WEB_SEARCH_TOOL_NAME, enrichment=True),
+    ]
 
 
 def test_the_refusal_names_the_instances_own_row() -> None:

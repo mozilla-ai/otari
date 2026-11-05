@@ -155,6 +155,9 @@ def test_a_dangling_default_falls_through_to_the_single_instance() -> None:
         pytest.param(
             {"search_tools": {"exa": _EXA, "other": _EXA}, "web_search_default_tool": "other"}, True, id="named"
         ),
+        pytest.param({"search_tools": {"local": _SEARXNG}}, True, id="one-searxng-instance"),
+        pytest.param({"search_tools": {"local": {"provider": "searxng"}}}, False, id="searxng-with-no-address"),
+        pytest.param({"search_tools": {"local": {"provider": "searxng", "api_base": " "}}}, False, id="blank-address"),
         pytest.param({"web_search_url": "http://searxng:8080"}, True, id="legacy-url"),
         pytest.param({"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-k"}, True, id="pair"),
         pytest.param({"web_search_url": "http://searxng:8080", "web_search_default_tool": "none"}, False, id="none"),
@@ -163,6 +166,16 @@ def test_a_dangling_default_falls_through_to_the_single_instance() -> None:
 )
 def test_search_is_configured_when_the_in_loop_default_yields_one(settings: dict[str, Any], configured: bool) -> None:
     assert web_search_configured(GatewayConfig(**settings)) is configured
+
+
+def test_a_blank_api_base_inherits_web_search_url_even_beside_a_key() -> None:
+    config = GatewayConfig(
+        search_tools={"local": {"provider": "searxng", "api_key": "k", "api_base": " "}},
+        web_search_url="https://searxng.example",
+    )
+    config.validate_search_tools()
+    assert config.search_tools_without_backend_url() == []
+    assert effective_search_instances(config)["local"].api_base is None
 
 
 def test_a_single_instance_any_search_does_not_serve_configures_nothing() -> None:
@@ -220,7 +233,6 @@ def test_the_url_with_engines_describes_a_searxng_instance() -> None:
         provider="searxng",
         api_base="http://searxng:8080",
         engines=("mojeek", "wikipedia"),
-        provider_defaults={"method": "get"},
     )
 
 
@@ -446,11 +458,12 @@ def test_a_search_entry_named_like_the_every_tool_entry_breaks_the_rules(caplog:
 
 
 def test_instances_are_flagged_library_backed_or_not() -> None:
-    config = GatewayConfig(search_tools={"exa": _EXA, "local": _SEARXNG})
+    config = _with_stored(GatewayConfig(search_tools={"exa": _EXA, "local": _SEARXNG}), retired=_RETIRED)
     instances = effective_search_instances(config)
     assert instances["exa"].library_backed is True
-    assert instances["local"].library_backed is False
-    assert instances["local"].provider_defaults == {"method": "get"}
+    assert instances["local"].library_backed is True
+    assert instances["local"].provider_defaults == {}
+    assert instances["retired"].library_backed is False
 
 
 def test_builtin_fetch_is_always_a_fetch_instance() -> None:
@@ -550,12 +563,11 @@ def test_exa_fetch_options_are_checked_against_its_own_metadata() -> None:
     assert instance.dropped_options == frozenset({"type"})
 
 
-def test_searxng_options_go_unchecked(caplog: pytest.LogCaptureFixture) -> None:
-    """There is no schema to check them against until any-search has a SearXNG adapter."""
+def test_searxng_options_are_checked_against_its_schema(caplog: pytest.LogCaptureFixture) -> None:
     config = GatewayConfig(search_tools={"local": {**_SEARXNG, "options": {"anything": 1, "categories": "news"}}})
     config.validate_search_tools()
-    assert effective_search_instances(config)["local"].dropped_options == frozenset()
-    assert _warnings(caplog, config) == ""
+    assert effective_search_instances(config)["local"].dropped_options == frozenset({"anything"})
+    assert "search_tools.local breaks the instance rules and loads anyway" in _warnings(caplog, config)
 
 
 def test_the_lenient_load_warns_with_names_and_never_values(caplog: pytest.LogCaptureFixture) -> None:

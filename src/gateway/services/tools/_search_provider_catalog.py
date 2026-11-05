@@ -13,9 +13,6 @@ import any_fetch
 import any_search
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import (
-    SEARCH_PROVIDERS_REQUIRING_API_BASE,
-    SEARCH_PROVIDERS_REQUIRING_API_KEY,
-    SEARCH_PROVIDERS_WITHOUT_ADAPTER,
     ToolInstance,
     ToolKind,
     default_api_base,
@@ -56,7 +53,7 @@ def _option_schemas(
 
 
 def _search_providers(config: GatewayConfig, *, operates: bool) -> list[SearchProviderSchema]:
-    """any-search's providers, and those it has no adapter for yet."""
+    """any-search's providers, other than the ones that exist only for tests."""
     instances = _instance_names(effective_search_instances(config)) if operates else {}
     served = {
         provider: any_search.AnySearch.get_provider_metadata(provider)
@@ -64,27 +61,11 @@ def _search_providers(config: GatewayConfig, *, operates: bool) -> list[SearchPr
     }
     served = {provider: metadata for provider, metadata in served.items() if metadata.tier != "test"}
     entries = []
-    for provider in sorted({*served, *SEARCH_PROVIDERS_WITHOUT_ADAPTER}):
-        metadata = served.get(provider)
-        library_base = metadata.default_api_base if metadata is not None else None
+    for provider, metadata in sorted(served.items()):
         # An endpoint other than the library's comes from this deployment's
         # settings, such as the web_search_url a searxng tool inherits, so only
         # an operator is shown the one a tool would really use.
-        api_base = default_api_base(config, provider) if operates else library_base
-        if metadata is None:
-            # No adapter, so no metadata and no option schema: the gateway's own
-            # tables say what a tool on it needs, so the form can offer it.
-            entries.append(
-                SearchProviderSchema(
-                    id=provider,
-                    kind="search",
-                    requires_api_key=provider in SEARCH_PROVIDERS_REQUIRING_API_KEY,
-                    requires_api_base=provider in SEARCH_PROVIDERS_REQUIRING_API_BASE,
-                    default_api_base=api_base,
-                    instances=instances.get(provider, []),
-                )
-            )
-            continue
+        api_base = default_api_base(config, provider) if operates else metadata.default_api_base
         entries.append(
             SearchProviderSchema(
                 id=provider,

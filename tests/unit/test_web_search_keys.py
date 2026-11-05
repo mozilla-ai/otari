@@ -381,7 +381,7 @@ def test_a_key_may_name_a_provider_the_libraries_serve_for_its_kind(kind: ToolKi
         ("search", "tabstack"),
         ("fetch", "mojeek"),
         ("fetch", "tavily"),
-        ("search", "searxng"),
+        ("fetch", "searxng"),
         ("search", "nowhere"),
     ],
 )
@@ -399,6 +399,17 @@ def test_a_key_may_not_name_a_provider_its_kind_does_not_offer(kind: ToolKind, p
 async def test_a_keyed_provider_needs_a_key(kind: ToolKind, provider: str) -> None:
     with pytest.raises(WebSearchKeyIncompleteError, match="needs an API key"):
         await _web_search_keys._check_settings(kind, provider, has_key=False, api_base=None, options=None)
+
+
+@pytest.mark.asyncio
+async def test_a_searxng_key_needs_its_own_endpoint_and_no_api_key() -> None:
+    assert _web_search_keys._validated_provider("search", "searxng") == "searxng"
+    with pytest.raises(WebSearchKeyIncompleteError, match="api_base"):
+        await _web_search_keys._check_settings("search", "searxng", has_key=False, api_base=None, options=None)
+
+    await _web_search_keys._check_settings(
+        "search", "searxng", has_key=False, api_base="https://1.1.1.1/searx", options={"engines": "wikinews"}
+    )
 
 
 @pytest.mark.asyncio
