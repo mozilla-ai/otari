@@ -209,7 +209,14 @@ export function McpServerConnection({
                 }
               />
               {server.has_token ? (
-                <Checkbox isSelected={clearToken} onChange={setClearToken}>
+                // And ticking Remove clears what was typed, for the same reason.
+                <Checkbox
+                  isSelected={clearToken}
+                  onChange={(remove) => {
+                    setClearToken(remove)
+                    if (remove) setToken("")
+                  }}
+                >
                   Remove the stored token
                 </Checkbox>
               ) : null}

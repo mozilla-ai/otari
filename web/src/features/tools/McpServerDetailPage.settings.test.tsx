@@ -91,6 +91,21 @@ describe("McpServerDetailPage, exposed tools and connection", () => {
     })
   })
 
+  it("drops a typed replacement when Remove is ticked after it", async () => {
+    const calls = mockMcpServerApi({ server: SERVER })
+    const user = userEvent.setup()
+    await editConnection(user)
+
+    await user.type(screen.getByLabelText("Authorization token"), "ghp_new")
+    await user.click(
+      screen.getByRole("checkbox", { name: "Remove the stored token" }),
+    )
+    expect(screen.getByLabelText("Authorization token")).toHaveValue("")
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+
+    expect(await patchBody(calls)).toMatchObject({ authorization_token: "" })
+  })
+
   it("says so when a save's check could not run", async () => {
     // The gateway had no free check slot, so the row comes back with no health.
     mockMcpServerApi({
