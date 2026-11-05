@@ -725,7 +725,7 @@ async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment
     agreed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek", organization_id=organization.id)
     listed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek")
 
-    assert agreed == ToolRate(key, Decimal("0.003"), "organization")
+    assert agreed == ToolRate(key, Decimal("0.003"), "organization", old_key=True)
     assert listed == ToolRate(key, Decimal("0.004"), "deployment")
 
 

@@ -45,7 +45,7 @@ from gateway.services.pricing_service import (
     resolve_organization_override,
     resolve_tool_rate,
 )
-from gateway.types.tool_charges import LabelCalls
+from gateway.types.tool_charges import LabelCalls, instance_rate_key
 
 T = TypeVar("T")
 
@@ -739,6 +739,55 @@ async def _tool_price(session: AsyncSession, model_key: str, rate: float) -> Non
 
 
 _EXA = "exa:exa-search"
+
+
+def test_a_tool_rate_says_when_its_old_key_holds_it() -> None:
+    """An instance's own row wins over its old ``<provider>:<name>`` row, and the rate says which one priced it."""
+
+    async def scenario(session: AsyncSession) -> None:
+        earlier = _NOW - timedelta(days=1)
+        session.add_all(
+            [
+                ModelPricing(
+                    kind="search",
+                    model_key="own",
+                    effective_at=earlier,
+                    input_price_per_million=3_000.0,
+                    output_price_per_million=0.0,
+                    unit="request",
+                ),
+                ModelPricing(
+                    model_key="exa:own",
+                    effective_at=earlier,
+                    input_price_per_million=9_000.0,
+                    output_price_per_million=0.0,
+                    unit="request",
+                ),
+                ModelPricing(
+                    model_key="exa:old",
+                    effective_at=earlier,
+                    input_price_per_million=2_000.0,
+                    output_price_per_million=0.0,
+                    unit="request",
+                ),
+            ]
+        )
+        await session.flush()
+        own = instance_rate_key("search", "own", "exa")
+        old = instance_rate_key("search", "old", "exa")
+
+        assert await resolve_tool_rate(session, (own,), deployment_paid=True, as_of=_NOW) == ToolRate(
+            own, Decimal("0.003"), "deployment"
+        )
+        assert await resolve_tool_rate(session, (old,), deployment_paid=True, as_of=_NOW) == ToolRate(
+            old, Decimal("0.002"), "deployment", old_key=True
+        )
+        # A model-kind key has no old key: its slash spelling is the same key.
+        assert await resolve_tool_rate(session, ("exa:old",), as_of=_NOW) == ToolRate(
+            "exa:old", Decimal("0.002"), "deployment"
+        )
+
+    _run(scenario)
 
 
 def test_a_tools_unit_rate_keeps_what_rounding_the_total_loses() -> None:

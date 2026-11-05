@@ -10068,6 +10068,17 @@ export interface components {
             kind: "search" | "fetch";
             /** Name */
             name: string;
+            /**
+             * Price Per Call
+             * @description USD for one call on the deployment's own account when the provider reports no cost of its own, from the deployment's price list. An override the operator set for one organization prices that organization's calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused.
+             */
+            price_per_call: number | null;
+            /**
+             * Price Source
+             * @description Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.
+             * @enum {string}
+             */
+            price_source: "own" | "config" | "old_key" | "none";
             /** Provider */
             provider: string;
             /**
@@ -13278,6 +13289,64 @@ export interface components {
              * @description Human-friendly display name.
              */
             name: string;
+        };
+        /**
+         * ListedSearchToolSchema
+         * @description A stored instance as the listing shows it: with what one of its calls costs.
+         */
+        ListedSearchToolSchema: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Decryptable
+             * @default true
+             */
+            decryptable: boolean;
+            /**
+             * Fetch Tool
+             * @description A search instance's enrichment fetch instance. Null means the fetch default enriches it.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description Whether this is a search or a fetch instance.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Price Per Call
+             * @description USD for one call on the deployment's own account when the provider reports no cost of its own, from the deployment's price list. An override the operator set for one organization prices that organization's calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused.
+             */
+            price_per_call: number | null;
+            /**
+             * Price Source
+             * @description Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.
+             * @enum {string}
+             */
+            price_source: "own" | "config" | "old_key" | "none";
+            /** Provider */
+            provider: string;
+            /**
+             * Shadows Config
+             * @description True when a config-file search tool of the same name exists; the stored one is in effect.
+             * @default false
+             */
+            shadows_config: boolean;
+            /** Timeout */
+            timeout?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * MailSettings
@@ -17772,7 +17841,7 @@ export interface components {
             /** Config */
             config: components["schemas"]["ConfigSearchToolSchema"][];
             /** Stored */
-            stored: components["schemas"]["StoredSearchToolSchema"][];
+            stored: components["schemas"]["ListedSearchToolSchema"][];
         };
         /**
          * SelectorIndexResponse

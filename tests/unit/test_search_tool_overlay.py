@@ -33,6 +33,11 @@ from gateway.services.tools._search_tool_overlay import (
 )
 
 
+async def _no_rate(_rate_key: Any) -> None:
+    """A price list that prices nothing, for a service whose tests list no tool."""
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _clean_cache() -> Iterator[None]:
     reset_search_tool_cache()
@@ -343,6 +348,7 @@ async def test_the_refresh_reads_the_rows_then_the_settings_and_applies_both(cap
         tools=_Rows(reads),  # type: ignore[arg-type]
         read_settings=read_settings,
         stage_setting=stage_setting,
+        read_rate=_no_rate,
     )
     await service.refresh()
     assert reads == ["rows", "settings"]
@@ -410,6 +416,7 @@ async def test_a_startup_load_the_database_refuses_is_logged_by_class(caplog: py
         tools=_Refusing(),  # type: ignore[arg-type]
         read_settings=read_settings,
         stage_setting=stage_setting,
+        read_rate=_no_rate,
     )
     assert await service.load_at_startup() is False
     logged = "\n".join(record.getMessage() for record in caplog.records)
@@ -441,6 +448,7 @@ async def test_a_startup_load_whose_commit_fails_applies_no_stored_row() -> None
         tools=_Rows([]),  # type: ignore[arg-type]
         read_settings=read_settings,
         stage_setting=stage_setting,
+        read_rate=_no_rate,
     )
     assert await service.load_at_startup() is False
     assert set(config.search_tools) == {"from-file"}
@@ -462,6 +470,7 @@ async def test_a_startup_load_that_commits_applies_the_rows_and_says_so() -> Non
         tools=_Rows([]),  # type: ignore[arg-type]
         read_settings=read_settings,
         stage_setting=stage_setting,
+        read_rate=_no_rate,
     )
     assert await service.load_at_startup() is True
     assert set(config.search_tools) == {"from-file", "first", "second"}

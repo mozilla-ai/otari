@@ -203,6 +203,7 @@ from gateway.services.tools import (
     DirectToolService,
     DirectToolUsage,
     SearchToolService,
+    ToolRateInForce,
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
@@ -217,6 +218,7 @@ from gateway.services.workspace_scope import (
     organization_for_key_id,
     workspace_for_key_id,
 )
+from gateway.types.tool_charges import InstanceRateKey
 from gateway.types.traces import (
     ContentCapture,
     ContentReader,
@@ -1881,12 +1883,20 @@ def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
     return run
 
 
+async def _deployment_tool_rate(session: AsyncSession, rate_key: InstanceRateKey) -> ToolRateInForce | None:
+    """The rate one of the deployment's search or fetch tools settles at on its own account, as settlement reads it."""
+    rate = await resolve_tool_rate(session, [rate_key], deployment_paid=True)
+    if rate is None:
+        return None
+    return ToolRateInForce(rate.unit_rate, under_old_key=rate.old_key)
+
+
 def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config: GatewayConfig) -> SearchToolService:
     """Build the search-tool service on ``uow``.
 
     ``session`` is the session ``uow`` runs on. The runtime tool settings are
     read and staged through it, so a default a create stores lands in the
-    create's commit.
+    create's commit, and the price list is read through it.
     """
     return SearchToolService(
         uow,
@@ -1894,6 +1904,7 @@ def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config:
         tools=SearchToolRepository(uow),
         read_settings=lambda: load_overrides(session, report_invalid=False),
         stage_setting=lambda key, value: stage_override(session, key, value),
+        read_rate=lambda rate_key: _deployment_tool_rate(session, rate_key),
     )
 
 

@@ -5265,6 +5265,29 @@
             "title": "Name",
             "type": "string"
           },
+          "price_per_call": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for one call on the deployment's own account when the provider reports no cost of its own, from the deployment's price list. An override the operator set for one organization prices that organization's calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused.",
+            "title": "Price Per Call"
+          },
+          "price_source": {
+            "description": "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.",
+            "enum": [
+              "own",
+              "config",
+              "old_key",
+              "none"
+            ],
+            "title": "Price Source",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -5279,7 +5302,9 @@
         "required": [
           "name",
           "provider",
-          "has_api_key"
+          "has_api_key",
+          "price_per_call",
+          "price_source"
         ],
         "title": "ConfigSearchToolSchema",
         "type": "object"
@@ -12087,6 +12112,143 @@
           "name"
         ],
         "title": "KnownProviderSummarySchema",
+        "type": "object"
+      },
+      "ListedSearchToolSchema": {
+        "description": "A stored instance as the listing shows it: with what one of its calls costs.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
+          "fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A search instance's enrichment fetch instance. Null means the fetch default enriches it.",
+            "title": "Fetch Tool"
+          },
+          "kind": {
+            "default": "search",
+            "description": "Whether this is a search or a fetch instance.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "price_per_call": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for one call on the deployment's own account when the provider reports no cost of its own, from the deployment's price list. An override the operator set for one organization prices that organization's calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused.",
+            "title": "Price Per Call"
+          },
+          "price_source": {
+            "description": "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.",
+            "enum": [
+              "own",
+              "config",
+              "old_key",
+              "none"
+            ],
+            "title": "Price Source",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "shadows_config": {
+            "default": false,
+            "description": "True when a config-file search tool of the same name exists; the stored one is in effect.",
+            "title": "Shadows Config",
+            "type": "boolean"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "price_per_call",
+          "price_source"
+        ],
+        "title": "ListedSearchToolSchema",
         "type": "object"
       },
       "MailSettings": {
@@ -21431,7 +21593,7 @@
           },
           "stored": {
             "items": {
-              "$ref": "#/components/schemas/StoredSearchToolSchema"
+              "$ref": "#/components/schemas/ListedSearchToolSchema"
             },
             "title": "Stored",
             "type": "array"
