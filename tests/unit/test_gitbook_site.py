@@ -253,6 +253,17 @@ def test_endpoint_page_names_each_operation_by_path_then_method(repo: Path, site
     )
 
 
+def test_endpoint_pages_name_the_spec_a_build_is_given(repo: Path) -> None:
+    spec_url = "https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs-preview/api/openapi.json"
+    site = gitbook.Site.from_summary(repo / "docs", "main", spec_name="otari-openapi-spec-preview", spec_url=spec_url)
+    site.build(repo / "site")
+
+    page = (repo / "site" / "guides" / "api-endpoints" / "chat.md").read_text(encoding="utf-8")
+    assert 'spec="otari-openapi-spec-preview"' in page
+    assert f"[OpenAPI otari-openapi-spec-preview]({spec_url})" in page
+    assert 'spec="otari-openapi-spec"' not in page
+
+
 @pytest.mark.parametrize(("ref", "version"), [("v1.2.3", "1.2.3"), ("main", "0.0.0-dev")])
 def test_build_stamps_a_release_version_on_the_spec(repo: Path, ref: str, version: str) -> None:
     gitbook.Site.from_summary(repo / "docs", ref).build(repo / "site")

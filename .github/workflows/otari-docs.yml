@@ -16,7 +16,9 @@ name: Otari Docs
 # branch instead, which the preview site syncs from, so the next layout can be
 # read before a release ships it. Links between its spaces go to the repository
 # variable GITBOOK_PREVIEW_SITE_URL, or to the production site when it is unset.
-# This repository is public, so that variable must not hold a share link.
+# This repository is public, so that variable must not hold a share link. Its
+# endpoint pages read the otari-openapi-spec-preview specification, which GitBook
+# reads from the preview branch, so they show main's API rather than the release's.
 
 on:
   release:
@@ -96,6 +98,8 @@ jobs:
               echo "label=main"
               echo "branch=gitbook-docs-preview"
               echo "site_url=${PREVIEW_SITE_URL:-https://docs.otari.ai}"
+              echo "spec_name=otari-openapi-spec-preview"
+              echo "spec_url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gitbook-docs-preview/api/openapi.json"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -120,6 +124,8 @@ jobs:
             echo "label=$TAG"
             echo "branch=gitbook-docs"
             echo "site_url=https://docs.otari.ai"
+            echo "spec_name=otari-openapi-spec"
+            echo "spec_url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gitbook-docs/api/openapi.json"
           } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -132,7 +138,11 @@ jobs:
         env:
           DOCS_REF: ${{ steps.tag.outputs.tag }}
           SITE_URL: ${{ steps.tag.outputs.site_url }}
-        run: python3 scripts/prepare_gitbook_site.py --ref "$DOCS_REF" --site-url "$SITE_URL"
+          SPEC_NAME: ${{ steps.tag.outputs.spec_name }}
+          SPEC_URL: ${{ steps.tag.outputs.spec_url }}
+        run: >-
+          python3 scripts/prepare_gitbook_site.py --ref "$DOCS_REF" --site-url "$SITE_URL"
+          --spec-name "$SPEC_NAME" --spec-url "$SPEC_URL"
 
       - name: Deploy
         env:
