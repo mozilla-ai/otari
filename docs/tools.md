@@ -1120,11 +1120,12 @@ Each note applies when upgrading from the release it names to a later one.
 An organization owner's or admin's override of `otari:code_execution` on
 `/api/v1/organizations/me/pricing` is refused with `403`, as a price of kind
 `search` or `fetch` already is. Such an override has priced no sandbox run since
-0.33, because code execution runs on the deployment's account. It did price an
-MCP tool named `code_execution`, which is priced under the same key and now
-takes the deployment's price. An override already stored stays: the
-organization can delete it, not change it, and the operator can replace or
-delete it. The operator sets the price with the master key.
+0.33, because code execution runs on the deployment's account. It does price an
+MCP tool named `code_execution`, which is priced under the same key: an
+override already stored keeps pricing such a tool's calls until it is deleted,
+and without one they take the deployment's price. An override already stored
+stays: the organization can delete it, not change it, and the operator can
+replace or delete it. The operator sets the price with the master key.
 
 ### From 0.37: the pages a search reads are billed as fetches
 
