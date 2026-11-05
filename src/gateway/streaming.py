@@ -19,6 +19,7 @@ from gateway.core.usage import (
     cache_write_tokens_of,
     provider_web_searches_of,
     reasoning_tokens_of,
+    service_tier_of,
 )
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
@@ -138,6 +139,7 @@ def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> Com
         cache_tokens_in_prompt=cache_tokens_in_prompt_of(update) and cache_tokens_in_prompt_of(current),
         reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
         provider_web_searches=provider_web_searches_of(update) or provider_web_searches_of(current),
+        service_tier=service_tier_of(update) or service_tier_of(current),
     )
 
 

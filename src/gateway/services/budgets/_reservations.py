@@ -408,6 +408,8 @@ class EstimateInputs:
     max_output_tokens: int | None
     default_output_tokens: int
     cache_write_ttl: Literal["5m", "1h"] | None = None
+    # What the request says about itself that a price's rules ask.
+    facts: PriceFacts = NO_FACTS
 
     def get_reserved_output_tokens(self, pricing: ModelPricing | None) -> int | None:
         """Return the output tokens an estimate on ``pricing`` assumes, or None where a lower limit cannot shrink it."""

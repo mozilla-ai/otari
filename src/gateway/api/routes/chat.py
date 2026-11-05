@@ -79,6 +79,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
     reports_tool_activity,
 )
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import apply_endpoint_defaults, with_request_fields
 from gateway.services.providers import acompletion
 from gateway.services.tools import (
@@ -314,13 +315,14 @@ class _ChatAdapter:
             cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
             cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
+            service_tier=chunk.service_tier,
         )
         return GatewayUsage(**fields)
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
         if result.usage is None:
             return None
-        return GatewayUsage.from_completion_usage(result.usage)
+        return GatewayUsage.from_completion_usage(result.usage, service_tier=result.service_tier)
 
     def attach_cost(
         self,
@@ -614,6 +616,7 @@ async def run_chat_completion(
             model=request.model,
             user_id_from_request=request.user,
             safety_identifier=request.safety_identifier,
+            price_facts=PriceFacts(service_tier=request.service_tier),
             estimate_prompt_chars=len(str(request.messages)),
             estimate_max_output_tokens=output_cap,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,

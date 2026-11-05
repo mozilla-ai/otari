@@ -53,6 +53,12 @@ class GatewayUsage(CompletionUsage):
     are not tokens: settlement prices them as ``web_search`` calls under the
     ``<provider>:web_search`` label, never through the token meters.
     """
+    service_tier: str | None = None
+    """The tier the provider says it served the call at, ``None`` where it says none.
+
+    Settlement prices the call at this tier, not the one the request asked
+    for: a provider may serve a request at another tier than it asked.
+    """
 
     @staticmethod
     def external_extras(usage: CompletionUsage) -> dict[str, Any]:
@@ -73,6 +79,7 @@ class GatewayUsage(CompletionUsage):
         cache_write_1h_tokens: int | None = None,
         cache_tokens_in_prompt: bool | None = None,
         reasoning_tokens: int | None = None,
+        service_tier: str | None = None,
     ) -> "GatewayUsage":
         """Build a ``GatewayUsage`` from a base ``CompletionUsage`` plus cache counts.
 
@@ -108,6 +115,7 @@ class GatewayUsage(CompletionUsage):
             cache_write_1h_tokens=cache_write_1h_tokens,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
             reasoning_tokens=reasoning_tokens,
+            service_tier=service_tier if service_tier is not None else service_tier_of(usage),
         )
         return cls(**fields)
 
@@ -171,6 +179,11 @@ def cache_tokens_in_prompt_of(usage: CompletionUsage) -> bool:
 def provider_web_searches_of(usage: CompletionUsage) -> int:
     """Return the searches the provider ran itself, which only a :class:`GatewayUsage` carries."""
     return usage.provider_web_searches if isinstance(usage, GatewayUsage) else 0
+
+
+def service_tier_of(usage: CompletionUsage) -> str | None:
+    """Return the tier the provider served the call at, which only a :class:`GatewayUsage` carries."""
+    return usage.service_tier if isinstance(usage, GatewayUsage) else None
 
 
 def reasoning_tokens_of(usage: CompletionUsage) -> int:
