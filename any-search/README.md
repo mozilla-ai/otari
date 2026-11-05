@@ -222,7 +222,8 @@ query out of the instance's access log too. Any other `method` is refused before
 
 | `SearchHit` | From SearXNG |
 |---|---|
-| `url`, `title` | `url`, `title`, empty when absent |
+| `url` | `url`; a result without one is dropped |
+| `title` | `title`, empty when absent |
 | `snippet` | `content`, empty when absent; SearXNG returns no page text, so `text` is always `None` |
 | `published` | `publishedDate`, ISO 8601, often `null`; without a zone, UTC; in another form, `None`, and the value stays in `raw` |
 
@@ -242,10 +243,11 @@ status from 400 raises `ProviderError`: a 403 tagged `forbidden`, which SearXNG 
 never reaches the error.
 
 SearXNG's documentation describes none of its answer's fields, so only `results`, without which
-the adapter cannot answer, is required. `unresponsive_engines` must be a list when present, an
-item's `url`, `title` and `content` strings or absent, and a `publishedDate` that starts like an
-ISO 8601 date must be one; anything else raises `ProviderError` with the tag
-`unexpected_response`. A result without a `url`, or whose `url` is not an http or https URL with a
+the adapter cannot answer, is required. `unresponsive_engines` must be a list when present. Each
+item read before the count is reached must have a `url` that is a string, `null` or absent, a
+`title` and a `content` that are strings or absent, and a `publishedDate` that, when it starts
+like an ISO 8601 date, is one; anything else raises `ProviderError` with the tag
+`unexpected_response`. A result whose `url` is `null`, absent, or not an http or https URL with a
 host, such as a torrent engine's `magnet:` link, is dropped, and the count is filled from the
 items after it. Infoboxes, answers and suggestions come in fields of their own, which the adapter
 does not read.

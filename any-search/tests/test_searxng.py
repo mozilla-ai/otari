@@ -83,7 +83,7 @@ async def test_method_post_sends_the_same_fields_as_form_data() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("method", ["POST", "form", "post "])
+@pytest.mark.parametrize("method", ["POST", "form", "post ", ""])
 async def test_a_method_other_than_get_or_post_is_refused_before_any_request(method: str) -> None:
     sent: list[httpx.Request] = []
 
@@ -246,6 +246,7 @@ async def test_an_engine_that_failed_beside_hits_is_no_error() -> None:
         ),
         (httpx.Response(400, json={"error": "Empty pageno parameter"}), "invalid_parameter"),
         (httpx.Response(400, json={"error": "No query"}), "http_error"),
+        (httpx.Response(500, json={"error": "Empty pageno parameter"}), "http_error"),
         (httpx.Response(400, json={"error": 7}), "http_error"),
         (httpx.Response(429, text="sentinel-body-text"), "http_error"),
         (httpx.Response(500, json={"error": "sentinel-body-text"}), "http_error"),

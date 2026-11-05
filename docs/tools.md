@@ -829,7 +829,9 @@ caller.
 `web_search_url` points at a SearXNG instance, such as the bundled one
 ([try it](#try-web-search-with-the-bundled-searxng)), which any-search's SearXNG
 adapter asks to search the engines in `web_search_engines`, else `duckduckgo`,
-`mojeek`, `qwant` and `wikipedia`; SearXNG skips a name it has no engine for. A
+`mojeek`, `qwant` and `wikipedia`; SearXNG skips a name it has no engine for,
+and when it knows none of the names it searches its own default engines, so a
+misspelled engine can send the query to engines the list leaves out. A
 configured provider wins over it.
 
 When content extraction is enabled, Otari retrieves each result through its

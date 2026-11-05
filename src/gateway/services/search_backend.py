@@ -1,6 +1,6 @@
 """The direct search endpoint's old client, for the organization keys that do not run on any-search.
 
-``POST /api/v1/search`` runs on any-search (``gateway.services.tools``), except
+The direct search endpoint runs on any-search (``gateway.services.tools``), except
 a search on a workspace's Tavily or Brave organization key (#2015), which
 any-search has no adapter for: it runs here, through the provider mapping the
 in-loop backend uses. It reads the request in the gateway's provider-neutral terms
