@@ -12,8 +12,9 @@ import { oldPriceKey, type WebToolRow } from "./webTools"
 // same name would inherit both. The price is offered for deletion here, checked.
 // A price under the tool's old `<provider>:<name>` key, read when the dialog
 // opens, is only named: for a provider that also serves models, such as
-// DeepSeek, that key can be a model's price. The access lists are only named,
-// since nothing here can edit them.
+// DeepSeek, that key can be a model's price. Removal waits for that read, so
+// the note is never missed, and a failed read says the key was not checked.
+// The access lists are only named, since nothing here can edit them.
 export function RemoveWebToolDialog({
   tool,
   isDefault,
@@ -27,6 +28,7 @@ export function RemoveWebToolDialog({
   const [oldKeyRead] = usePricesInEffect([
     { kind: "model", modelKey: oldPriceKey(tool) },
   ])
+  const isCheckingOldKey = !oldKeyRead || oldKeyRead.isPending
   const hasOldKeyPrice = Boolean(oldKeyRead?.data)
   const remove = useDeleteSearchTool()
   const deletePrice = useDeletePricing()
@@ -87,6 +89,12 @@ export function RemoveWebToolDialog({
               tool named {tool.name} on {tool.provider} that has no price of its
               own.
             </p>
+          ) : oldKeyRead?.isError ? (
+            <p>
+              Could not check for a price stored under {oldPriceKey(tool)}. One
+              stored there stays, and prices a new tool named {tool.name} on{" "}
+              {tool.provider} that has no price of its own.
+            </p>
           ) : null}
           <Checkbox
             isSelected={alsoPrice}
@@ -106,6 +114,7 @@ export function RemoveWebToolDialog({
       }
       confirmLabel="Remove permanently"
       isPending={remove.isPending || deletePrice.isPending}
+      isConfirmDisabled={isCheckingOldKey}
       error={isToolRemoved ? deletePrice.error : remove.error}
       onConfirm={() => void confirm()}
     />

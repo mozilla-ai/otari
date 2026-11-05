@@ -194,6 +194,8 @@ function mockApi(
     settingsRefusal?: string
     /** Refuse only the first price write, or price delete, then accept. */
     priceFailsOnce?: boolean
+    /** Rate reads, as `kind:model_key`, that answer 500. */
+    failingReads?: string[]
   } = {},
 ) {
   const requests: Request[] = []
@@ -271,7 +273,11 @@ function mockApi(
       const key = decodeURIComponent(
         path.pathname.slice(`${API_ROOT}/pricing/`.length),
       )
-      const found = rates[`${path.searchParams.get("kind")}:${key}`]
+      const id = `${path.searchParams.get("kind")}:${key}`
+      if (opts.failingReads?.includes(id)) {
+        return jsonResponse({ detail: "Database unavailable" }, 500)
+      }
+      const found = rates[id]
       return found
         ? jsonResponse(found)
         : jsonResponse({ detail: "Not found" }, 404)
@@ -322,6 +328,18 @@ const listingReads = (requests: Request[]) =>
       new URL(request.url, "http://localhost").pathname ===
         `${API_ROOT}/search-tools`,
   )
+
+/** Confirms a removal once the dialog has checked the tool's old price key. */
+const confirmRemoval = async (
+  user: ReturnType<typeof userEvent.setup>,
+  confirm: HTMLElement,
+) => {
+  const button = within(confirm).getByRole("button", {
+    name: "Remove permanently",
+  })
+  await waitFor(() => expect(button).toBeEnabled())
+  await user.click(button)
+}
 
 const writes = (requests: Request[], method: string, path: string) =>
   requests.filter(
@@ -585,9 +603,7 @@ describe("WebSearchPage", () => {
     expect(
       within(confirm).queryByText(/The price stored under exa:exa stays/),
     ).not.toBeInTheDocument()
-    await user.click(
-      within(confirm).getByRole("button", { name: "Remove permanently" }),
-    )
+    await confirmRemoval(user, confirm)
 
     await waitFor(() =>
       expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
@@ -623,9 +639,7 @@ describe("WebSearchPage", () => {
           /The price stored under exa:exa stays/,
         ),
       ).toBeInTheDocument()
-      await user.click(
-        within(confirm).getByRole("button", { name: "Remove permanently" }),
-      )
+      await confirmRemoval(user, confirm)
 
       await waitFor(() =>
         expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
@@ -634,6 +648,25 @@ describe("WebSearchPage", () => {
       expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
     },
   )
+
+  it("says when it could not check the removed tool's old key, and still removes it", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ failingReads: ["model:exa:exa"] })
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Remove exa" }))
+    const confirm = await screen.findByRole("alertdialog")
+    expect(
+      await within(confirm).findByText(
+        /Could not check for a price stored under exa:exa/,
+      ),
+    ).toBeInTheDocument()
+    await confirmRemoval(user, confirm)
+
+    await waitFor(() =>
+      expect(writes(requests, "DELETE", "/search-tools/exa")).toHaveLength(1),
+    )
+  })
 
   it("configures a stored tool by sending only what changed", async () => {
     const user = userEvent.setup()
@@ -800,15 +833,11 @@ describe("WebSearchPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Remove exa" }))
     const confirm = await screen.findByRole("alertdialog")
-    await user.click(
-      within(confirm).getByRole("button", { name: "Remove permanently" }),
-    )
+    await confirmRemoval(user, confirm)
     await waitFor(() =>
       expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
     )
-    await user.click(
-      within(confirm).getByRole("button", { name: "Remove permanently" }),
-    )
+    await confirmRemoval(user, confirm)
 
     await waitFor(() =>
       expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(2),
