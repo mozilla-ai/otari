@@ -177,6 +177,43 @@ def test_an_access_log_line_is_masked_and_still_formats() -> None:
     assert line == '127.0.0.1:5000 - "GET /api/v1/models?<redacted> HTTP/1.1" 200 OK'
 
 
+def _access_line(path: str) -> str:
+    from uvicorn.logging import AccessFormatter
+
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        0,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:5000", "GET", path, "1.1", 200),
+        None,
+    )
+    assert log_config.CredentialMaskingFilter().filter(record)
+    return AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s', use_colors=False).format(record)
+
+
+@pytest.mark.parametrize("scope_type", ["api_token", "api_key", "token"])
+def test_a_query_value_naming_a_credential_kind_is_kept(scope_type: str) -> None:
+    """A value at the end of the path sits next to ``HTTP/1.1``, which is no credential."""
+    path = f"/api/v1/scoped-budgets?skip=0&limit=1000&scope_type={scope_type}"
+
+    assert _access_line(path) == f'127.0.0.1:5000 - "GET {path} HTTP/1.1" 200 OK'
+
+
+@pytest.mark.parametrize("param", ["api_key", "token", "access_token", "password"])
+def test_a_credential_query_parameter_is_still_masked(param: str) -> None:
+    line = _access_line(f"/api/v1/models?{param}=s3cr3t-12345678")
+
+    assert "s3cr3t" not in line
+
+
+def test_a_bearer_credential_is_still_masked(configured_logger: io.StringIO) -> None:
+    log_config.logger.warning("Upstream echoed Authorization: Bearer %s", "abcdefgh12345678")
+
+    assert "abcdefgh12345678" not in configured_logger.getvalue()
+
+
 def test_every_uvicorn_handler_masks_credentials(capsys: pytest.CaptureFixture[str]) -> None:
     import logging.config
 

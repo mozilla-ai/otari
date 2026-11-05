@@ -52,6 +52,7 @@ from gateway.exceptions.identity_exceptions import (
     DeploymentUserSelfChangeError,
     EmptyDeploymentUserUpdateError,
 )
+from gateway.log_config import logger
 from gateway.models.tenancy import (
     DeploymentUserOrganizationPublic,
     DeploymentUserPublic,
@@ -185,6 +186,15 @@ class DeploymentUserService:
             await self.db.rollback()
             raise
         await self.db.refresh(target)
+        # Operator access opens shared session content and, where enabled, break-glass,
+        # so who granted or removed it, and who deactivated whom, is on the record.
+        logger.warning(
+            "Deployment account changed by operator: actor=%s target=%s is_active=%s is_superuser=%s",
+            actor.id,
+            target.id,
+            request.is_active,
+            request.is_superuser,
+        )
 
         memberships = await self.members.get_by_users_with_organizations([target.id])
         bootstrap = await load_bootstrap_identity(self.db)

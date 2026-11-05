@@ -78,13 +78,12 @@ def test_a_reported_cost_on_the_deployments_account_is_charged_as_reported() -> 
         label="exa:exa-search",
         rate_keys=("otari:web_search",),
         cost=Decimal("0.007"),
-        enrichment_cost=Decimal("0.002"),
         deployment_paid=True,
     )
 
     charges = charge_tool_calls(tally.label_calls(), {})
 
-    assert charges.deployment_paid_total == Decimal("0.009")
+    assert charges.deployment_paid_total == Decimal("0.007")
 
 
 def test_each_charge_line_says_whose_account_ran_its_calls() -> None:

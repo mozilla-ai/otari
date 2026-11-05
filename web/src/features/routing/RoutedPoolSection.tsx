@@ -16,7 +16,6 @@ import {
   poolShares,
 } from "./policyDraft"
 import {
-  KNN_BACKEND,
   MAX_CANDIDATES,
   PRIORITY_BACKEND,
   WEIGHTED_BACKEND,
@@ -38,17 +37,10 @@ const COPY = {
     mark: "Serves on opt-out",
     tooFew: "Ordering one",
   },
-  [KNN_BACKEND]: {
-    label: "The router chooses between",
-    description:
-      "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost.",
-    mark: "Serves when unsure",
-    tooFew: "Ranking one",
-  },
 } as const
 
 /**
- * The models one of which serves each request, for any of the three backends.
+ * The models one of which serves each request, for either backend.
  *
  * They share this control because each is "these models, one per request";
  * they differ in what decides, and in whether a share or a move control sits
@@ -271,7 +263,7 @@ export function RoutedPoolSection({
             before any backup. Each request is drawn independently, so the
             shares hold over traffic rather than over any ten requests.
           </>
-        ) : isPriority ? (
+        ) : (
           <>
             Only a model with a per-model limit ever fills; set one under{" "}
             <Link to="/settings" className="text-link hover:underline">
@@ -280,15 +272,6 @@ export function RoutedPoolSection({
             . A model that fails before responding moves the request down this
             list before any backup. The marked model serves a caller who sends{" "}
             <code>Otari-Router: off</code>.
-          </>
-        ) : (
-          <>
-            The marked model serves whenever the router does not choose: too few
-            scored examples, a weakly supported pick, a request carrying tools,
-            or a caller sending <code>Otari-Router: off</code>. Until it has
-            scored examples (<code>POST /api/v1/routing/preferences/rank</code>
-            ), it serves the marked model; open <b>Examples</b> on the policy's
-            row to watch it warm up.
           </>
         )}
       </p>

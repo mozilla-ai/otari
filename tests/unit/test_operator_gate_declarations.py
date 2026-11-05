@@ -28,6 +28,7 @@ import gateway.api.routes
 from gateway.api.deps import (
     require_deployment_operator,
     require_deployment_operator_or_absent,
+    verify_api_key,
     verify_api_key_or_master_key,
     verify_catalog_reader,
     verify_catalog_reader_or_public,
@@ -35,10 +36,12 @@ from gateway.api.deps import (
     verify_service_key,
 )
 from gateway.api.routes import (
+    agent_recommenders,
     agent_telemetry,
     aliases,
     budgets,
     catalog,
+    country_database,
     end_users,
     health_checks,
     hook_guardrails,
@@ -51,7 +54,6 @@ from gateway.api.routes import (
     pricing,
     providers,
     routing,
-    routing_memory,
     scoped_budgets,
     search_tools,
     settings,
@@ -67,6 +69,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("agent_telemetry", agent_telemetry.router),
     ("aliases", aliases.router),
     ("budgets", budgets.router),
+    ("country_database", country_database.router),
     ("health_checks", health_checks.router),
     ("keys", keys.router),
     ("mail", mail.router),
@@ -75,7 +78,6 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("pricing", pricing.operator_router),
     ("providers", providers.router),
     ("routing", routing.router),
-    ("routing_memory", routing_memory.router),
     ("scoped_budgets", scoped_budgets.router),
     ("search_tools", search_tools.router),
     ("settings", settings.router),
@@ -110,6 +112,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("hook_guardrails", hook_guardrails.router, verify_api_key_or_master_key),
     # Operator-only, with the 404 the admin surface answers rather than the 403:
     # the deployment's own credentials are not a surface to confirm to a member.
+    ("agent_recommenders", agent_recommenders.router, require_deployment_operator_or_absent),
     ("hosted_providers", hosted_providers.router, require_deployment_operator_or_absent),
 ]
 
@@ -127,8 +130,10 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "audio.router": _DATA_PLANE,
     "batches.router": _DATA_PLANE,
     "chat.router": _DATA_PLANE,
+    "code_execution.router": _DATA_PLANE,
     "embeddings.router": _DATA_PLANE,
     "decisions.router": _DATA_PLANE,
+    "fetch.router": _DATA_PLANE,
     "files.router": _DATA_PLANE,
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
@@ -162,6 +167,7 @@ _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
     {
         hooks.verify_hook_caller,
         require_deployment_operator,
+        verify_api_key,
         verify_api_key_or_master_key,
         verify_catalog_reader,
         verify_catalog_reader_or_public,

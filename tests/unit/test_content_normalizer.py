@@ -1,6 +1,6 @@
 """Unit tests for the content normalizer.
 
-The heavy extraction and vision boundaries (markitdown, the vision side-call)
+The extraction and vision boundaries (file extraction, the vision side-call)
 are monkeypatched and the files service is a stand-in, so these tests run with
 no optional deps and no database.
 """
@@ -370,6 +370,104 @@ async def test_text_document_is_extracted_for_a_pdf_capable_model(
     text_type = "input_text" if fmt == "responses" else "text"
     assert out[0]["content"][0]["type"] == text_type
     assert "# Otari" in out[0]["content"][0]["text"]
+    assert stats.files_extracted == 1
+
+
+_IMAGE_FILE_BLOCKS = [
+    ("openai", {"type": "file", "file": {"file_id": "file-png"}}),
+    ("responses", {"type": "input_file", "file_id": "file-png"}),
+    ("anthropic", {"type": "document", "source": {"type": "file", "file_id": "file-png"}}),
+    ("anthropic", {"type": "container_upload", "file_id": "file-png"}),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("fmt", "block"), _IMAGE_FILE_BLOCKS)
+async def test_an_uploaded_image_in_a_file_block_reaches_a_vision_model_as_an_image(
+    fmt: cn.WireFormat, block: dict[str, Any]
+) -> None:
+    files = _files(_stored("file-png", "post.png", "image/png"), data=b"\x89PNG\r\n\x1a\n")
+    msgs = [{"role": "user", "content": [block]}]
+    out, stats = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt=fmt, files=files, user_id="u")
+    part = out[0]["content"][0]
+    if fmt == "anthropic":
+        assert part == {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}}
+    elif fmt == "responses":
+        assert part == {"type": "input_image", "image_url": _PNG_DATA_URL}
+    else:
+        assert part == {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}
+    assert stats.dropped == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("fmt", "block"), _IMAGE_FILE_BLOCKS)
+async def test_an_uploaded_image_in_a_file_block_is_described_for_a_text_only_model(
+    monkeypatch: pytest.MonkeyPatch, fmt: cn.WireFormat, block: dict[str, Any]
+) -> None:
+    async def fake_describe(
+        config: GatewayConfig, data_url: str, **_: Any
+    ) -> tuple[str | None, CompletionUsage | None]:
+        return "a red circle", None
+
+    monkeypatch.setattr(cn, "describe_image", fake_describe)
+    files = _files(_stored("file-png", "post.png", "image/png"), data=b"\x89PNG\r\n\x1a\n")
+    msgs = [{"role": "user", "content": [block]}]
+    out, stats = await normalize_messages(
+        msgs, config=GatewayConfig(vision_strategy="describe"), caps=_TEXT_ONLY, fmt=fmt, files=files, user_id="u"
+    )
+    assert "a red circle" in out[0]["content"][0]["text"]
+    assert stats.images_described == 1
+    assert stats.dropped == 0
+
+
+@pytest.mark.asyncio
+async def test_an_inline_image_in_a_file_block_is_rewritten_to_an_image_part() -> None:
+    msgs = [{"role": "user", "content": [{"type": "file", "file": {"file_data": _PNG_DATA_URL}}]}]
+    out, _ = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt="openai", files=None, user_id="u")
+    assert out[0]["content"][0] == {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"type": "document", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}},
+        {"type": "container_upload", "file_data": _PNG_DATA_URL},
+    ],
+)
+async def test_an_inline_anthropic_image_in_a_file_block_is_rewritten_to_an_image_part(block: dict[str, Any]) -> None:
+    msgs = [{"role": "user", "content": [block]}]
+    out, _ = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="anthropic", files=None, user_id="u"
+    )
+    assert out[0]["content"][0] == {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64},
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_uploaded_image_type_loses_its_parameters() -> None:
+    files = _files(_stored("file-png", "post.png", "image/PNG; charset=binary"), data=b"\x89PNG\r\n\x1a\n")
+    msgs = [{"role": "user", "content": [{"type": "document", "source": {"type": "file", "file_id": "file-png"}}]}]
+    out, _ = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="anthropic", files=files, user_id="u"
+    )
+    assert out[0]["content"][0]["source"]["media_type"] == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_an_uploaded_image_no_provider_reads_stays_a_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(data.decode("utf-8"), True, "ok")
+
+    monkeypatch.setattr(cn, "extract_text_from_file", fake_extract)
+    files = _files(_stored("file-svg", "logo.svg", "image/svg+xml"), data=b"<svg/>")
+    msgs = [{"role": "user", "content": [{"type": "file", "file": {"file_id": "file-svg"}}]}]
+    out, stats = await normalize_messages(
+        msgs, config=GatewayConfig(), caps=_NATIVE, fmt="openai", files=files, user_id="u"
+    )
+    assert "<svg/>" in out[0]["content"][0]["text"]
     assert stats.files_extracted == 1
 
 

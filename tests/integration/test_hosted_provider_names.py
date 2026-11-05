@@ -64,7 +64,7 @@ def looked_up(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Iterator[l
             input_price_per_million=Decimal("2.5"),
             output_price_per_million=Decimal("10"),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
         )
 
     monkeypatch.setattr("gateway.services.pricing_service.default_model_pricing", _stub)
@@ -133,6 +133,29 @@ def test_a_name_a_selector_could_not_address_is_refused(
 
     assert response.status_code == 400, response.text
     assert problem in response.json()["detail"]
+
+
+@pytest.mark.parametrize("name", [None, "otari"])
+def test_an_otari_provider_cannot_take_the_reserved_name(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    dials: list[dict[str, Any]],
+    name: str | None,
+) -> None:
+    """``otari`` prefixes the gateway's tool prices, so a provider under it would lose its own."""
+    body: dict[str, Any] = {"provider": "otari", "api_base": "http://otari.test/v1"}
+    if name is not None:
+        body["name"] = name
+
+    response = client.post(PATH, json=body, headers=master_key_header)
+
+    assert response.status_code == 400, response.text
+    assert "'otari' is reserved" in response.json()["detail"]
+    assert dials == []
+    assert db_session.execute(select(HostedProvider)).scalars().all() == []
+    named = _create(client, master_key_header, provider="otari", name="upstream", api_base="http://otari.test/v1")
+    assert (named["name"], named["provider"]) == ("upstream", "otari")
 
 
 def test_an_endpoint_of_its_own_may_be_stored_without_a_key(

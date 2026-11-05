@@ -8,9 +8,12 @@ request's count. Its hits are held to the search declaration's domain rules and
 cut to the count, and a hit that came without page text is enriched through the
 fetch instance the resolver chose for it, under the same domain rules, the
 first 20 of a search at most; a page that cannot be fetched leaves the hit its
-snippet. Enrichment is part of the
-search call: it takes no slot and records no fetch, and only the cost its
-fetcher reports is kept, beside the search's own.
+snippet. Enrichment takes no slot of the allowance. Its pages are billed as
+fetches on the instance that read them: before any is read, their price at that
+instance's rate is one hold on the request's budgets, and a hold that does not
+fit leaves every hit its snippet; each page that comes back is recorded as a
+``web_fetch`` call under the instance's label, at the cost the provider
+reported or else the instance's rate.
 
 ``builtin`` enriches through the per-request retrieval client and checks every
 redirect against the domain rules, reaching a private host only when
@@ -45,11 +48,12 @@ import any_search
 from any_fetch import FetchedPage
 from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
 from gateway.log_config import logger
-from gateway.services.tool_usage import is_tool_error
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, is_tool_error
 from gateway.services.tools._web_call_cap import SEARCH_CALL_LIMIT_TEXT, WebToolCallCap
 from gateway.services.tools._web_display import published_date
 from gateway.services.tools._web_fetch import FetchFailure, fetch_page, retrieval_client
 from gateway.services.tools._web_names import (
+    WEB_FETCH_TOOL_NAME,
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_PURPOSE_HINT,
     WEB_SEARCH_TOOL_NAME,
@@ -57,6 +61,7 @@ from gateway.services.tools._web_names import (
 )
 from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_tool_failure import (
+    BUDGET_EXCEEDED_TAG,
     CALL_LIMIT_TAG,
     INTERNAL_ERROR_TAG,
     MISSING_CREDENTIAL_TAG,
@@ -64,6 +69,7 @@ from gateway.services.tools._web_tool_failure import (
     WebToolFailure,
     failed_text,
 )
+from gateway.services.traces import ToolSpans
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy, WebURLValidationError, canonicalize_web_url
 
@@ -94,11 +100,10 @@ _ENRICHMENT_MAX_HITS = 20
 
 @dataclass(frozen=True)
 class _Searched:
-    """One call's text for the model, and the costs its search and its enrichment reported."""
+    """One call's text for the model, and the cost its search reported."""
 
     text: str
     cost: Decimal | None = None
-    enrichment_cost: Decimal | None = None
 
 
 class WebSearchBackend:
@@ -137,7 +142,7 @@ class WebSearchBackend:
         # None outside an app, where each provider opens its own per call.
         self._web_provider_client = web_provider_client
         self._tally = tally
-        self._trace = trace
+        self._spans = ToolSpans(trace, "otari_web_search", WEB_SEARCH_TOOL_NAME)
         self._stack = AsyncExitStack()
         # The built-in fetcher's client for enrichment, opened only where it enriches.
         self._retrieval_client: httpx.AsyncClient | None = None
@@ -201,42 +206,42 @@ class WebSearchBackend:
             span.set_attribute("tool.type", "otari_web_search")
             span.set_attribute("web_search.provider", self._search.provider)
             try:
-                if self._cap.claim():
-                    searched = await self._call(arguments)
-                else:
+                if not self._cap.claim():
                     searched = _Searched(self._refused(CALL_LIMIT_TAG, SEARCH_CALL_LIMIT_TEXT))
+                elif self._tally is not None and not await self._tally.admit(
+                    WEB_SEARCH_TOOL_NAME,
+                    label=self._search.label,
+                    rate_keys=self._search.rate_keys,
+                    deployment_paid=not self._search.on_credential,
+                ):
+                    searched = _Searched(self._refused(BUDGET_EXCEEDED_TAG, TOOL_BUDGET_EXCEEDED_TEXT))
+                else:
+                    searched = await self._call(arguments)
             except Exception:
                 # Every failure the backend knows is returned; one it does not is counted and
                 # traced as failed before the loop turns it into its generic text.
                 span.set_status(trace.StatusCode.ERROR, INTERNAL_ERROR_TAG)
                 if self._tally is not None:
                     self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
-                self._record_span(started, ok=False)
+                self._spans.record(started, ok=False, arguments=arguments)
                 raise
             if self._last_failure is not None:
                 span.set_status(trace.StatusCode.ERROR, self._last_failure.tag)
             else:
                 span.set_attribute("web_search.result_count", len(self._last_hits))
         if self._tally is not None:
-            # Under what served it (design L): the label and rate keys the resolver gave, the
-            # search's reported cost, which ``None`` leaves to the rate, and its enrichment's.
+            # Under what served it (design L): the label and rate keys the resolver gave, and the
+            # search's reported cost, which ``None`` leaves to the rate.
             self._tally.record_result(
                 WEB_SEARCH_TOOL_NAME,
                 searched.text,
                 label=self._search.label,
                 rate_keys=self._search.rate_keys,
                 cost=searched.cost,
-                enrichment_cost=searched.enrichment_cost,
                 deployment_paid=not self._search.on_credential,
             )
-        self._record_span(started, ok=not is_tool_error(searched.text))
+        self._spans.record(started, ok=not is_tool_error(searched.text), arguments=arguments, result=searched.text)
         return searched.text
-
-    def _record_span(self, started: datetime, *, ok: bool) -> None:
-        if self._trace is not None:
-            self._trace.record_tool_call(
-                tool_name=WEB_SEARCH_TOOL_NAME, tool_type="otari_web_search", started=started, ok=ok
-            )
 
     async def _call(self, arguments: dict[str, Any]) -> _Searched:
         query = arguments.get("query")
@@ -265,7 +270,7 @@ class WebSearchBackend:
         if (error := result.error) is not None:
             return _Searched(self._failed(WebToolFailure.of(resolved.provider, error.status, error.tag), error.status))
         hits = [hit for hit in result.hits if self._permits(hit.url)][: self._max_results]
-        bodies, enrichment_cost = await self._enriched(hits) if self._enrich else ({}, None)
+        bodies = await self._enriched(hits) if self._enrich else {}
         self._last_hits = hits
         first, self._numbered = self._numbered + 1, self._numbered + len(hits)
         text = truncate_utf8(
@@ -273,7 +278,7 @@ class WebSearchBackend:
             WEB_RETRIEVAL_RESULT_MAX_BYTES,
             suffix=_RESULT_TRUNCATION_NOTICE,
         ).text
-        return _Searched(text, result.cost, enrichment_cost)
+        return _Searched(text, result.cost)
 
     def _permits(self, url: str) -> bool:
         """Whether a hit's URL passes the search's domain rules; one that cannot be read does not."""
@@ -282,27 +287,55 @@ class WebSearchBackend:
         except WebURLValidationError:
             return False
 
-    async def _enriched(self, hits: list[any_search.SearchHit]) -> tuple[dict[int, str], Decimal | None]:
-        """The text each hit without any is shown from its page, by its index, and what the fetcher reported."""
+    async def _enriched(self, hits: list[any_search.SearchHit]) -> dict[int, str]:
+        """The text each hit without any is shown from its page, by its index.
+
+        The pages are held on the request's budgets as one hold before any is
+        read, which stays until settlement as the model call's own does, and
+        each that comes back is recorded as a fetch on the instance that read
+        it, with the cost the provider reported.
+        """
+        wanted = [index for index, hit in enumerate(hits) if not _text(hit)][:_ENRICHMENT_MAX_HITS]
+        if not wanted:
+            return {}
+        enrichment = self._enrichment
+        if self._tally is not None and not await self._tally.admit(
+            WEB_FETCH_TOOL_NAME,
+            label=enrichment.label,
+            rate_keys=enrichment.rate_keys,
+            deployment_paid=not enrichment.on_credential,
+            calls=len(wanted),
+        ):
+            logger.info(
+                "Enrichment through '%s' (%s) left %d results their snippets: their pages do not fit the budget",
+                enrichment.name or enrichment.label,
+                enrichment.provider,
+                len(wanted),
+            )
+            return {}
         semaphore = asyncio.Semaphore(_ENRICHMENT_CONCURRENCY)
 
         async def page(url: str) -> FetchedPage | None:
             async with semaphore:
                 return await self._page(url)
 
-        wanted = [index for index, hit in enumerate(hits) if not _text(hit)][:_ENRICHMENT_MAX_HITS]
         pages = await asyncio.gather(*(page(hits[index].url) for index in wanted))
         bodies: dict[int, str] = {}
-        costs: list[Decimal] = []
         for index, fetched in zip(wanted, pages, strict=True):
             if fetched is None:
                 continue
-            if fetched.cost is not None:
-                costs.append(fetched.cost)
+            if self._tally is not None:
+                self._tally.record_success(
+                    WEB_FETCH_TOOL_NAME,
+                    label=enrichment.label,
+                    rate_keys=enrichment.rate_keys,
+                    cost=fetched.cost,
+                    deployment_paid=not enrichment.on_credential,
+                )
             if text := fetched.text.strip():
                 snippet = hits[index].snippet.strip()
                 bodies[index] = text if self._builtin_enrichment or not snippet else f"{snippet}\n\n{text}"
-        return bodies, sum(costs, Decimal(0)) if costs else None
+        return bodies
 
     async def _page(self, url: str) -> FetchedPage | None:
         """The page at a hit's URL, or ``None`` when it cannot be fetched or is refused."""
@@ -318,7 +351,7 @@ class WebSearchBackend:
         if isinstance(fetched, FetchFailure):
             logger.debug(
                 "Enrichment through '%s' (%s) left a result its snippet: %s",
-                enrichment.name,
+                enrichment.name or enrichment.label,
                 enrichment.provider,
                 fetched.failure.tag,
             )

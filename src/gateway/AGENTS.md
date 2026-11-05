@@ -52,7 +52,8 @@ Completion requests follow this order:
 Chat, Messages, and Responses share the pipeline in
 `api/routes/_pipeline.py`; the attempt walk and its shared refusals live in
 `_attempts.py`, and streaming settlement in `streaming.py`. Pass-through endpoints use
-`run_passthrough`. Direct search has its own dispatch scaffold.
+`run_passthrough`. Direct search and direct code execution each have their own
+dispatch scaffold.
 
 A new provider-calling scaffold must register with `track_request` so
 `/api/v1/usage/in-flight` sees it. Removal belongs to `InFlightMiddleware`,
@@ -92,10 +93,11 @@ dashboard session. It does not prove that the session may act deployment-wide.
   dashboard cookie. The Playground's own completion endpoint
   (`routes/playground.py`) is the one surface that runs a completion from a
   session, and it is a separate route rather than a relaxation of that one: it
-  resolves the caller's attribution user and proves their workspace membership
-  itself, then hands the pipeline a `SessionPrincipal`
-  (`types/session_principal.py`). Adding a second such route means doing all
-  three, not reusing the type.
+  resolves the caller's attribution user, proves their workspace membership
+  and refuses a viewer itself
+  (`OrganizationService.require_workspace_contributor_access`), then hands the
+  pipeline a `SessionPrincipal` (`types/session_principal.py`). Adding a second
+  such route means doing all of that, not reusing the type.
 - Non-billable catalog reads use `verify_catalog_reader`.
 - A service key manages its own end users (`routes/end_users.py`) through
   `verify_service_key`, which takes neither the master key nor a cookie, and
@@ -107,7 +109,8 @@ that needs a deployment-wide route gets a separately scoped endpoint, as
 organization usage does for reads and `/api/v1/organizations/me/keys`
 (`organization_keys.py`) does for writes; do not loosen the original route. A
 member's key surface derives its owner as well as its scope, so it takes no
-`user_id` and mints nothing budget-exempt.
+`user_id`, mints nothing budget-exempt, and refuses a viewer's key writes
+through the same contributor check.
 
 The API key determines the billed workspace. Client `user`, workspace, or
 organization fields cannot move billing or credential resolution.
@@ -222,8 +225,9 @@ tenant's, so it is held to public addresses and dialed through the
 owned-endpoint client (`web_provider_client_for`), whatever
 `provider_allow_private_hosts` says. A search key also serves the
 workspace's explicit `otari_web_search` declarations where the deployment has no
-search of its own; provider-native declarations, `GET /api/v1/tools` and the
-Playground follow the deployment's own search alone.
+search of its own; provider-native declarations, the Playground and `GET /api/v1/tools`
+for a master key or a session follow the deployment's own search alone, while an
+API key's `GET /api/v1/tools` counts its workspace's key and switches.
 MCP servers are workspace resources rather than a refinement of a deployment
 server list.
 
@@ -236,8 +240,9 @@ for example, enforces the workspace search disable switch.
 
 ## Provider and search credential stores
 
-`search_tool_store_service.py` overlays encrypted stored rows on a preserved
-config baseline and refreshes them across workers. Stored values win over config
+`SearchToolService` (`services/tools/`) overlays encrypted stored rows on a
+preserved config baseline and refreshes them across workers; each worker's
+overlay is module state in `_search_tool_overlay.py`. Stored values win over config
 values of the same name; config entries remain read-only through the management
 API. A provider credential the deployment stores is a hosted provider (below);
 the `provider_credentials` rows the Deployment providers page used to store are

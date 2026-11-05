@@ -31,7 +31,6 @@ def test_a_call_recorded_as_today_keeps_no_label_or_rate_keys() -> None:
         calls=1,
         unreported_calls=1,
         reported_cost=Decimal(0),
-        enrichment_cost=Decimal(0),
     )
     assert tally.meters() == {"web_search": {"billed": 1, "errors": 0}}
 
@@ -65,17 +64,25 @@ def test_an_unreported_zero_hit_search_is_billed_at_the_rate() -> None:
     assert (entry.calls, entry.unreported_calls) == (1, 1)
 
 
-def test_enrichment_costs_add_up_beside_the_calls_own() -> None:
+def test_a_success_recorded_without_a_text_is_billed_as_a_call_that_returned_one() -> None:
+    """A page read to enrich a search's hit is recorded as the fetch it is, beside the calls the model made."""
     tally = ToolUsageTally()
     tally.record_result(
-        "web_search", _HITS, label=_EXA, rate_keys=_EXA_KEYS, cost=Decimal("0.005"), enrichment_cost=Decimal("0.002")
+        "web_fetch", _HITS, label="tabstack:tabstack", rate_keys=("tabstack:tabstack",), cost=Decimal("0.002")
     )
-    tally.record_result("web_search", _HITS, label=_EXA, rate_keys=_EXA_KEYS, enrichment_cost=Decimal("0.003"))
+    tally.record_success(
+        "web_fetch", label="tabstack:tabstack", rate_keys=("tabstack:tabstack",), cost=Decimal("0.003")
+    )
+    tally.record_success("web_fetch", label="tabstack:tabstack", rate_keys=("tabstack:tabstack",), deployment_paid=True)
 
-    entry = _only(tally)
-    assert entry.reported_cost == Decimal("0.005")
-    assert entry.enrichment_cost == Decimal("0.005")
-    assert entry.unreported_calls == 1
+    assert {
+        (entry.calls, entry.unreported_calls, entry.reported_cost, entry.deployment_paid)
+        for entry in tally.label_calls()
+    } == {
+        (2, 0, Decimal("0.005"), None),
+        (1, 1, Decimal(0), True),
+    }
+    assert tally.meters() == {"web_fetch": {"billed": 3, "errors": 0}}
 
 
 @pytest.mark.parametrize(
@@ -83,15 +90,14 @@ def test_enrichment_costs_add_up_beside_the_calls_own() -> None:
 )
 def test_an_unusable_reported_cost_reads_as_unreported_and_never_credits(unusable: Decimal) -> None:
     tally = ToolUsageTally()
-    tally.record_result("web_search", _HITS, label=_EXA, rate_keys=_EXA_KEYS, cost=unusable, enrichment_cost=unusable)
+    tally.record_result("web_search", _HITS, label=_EXA, rate_keys=_EXA_KEYS, cost=unusable)
 
     entry = _only(tally)
     assert (entry.calls, entry.unreported_calls) == (1, 1)
     assert entry.reported_cost == Decimal(0)
-    assert entry.enrichment_cost == Decimal(0)
 
 
-def test_a_failed_call_is_counted_and_its_costs_dropped() -> None:
+def test_a_failed_call_is_counted_and_its_cost_dropped() -> None:
     tally = ToolUsageTally()
     tally.record_result(
         "web_search",
@@ -99,7 +105,6 @@ def test_a_failed_call_is_counted_and_its_costs_dropped() -> None:
         label=_EXA,
         rate_keys=_EXA_KEYS,
         cost=Decimal("0.005"),
-        enrichment_cost=Decimal("0.001"),
     )
     tally.record_failure("web_search")
 
@@ -136,3 +141,52 @@ def test_a_tool_past_the_name_cap_records_its_label_under_the_overflow_meter() -
     overflow = [entry for entry in tally.label_calls() if entry.tool == OVERFLOW_TOOL_NAME]
     assert [(entry.label, entry.calls) for entry in overflow] == [("mcp:one_more", 1)]
     assert tally.overflowed
+
+
+class _Gate:
+    def __init__(self, *, fits: bool) -> None:
+        self.fits = fits
+        self.asked: list[LabelCalls] = []
+
+    async def admit(self, call: LabelCalls) -> bool:
+        self.asked.append(call)
+        return self.fits
+
+
+@pytest.mark.asyncio
+async def test_a_tally_with_no_spend_gate_admits_every_call() -> None:
+    assert await ToolUsageTally().admit("web_search")
+
+
+@pytest.mark.asyncio
+async def test_the_spend_gate_is_asked_about_one_unreported_call_under_its_label() -> None:
+    """One call with no reported cost, which is what a rate prices before the call has run."""
+    tally = ToolUsageTally()
+    tally.spend_gate = gate = _Gate(fits=False)
+
+    assert not await tally.admit("web_search", label=_EXA, rate_keys=_EXA_KEYS, deployment_paid=True)
+    assert gate.asked == [
+        LabelCalls(
+            tool="web_search",
+            label=_EXA,
+            rate_keys=_EXA_KEYS,
+            calls=1,
+            unreported_calls=1,
+            reported_cost=Decimal(0),
+            deployment_paid=True,
+        )
+    ]
+    assert tally.is_empty(), "asking records nothing"
+
+
+@pytest.mark.asyncio
+async def test_the_spend_gate_is_asked_about_the_pages_a_search_reads_as_one_hold() -> None:
+    """The pages a search reads together are one hold of that many unreported fetches under the fetch instance."""
+    tally = ToolUsageTally()
+    tally.spend_gate = gate = _Gate(fits=True)
+
+    assert await tally.admit(
+        "web_fetch", label="tabstack:tabstack", rate_keys=("tabstack:tabstack",), deployment_paid=True, calls=3
+    )
+    [asked] = gate.asked
+    assert (asked.tool, asked.calls, asked.unreported_calls, asked.reported_cost) == ("web_fetch", 3, 3, Decimal(0))

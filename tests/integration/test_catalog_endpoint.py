@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.types.model import Model
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -22,6 +23,8 @@ from gateway.models.tenancy import DashboardSession, Organization, OrganizationM
 from gateway.ports.model_provider_port import NO_ORGANIZATION
 from gateway.services import model_catalog_service as mcs
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.model_discovery_service import get_model_cache
+from gateway.types.models_dev import parse_catalog, parse_catalog_v2
 
 from .conftest import build_test_client
 from .hosted_port_helpers import HostedModelProvider, bind_model_provider
@@ -136,7 +139,7 @@ def priced(catalog_client: TestClient, master_header: dict[str, str]) -> TestCli
 
 
 def _get(client: TestClient, path: str, **kwargs: Any) -> Any:
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         response = client.get(path, **kwargs)
     assert response.status_code == status.HTTP_200_OK, response.text
     return response.json()
@@ -234,7 +237,7 @@ def test_the_search_cannot_widen_what_the_caller_may_see(
 
 
 def test_the_window_is_bounded(priced: TestClient, master_header: dict[str, str]) -> None:
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         over = priced.get(f"{API_ROOT}/catalog/models?limit=1001", headers=master_header)
         long_term = priced.get(f"{API_ROOT}/catalog/models?search={'x' * 201}", headers=master_header)
 
@@ -256,7 +259,7 @@ def test_the_detail_lists_every_offering_cheapest_first(priced: TestClient, mast
     assert nebius["price_source"] == "deployment"
     assert nebius["price_reference"] == _NEBIUS_GLM
     assert nebius["pricing"]["input_price_per_million"] == 0.5
-    assert nebius["pricing"]["unit"] == "tokens"
+    assert nebius["pricing"]["unit"] == "token"
     assert fireworks["context_window"] == 131072
     assert fireworks["max_output_tokens"] == 16384
     # Groq serves it too and is not configured here.
@@ -289,7 +292,7 @@ def test_an_aliased_model_stays_in_the_catalog(priced: TestClient, master_header
 
 
 def test_an_unknown_model_is_404(priced: TestClient, master_header: dict[str, str]) -> None:
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         response = priced.get(f"{API_ROOT}/catalog/models/no-such-model", headers=master_header)
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -337,7 +340,7 @@ def test_an_api_key_sees_only_the_models_its_allow_list_permits(
     assert filtered["models"] == []
     assert filtered["facets"]["providers"] == ["nebius"]
 
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         denied = priced.get(f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=key_header)
     # Indistinguishable from a model that does not exist.
     assert denied.status_code == status.HTTP_404_NOT_FOUND
@@ -378,7 +381,7 @@ def test_a_session_is_priced_at_its_organizations_override(
                 pricing_tiers=[],
                 effective_from=datetime.now(UTC) - timedelta(days=1),
                 effective_to=None,
-                unit="tokens",
+                unit="token",
                 origin="api",
             )
         )
@@ -435,6 +438,85 @@ def test_the_list_carries_what_the_filters_and_the_search_need(
     assert isinstance(glm["discovered"], bool)
 
 
+def test_the_catalog_names_each_models_kind_and_filters_by_it(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    catalog = parse_catalog_v2(
+        {
+            "nebius": {
+                "models": {
+                    "zai-org/GLM-5.3": {"name": "GLM-5.3", "type": "chat"},
+                    "moonshotai/Kimi-K2.6": {"name": "Kimi K2.6", "type": "image"},
+                }
+            },
+            "fireworks-ai": {"models": {"accounts/fireworks/models/glm-5p3": {"name": "GLM 5.3", "type": "chat"}}},
+        }
+    )
+    path = f"{API_ROOT}/catalog/models"
+
+    def get(**params: Any) -> Any:
+        with patch.object(mcs, "_fallback", return_value=catalog):
+            response = priced.get(path, headers=master_header, params=params)
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return response.json()
+
+    body = get(include_facets=True)
+    assert {model["id"]: model["type"] for model in body["models"]} == {
+        "z-ai/glm-5.3": "chat",
+        "moonshotai/kimi-k2.6": "image",
+    }
+    assert body["facets"]["types"] == ["chat", "image"]
+    assert [model["id"] for model in get(type="image")["models"]] == ["moonshotai/kimi-k2.6"]
+    assert [model["id"] for model in get(type=["image", "chat"])["models"]] == [
+        "z-ai/glm-5.3",
+        "moonshotai/kimi-k2.6",
+    ]
+
+    # The provider's listing outranks models.dev. Kimi has one offering, so its kind is that offering's.
+    get_model_cache().set(
+        "nebius",
+        [
+            Model.model_validate(
+                {"id": "moonshotai/Kimi-K2.6", "object": "model", "created": 0, "owned_by": "nebius", "type": "chat"}
+            )
+        ],
+    )
+    try:
+        assert next(m for m in get()["models"] if m["id"] == "moonshotai/kimi-k2.6")["type"] == "chat"
+        assert "moonshotai/kimi-k2.6" in [model["id"] for model in get(type="chat")["models"]]
+        assert get(type="image")["models"] == []
+        assert get(include_facets=True)["facets"]["types"] == ["chat"]
+    finally:
+        get_model_cache().clear("nebius")
+
+
+def test_each_offering_names_the_routes_that_serve_it(priced: TestClient, master_header: dict[str, str]) -> None:
+    # Fireworks has no models.dev entry here, so nothing says which routes serve it.
+    catalog = parse_catalog_v2(
+        {
+            "nebius": {
+                "models": {
+                    "zai-org/GLM-5.3": {
+                        "name": "GLM-5.3",
+                        "api": {"responses": {}, "converse": {}, "chat-completions": {}},
+                    },
+                    # An entry whose protocols have no Otari route.
+                    "moonshotai/Kimi-K2.6": {"name": "Kimi K2.6", "api": {"converse": {}}},
+                }
+            },
+        }
+    )
+
+    def endpoints(model_id: str) -> dict[str, list[str]]:
+        with patch.object(mcs, "_fallback", return_value=catalog):
+            response = priced.get(f"{API_ROOT}/catalog/models/{model_id}", headers=master_header)
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return {offering["selector"]: offering["endpoints"] for offering in response.json()["offerings"]}
+
+    assert endpoints("z-ai/glm-5.3") == {_NEBIUS_GLM: ["/responses", "/chat/completions"], _FIREWORKS_GLM: []}
+    assert endpoints("moonshotai/kimi-k2.6") == {_NEBIUS_KIMI: []}
+
+
 def test_prices_compare_at_the_tier_a_request_size_settles_at(
     priced: TestClient, master_header: dict[str, str]
 ) -> None:
@@ -477,7 +559,7 @@ def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
 
     config = cast(FastAPI, priced.app).state.config
     try:
-        with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+        with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
             rebuilt = priced.post(f"{API_ROOT}/catalog/selectors/refresh", headers=master_header)
         assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text
         assert rebuilt.json()["models"] >= 1
@@ -521,7 +603,7 @@ def test_a_visitor_reads_the_catalog_only_while_it_is_public(
     assert offering["usage_30d"] is None
 
     # A credential that is present and wrong is still a wrong credential.
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         refused = public_client.get(f"{API_ROOT}/catalog/models", headers={"Authorization": "Bearer not-a-key"})
     assert refused.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
 
@@ -588,6 +670,34 @@ def test_a_visitor_reads_the_hosted_models_too(
 
 
 @pytest.fixture
+def zero_retention_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    mcs.clear_catalog_cache()
+    hosted = {"groq": {"api_key": "sk-fake", "models": ["glm-5.3"], "zero_data_retention": True}}
+    try:
+        yield from build_test_client(_config(postgres_url, public_catalog=True, hosted_providers=hosted))
+    finally:
+        mcs.clear_catalog_cache()
+
+
+def test_a_hosted_provider_declared_zero_data_retention_marks_its_offerings(
+    zero_retention_client: TestClient, master_header: dict[str, str]
+) -> None:
+    bind_model_provider(zero_retention_client, HostedModelProvider("groq", models={"groq": ["glm-5.3"]}))
+    _price(zero_retention_client, master_header, "groq:glm-5.3", 0.4, 1.6)
+    _price(zero_retention_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+    _price(zero_retention_client, master_header, _NEBIUS_KIMI, 0.6, 2.4)
+
+    body = _get(zero_retention_client, f"{API_ROOT}/catalog/models", params={"zero_data_retention": True})
+    assert [(model["id"], model["zero_data_retention_providers"]) for model in body["models"]] == [
+        ("z-ai/glm-5.3", ["groq"])
+    ]
+
+    detail = _get(zero_retention_client, f"{API_ROOT}/catalog/models/z-ai/glm-5.3")
+    flags = {offering["provider"]: offering["zero_data_retention"] for offering in detail["offerings"]}
+    assert flags == {"groq": True, "nebius": False}
+
+
+@pytest.fixture
 def throttled_public_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
     mcs.clear_catalog_cache()
     try:
@@ -600,7 +710,7 @@ def test_a_visitor_is_throttled_on_the_catalogs_own_budget(
     throttled_public_client: TestClient, master_header: dict[str, str]
 ) -> None:
     # The budget is per client address and counts anonymous reads only.
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         statuses = [throttled_public_client.get(f"{API_ROOT}/catalog/models").status_code for _ in range(3)]
         assert statuses == [status.HTTP_200_OK, status.HTTP_200_OK, status.HTTP_429_TOO_MANY_REQUESTS]
         # The detail shares the budget: it is the same catalog being read.
@@ -734,6 +844,7 @@ def test_facets_describe_the_whole_catalog_rather_than_the_page(
         {"capability": "invalid"},
         {"pricing": "invalid"},
         {"source": "invalid"},
+        {"type": "invalid"},
     ],
 )
 def test_invalid_filter_values_return_validation_errors(

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
     admin,
+    agent_recommenders,
     agent_routing,
     agent_telemetry,
     aliases,
@@ -19,9 +20,12 @@ from gateway.api.routes import (
     budgets,
     catalog,
     chat,
+    code_execution,
+    country_database,
     decisions,
     embeddings,
     end_users,
+    fetch,
     files,
     health,
     hook_guardrails,
@@ -57,7 +61,6 @@ from gateway.api.routes import (
     responses,
     retired_root,
     routing,
-    routing_memory,
     scoped_budgets,
     search,
     search_tools,
@@ -69,6 +72,7 @@ from gateway.api.routes import (
     web_search_keys,
     workspace_activation,
     workspace_code_execution_policy,
+    workspace_hosted_providers,
     workspace_mcp_servers,
     workspace_member_budget_policies,
     workspace_web_search,
@@ -148,6 +152,8 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # since the harness dispatches the subagent to its own provider.
     agent_routing.router,
     search.router,
+    fetch.router,
+    code_execution.router,
     batches.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
@@ -166,6 +172,9 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # The deployment's own upstream credentials and the models it offers on
     # them. Operator-only, and answered 404 to anyone else like /admin.
     hosted_providers.router,
+    # The decision models that pick a subagent's model, and their prices.
+    # Operator-only, and answered 404 to anyone else like /admin.
+    agent_recommenders.router,
     keys.router,
     # A service key managing its own end users, rather than the operator gate
     # ``keys.router`` holds over every key's.
@@ -203,13 +212,14 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     web_search_keys.workspace_router,
     org_provider_keys.org_router,
     org_provider_keys.workspace_router,
+    workspace_hosted_providers.router,
+    workspace_hosted_providers.policy_router,
     budgets.router,
     scoped_budgets.router,
     overview.router,
     aliases.router,
     provider_endpoints.router,
     routing.router,
-    routing_memory.router,
     # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     pricing.operator_router,
@@ -224,6 +234,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     rate_limits.router,
     mail.router,
     maintenance_mode.router,
+    country_database.router,
     # All three prefixed /tool-settings, split by who may call them. Operator
     # first, matching the pairs above, though none ends with a catch-all.
     tool_settings.operator_router,

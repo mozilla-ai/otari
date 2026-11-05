@@ -77,6 +77,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario(handler=_replay("mojeek", "error")),
         "in_body_error": Scenario(handler=_replay("mojeek", "in_body_error")),
     },
+    "serply": {
+        "normal": Scenario(handler=_replay("serply", "normal")),
+        "empty": Scenario(handler=_replay("serply", "empty")),
+        "error": Scenario(handler=_replay("serply", "error")),
+    },
 }
 
 PROVIDERS = AnySearch.get_supported_providers()

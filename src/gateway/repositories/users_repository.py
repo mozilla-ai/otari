@@ -10,7 +10,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.api_keys import APIKey
+from gateway.models.api_keys import SERVICE_KEY_OWNER_ID_PREFIX, APIKey
 from gateway.models.tenancy import OrganizationMember, Workspace
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
@@ -64,6 +64,22 @@ async def get_or_create_default_user(db: AsyncSession) -> User:
         if winner is None:
             raise
         return await _revive(winner)
+
+
+def add_service_key_owner(db: AsyncSession, *, alias: str, creator: User) -> User:
+    """Stage the user an organization's service key is owned by, and return it.
+
+    A user of the key's own, so its end users are reachable from no other key or organization. It starts with the
+    creator's model and tool access, so the key grants nothing its creator lacks. The caller owns the commit.
+    """
+    owner = User(
+        user_id=f"{SERVICE_KEY_OWNER_ID_PREFIX}{uuid.uuid4().hex}",
+        alias=alias,
+        allowed_models=creator.allowed_models,
+        allowed_tools=creator.allowed_tools,
+    )
+    db.add(owner)
+    return owner
 
 
 async def get_or_create_attribution_user(db: AsyncSession, *, user_id: str, alias: str | None) -> User:

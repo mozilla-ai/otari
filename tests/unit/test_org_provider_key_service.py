@@ -4,7 +4,6 @@ Pure precedence logic and the cache accessors are tested with in-memory
 fixtures, no database.
 """
 
-import time
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -104,7 +103,6 @@ def test_cached_org_provider_kwargs_returns_none_until_loaded() -> None:
 
 def test_cached_org_provider_kwargs_is_scoped_by_workspace_and_provider() -> None:
     store._org_cache[(WORKSPACE_ID, "openai")] = {"api_key": "sk-org"}
-    store._org_cached_at = time.monotonic()
 
     assert cached_org_provider_kwargs(WORKSPACE_ID, "openai") == {"api_key": "sk-org"}
     assert cached_org_provider_kwargs(OTHER_WORKSPACE_ID, "openai") is None
@@ -113,7 +111,6 @@ def test_cached_org_provider_kwargs_is_scoped_by_workspace_and_provider() -> Non
 
 def test_reset_clears_the_cache() -> None:
     store._org_cache[(WORKSPACE_ID, "openai")] = {"api_key": "sk-org"}
-    store._org_cached_at = time.monotonic()
     assert cached_org_provider_kwargs(WORKSPACE_ID, "openai") == {"api_key": "sk-org"}, "the entry is set before reset"
 
     reset_org_provider_cache()

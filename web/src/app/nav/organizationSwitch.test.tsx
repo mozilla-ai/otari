@@ -165,15 +165,15 @@ function mockApi({
             ceilings: null,
           } as never
         }
-        // A different figure from the one here, so the cell says which
-        // organization answered it: 10 of 100.
+        // A different figure from the one here, so the strip says which
+        // organization answered it: 10 of 100, inside its limit.
         return ceilingSummary({ spent: 10, allocated: 100 }) as never
       }
       if (holdCeilingsHere) {
         await holdCeilingsHere.held
         holdCeilingsHere.answered()
       }
-      // 200 of 250, which the budget-health cell reads as 80.0%.
+      // 200 of 250, which the attention strip reads as near its limit.
       return ceilingSummary({ spent: 200, allocated: 250 }) as never
     }
     if (url.startsWith("/organizations/me/usage/summary")) {
@@ -251,34 +251,30 @@ describe("switching organization", () => {
   it("keeps a page working where the new role is lower", async () => {
     const requests = mockApi({ roleThere: "member" })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Overview" })
 
     await switchOrganization()
 
-    // The page's own reads are made again, the summary among them. It is asked
-    // for whatever the role, because it answers 200 and leaves the ceilings out
-    // for a caller who may not see them; the client used to have to withhold a
-    // ceilings read instead, and asking anyway left "Not enough privileges to
-    // perform this action" on a page that was working.
+    // The page's own reads are made again in the new role. The ceilings are
+    // a manager's alone, so a member is not asked for them: asking anyway once
+    // left "Not enough privileges to perform this action" on a page that was
+    // working.
     await waitFor(() => {
       expect(
         afterSwitch(requests).some((r) => r.includes("usage/summary")),
       ).toBe(true)
     })
-    await waitFor(() => {
-      expect(afterSwitch(requests).some((r) => r.includes("/overview"))).toBe(
-        true,
-      )
-    })
+    expect(afterSwitch(requests).some((r) => r.includes("/overview"))).toBe(
+      false,
+    )
     expect(screen.queryByText(/Not enough privileges/)).toBeNull()
-    // And no budget cell, because the summary withheld the strip.
-    expect(screen.queryByText("10.0%")).toBeNull()
+    expect(screen.queryByText(/spend ceiling/)).toBeNull()
   })
 
   it("takes the new role from the switch's own answer", async () => {
     const requests = mockApi({ roleThere: "member" })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Overview" })
 
     await switchOrganization()
 
@@ -298,30 +294,35 @@ describe("switching organization", () => {
     // under that one rather than under the organization now on screen.
     const hold = deferred()
     const answered = deferred()
-    mockApi({
+    const requests = mockApi({
       roleThere: "admin",
       holdCeilingsHere: { held: hold.promise, answered: answered.resolve },
     })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Overview" })
 
     await switchOrganization()
-    // The organization switched into has answered, so the cell has a figure of
-    // its own for the late one to overwrite.
-    expect(await screen.findByText("10.0%")).toBeInTheDocument()
+    // The organization switched into has answered, with a ceiling well inside
+    // its limit, so the strip has nothing to say about it.
+    await waitFor(() => {
+      expect(afterSwitch(requests).some((r) => r.includes("/overview"))).toBe(
+        true,
+      )
+    })
 
     hold.resolve()
     await answered.promise
     await act(async () => {})
 
-    expect(screen.getByText("10.0%")).toBeInTheDocument()
-    expect(screen.queryByText("80.0%")).toBeNull()
+    // The late answer is the one that is near its limit (200 of 250), and it
+    // is about the organization that was left.
+    expect(screen.queryByText(/near limit/)).toBeNull()
   })
 
   it("does not ask for a workspace of the organization it left", async () => {
     const requests = mockApi({ roleThere: "admin" })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Overview" })
     expect(requests.some((r) => r.includes(WORKSPACE_HERE))).toBe(true)
 
     await switchOrganization()
@@ -342,7 +343,7 @@ describe("switching organization", () => {
   it("makes the gated read again where the role survives the switch", async () => {
     const requests = mockApi({ roleThere: "admin" })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Overview" })
 
     await switchOrganization()
 

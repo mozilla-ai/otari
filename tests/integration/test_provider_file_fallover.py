@@ -15,6 +15,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import httpx2
 import pytest
 from any_llm.types.messages import MessageResponse, TextBlock
 from fastapi.testclient import TestClient
@@ -69,14 +70,14 @@ class _AccountFiles:
     def __init__(self) -> None:
         self.uploads: list[str] = []
 
-    def handle(self, request: httpx.Request) -> httpx.Response:
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
         if request.method == "GET" and "/v1/files/" in request.url.path:
-            return httpx.Response(200, json=self._metadata(request.url.path.rsplit("/", 1)[-1]))
+            return httpx2.Response(200, json=self._metadata(request.url.path.rsplit("/", 1)[-1]))
         if request.method != "POST" or not request.url.path.endswith("/v1/files"):
-            return httpx.Response(404)
+            return httpx2.Response(404)
         key = request.headers.get("x-api-key", "")
         self.uploads.append(key)
-        return httpx.Response(200, json=self._metadata(f"file_copy_for_{key}"))
+        return httpx2.Response(200, json=self._metadata(f"file_copy_for_{key}"))
 
     @staticmethod
     def _metadata(file_id: str) -> dict[str, Any]:
@@ -96,13 +97,13 @@ class _AccountFiles:
 @pytest.fixture
 def account_files(monkeypatch: pytest.MonkeyPatch) -> _AccountFiles:
     stub = _AccountFiles()
-    original_init = httpx.AsyncClient.__init__
+    original_init = httpx2.AsyncClient.__init__
 
-    def patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
-        kwargs["transport"] = httpx.MockTransport(stub.handle)
+    def patched_init(self: httpx2.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        kwargs["transport"] = httpx2.MockTransport(stub.handle)
         original_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+    monkeypatch.setattr(httpx2.AsyncClient, "__init__", patched_init)
     return stub
 
 

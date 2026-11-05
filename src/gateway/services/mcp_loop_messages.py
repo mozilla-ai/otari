@@ -986,6 +986,7 @@ async def anthropic_tool_loop_stream(
     emit_native_mcp: bool = False,
     use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Streaming Anthropic Messages tool-use loop.
 
@@ -1027,6 +1028,7 @@ async def anthropic_tool_loop_stream(
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            on_first_response=on_first_response,
         )
     ) as inner:
         async for event in inner:

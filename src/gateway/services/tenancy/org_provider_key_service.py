@@ -33,7 +33,6 @@ benefit.
 """
 
 import asyncio
-import time
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
@@ -53,6 +52,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgDefaultProviderKeyConflictError,
     OrgProviderKeyAlreadyExistsError,
     OrgProviderKeyArchivedError,
+    OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
     OrgProviderKeyNameRequiredError,
     OrgProviderKeyNotArchivedError,
@@ -68,7 +68,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
-from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User, Workspace
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
@@ -122,7 +122,8 @@ _org_model_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}
 # it with its serving switch (``None`` when the key offers no rows), so a
 # refusal can say which of the two narrowings turned the model away.
 _org_key_offers: dict[tuple[uuid.UUID, str], KeyOffer] = {}
-_org_cached_at: float | None = None
+# (workspace_id, provider) -> whether the active key is declared zero data retention.
+_org_key_zero_retention: dict[tuple[uuid.UUID, str], bool] = {}
 
 
 def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
@@ -159,7 +160,7 @@ def key_is_usable(key: OrgProviderKey) -> bool:
 
 def has_credential(key: OrgProviderKey) -> bool:
     """Whether this key holds an API key or a base URL, and its secret decrypts."""
-    return (key.encrypted_api_key is not None or key.api_base is not None) and key_is_usable(key)
+    return (key.encrypted_api_key is not None or bool(key.api_base)) and key_is_usable(key)
 
 
 def cached_org_provider_kwargs(workspace_id: uuid.UUID, provider: str) -> dict[str, Any] | None:
@@ -202,19 +203,21 @@ def cached_org_model_restriction(workspace_id: uuid.UUID, provider: str) -> list
     return _org_model_restrictions.get((workspace_id, provider))
 
 
-def org_cache_is_stale(ttl: float = ORG_PROVIDER_CACHE_TTL_SECONDS) -> bool:
-    """Whether the cache has never been loaded or has outlived ``ttl``."""
-    return _org_cached_at is None or (time.monotonic() - _org_cached_at) >= ttl
+def cached_org_key_zero_data_retention(workspace_id: uuid.UUID, provider: str) -> bool:
+    """Whether the key this worker last resolved for the workspace and provider is declared zero data retention.
+
+    False where no key resolved, which is the answer a caller asking whether
+    the key may serve a workspace that requires it wants.
+    """
+    return _org_key_zero_retention.get((workspace_id, provider), False)
 
 
 def reset_org_provider_cache() -> None:
     """Drop the overlay cache so the next load starts clean (startup, tests)."""
-    global _org_cached_at  # noqa: PLW0603
-
     _org_cache.clear()
     _org_model_restrictions.clear()
     _org_key_offers.clear()
-    _org_cached_at = None
+    _org_key_zero_retention.clear()
 
 
 async def refresh_org_provider_cache(db: AsyncSession) -> None:
@@ -227,8 +230,6 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     provider) pair that actually has a key, not once per workspace times
     every provider that exists anywhere.
     """
-    global _org_cached_at  # noqa: PLW0603
-
     workspace_orgs = (await db.execute(select(col(Workspace.id), col(Workspace.organization_id)))).all()
     keys = (
         (
@@ -267,6 +268,7 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     new_cache: dict[tuple[uuid.UUID, str], dict[str, Any]] = {}
     new_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}
     new_offers: dict[tuple[uuid.UUID, str], KeyOffer] = {}
+    new_zero_retention: dict[tuple[uuid.UUID, str], bool] = {}
     for workspace_id, organization_id in workspace_orgs:
         for provider in providers_by_org.get(organization_id, ()):
             candidates: list[Candidate] = [
@@ -287,6 +289,7 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
                     workspace_id,
                 )
                 continue
+            new_zero_retention[(workspace_id, provider)] = active.zero_data_retention
             # Two narrowings, and neither may widen the other. The workspace's
             # own restriction is what it was; the organization's offered models
             # are the serving switches on this key. An entry is stored when
@@ -311,7 +314,8 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     _org_model_restrictions.update(new_restrictions)
     _org_key_offers.clear()
     _org_key_offers.update(new_offers)
-    _org_cached_at = time.monotonic()
+    _org_key_zero_retention.clear()
+    _org_key_zero_retention.update(new_zero_retention)
 
 
 async def load_org_provider_keys_at_startup(db: AsyncSession) -> None:
@@ -500,6 +504,7 @@ class OrgProviderKeyService:
                 last4=last4,
                 api_base=request.api_base,
                 client_args=request.client_args,
+                zero_data_retention=request.zero_data_retention,
             )
             await self.db.commit()
         except IntegrityError:
@@ -529,6 +534,9 @@ class OrgProviderKeyService:
             raise OrgProviderKeyArchivedError(key_id)
 
         update_data = request.model_dump(exclude_unset=True)
+        # A declaration is true or false; an explicit null changes nothing.
+        if update_data.get("zero_data_retention", False) is None:
+            del update_data["zero_data_retention"]
         if "name" in update_data:
             new_name = _validated_name(update_data["name"])
             update_data["name"] = new_name
@@ -542,6 +550,12 @@ class OrgProviderKeyService:
                     raise OrgProviderKeyAlreadyExistsError(key.provider, new_name)
         if "api_base" in update_data:
             await _gate_api_base(update_data["api_base"])
+            if update_data["api_base"] and update_data["api_base"] != key.api_base:
+                stored_args_follow = stored_secrets_survive(
+                    key.client_args, update_data.get("client_args"), sent="client_args" in update_data
+                )
+                if (key.encrypted_api_key is not None and "api_key" not in update_data) or stored_args_follow:
+                    raise OrgProviderKeyCredentialRequiredError
         if "client_args" in update_data:
             # ``from_row`` masks a credential-shaped entry, so an editor
             # resubmitting the whole object sends the mask for the entries it was
@@ -698,6 +712,7 @@ class OrgProviderKeyService:
                     # tell from this one.
                     usable=key_is_usable(key),
                     allowed_models=restrictions.get((workspace.id, key.id), []),
+                    zero_data_retention=key.zero_data_retention,
                 )
                 for key, override in candidates
             ]
@@ -805,6 +820,7 @@ class OrgProviderKeyService:
             is_effective_enabled=not result_disabled,
             usable=key_is_usable(key),
             allowed_models=allowed_models,
+            zero_data_retention=key.zero_data_retention,
         )
 
     async def reset_workspace_override_for_user(
@@ -935,6 +951,20 @@ class OrgProviderKeyService:
             }
         return active
 
+    async def get_workspace_byo_providers(self, *, workspace_id: uuid.UUID) -> frozenset[str]:
+        """Returns the providers one workspace calls on a key of its own.
+
+        Narrowed exactly as dispatch is: the key active in that workspace,
+        holding a credential, which is the one condition under which dispatch
+        never asks the hosted port. A key the organization holds in another
+        workspace does not count.
+        """
+        workspace = await self.workspaces.get(workspace_id)
+        if workspace is None or workspace.organization_id is None:
+            return frozenset()
+        active = await self.get_active_keys(organization_id=workspace.organization_id, workspace_ids=[workspace_id])
+        return frozenset(provider for provider, key in active.get(workspace_id, {}).items() if has_credential(key))
+
     async def get_byo_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
         """Returns the providers that every workspace in the organization calls with its own key.
 
@@ -955,15 +985,36 @@ class OrgProviderKeyService:
             )
         )
 
+    async def get_zero_data_retention_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        """Returns the providers whose every usable key in the organization declares zero data retention.
+
+        Every key rather than any: which key serves a workspace depends on its
+        defaults and overrides, so one undeclared key means a request may go
+        out on an account that keeps data. A key with no credential serves
+        nothing and does not count. Checking one costs a decryption, so a
+        provider with no declared key is never checked, and the checks stop
+        at the first answer.
+        """
+        by_provider: dict[str, list[OrgProviderKey]] = defaultdict(list)
+        for key in await self.keys.list_live_keys(organization_id):
+            by_provider[key.provider].append(key)
+        return frozenset(
+            provider
+            for provider, keys in by_provider.items()
+            if any(key.zero_data_retention for key in keys)
+            and not any(has_credential(key) for key in keys if not key.zero_data_retention)
+            and any(has_credential(key) for key in keys if key.zero_data_retention)
+        )
+
 
 __all__ = [
     "ORG_PROVIDER_CACHE_TTL_SECONDS",
     "OrgProviderKeyService",
+    "cached_org_key_zero_data_retention",
     "cached_org_model_restriction",
     "cached_org_provider_kwargs",
     "has_credential",
     "load_org_provider_keys_at_startup",
-    "org_cache_is_stale",
     "refresh_org_provider_cache",
     "reset_org_provider_cache",
     "run_org_provider_refresher",

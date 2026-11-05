@@ -229,7 +229,6 @@ describe("sessionStats", () => {
     expect(judged.gates.runs).toBe(3)
     expect(judged.judges).toEqual({
       calls: 2,
-      models: ["claude-haiku-4-5-20251001"],
       cost: 0.02,
       priced: 1,
     })

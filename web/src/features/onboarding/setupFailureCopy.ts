@@ -25,7 +25,11 @@ import type { SetupSnippetId } from "@/features/onboarding/setupSnippets"
  * against is already on screen.
  */
 export type SetupHint =
-  | { label: string; to: "/models" | "/budgets" | "/activity"; tab?: never }
+  | {
+      label: string
+      to: "/models" | "/budgets" | "/requests"
+      tab?: never
+    }
   | { label: string; tab: SetupSnippetId; to?: never }
 
 export interface SetupFailure {
@@ -63,7 +67,7 @@ const FAILURES: Record<ActivationErrorCategory, SetupFailure> = {
   },
   internal: {
     cause: "The gateway could not complete the request.",
-    hint: { label: "Open the activity log", to: "/activity" },
+    hint: { label: "Open the activity log", to: "/requests" },
   },
 }
 

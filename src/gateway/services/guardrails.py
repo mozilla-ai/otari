@@ -35,7 +35,7 @@ import asyncio
 import logging
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 
@@ -45,6 +45,15 @@ from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT_S = 30.0
+
+UnavailableReason = Literal["not_configured", "evaluation_failed"]
+"""Why a guardrail could not run, in words safe to send back to the caller.
+
+``not_configured`` means no guardrails service was named for the profile.
+``evaluation_failed`` covers every other failure, and the log holds the detail.
+"""
+
+GuardrailStatus = Literal["evaluated", "inconclusive", "unavailable"]
 
 
 def _unevaluated_detail(profile: str) -> str:
@@ -70,9 +79,16 @@ class GuardrailsNotReachableError(RuntimeError):
     an address, and it is the only one a reader can actually act on.
     """
 
-    def __init__(self, message: str, *, public_detail: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        public_detail: str | None = None,
+        reason: UnavailableReason = "evaluation_failed",
+    ) -> None:
         super().__init__(message)
         self.public_detail = public_detail if public_detail is not None else message
+        self.reason: UnavailableReason = reason
 
 
 @dataclass
@@ -84,6 +100,15 @@ class GuardrailResult:
     valid: bool | None
     explanation: object | None = None
     score: object | None = None
+    unavailable: UnavailableReason | None = None
+    """Set when the check could not run and the request was served anyway."""
+
+    @property
+    def status(self) -> GuardrailStatus:
+        """Whether the check ran, ran without a verdict, or could not run."""
+        if self.unavailable is not None:
+            return "unavailable"
+        return "inconclusive" if self.valid is None else "evaluated"
 
     @property
     def flagged(self) -> bool:
@@ -395,7 +420,8 @@ async def run_input_guardrails(
                     raise GuardrailsNotReachableError(
                         f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
                         "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
-                        "guardrail entry."
+                        "guardrail entry.",
+                        reason="not_configured",
                     )
                 else:
                     result = await _validate_one(
@@ -427,6 +453,7 @@ async def run_input_guardrails(
                         mode=cfg.mode,
                         valid=None,
                         explanation="guardrail service unavailable",
+                        unavailable=exc.reason,
                     )
                 )
                 continue

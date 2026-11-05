@@ -467,6 +467,24 @@ describe("the Playground before the first question", () => {
       await screen.findByRole("link", { name: "Providers" }),
     ).toHaveAttribute("href", "/organization/provider-keys")
   })
+
+  it("tells a viewer the Playground is not theirs to run", async () => {
+    mockApi({
+      context: organizationContext({
+        role: "viewer",
+        deployment_operator: false,
+        workspace_memberships: [
+          { workspace_id: WORKSPACE_ID, name: "Default", role: "member" },
+        ],
+      }) as OrganizationContext,
+    })
+    renderPage()
+
+    expect(
+      await screen.findByText("The Playground is not open to viewers"),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  })
 })
 
 describe("sending a question", () => {

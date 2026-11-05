@@ -804,6 +804,7 @@ async def responses_tool_loop_stream(
     max_iterations: int,
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
+    on_first_response: Callable[[], None] | None = None,
 ) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
 
@@ -831,6 +832,7 @@ async def responses_tool_loop_stream(
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            on_first_response=on_first_response,
         )
     ) as inner:
         async for event in inner:

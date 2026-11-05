@@ -128,7 +128,7 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]
             input_price_per_million=Decimal(input_rate),
             output_price_per_million=Decimal(output_rate),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
         )
 
     monkeypatch.setattr(DATASET, _stub)
@@ -162,7 +162,7 @@ async def _price(
             input_price_per_million=Decimal(input_rate),
             output_price_per_million=Decimal(output_rate),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
             origin=origin,
         )
     )
@@ -185,7 +185,7 @@ async def _override(db: AsyncSession, organization: Organization, model_key: str
             input_price_per_million=Decimal("1"),
             output_price_per_million=Decimal("2"),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
             origin=API_ORIGIN,
             effective_from=datetime(2026, 1, 1, tzinfo=UTC),
         )
@@ -524,16 +524,16 @@ async def test_a_model_can_be_priced_per_request(async_db: AsyncSession, monkeyp
     added = await service.add_model(
         "openai",
         HostedModelCreateRequest(
-            model="rerank", input_price_per_million=2000, output_price_per_million=0, unit="requests"
+            model="rerank", input_price_per_million=2000, output_price_per_million=0, unit="request"
         ),
     )
     repriced = await service.update_model(
         "openai", added.id, HostedModelUpdateRequest(input_price_per_million=3000, output_price_per_million=0)
     )
 
-    assert (added.unit, added.input_price_per_million) == ("requests", 2000.0)
-    assert (repriced.unit, repriced.input_price_per_million) == ("requests", 3000.0)
-    assert {version.unit for version in await _versions(async_db, "openai:rerank")} == {"requests"}
+    assert (added.unit, added.input_price_per_million) == ("request", 2000.0)
+    assert (repriced.unit, repriced.input_price_per_million) == ("request", 3000.0)
+    assert {version.unit for version in await _versions(async_db, "openai:rerank")} == {"request"}
 
 
 async def test_an_offer_without_a_price_seeds_the_default(
@@ -638,7 +638,7 @@ async def test_new_base_rates_drop_a_seeds_tiers_and_carry_an_operators(
             input_price_per_million=Decimal("2.5"),
             output_price_per_million=Decimal("10"),
             pricing_tiers=[tier],
-            unit="tokens",
+            unit="token",
         )
 
     monkeypatch.setattr(DATASET, _tiered)

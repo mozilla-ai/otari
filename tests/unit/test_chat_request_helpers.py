@@ -365,7 +365,7 @@ def _capped_context(entry: dict[str, Any] | None) -> ToolContext:
 
 def test_max_uses_is_read_from_a_native_declaration() -> None:
     entry = {"type": "web_search_20250305", "name": "web_search", "max_uses": 3}
-    assert _capped_context(entry).max_web_search_uses == 3
+    assert read_web_search_max_uses(entry) == 3
 
 
 def test_max_uses_is_honored_on_a_declaration_with_no_native_response_shape() -> None:
@@ -378,20 +378,20 @@ def test_max_uses_is_honored_on_a_declaration_with_no_native_response_shape() ->
         entry = {"type": type_value, "max_uses": 2}
         ctx = _capped_context(entry)
         assert ctx.native_tools(Dialect.MESSAGES) == frozenset()
-        assert ctx.max_web_search_uses == 2, type_value
+        assert read_web_search_max_uses(entry) == 2, type_value
 
 
 def test_no_max_uses_leaves_the_searches_uncapped() -> None:
-    assert _capped_context({"type": "web_search_20250305"}).max_web_search_uses is None
-    assert _capped_context(None).max_web_search_uses is None
-    assert _capped_context({"type": "web_search_20250305", "max_uses": None}).max_web_search_uses is None
+    assert read_web_search_max_uses({"type": "web_search_20250305"}) is None
+    assert read_web_search_max_uses(None) is None
+    assert read_web_search_max_uses({"type": "web_search_20250305", "max_uses": None}) is None
 
 
 def test_a_zero_max_uses_caps_the_searches_at_none_rather_than_at_no_limit() -> None:
     """A spend control must not read a limit of zero as permission to spend freely."""
     entry = {"type": "web_search_20250305", "max_uses": 0}
     ctx = _capped_context(entry)
-    assert ctx.max_web_search_uses == 0
+    assert read_web_search_max_uses(entry) == 0
     assert ctx.use_budget is not None
     assert ctx.use_budget.exhausted("web_search"), "the first search must already be over the cap"
 

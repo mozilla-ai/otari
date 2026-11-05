@@ -53,7 +53,7 @@ jobs:
       with:
         persist-credentials: false
 
-    - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         python-version: "3.14"
 
@@ -79,9 +79,12 @@ jobs:
       working-directory: web
       run: pnpm install --frozen-lockfile
 
-    - name: Install Playwright Chromium
+    # Two engines: the models spec runs in WebKit as well, because whether focus
+    # scrolls a clipped ancestor is engine behavior (see the `parity-webkit`
+    # project in web/playwright.config.ts).
+    - name: Install Playwright browsers
       working-directory: web
-      run: pnpm exec playwright install --with-deps chromium
+      run: pnpm exec playwright install --with-deps chromium webkit
 
     # `pnpm run e2e` builds the bundle first (see web/package.json), so a local run
     # and CI serve the same freshly built dashboard. It names every project it

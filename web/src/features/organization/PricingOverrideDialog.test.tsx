@@ -35,7 +35,8 @@ function pricingOverride(
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
     pricing_tiers: [],
-    unit: "tokens",
+    unit: "token",
+    rates: {},
     effective_from: "2026-08-01T00:00:00Z",
     effective_to: null,
     created_at: "2026-08-01T00:00:00Z",
@@ -441,7 +442,7 @@ describe("PricingOverrideDialog", () => {
         input_price_per_million: 2000,
         output_price_per_million: 0,
         cache_read_price_per_million: null,
-        unit: "requests",
+        unit: "request",
       })
     })
   })
@@ -451,7 +452,7 @@ describe("PricingOverrideDialog", () => {
       model_key: "cohere:rerank-v3.5",
       input_price_per_million: 2000,
       output_price_per_million: 0,
-      unit: "requests",
+      unit: "request",
     })
     mockApi({ overrides: [stored] })
 

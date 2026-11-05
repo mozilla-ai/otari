@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.services import model_catalog_service as mcs
+from gateway.types.models_dev import parse_catalog
 
 from .conftest import build_test_client
 
@@ -71,15 +72,16 @@ def test_list_models_deduplicates_effective_entries(
 
     resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
-    models = [m for m in resp.json()["data"] if m["id"] == model_key]
+    models = [m for m in resp.json()["data"] if m["id"] == "openai/gpt-4o"]
     assert len(models) == 1
+    assert models[0]["pricing"]["input_price_per_million"] == 2.0
 
 
-def test_list_models_owned_by_from_provider(
+def test_list_models_owned_by_the_vendor(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """Models owned_by field is derived from the provider prefix."""
+    """A model is listed under its catalog id, owned by its vendor rather than the provider serving it."""
     client.post(
         f"{API_ROOT}/pricing",
         json={
@@ -93,8 +95,9 @@ def test_list_models_owned_by_from_provider(
     resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     models = resp.json()["data"]
-    gpt4 = next(m for m in models if m["id"] == "openai:gpt-4o")
+    gpt4 = next(m for m in models if m["id"] == "openai/gpt-4o")
     assert gpt4["owned_by"] == "openai"
+    assert "openai:gpt-4o" not in {m["id"] for m in models}
 
 
 def test_list_models_exposes_cache_pricing(
@@ -116,20 +119,20 @@ def test_list_models_exposes_cache_pricing(
 
     resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
-    model = next(m for m in resp.json()["data"] if m["id"] == "anthropic:claude-sonnet-4")
+    model = next(m for m in resp.json()["data"] if m["id"] == "anthropic/claude-sonnet-4")
     assert model["pricing"]["cache_read_price_per_million"] == 0.3
     assert model["pricing"]["cache_write_price_per_million"] == 3.75
 
-    # A model priced without cache rates reports them as null, not absent.
+    # An unset cache rate is absent, like every other value the response does not know.
     client.post(
         f"{API_ROOT}/pricing",
         json={"model_key": "openai:gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10.0},
         headers=master_key_header,
     )
     resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
-    gpt4 = next(m for m in resp.json()["data"] if m["id"] == "openai:gpt-4o")
-    assert gpt4["pricing"]["cache_read_price_per_million"] is None
-    assert gpt4["pricing"]["cache_write_price_per_million"] is None
+    gpt4 = next(m for m in resp.json()["data"] if m["id"] == "openai/gpt-4o")
+    assert "cache_read_price_per_million" not in gpt4["pricing"]
+    assert "cache_write_price_per_million" not in gpt4["pricing"]
 
 
 def test_get_model_found(
@@ -249,8 +252,8 @@ def test_the_catalog_says_which_models_the_deployment_supplies(instance_client: 
     assert listed.status_code == 200, listed.text
     managed = {model["id"]: model["deployment_managed"] for model in listed.json()["data"]}
 
-    assert managed["home_lab:llama-3"] is True
-    assert managed["openai:gpt-4o"] is False
+    assert managed["meta/llama-3"] is True
+    assert managed["openai/gpt-4o"] is False
 
     one = instance_client.get(f"{API_ROOT}/models/home_lab:llama-3", headers=headers)
     assert one.status_code == 200, one.text
@@ -260,6 +263,10 @@ def test_the_catalog_says_which_models_the_deployment_supplies(instance_client: 
 _QWEN = "nebius:Qwen/Qwen3-30B-A3B-Instruct-2507"
 _GEMINI = "gemini:models/gemini-3.5-flash-lite"
 _UNKNOWN = "nebius:made-up-model-xyz"
+# The catalog ids the listing names them by. A vendor nobody names leaves the bare slug.
+_QWEN_ID = "alibaba/qwen3-30b-a3b-instruct-2507"
+_GEMINI_ID = "google/gemini-3.5-flash-lite"
+_UNKNOWN_ID = "made-up-model-xyz"
 
 # models.dev as the listing reads it: Gemini under ``google`` and keyed by the
 # bare id, where the gateway's selector carries Gemini's own ``models/`` prefix.
@@ -316,26 +323,34 @@ def limits_client(limits_config: GatewayConfig, clean_database: None) -> Generat
 
 def _read(client: TestClient, path: str) -> Any:
     """GET ``path`` as the master key, with models.dev answering ``_MODELS_DEV``."""
-    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=_MODELS_DEV)):
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(_MODELS_DEV)):
         response = client.get(path, headers={API_KEY_HEADER: "Bearer test-master-key"})
     assert response.status_code == 200, response.text
     return response.json()
 
 
 def _limits(model: dict[str, Any]) -> tuple[int | None, int | None]:
-    return model["context_window"], model["max_output_tokens"]
+    # The two model routes omit a limit they do not know.
+    return model.get("context_window"), model.get("max_output_tokens")
+
+
+def _offered_limits(offering: dict[str, Any]) -> tuple[int | None, int | None]:
+    # The grouped catalog sends null instead, so indexing holds it to that.
+    return offering["context_window"], offering["max_output_tokens"]
 
 
 def test_the_listing_carries_each_models_token_limits(limits_client: TestClient) -> None:
     """The issue's reproduction: a Nebius model reports both limits."""
     listed = {model["id"]: _limits(model) for model in _read(limits_client, f"{API_ROOT}/models")["data"]}
 
-    assert listed[_QWEN] == (262144, 8192)
-    assert listed[_UNKNOWN] == (None, None)
+    assert listed[_QWEN_ID] == (262144, 8192)
+    assert listed[_UNKNOWN_ID] == (None, None)
     # An alias reports its target's limits; the listing still withholds the target itself.
     assert listed["house-gemini"] == (1048576, 65536)
+    assert _GEMINI_ID not in listed
     assert _GEMINI not in listed
 
+    assert _limits(_read(limits_client, f"{API_ROOT}/models/{_QWEN_ID}")) == (262144, 8192)
     assert _limits(_read(limits_client, f"{API_ROOT}/models/{_QWEN}")) == (262144, 8192)
     assert _limits(_read(limits_client, f"{API_ROOT}/models/{_GEMINI}")) == (1048576, 65536)
     assert _limits(_read(limits_client, f"{API_ROOT}/models/house-gemini")) == (1048576, 65536)
@@ -343,20 +358,21 @@ def test_the_listing_carries_each_models_token_limits(limits_client: TestClient)
 
 
 def test_the_listing_and_the_catalog_report_the_same_limits(limits_client: TestClient) -> None:
-    """Both surfaces read one merged catalog, so no selector can carry two answers."""
+    """Both surfaces read one merged catalog, so a model's row carries the limits of an offering of it."""
     listed = {model["id"]: _limits(model) for model in _read(limits_client, f"{API_ROOT}/models")["data"]}
-    offered: dict[str, tuple[int | None, int | None]] = {}
+    offered: dict[str, set[tuple[int | None, int | None]]] = {}
     for summary in _read(limits_client, f"{API_ROOT}/catalog/models")["models"]:
         detail = _read(limits_client, f"{API_ROOT}/catalog/models/{summary['id']}")
-        offered.update({offering["selector"]: _limits(offering) for offering in detail["offerings"]})
+        offered[summary["id"]] = {_offered_limits(offering) for offering in detail["offerings"]}
 
     shared = listed.keys() & offered.keys()
-    assert {_QWEN, _UNKNOWN, "openai:gpt-4o"} <= shared
-    assert {selector: listed[selector] for selector in shared} == {selector: offered[selector] for selector in shared}
+    assert {_QWEN_ID, _UNKNOWN_ID, "openai/gpt-4o"} <= shared
+    assert all(listed[model_id] in offered[model_id] for model_id in shared)
 
 
 def _capabilities(model: dict[str, Any]) -> tuple[Any, Any, Any]:
-    return model["name"], model["supported_parameters"], model["architecture"]
+    # The listing omits a capability it does not know, where the catalog sends null.
+    return model.get("name"), model.get("supported_parameters"), model.get("architecture")
 
 
 def test_the_listing_carries_each_models_capabilities(limits_client: TestClient) -> None:
@@ -368,12 +384,12 @@ def test_the_listing_carries_each_models_capabilities(limits_client: TestClient)
         ["tools", "tool_choice"],
         {"input_modalities": ["text"], "output_modalities": ["text"]},
     )
-    assert listed[_QWEN] == qwen
-    assert listed[_UNKNOWN] == (None, None, None)
+    assert listed[_QWEN_ID] == qwen
+    assert listed[_UNKNOWN_ID] == (None, None, None)
     # An alias takes its target's capabilities, but not the name that would reveal the target.
     assert listed["house-gemini"] == (None, [], {"input_modalities": [], "output_modalities": []})
 
-    assert _capabilities(_read(limits_client, f"{API_ROOT}/models/{_QWEN}")) == qwen
+    assert _capabilities(_read(limits_client, f"{API_ROOT}/models/{_QWEN_ID}")) == qwen
     assert _capabilities(_read(limits_client, f"{API_ROOT}/models/house-gemini"))[0] is None
 
 
@@ -383,9 +399,9 @@ def test_without_models_dev_the_window_comes_from_the_snapshot(limits_client: Te
     assert response.status_code == 200, response.text
     listed = {model["id"]: _limits(model) for model in response.json()["data"]}
 
-    assert listed["openai:gpt-4o"] == (128000, None)
-    assert listed[_QWEN] == (262144, None)
-    assert listed[_UNKNOWN] == (None, None)
+    assert listed["openai/gpt-4o"] == (128000, None)
+    assert listed[_QWEN_ID] == (262144, None)
+    assert listed[_UNKNOWN_ID] == (None, None)
 
 
 def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, clean_database: None) -> None:
@@ -399,19 +415,19 @@ def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, 
         models_dev_metadata=False,
         providers={"nebius": {"api_key": "sk-fake"}},
     )
-    fetch = AsyncMock(return_value=_MODELS_DEV)
+    fetch = AsyncMock(return_value=parse_catalog(_MODELS_DEV))
     for client in build_test_client(config):
         _price(client, _QWEN)
         with patch.object(mcs, "_fetch", new=fetch):
             response = client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: "Bearer test-master-key"})
         assert response.status_code == 200, response.text
-        assert {model["id"]: _limits(model) for model in response.json()["data"]}[_QWEN] == (262144, None)
+        assert {model["id"]: _limits(model) for model in response.json()["data"]}[_QWEN_ID] == (262144, None)
     fetch.assert_not_called()
 
 
 def test_an_unknown_model_is_refused_without_fetching_models_dev(limits_client: TestClient) -> None:
     """A 404 has no limits to report, so it never waits on a models.dev fetch."""
-    fetch = AsyncMock(return_value=_MODELS_DEV)
+    fetch = AsyncMock(return_value=parse_catalog(_MODELS_DEV))
     with patch.object(mcs, "_fetch", new=fetch):
         response = limits_client.get(
             f"{API_ROOT}/models/nebius:not-a-model", headers={API_KEY_HEADER: "Bearer test-master-key"}

@@ -16,14 +16,16 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Self
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
+from gateway.core.settings.inference import country_codes
 from gateway.models.money import as_float
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
-from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderEndpoint
+from gateway.models.providers import HostedModelDisabledReason, HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
+from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
 
 
 class OrgProviderKeyCreateRequest(SQLModel):
@@ -39,6 +41,13 @@ class OrgProviderKeyCreateRequest(SQLModel):
     api_key: str | None = Field(default=None)
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
+    zero_data_retention: bool = Field(
+        default=False,
+        description=(
+            "The organization's declaration that the provider account behind this key keeps no prompt or "
+            "completion data. The catalog shows it and filters on it; nothing is enforced on it."
+        ),
+    )
 
 
 class OrgProviderKeyUpdateRequest(SQLModel):
@@ -48,6 +57,7 @@ class OrgProviderKeyUpdateRequest(SQLModel):
     api_key: str | None = None
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
+    zero_data_retention: bool | None = None
 
 
 class OrgProviderKeyPublic(SQLModel):
@@ -61,6 +71,7 @@ class OrgProviderKeyPublic(SQLModel):
     client_args: dict[str, Any] | None = None
     last4: str | None = None
     is_org_default: bool
+    zero_data_retention: bool = False
     usable: bool = Field(
         description=(
             "False when the stored credential cannot be decrypted on this deployment, so the key "
@@ -115,6 +126,7 @@ class OrgProviderKeyPublic(SQLModel):
             client_args=redact_secret_like_values(key.client_args),
             last4=key.last4,
             is_org_default=key.is_org_default,
+            zero_data_retention=key.zero_data_retention,
             usable=usable,
             offered_count=offered_count,
             serving_count=serving_count,
@@ -163,6 +175,9 @@ class WorkspaceProviderKeyOverridePublic(SQLModel):
     # fetching it per key turns one read into one per key. Empty is the common
     # answer and means every model the key serves, never none of them.
     allowed_models: list[str]
+    # The organization's declaration on the key, so a workspace that requires
+    # zero data retention can be shown which of its keys that leaves.
+    zero_data_retention: bool = False
 
 
 class WorkspaceProviderKeyOverridesPublic(SQLModel):
@@ -204,8 +219,8 @@ class OrgProviderKeyModelPublic(SQLModel):
     ``deployment`` for the deployment's own price list, and None when nothing
     prices the model yet. ``pricing_id`` names the organization's own row where
     there is one, so a client can edit that rate without re-deriving the key.
-    ``unit`` says what the rates are per, as on a pricing row: tokens, requests
-    or images, so a per-request rate is not read as a per-token one.
+    ``unit`` says what the rates are per, as on a pricing row: token, request
+    or image, so a per-request rate is not read as a per-token one.
     """
 
     id: uuid.UUID
@@ -217,7 +232,7 @@ class OrgProviderKeyModelPublic(SQLModel):
     cache_write_price_per_million: float | None = None
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
-    unit: str = "tokens"
+    unit: PriceUnit = "token"
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
@@ -363,7 +378,11 @@ class HostedProviderCreateRequest(SQLModel):
     every other one is served as if it were not configured.
     ``serves_unlisted_models`` serves a model the roster does not list, as a
     ``config.yml`` instance does, and switches on every model it offers
-    whether or not something prices it.
+    whether or not something prices it. ``supported_countries`` keeps the
+    provider to requests from those ISO country codes, checked as well as
+    ``provider_supported_countries``; null serves every country.
+    ``zero_data_retention`` declares that the upstream keeps no prompt or
+    completion data; the catalog shows it and nothing enforces it.
     """
 
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
@@ -376,6 +395,13 @@ class HostedProviderCreateRequest(SQLModel):
     enabled: bool = True
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
+    supported_countries: list[str] | None = Field(default=None, max_length=300)
+    zero_data_retention: bool = False
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
 
 
 class HostedProviderUpdateRequest(SQLModel):
@@ -389,7 +415,8 @@ class HostedProviderUpdateRequest(SQLModel):
     without one. ``client_args`` omitted is left alone; an explicit
     null clears it, and an entry echoed back as the mask keeps the stored value.
     ``restricted_to_organization_id`` reads the same way: omitted keeps the
-    restriction, null lifts it.
+    restriction, null lifts it, and so does ``supported_countries``, where an
+    empty list closes the provider to every country.
     """
 
     # A toggle alone, so a reader who edits the example never re-sends a key.
@@ -401,6 +428,13 @@ class HostedProviderUpdateRequest(SQLModel):
     enabled: bool | None = None
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool | None = None
+    supported_countries: list[str] | None = Field(default=None, max_length=300)
+    zero_data_retention: bool | None = None
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
 
 
 class HostedProviderPublic(SQLModel):
@@ -422,7 +456,9 @@ class HostedProviderPublic(SQLModel):
     and ``decryptable`` false for one whose key or extras no configured
     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
     ``serves_unlisted_models`` is true for one that serves a model its roster
-    does not list.
+    does not list. ``supported_countries`` is null for one that serves every
+    country. ``zero_data_retention`` is the operator's declaration that the
+    upstream keeps no prompt or completion data.
     """
 
     id: uuid.UUID | None = None
@@ -437,6 +473,8 @@ class HostedProviderPublic(SQLModel):
     enabled: bool
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
+    supported_countries: list[str] | None = None
+    zero_data_retention: bool = False
     shadows_config: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -471,6 +509,8 @@ class HostedProviderPublic(SQLModel):
             enabled=row.enabled,
             restricted_to_organization_id=row.restricted_to_organization_id,
             serves_unlisted_models=row.serves_unlisted_models,
+            supported_countries=row.supported_countries,
+            zero_data_retention=row.zero_data_retention,
             shadows_config=shadows_config,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -488,6 +528,8 @@ class HostedProviderPublic(SQLModel):
         client_args: dict[str, Any] | None,
         enabled: bool,
         restricted_to_organization_id: uuid.UUID | None,
+        supported_countries: list[str] | None = None,
+        zero_data_retention: bool = False,
     ) -> HostedProviderPublic:
         """Read one configuration entry for the API, masked as a row is.
 
@@ -503,6 +545,8 @@ class HostedProviderPublic(SQLModel):
             client_args=redact_secret_like_values(client_args),
             enabled=enabled,
             restricted_to_organization_id=restricted_to_organization_id,
+            supported_countries=supported_countries,
+            zero_data_retention=zero_data_retention,
         )
 
 
@@ -657,7 +701,7 @@ class HostedModelCreateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    unit: Literal["tokens", "requests", "images"] | None = None
+    unit: AcceptedPriceUnit | None = None
 
     @model_validator(mode="after")
     def _prices_come_as_a_pair(self) -> Self:
@@ -684,7 +728,7 @@ class HostedModelUpdateRequest(SQLModel):
     output_price_per_million: float | None = Field(default=None, ge=0)
     cache_read_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    unit: Literal["tokens", "requests", "images"] | None = None
+    unit: AcceptedPriceUnit | None = None
     enabled: bool | None = None
 
     @model_validator(mode="after")
@@ -701,7 +745,7 @@ class HostedModelRates(SQLModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    unit: str = "tokens"
+    unit: str = "token"
 
     @classmethod
     def from_version(cls, version: ModelPricing, source: PriceSource) -> HostedModelRates:
@@ -712,7 +756,7 @@ class HostedModelRates(SQLModel):
             output_price_per_million=float(version.output_price_per_million),
             cache_read_price_per_million=as_float(version.cache_read_price_per_million),
             cache_write_price_per_million=as_float(version.cache_write_price_per_million),
-            unit=version.unit or "tokens",
+            unit=version.unit or "token",
         )
 
 
@@ -725,7 +769,9 @@ class HostedModelPublic(SQLModel):
     supplies it, and None when nothing prices the model yet. ``unit`` says what
     the rates are per, so a per-request rate is not read as a per-token one.
     ``enabled`` is the serving switch; a model offered without a discoverable
-    price starts off.
+    price starts off. ``disabled_reason`` says why a model is off: ``unpriced``
+    while it waits for a rate, ``operator`` when an operator switched it off,
+    ``unavailable`` when its provider refused to serve it.
     """
 
     id: uuid.UUID
@@ -738,6 +784,7 @@ class HostedModelPublic(SQLModel):
     unit: str | None = None
     price_source: PriceSource | None = None
     enabled: bool
+    disabled_reason: HostedModelDisabledReason | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -755,6 +802,7 @@ class HostedModelPublic(SQLModel):
             unit=rates.unit if rates else None,
             price_source=rates.source if rates else None,
             enabled=row.enabled,
+            disabled_reason=row.disabled_reason,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -833,6 +881,77 @@ class HostedCatalogRefreshPublic(SQLModel):
     orphaned_rosters: list[str] = Field(default_factory=list)
 
 
+class HostedCatalogPriceChangePublic(SQLModel):
+    """One model whose models.dev price a catalog update adds, changes or removes."""
+
+    model_key: str
+    change: Literal["added", "changed", "removed"]
+
+
+class HostedCatalogPriceUpdatePublic(SQLModel):
+    """The models.dev price changes a catalog update would apply.
+
+    ``changes`` is a sample and the counts are the totals. ``digest`` names the
+    fetched prices, so applying them applies what was reviewed. ``needs_review``
+    is why the scheduled update would hold them for a person under ``auto``.
+    """
+
+    fetched_at: datetime
+    added_count: int
+    changed_count: int
+    removed_count: int
+    changes: list[HostedCatalogPriceChangePublic]
+    changes_truncated: bool
+    digest: str
+    needs_review: bool
+    review_reason: str | None = None
+
+
+class HostedCatalogUpdatePreviewRequest(SQLModel):
+    """What to preview: the update alone, or with the cleanup."""
+
+    cleanup: bool = Field(
+        default=False,
+        description="Also preview removing the prices of models no hosted provider serves.",
+    )
+
+
+class HostedCatalogUpdateRequest(SQLModel):
+    """What to apply, as the preview showed it."""
+
+    digest: str | None = Field(
+        default=None,
+        description=(
+            "The `digest` of the previewed prices, to apply them; 409 when the pending prices differ. "
+            "Without it, no price changes."
+        ),
+    )
+    cleanup: bool = Field(
+        default=False,
+        description="Also remove the prices of models no hosted provider serves, with their history.",
+    )
+
+
+class HostedCatalogUpdatePreviewPublic(SQLModel):
+    """What a catalog update would do: its price changes, then what each provider newly lists.
+
+    ``prices`` is ``None`` when models.dev changed nothing, or when it could not
+    be fetched, which ``price_error`` then says. ``catalog`` carries the cleanup
+    the preview was asked for, and no removals otherwise.
+    """
+
+    prices: HostedCatalogPriceUpdatePublic | None
+    price_error: str | None = None
+    catalog: HostedCatalogRefreshPublic
+
+
+class HostedCatalogUpdatePublic(SQLModel):
+    """What a catalog update did."""
+
+    prices_applied: bool
+    catalog: HostedCatalogRefreshPublic
+
+
 class HostedAvailableModelsPublic(SQLModel):
     """What the provider says it serves on the stored credential.
 
@@ -846,6 +965,59 @@ class HostedAvailableModelsPublic(SQLModel):
     models: list[str] = Field(default_factory=list)
     error: str | None = None
     discovery_unsupported: bool = False
+
+
+class WorkspaceHostedProviderAccessRequest(SQLModel):
+    """What one workspace may do with one hosted provider. Replaces whatever it stored before."""
+
+    enabled: bool = Field(description="False switches the provider off for this workspace.")
+    models: list[str] | None = Field(
+        default=None,
+        max_length=1000,
+        description=(
+            "The models this workspace may call on the provider. Null for every model the deployment serves on it, "
+            "including ones added later. A list must name at least one model."
+        ),
+    )
+
+
+class WorkspaceHostedProviderPublic(SQLModel):
+    """One hosted provider as one workspace sees it."""
+
+    provider: str = Field(description="The hosted provider's name, as a request's selector prefix spells it.")
+    enabled: bool
+    models: list[str] | None = Field(description="This workspace's model list, or null for every served model.")
+    customized: bool = Field(description="Whether this workspace stores a departure from full inheritance.")
+    served_models: list[str] | None = Field(
+        description=(
+            "The models the deployment serves on the provider for this organization, or null for any priced one."
+        ),
+    )
+    served_by_own_key: bool = Field(
+        description="Whether the workspace calls this provider on the organization's own key, so this row is not used."
+    )
+    zero_data_retention: bool = Field(
+        default=False, description="Whether the deployment declares this provider keeps no prompt or completion data."
+    )
+
+
+class WorkspaceHostedProvidersPublic(SQLModel):
+    data: list[WorkspaceHostedProviderPublic]
+
+
+class WorkspaceProviderPolicyRequest(SQLModel):
+    """What one workspace requires of every provider serving it."""
+
+    require_zero_data_retention: bool = Field(
+        description=(
+            "Refuse every provider not declared zero data retention: an organization key or a hosted provider "
+            "nobody declared, and every provider configured in config.yml or endpoint the workspace owns."
+        )
+    )
+
+
+class WorkspaceProviderPolicyPublic(SQLModel):
+    require_zero_data_retention: bool
 
 
 __all__ = [
@@ -886,6 +1058,11 @@ __all__ = [
     "ProviderEndpointUpdateRequest",
     "ProviderEndpointsPublic",
     "WorkspaceProviderKeyOverridePublic",
+    "WorkspaceHostedProviderAccessRequest",
+    "WorkspaceHostedProviderPublic",
+    "WorkspaceHostedProvidersPublic",
+    "WorkspaceProviderPolicyPublic",
+    "WorkspaceProviderPolicyRequest",
     "WorkspaceProviderKeyOverrideRequest",
     "WorkspaceProviderKeyOverridesPublic",
     "WorkspaceProviderModelRestrictionRequest",

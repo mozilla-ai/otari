@@ -57,3 +57,32 @@ stamps the tag into it before building. The Docker image installs from the tree
 unstamped and sets `OTARI_VERSION` to its tag instead, which `otari --version`
 reports whenever that variable is set; the gateway reads the same one, in
 `src/gateway/version.py`.
+
+## This repository's own guardrail CI
+
+Two workflows run `otari guardrails check` on every pull request to `main`,
+following the steps in `docs/agent-guardrails.md` ("Checking a pull request in
+CI"). Both take the CLI, the guardrail files and the verifier scripts from the
+base commit, and both skip with a notice when the base commit's CLI has no
+`otari guardrails check`, rather than take the command from the pull request.
+
+- `.github/workflows/otari-guardrails-check.yml` runs the `path` and `verifier`
+  gates on `pull_request`. It checks out the base commit and the pull request
+  side by side, stages the pull request against its merge base, and runs
+  `--type path --type verifier --guardrails-from <base>` in the pull request's
+  tree. It holds no secret: a pull request can edit it, and a verifier runs the
+  pull request's own scripts (such as `scripts/check_architecture.py`), so a
+  required status check and review of the workflow and those scripts are what
+  keep it honest.
+- `.github/workflows/otari-guardrails-judges.yml` runs the `judge` gates on
+  `pull_request_target`, so it runs as it is on `main` and a pull request cannot
+  edit the job that holds the credential. It checks out only the base commit,
+  fetches the pull request as Git objects, and runs
+  `--base <base> --head <head> --type judge` with `OTARI_HOOK_MAX_JUDGES=20`.
+  Its credential, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, comes from
+  the `agent-guardrails` environment, which can restrict its deployment branches
+  to `main`; without one, or on a pull request from a fork, the judges skip with
+  a notice. Findings go to the job summary, and a failing judge starts one
+  comment on the pull request, naming the commit it describes, which later runs
+  edit. A finding fails the job so it shows in the checks, but the job is not a
+  required check, so it does not block the merge.

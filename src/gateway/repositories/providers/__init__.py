@@ -12,6 +12,10 @@ from gateway.repositories.providers.provider_endpoint_repository import (
     EndpointNameConflict,
     ProviderEndpointRepository,
 )
+from gateway.repositories.providers.workspace_hosted_access_repository import (
+    WorkspaceHostedAccessRepository,
+    WorkspaceProviderPolicyRepository,
+)
 
 __all__ = [
     "EndpointNameConflict",
@@ -22,4 +26,6 @@ __all__ = [
     "OfferedModelConflict",
     "OrgProviderKeyModelRepository",
     "ProviderEndpointRepository",
+    "WorkspaceHostedAccessRepository",
+    "WorkspaceProviderPolicyRepository",
 ]

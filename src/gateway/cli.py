@@ -354,7 +354,7 @@ def routing_explain(
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
     # Keyed on the backend rather than on the shares: a weighted policy whose whole
     # split is filtered out for this caller has no shares to print, and the decline
-    # text below is the learned router's vocabulary, which would misdescribe it.
+    # text below would misdescribe it.
     if backend_is_weighted(spec.router_backend):
         click.echo(
             "  weighted: one candidate is drawn per request in proportion to its share, and a candidate "
@@ -371,14 +371,13 @@ def routing_explain(
             "rate limits, then on_failure. A candidate that fails before responding falls to the next one."
         )
     elif spec.router_backend is not None:
-        # The plan above is the *decline* path, because a router needs a live
-        # request (a prompt to embed, stored examples to compare it against) and
-        # this command deliberately touches neither. Saying so beats printing a
-        # one-candidate plan that looks like the router was ignored.
+        # The plan above is the *decline* path: this command sends no request, so
+        # no other router is asked. Saying so beats printing a one-candidate plan
+        # that looks like the router was ignored.
         click.echo(
             f"  router: '{spec.router_backend}' ranks {', '.join(spec.router_candidates)} at request time. "
-            f"The plan above is what serves when it declines (cold pool, low confidence, tools present, "
-            f"or Otari-Router: off)."
+            f"The plan above is what serves when it declines, when this build has no such router, "
+            f"or on Otari-Router: off."
         )
     if plan.guardrails:
         click.echo("  guardrails (always enforced):")

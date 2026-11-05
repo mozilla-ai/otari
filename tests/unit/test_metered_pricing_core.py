@@ -286,6 +286,18 @@ def test_a_claude_1h_write_bills_at_twice_the_input_rate() -> None:
         ("openai:gpt-5", "0.000500"),
         # An Anthropic-compatible endpoint serving another vendor's model.
         ("minimax:MiniMax-M2", "0.000500"),
+        # An instance named for Claude serving another vendor's model is not Claude.
+        ("claude-proxy:MiniMax-M2", "0.000500"),
+        # No provider: the key is the bare model id, whose Bedrock ":<n>" suffix is a version.
+        ("claude-haiku-5-5", "0.000800"),
+        ("us.anthropic.claude-haiku-5-5-v1:0", "0.000800"),
+        ("anthropic.claude-haiku-5-5-v1:0", "0.000800"),
+        ("anthropic.claude-3-sonnet-20240229-v1:0:200k", "0.000800"),
+        ("meta.llama3-70b-instruct-v1:0", "0.000500"),
+        # A non-ASCII digit is not a version, so the instance name stays ignored.
+        ("claude-proxy:\u00b2", "0.000500"),
+        # A provider and a Bedrock id that carries its own version suffix.
+        ("bedrock:us.anthropic.claude-haiku-5-5-v1:0", "0.000800"),
     ],
 )
 def test_a_1h_write_bills_at_twice_input_only_for_a_claude_model(model_key: str, cost: str) -> None:
@@ -429,7 +441,7 @@ def test_an_estimate_never_prices_below_the_input_rate() -> None:
 
 
 def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> None:
-    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="request")
 
     cost, meters, lines = price_request(pricing)
 
@@ -441,30 +453,30 @@ def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> 
 
 def test_a_per_request_charge_line_agrees_with_the_settled_cost() -> None:
     """A rate below a micro-dollar per request rounds once, and the line shows the rounded amount."""
-    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("1.5"), unit="requests"))
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("1.5"), unit="request"))
 
     assert cost == Decimal("0.000002")
     assert lines == [{"meter": "request", "units": 1, "unit_rate": 0.000002, "cost": 0.000002}]
 
-    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("0.4"), unit="requests"))
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("0.4"), unit="request"))
 
     assert (cost, lines) == (Decimal("0"), [])
 
 
 def test_a_free_per_request_rate_writes_no_charge_line() -> None:
-    cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="requests"))
+    cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="request"))
 
     assert (cost, meters, lines) == (Decimal("0"), {"requests": 1}, [])
 
 
 def test_a_per_request_rate_refuses_an_unusable_rate() -> None:
     with pytest.raises(ValueError, match="no usable per-request rate"):
-        price_request(_pricing(input_price_per_million=None, unit="requests"))
+        price_request(_pricing(input_price_per_million=None, unit="request"))
 
 
 def test_a_per_request_rate_is_estimated_at_one_request() -> None:
     """The reservation holds what the request settles at, not a token estimate."""
-    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="request")
 
     estimate = estimate_metered_cost(pricing, estimated_input_tokens=1_000_000, estimated_output_tokens=4096)
 

@@ -5,10 +5,13 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import AsyncGenerator, Callable, Generator
+from collections.abc import AsyncGenerator, Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -40,9 +43,23 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
 from gateway.rate_limit import RateLimiter
+from gateway.services.budgets import reserve_budget
 from gateway.services.feedback import new_feedback_rate_limiter
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
+
+
+@contextmanager
+def held_reservations() -> Iterator[list[Decimal]]:
+    """Every amount a pass-through request reserved before calling the provider."""
+    held: list[Decimal] = []
+
+    async def capture(*args: Any, **kwargs: Any) -> Any:
+        held.append(Decimal(str(args[2])))
+        return await reserve_budget(*args, **kwargs)
+
+    with patch("gateway.api.routes._passthrough.reserve_budget", side_effect=capture):
+        yield held
 
 
 def alembic_config(database_url: str) -> Config:
@@ -214,6 +231,13 @@ def clean_database(postgres_url: str) -> None:
     """
     _run_alembic_migrations(postgres_url)
     reset_database(postgres_url)
+
+
+@pytest.fixture
+def unpriced_builtin_fetch(postgres_url: str, clean_database: None) -> None:
+    """A database whose ``builtin_fetch`` has no price: a migration gives it 0 on a fresh one."""
+    with _reset_engine(postgres_url).begin() as conn:
+        conn.execute(text("DELETE FROM model_pricing WHERE kind = 'fetch' AND model_key = 'builtin_fetch'"))
 
 
 @pytest.fixture

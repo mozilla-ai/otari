@@ -522,8 +522,8 @@ async def list_mcp_tools(
                     McpToolDefinition(
                         name=tool.name,
                         description=tool.description,
-                        input_schema=tool.inputSchema,
-                        annotations=tool.annotations.model_dump(mode="json", exclude_none=True)
+                        input_schema=tool.input_schema,
+                        annotations=tool.annotations.model_dump(mode="json", by_alias=True, exclude_none=True)
                         if tool.annotations is not None
                         else None,
                     )

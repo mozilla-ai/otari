@@ -4,7 +4,7 @@
 # so without this the whole install + vite build runs a second time under QEMU for
 # the non-native arch on every publish. The output is JavaScript, CSS, and PNGs,
 # which are architecture-independent, so one native build serves both images.
-FROM --platform=$BUILDPLATFORM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS web
+FROM --platform=$BUILDPLATFORM node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS web
 
 WORKDIR /app/web
 
@@ -42,9 +42,10 @@ COPY any-fetch ./any-fetch
 # The e2b extra lets `sandbox_provider: e2b` work from the published image; the
 # adapter imports it only when that provider is selected. The metrics extra keeps
 # a Prometheus scrape one config flag away rather than a reinstall, and the redis
-# extra a rate limit shared across replicas. Bytecode is compiled here, or every
+# extra a rate limit shared across replicas, and the geoip extra the provider
+# country gate's address lookup. Bytecode is compiled here, or every
 # fresh container spends its first seconds compiling each dependency it imports.
-RUN UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --extra e2b --extra metrics --extra redis
+RUN UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev --extra e2b --extra metrics --extra redis --extra geoip
 
 FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1 AS runtime
 

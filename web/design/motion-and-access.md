@@ -103,13 +103,12 @@ Two ways a small visual keeps a large target:
 - A 24px toggle track grows its hit area with a `before:` pseudo-element
   (`before:-inset-y-2.5`), absolutely positioned so the row does not move.
 
-**One control is knowingly under the floor**, and it is the shape of the exception
-rather than a licence to add more. `DismissChip`'s remove button is 24px, because
-neither device above reaches it: its row wraps at an 8px gap, so a `before:` bleed
-would overlap the row above and a press near the seam would dismiss the neighboring
-filter, and a real 44px target grows the filter area on three pages. #947 carries
-the decision. A new control under 44px needs the same kind of argument, in writing,
-or it is a bug.
+`DismissChip`'s remove button is drawn 24px and reaches 44px on a coarse pointer
+the way the toggle does, with a `before:` bleed (`pointer-coarse:before:-inset-2.5`).
+Two bleeds in a wrapped row overlap unless the rows are 44px apart, so every row that
+holds these chips sets `pointer-coarse:gap-y-5` (24px + 20px). A new host of the chip
+does the same, or a press near a seam dismisses the neighboring filter. A fine pointer
+sees neither change.
 
 Hover is never the only channel. A hover state that carries information alone does
 not exist on a phone: pair it with a fill *and* an ink change, as the rail rows do.

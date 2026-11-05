@@ -25,6 +25,7 @@ from typing import Annotated, Any
 from any_llm import LLMProvider
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from gateway.core.settings.inference import country_codes
 from gateway.core.settings_view import OMITTED
 
 # What a ``hosted_providers:`` entry may not carry, with the reason it is refused.
@@ -45,6 +46,13 @@ class _HostedProviderEntryShape(BaseModel):
     enabled: bool = True
     restricted_to_organization_id: uuid.UUID | None = None
     models: list[str] | None = None
+    supported_countries: list[str] | None = None
+    zero_data_retention: bool = False
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,10 @@ class HostedProviderEntry:
     restricted_to_organization_id: uuid.UUID | None
     # Model ids the provider offers when it cannot list them itself.
     models: tuple[str, ...]
+    # The countries whose requests it serves, or None for every country.
+    supported_countries: tuple[str, ...] | None = None
+    # The operator's declaration that the upstream keeps no prompt or completion data.
+    zero_data_retention: bool = False
 
 
 def _entry_error(name: str, exc: ValidationError) -> ValueError:
@@ -111,6 +123,8 @@ def parse_hosted_providers(raw: Mapping[str, Any]) -> dict[str, HostedProviderEn
             enabled=shape.enabled,
             restricted_to_organization_id=shape.restricted_to_organization_id,
             models=tuple(shape.models or ()),
+            supported_countries=tuple(shape.supported_countries) if shape.supported_countries is not None else None,
+            zero_data_retention=shape.zero_data_retention,
         )
     return entries
 

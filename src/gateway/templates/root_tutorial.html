@@ -466,7 +466,7 @@
             <span class="step-num" aria-hidden="true">02</span>
             <div>
               <h3>Install a client</h3>
-              <p>Any OpenAI-compatible SDK works. Here we use the Otari Python SDK.</p>
+              <p>Otari speaks the OpenAI API, so use the OpenAI Python client.</p>
             </div>
           </div>
           <figure class="code">
@@ -478,7 +478,7 @@
                 <span class="copy-label" aria-hidden="true"></span>
               </button>
             </figcaption>
-            <pre tabindex="0" role="region" aria-label="Client install command"><code>pip install otari</code></pre>
+            <pre tabindex="0" role="region" aria-label="Client install command"><code>pip install openai</code></pre>
           </figure>
         </article>
 
@@ -486,10 +486,22 @@
           <div class="card-head">
             <span class="step-num" aria-hidden="true">03</span>
             <div>
-              <h3>Send a chat completion</h3>
-              <p>Point <code>api_base</code> at Otari and call any model as <code>provider:model</code>.</p>
+              <h3>Send a chat completion through the Otari router</h3>
+              <p>Point <code>base_url</code> at Otari and send a model's catalog id as <code>model</code>: the Otari router chooses the provider and, where more than one serves the model, falls back to the next when one fails. This example uses the OpenAI provider from the Quickstart; list the ids your gateway serves with the command below, and send <code>provider:model</code> to pin one provider.</p>
             </div>
           </div>
+          <figure class="code">
+            <figcaption>
+              <span class="cap-label">bash</span>
+              <button class="copy" type="button" aria-label="Copy model listing command">
+                <svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg class="check-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>
+                <span class="copy-label" aria-hidden="true"></span>
+              </button>
+            </figcaption>
+            <pre tabindex="0" role="region" aria-label="Model listing command"><code>curl http://localhost:8000/api/v1/models \
+  -H "Authorization: Bearer $OTARI_API_KEY"</code></pre>
+          </figure>
           <figure class="code">
             <figcaption>
               <span class="cap-label">python</span>
@@ -501,16 +513,16 @@
             </figcaption>
             <pre tabindex="0" role="region" aria-label="Chat completion example"><code>import os
 
-from otari import OtariClient
+from openai import OpenAI
 
-client = OtariClient(
-    api_base="http://localhost:8000",
+client = OpenAI(
+    base_url="http://localhost:8000/api/v1",
     api_key=os.environ["OTARI_API_KEY"],
 )
 
-response = client.completion(
-    model="openai:gpt-4o",
-    messages=[{"role": "user", "content": "Hello!"}],
+response = client.chat.completions.create(
+    model="openai/gpt-4o-mini",
+    messages=[{"role": "user", "content": "Say hello in one short sentence."}],
 )
 
 print(response.choices[0].message.content)</code></pre>
@@ -521,7 +533,7 @@ print(response.choices[0].message.content)</code></pre>
 
     <footer>
       <div class="footer-inner">
-        <span>Otari, an open-source LLM gateway by mozilla.ai.</span>
+        <span>Otari, an open-source AI gateway by mozilla.ai.</span>
         <nav class="footer-links" aria-label="Resources">
           <a href="QUICKSTART_URL">Quickstart <span aria-hidden="true">↗</span></a>
           <a href="/docs">API docs</a>

@@ -11,12 +11,14 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
-and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
+and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
+``web_access_disabled_refusal`` where the workspace turned web access off.
 ``with_typed_code_execution_tool`` reads Gemini's own code-execution declaration as the bare keyword, and
 ``provider_attempt_kwargs`` gives it back to each attempt that goes to Gemini.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
 ``tools_to_price`` and ``configured_tools_to_price`` say which pricing rows ``require_pricing`` checks for a
 request's gateway-run tools, and for the deployment's at startup, and ``unpriced_tool_detail`` what its refusal says.
+``deployment_tool_rate_keys`` names the own price row of each of the deployment's search and fetch tools.
 ``search_provider_catalog`` lists the providers a search or fetch tool may name.
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
@@ -24,6 +26,7 @@ request's gateway-run tools, and for the deployment's at startup, and ``unpriced
 ``web_search_configured`` answers whether the in-loop default yields a search, and ``warn_about_tool_instances``
 logs at startup what the instance rules let load but an operator should fix.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with,
+``search_resolves`` and ``fetch_resolves`` whether a declared search or fetch finds anything to run on,
 ``resolve_in_loop_search`` which ``InLoopSearch`` a request's searches run on through the libraries,
 and ``builtin_fetch_resolved`` answers ``builtin_fetch``'s without a config. ``WebFetchBackend`` runs the fetch
 tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds one for a request, and
@@ -31,13 +34,17 @@ tool on the instance ``resolve_fetch`` chose, ``build_web_fetch_backend`` builds
 any-fetch's ``builtin`` provider, once, at startup. ``WebSearchBackend`` runs the search tool on an
 ``InLoopSearch``, ``build_web_search_backends`` builds it and the fetch tool's beside it for a request, and
 ``WebToolCallCap`` is the search and fetch calls one request may make between them.
+``DirectToolService`` runs a direct tool call, from its billed user to its settled cost, over the
+interfaces beside it (``DirectToolAccounts``, ``DirectToolLedger``, ``DirectToolGates``,
+``WorkspaceWebPolicies``), which the request's builder implements.
 ``pick_direct_search_instance``, ``resolve_direct_search`` and ``run_direct_search`` hold the direct
-search endpoint's rules and run its call, ``refuse_unpriced_direct_search`` refuses one ``require_pricing``
-cannot bill, and ``SearchQuery`` with the helpers beside it map LiteLLM's
+search endpoint's rules and run its call, ``unpriced_direct_search_detail`` names the row one
+``require_pricing`` cannot bill is missing, their ``_fetch`` twins do the same for the direct fetch
+endpoint, and ``SearchQuery`` with the helpers beside it map LiteLLM's
 search fields onto a provider. ``build_web_provider_client`` builds the client the web tools' providers
 are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
-``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's web tool calls, and
-``without_otari_tool_calls`` takes it back off the messages a client sends.
+``OTARI_TOOL_CALLS_FIELD`` is where a Chat Completions response reports the gateway's tool calls, ``mcp_entry``
+is the report of one MCP call, and ``without_otari_tool_calls`` takes the field back off the messages a client sends.
 ``sandbox_api_key`` is the key a hosted sandbox provider's sandboxes are leased with, stored or from the
 environment, ``store_sandbox_api_key`` and ``clear_sandbox_api_key`` change the stored one, and
 ``sandbox_credential_status`` says which one is in use.
@@ -47,7 +54,7 @@ and ``retargeted_tool_choice`` points a forced ``tool_choice`` at the search too
 
 from gateway.services.tools._builtin_tool import BuiltinTool
 from gateway.services.tools._candidate_tools import CandidateTools, ProviderToolDeclaration, decide_candidate_tools
-from gateway.services.tools._chat_tool_calls import OTARI_TOOL_CALLS_FIELD, without_otari_tool_calls
+from gateway.services.tools._chat_tool_calls import OTARI_TOOL_CALLS_FIELD, mcp_entry, without_otari_tool_calls
 from gateway.services.tools._code_execution_admission import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
     AdmittedCodeExecution,
@@ -79,6 +86,18 @@ from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CA
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
 from gateway.services.tools._combined_backend import CombinedToolBackend, owning_backend
 from gateway.services.tools._declarations import Tool
+from gateway.services.tools._direct_tool_call import (
+    DirectCaller,
+    DirectToolAccounts,
+    DirectToolCall,
+    DirectToolGates,
+    DirectToolLedger,
+    DirectToolOutcome,
+    DirectToolResult,
+    DirectToolService,
+    DirectToolUsage,
+    WorkspaceWebPolicies,
+)
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
 from gateway.services.tools._native import (
@@ -101,35 +120,28 @@ from gateway.services.tools._sandbox_credential import (
     store_sandbox_api_key,
 )
 from gateway.services.tools._search_provider_catalog import search_provider_catalog
-from gateway.services.tools._search_tool_connection import (
-    check_test_input,
-    instance_to_test,
-    run_connection_test,
-    unsaved_instance_to_test,
-)
-from gateway.services.tools._search_tool_writes import (
-    DefaultPin,
-    check_kind_unchanged,
-    check_tool_entry,
-    check_tool_name_is_free,
-    check_tool_write,
-    default_to_pin,
-)
+from gateway.services.tools._search_tool_connection import check_test_input, run_connection_test
+from gateway.services.tools._search_tool_overlay import reset_search_tool_cache, run_search_tool_refresher
+from gateway.services.tools._search_tool_service import ReadToolSettings, SearchToolService, StageToolSetting
 from gateway.services.tools._tool_prices import (
     PricedTool,
     admitted_tools,
     configured_tools_to_price,
+    deployment_tool_rate_keys,
+    enriching_fetch_tool,
     tools_to_price,
     unpriced_tool_detail,
 )
 from gateway.services.tools._use_budget import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
-from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy
+from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy, web_access_disabled_refusal
 from gateway.services.tools._web_admission import (
     NO_WEB_TOOLS,
     AdmittedWebTools,
     DeclaredWebTools,
     WebClaims,
+    WorkspaceWebExecutors,
     admit_web_access,
+    enrichment_for,
     extract_web_tools,
     read_web_declarations,
     read_web_fetch_max_uses,
@@ -160,6 +172,8 @@ from gateway.services.tools._web_search import (
     CHARS_PER_TOKEN,
     DEFAULT_MAX_TOKENS_PER_PAGE,
     DIRECT_DEFAULT_MAX_RESULTS,
+    DirectFetch,
+    DirectFetchResult,
     DirectSearch,
     DirectSearchResult,
     InLoopSearch,
@@ -168,15 +182,21 @@ from gateway.services.tools._web_search import (
     SearchQuery,
     WebSearchBackend,
     builtin_fetch_resolved,
+    fetch_resolves,
     filter_hits_by_domain,
     page_budget_chars,
+    pick_direct_fetch_instance,
     pick_direct_search_instance,
-    refuse_unpriced_direct_search,
+    resolve_direct_fetch,
     resolve_direct_search,
     resolve_fetch,
     resolve_in_loop_search,
     resolve_search,
+    run_direct_fetch,
     run_direct_search,
+    search_resolves,
+    unpriced_direct_fetch_detail,
+    unpriced_direct_search_detail,
     warn_about_tool_instances,
     web_search_configured,
 )
@@ -186,6 +206,16 @@ from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_
 from gateway.services.tools._web_tool_failure import WebToolFailure
 
 __all__ = [
+    "DirectCaller",
+    "DirectToolAccounts",
+    "DirectToolCall",
+    "DirectToolGates",
+    "DirectToolLedger",
+    "DirectToolOutcome",
+    "DirectToolResult",
+    "DirectToolService",
+    "DirectToolUsage",
+    "WorkspaceWebPolicies",
     "MAX_TOOL_ITERATIONS_CAP",
     "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",
@@ -218,16 +248,21 @@ __all__ = [
     "PricedTool",
     "admitted_tools",
     "configured_tools_to_price",
+    "deployment_tool_rate_keys",
+    "enriching_fetch_tool",
+    "enrichment_for",
     "tools_to_price",
     "unpriced_tool_detail",
     "NO_WEB_TOOLS",
     "WebAccessGrant",
+    "WorkspaceWebExecutors",
     "WebClaims",
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
     "admit_mcp_servers",
     "admit_web_access",
     "apply_web_access_policy",
+    "web_access_disabled_refusal",
     "code_execution_declaration_forms",
     "decide_code_executor",
     "decide_candidate_tools",
@@ -237,6 +272,7 @@ __all__ = [
     "extract_web_tools",
     "first_provider_code_execution_tool",
     "is_capped_call",
+    "mcp_entry",
     "native_code_execution_dialect",
     "native_rendering",
     "parse_code_execution_header",
@@ -256,16 +292,13 @@ __all__ = [
     "DEFAULT_MAX_RESULTS",
     "web_search_max_results_baseline",
     "search_provider_catalog",
-    "DefaultPin",
-    "check_kind_unchanged",
+    "ReadToolSettings",
+    "SearchToolService",
+    "StageToolSetting",
     "check_test_input",
-    "check_tool_entry",
-    "check_tool_name_is_free",
-    "check_tool_write",
-    "default_to_pin",
-    "instance_to_test",
+    "reset_search_tool_cache",
     "run_connection_test",
-    "unsaved_instance_to_test",
+    "run_search_tool_refresher",
     "SANDBOX_KEY_ENV",
     "SandboxCredentialStatus",
     "clear_sandbox_api_key",
@@ -299,6 +332,8 @@ __all__ = [
     "CHARS_PER_TOKEN",
     "DEFAULT_MAX_TOKENS_PER_PAGE",
     "DIRECT_DEFAULT_MAX_RESULTS",
+    "DirectFetch",
+    "DirectFetchResult",
     "DirectSearch",
     "DirectSearchResult",
     "SearchQuery",
@@ -308,10 +343,16 @@ __all__ = [
     "filter_hits_by_domain",
     "owning_backend",
     "page_budget_chars",
+    "pick_direct_fetch_instance",
     "pick_direct_search_instance",
-    "refuse_unpriced_direct_search",
+    "resolve_direct_fetch",
     "resolve_direct_search",
+    "fetch_resolves",
+    "run_direct_fetch",
     "run_direct_search",
+    "unpriced_direct_fetch_detail",
+    "unpriced_direct_search_detail",
+    "search_resolves",
     "warn_about_tool_instances",
     "web_search_configured",
 ]

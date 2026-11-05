@@ -545,6 +545,28 @@ def test_open_signup_registers_nobody_from_an_address_the_provider_would_not_ver
     assert db_session.execute(select(User).where(col(User.email) == "stranger@example.com")).first() is None
 
 
+def test_open_signup_registers_nobody_from_a_blocked_address(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # The identity provider provisions the account before the sign-in gate refuses it, so the refusal rolls it back.
+    blocked = client.post(f"{API_ROOT}/admin/blocked-emails", json={"value": "spam.example"}, headers=master_key_header)
+    assert blocked.status_code == 201, blocked.text
+    stub_exchange(monkeypatch, email="stranger@spam.example")
+    organizations_before = len(db_session.execute(select(Organization)).all())
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 403, response.text
+    assert SESSION_COOKIE_NAME not in response.cookies
+    assert db_session.execute(select(User).where(col(User.email) == "stranger@spam.example")).first() is None
+    assert len(db_session.execute(select(Organization)).all()) == organizations_before
+
+
 def test_open_signup_does_not_register_a_deactivated_identity_afresh(
     client: TestClient,
     master_key_header: dict[str, str],

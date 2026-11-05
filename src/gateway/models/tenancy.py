@@ -65,8 +65,10 @@ from sqlalchemy import (
     Index,
     UniqueConstraint,
     Uuid,
+    false,
     func,
     text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlmodel import Field, SQLModel
@@ -931,12 +933,36 @@ class WorkspaceCreate(WorkspaceBase):
 class WorkspaceUpdate(SQLModel):
     name: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=1024)
+    trace_content_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Keep what this workspace's agent sessions were about: the prompts, commands and file paths its agents "
+            "report. Only where the deployment keeps content at all."
+        ),
+    )
+    trace_content_tool_output: bool | None = Field(
+        default=None,
+        description=(
+            "Also keep what each tool returned, where this workspace keeps content and the deployment keeps tool "
+            "output. Turning it off keeps none from the next request on, whatever the deployment allows."
+        ),
+    )
 
 
 class WorkspacePublic(WorkspaceBase):
     id: uuid.UUID
     organization_id: uuid.UUID
     created_by_user_id: uuid.UUID | None = None
+    trace_content_enabled: bool = Field(
+        default=False, description="Whether this workspace keeps what its agent sessions were about."
+    )
+    trace_content_tool_output: bool = Field(
+        default=True,
+        description=(
+            "Whether this workspace also keeps what each tool returned, where it keeps content and the deployment "
+            "keeps tool output."
+        ),
+    )
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -969,6 +995,11 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     # lives here because the overlay adds no tables of its own, so the column
     # has to exist in the one schema both editions boot.
     activation_classification: str = Field(default="eligible", max_length=32)
+    # Off until a workspace's managers turn it on. Read by the OTLP receiver,
+    # under the deployment's own ``trace_content_enabled``.
+    trace_content_enabled: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+    # A workspace may narrow the deployment's ``trace_content_tool_output``, never widen it, so on by default.
+    trace_content_tool_output: bool = Field(default=True, sa_column_kwargs={"server_default": true()})
 
 
 class WorkspaceMemberBase(SQLModel):
@@ -1433,7 +1464,7 @@ class WebAuthnCredential(WebAuthnCredentialBase, PrimaryKeyMixin, CreatedAtMixin
     import therefore holds exactly while the hosted origin stays ``otari.ai``:
     moving it re-scopes every passkey and no amount of data migration recovers
     them, because the key material never left the authenticator. See
-    `docs/access-control.md`.
+    `docs/sign-in.md`.
 
     ``credential_id`` and ``public_key`` are base64url text rather than
     ``LargeBinary``. Both cross the wire in that encoding in every WebAuthn

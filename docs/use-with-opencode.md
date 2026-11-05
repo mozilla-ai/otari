@@ -27,7 +27,9 @@ Add Otari as a provider in your `opencode.jsonc`:
 `baseURL` is the Otari API root, `/api/v1` (opencode appends `/chat/completions`
 itself). Point it at the gateway you are actually using: `http://localhost:8000/api/v1`
 for local development, your self-hosted gateway URL plus `/api/v1`, or
-`https://api.otari.ai/api/v1` when using otari.ai.
+`https://api.otari.ai/api/v1` when using otari.ai. Accounts in otari.ai's EU region
+use `https://eu.api.otari.ai/api/v1` instead: `api.otari.ai` answers an EU key
+with `421 Misdirected Request`, naming the host to use.
 
 Export your key so opencode reads it from the environment instead of the config
 file, then run with a model:
@@ -42,18 +44,16 @@ every key it issues.
 
 ## Choosing a model
 
-The provider id is `otari` (from your config) and the model selector is whatever
-your deployment expects:
-
-- **On otari.ai:** any model your organization's catalog lists, which
-  `GET /api/v1/models` returns for your key, for example `otari/openai:gpt-4o`,
-  `otari/anthropic:claude-sonnet-4-6` or `otari/mistral:mistral-large-latest`.
-  `provider/model` works as well as `provider:model`.
-- **On your own gateway:** `provider:model` for any provider it is configured
-  with, for example `otari/openai:gpt-4o`.
-
-Any model in the catalog works; Otari routes the request to the right
-provider and records usage and cost for it the same way as any other client.
+opencode names a model as `<provider id>/<model>`, and the provider id here is
+`otari`, from your config. Everything after `otari/` is sent to Otari unchanged,
+so write it as Otari spells it. On otari.ai, `otari/openai/gpt-4o` or
+`otari/anthropic/claude-sonnet-4-6` lets Otari choose the provider, and a
+`provider:model` selector such as `otari/anthropic:claude-sonnet-4-6` pins one.
+On your own gateway, use `provider:model` for any provider it is configured
+with, such as `otari/openai:gpt-4o`. [Model format](models.md#model-format) has
+the spellings Otari accepts, and
+[Listing available models](models.md#listing-available-models) shows which
+models your key can use.
 
 ## See also
 

@@ -1,10 +1,8 @@
 """Unit tests for the request-side inputs a policy's router reads.
 
-Two layers, both pure: the header contract (``Otari-Router``,
-``Otari-Conversation-Id``, ``Otari-Router-Task``) and the prompt-text signals the
-endpoints flatten out of their own wire formats. Between them they are everything
-a backend sees about a request, so a change in either is a change in routing
-behavior for every endpoint at once.
+The header contract (``Otari-Router`` and ``Otari-Conversation-Id``) is everything
+routing reads about a request, so a change here is a change in routing behavior
+for every endpoint at once. Also the prompt flattening guardrails read.
 """
 
 from __future__ import annotations
@@ -15,14 +13,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from gateway.api.routes._helpers import (
-    conversation_opening_text,
-    first_user_text,
-    latest_user_text,
-    routing_opted_out,
-    routing_signal_from_messages,
-    routing_signal_from_text,
-)
+from gateway.api.routes._helpers import latest_user_text, routing_opted_out, routing_signal
 
 
 def _request(headers: dict[str, str]) -> Request:
@@ -61,53 +52,32 @@ def test_invalid_value_raises_400() -> None:
     assert "Otari-Router" in exc.value.detail
 
 
-# -- conversation id and task partition ------------------------------------
+# -- the conversation id ---------------------------------------------------
 
 
-def test_conversation_id_and_task_are_extracted_and_trimmed() -> None:
-    signal = routing_signal_from_messages(
-        [{"role": "user", "content": "hi"}],
-        _request({"Otari-Conversation-Id": "  conv-42  ", "Otari-Router-Task": "  support-bot  "}),
-        has_tools=False,
-    )
+def test_the_conversation_id_is_extracted_and_trimmed() -> None:
+    signal = routing_signal(_request({"Otari-Conversation-Id": "  conv-42  ", "Otari-Router": "off"}))
     assert signal.conversation_id == "conv-42"
-    assert signal.task_id == "support-bot"
+    assert signal.opted_out is True
 
 
-@pytest.mark.parametrize(
-    "headers",
-    [{}, {"Otari-Conversation-Id": "", "Otari-Router-Task": ""}, {"Otari-Conversation-Id": "   "}],
-)
-def test_absent_or_blank_headers_are_none(headers: dict[str, str]) -> None:
-    # Blank is treated as absent: the router falls back to hashing the opener, and
-    # to the user's default pool, rather than keying on an empty identity.
-    signal = routing_signal_from_messages([{"role": "user", "content": "hi"}], _request(headers), has_tools=False)
-    assert signal.conversation_id is None
-    assert signal.task_id is None
+@pytest.mark.parametrize("headers", [{}, {"Otari-Conversation-Id": ""}, {"Otari-Conversation-Id": "   "}])
+def test_an_absent_or_blank_conversation_id_is_none(headers: dict[str, str]) -> None:
+    # Blank is treated as absent rather than keying on an empty identity.
+    assert routing_signal(_request(headers)).conversation_id is None
 
 
-# -- the prompt signals ----------------------------------------------------
+# -- the prompt text guardrails read ----------------------------------------
 
 
-_CONVO: list[dict[str, Any]] = [
-    {"role": "system", "content": "you are terse"},
-    {"role": "user", "content": "OPENER"},
-    {"role": "assistant", "content": "sure"},
-    {"role": "user", "content": "LATEST"},
-]
-
-
-def test_signals_separate_this_turn_from_the_conversation() -> None:
-    assert latest_user_text(_CONVO) == "LATEST"
-    assert first_user_text(_CONVO) == "OPENER"
-    # The anchor stops at the first assistant reply, so it does not grow as the
-    # conversation does: appending turns must not change the trace identity.
-    assert conversation_opening_text(_CONVO) == "you are terse\nOPENER"
-
-
-def test_anchor_is_stable_as_turns_are_appended() -> None:
-    grown = [*_CONVO, {"role": "assistant", "content": "more"}, {"role": "user", "content": "and more"}]
-    assert conversation_opening_text(grown) == conversation_opening_text(_CONVO)
+def test_the_latest_user_turn_is_read() -> None:
+    convo: list[dict[str, Any]] = [
+        {"role": "system", "content": "you are terse"},
+        {"role": "user", "content": "OPENER"},
+        {"role": "assistant", "content": "sure"},
+        {"role": "user", "content": "LATEST"},
+    ]
+    assert latest_user_text(convo) == "LATEST"
 
 
 def test_content_part_lists_are_flattened() -> None:
@@ -117,39 +87,4 @@ def test_content_part_lists_are_flattened() -> None:
 
 def test_a_conversation_with_no_user_turn_falls_back_to_the_last_message() -> None:
     messages = [{"role": "system", "content": "only a system turn"}]
-    assert first_user_text(messages) == "only a system turn"
-
-
-def test_continuation_is_detected_from_an_assistant_turn() -> None:
-    fresh = routing_signal_from_messages([{"role": "user", "content": "hi"}], _request({}), has_tools=False)
-    assert fresh.is_continuation is False
-    assert routing_signal_from_messages(_CONVO, _request({}), has_tools=True).is_continuation is True
-
-
-def test_the_responses_signal_includes_instructions() -> None:
-    """`instructions` is part of the task, so it has to be in the signal.
-
-    The same `input` under "answer in one word" and "write a proof" are different
-    jobs with different quality bars. Embedding only `input` gave both the same
-    routing decision and, under trace-sticky granularity, the same conversation
-    identity. Guardrails read `input` alone because they screen what the user sent;
-    routing reads what the model was asked to do.
-    """
-    from types import SimpleNamespace
-
-    from gateway.api.routes.responses import _routing_text
-
-    terse = SimpleNamespace(instructions="Answer in one word.", input="What is 2 plus 2?")
-    proof = SimpleNamespace(instructions="Write a rigorous proof.", input="What is 2 plus 2?")
-    assert _routing_text(terse) != _routing_text(proof)
-    assert "Answer in one word." in _routing_text(terse)
-    assert "What is 2 plus 2?" in _routing_text(terse)
-    # No instructions is still the input alone, with no stray separator.
-    assert _routing_text(SimpleNamespace(instructions=None, input="hi")) == "hi"
-
-
-def test_text_form_uses_one_blob_for_every_signal() -> None:
-    # The responses API has no turn structure to draw an opener from.
-    signal = routing_signal_from_text("do the thing", _request({}), has_tools=False)
-    assert signal.task_signal == signal.trace_signal == signal.trace_anchor == "do the thing"
-    assert signal.is_continuation is False
+    assert latest_user_text(messages) == "only a system turn"

@@ -142,6 +142,13 @@ class WorkspaceWebSearchKeyPublic(SQLModel):
     name: str
     last4: str | None = None
     is_default: bool = Field(description="The workspace pinned this key as its own for its kind.")
+    is_org_default: bool = Field(
+        default=False,
+        description=(
+            "The organization's default of its kind, which a workspace that pinned no key uses unless it turned the "
+            "key off or this deployment cannot decrypt it; the deployment's instance serves it then."
+        ),
+    )
     disabled: bool = Field(description="The workspace turned this key off.")
     is_effective: bool = Field(description="This is the key the workspace's calls of its kind use.")
     usable: bool
@@ -163,6 +170,20 @@ class WorkspaceWebSearchKeysPublic(SQLModel):
             "The provider the workspace's fetch tool runs on, and the enrichment of its search hits unless the "
             "search's instance names a fetch instance of its own: its effective fetch key's, else the "
             "deployment's default fetch instance's, which is builtin for the built-in fetcher."
+        ),
+    )
+    deployment_search_tool: str | None = Field(
+        default=None,
+        description=(
+            "The name of the deployment's search tool, which the workspace's searches run on when no key serves "
+            "them, whether or not one does now. Null when the deployment has none."
+        ),
+    )
+    deployment_fetch_tool: str | None = Field(
+        default=None,
+        description=(
+            "The name of the deployment's fetch tool, which the workspace's fetches run on when no key serves "
+            "them, whether or not one does now: builtin_fetch for the built-in fetcher."
         ),
     )
 
@@ -534,6 +555,140 @@ class SearchResponse(pydantic.BaseModel):
     )
 
 
+class FetchRequest(pydantic.BaseModel):
+    """A direct fetch request: one page, read through the deployment's fetch tool or the one named."""
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={"example": {"url": "https://example.com/article", "max_chars": 20000}},
+    )
+
+    url: str = pydantic.Field(min_length=1, description="The page to fetch: one public http or https URL.")
+    fetch_tool_name: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "Configured fetch tool to run on, builtin_fetch included. Optional: the deployment's "
+            "web_fetch_default_tool serves, else builtin_fetch. Ignored on POST /api/v1/fetch/{fetch_tool_name}."
+        ),
+    )
+    max_chars: int | None = pydantic.Field(
+        default=None,
+        ge=1,
+        description=(
+            "Cut the page text to this many characters. Unset, the tool's own max_chars option applies, "
+            "else the provider's own limits."
+        ),
+    )
+    include_raw: bool = pydantic.Field(
+        default=False,
+        description=(
+            "Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw "
+            "holds only content_kind and redirect_count."
+        ),
+    )
+    provider_options: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        description=(
+            "Native options for the provider that serves the call, under the provider's own names, as "
+            "GET /api/v1/search-tools/providers?kind=fetch lists them. An option the provider does not take from a "
+            "request is refused with a 400. On a call that names no tool they go to whichever provider "
+            "serves it, so name the tool when they are meant for one provider."
+        ),
+    )
+    user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
+
+
+class FetchResponse(pydantic.BaseModel):
+    """A completed direct fetch: one page's text and where it came from."""
+
+    object: Literal["fetch"] = "fetch"
+    fetch_tool: str = pydantic.Field(description="The configured fetch tool that served the request")
+    url: str = pydantic.Field(description="The URL fetched, as asked, in canonical form.")
+    final_url: str = pydantic.Field(
+        description=(
+            "Where the page was found after redirects. The URL asked for when the provider does not report "
+            "where a redirect led (reports_final_url in the provider catalog)."
+        )
+    )
+    title: str = pydantic.Field(default="", description="The page's title; empty when the provider gave none.")
+    content_type: str = pydantic.Field(
+        default="", description="The page's content type; empty when the provider does not report one."
+    )
+    text: str = pydantic.Field(description="The page's text, as the provider extracted it.")
+    published: datetime | None = pydantic.Field(
+        default=None, description="When the page was published, where the provider reports it."
+    )
+    truncated: bool = pydantic.Field(
+        description=(
+            "Whether text is less than the whole page: the body or the extracted text hit a limit of the "
+            "provider's, or max_chars cut it."
+        )
+    )
+    raw: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        exclude_if=lambda raw: raw is None,
+        description="The provider's whole response, untouched; only when the request set include_raw.",
+    )
+
+
+_MAX_CODE_EXECUTION_INPUTS = 32
+
+
+class CodeExecuteRequest(pydantic.BaseModel):
+    """A direct code execution request: the code to run, and the sandbox to run it in."""
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={"example": {"code": "print(1 + 1)", "container": "auto"}},
+    )
+
+    code: str = pydantic.Field(min_length=1, description="Python source to run in the sandbox")
+    container: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "'auto' to hold the sandbox after the run, or a container id an earlier response named in "
+            "Otari-Container-Id to run in that sandbox again, with its files and interpreter state. "
+            "Omitted, the sandbox is released when the run ends."
+        ),
+    )
+    timeout_seconds: int | None = pydantic.Field(
+        default=None,
+        ge=1,
+        description=(
+            "How long the code may run. Never more than the workspace's code execution ceiling, "
+            "or 60 seconds when it sets none."
+        ),
+    )
+    file_ids: list[str] | None = pydantic.Field(
+        default=None,
+        max_length=_MAX_CODE_EXECUTION_INPUTS,
+        description=(
+            "Uploads from POST /api/v1/files to put in the working directory before the code runs, "
+            "each under its own filename."
+        ),
+    )
+    user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
+
+
+class CodeExecutionOutputFile(pydantic.BaseModel):
+    """A file the code wrote, stored in the Files API."""
+
+    file_id: str = pydantic.Field(description="Download it from GET /api/v1/files/{file_id}/content")
+    filename: str = pydantic.Field(description="The name the code gave it in the working directory")
+
+
+class CodeExecuteResponse(pydantic.BaseModel):
+    """A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``."""
+
+    object: Literal["code_execution.result"] = "code_execution.result"
+    stdout: str
+    stderr: str
+    return_code: int | None = pydantic.Field(
+        description="The program's exit status; null when the sandbox did not report one."
+    )
+    files: list[CodeExecutionOutputFile] = pydantic.Field(
+        description="The files the code wrote. Empty when it wrote none, or where the Files API is off."
+    )
+
+
 class OtariToolCallSource(pydantic.BaseModel):
     """One page a gateway-run search returned: where it is, never its text."""
 
@@ -552,14 +707,14 @@ class OtariToolCallError(pydantic.BaseModel):
 
 
 class OtariToolCall(pydantic.BaseModel):
-    """One web search or fetch the gateway ran, as a Chat Completions response reports it in ``otari_tool_calls``.
+    """One tool call the gateway ran, as a Chat Completions response reports it in ``otari_tool_calls``.
 
     A stream sends the entry when the call starts and again when it ends, both with
     the same ``id``. Fields not set are left out of the wire entry.
     """
 
     id: str
-    type: Literal["web_search", "web_fetch"]
+    type: Literal["web_search", "web_fetch", "code_execution", "mcp"]
     status: Literal["in_progress", "completed", "failed"]
     query: str | None = pydantic.Field(default=None, description="A search's query.")
     url: str | None = pydantic.Field(
@@ -567,6 +722,19 @@ class OtariToolCall(pydantic.BaseModel):
     )
     sources: list[OtariToolCallSource] | None = pydantic.Field(
         default=None, description="A completed search's results; empty when it found none."
+    )
+    code: str | None = pydantic.Field(default=None, description="The code a code execution ran.")
+    stdout: str | None = pydantic.Field(default=None, description="What an ended code execution printed.")
+    stderr: str | None = pydantic.Field(default=None, description="What an ended code execution wrote to stderr.")
+    exit_code: int | None = pydantic.Field(default=None, description="An ended code execution's exit status.")
+    file_ids: list[str] | None = pydantic.Field(
+        default=None, description="The /v1/files IDs of the files a code execution produced."
+    )
+    server: str | None = pydantic.Field(default=None, description="The MCP server that ran the call.")
+    name: str | None = pydantic.Field(default=None, description="The MCP tool called.")
+    output: str | None = pydantic.Field(default=None, description="The text an ended MCP call gave the model.")
+    truncated: bool | None = pydantic.Field(
+        default=None, description="Whether stdout, stderr or output was cut to the report's limit."
     )
     error: OtariToolCallError | None = pydantic.Field(default=None, description="Why a failed call failed, when known.")
 

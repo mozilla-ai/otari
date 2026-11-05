@@ -40,6 +40,7 @@ import base64
 import hashlib
 import json
 import re
+import uuid
 import zlib
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -63,10 +64,17 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 from opentelemetry.proto.metrics.v1.metrics_pb2 import AggregationTemporality
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_api_key_or_master_key
+from gateway.api.deps import (
+    TelemetryStoragePortDep,
+    TraceServiceDep,
+    get_config,
+    get_db,
+    verify_api_key_or_master_key,
+    workspace_keeps_trace_content,
+)
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.core.config import GatewayConfig
-from gateway.core.database import release_session
+from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.ports.telemetry_storage_port import TelemetryRecord
@@ -87,6 +95,7 @@ from gateway.services.external_usage_service import (
     claude_usage_events,
     ingest_external_events,
     is_reserved_source,
+    token_count,
 )
 from gateway.services.traces import (
     CLAUDE_CODE_USAGE_SOURCE,
@@ -94,6 +103,7 @@ from gateway.services.traces import (
     HOOK_USAGE_SOURCE,
     OtlpSpan,
     PricedRequest,
+    TraceService,
     TraceWriter,
     gate_usage_event_id,
     record_otlp_export,
@@ -245,13 +255,6 @@ def _attributes(kv_list: Any, *, arrays: bool = False) -> dict[str, Any]:
     return {kv.key: _any_value(kv.value, arrays=arrays) for kv in kv_list}
 
 
-def _int(value: Any) -> int:
-    try:
-        return max(int(value), 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _nanos_to_dt(nanos: int) -> datetime | None:
     if not nanos:
         return None
@@ -335,10 +338,10 @@ def _build_event(
         provider = "anthropic"
         model = attrs.get("model")
         event_id = attrs.get("request_id") or fallback_event_id
-        input_tokens = _int(attrs.get("input_tokens"))
-        output_tokens = _int(attrs.get("output_tokens"))
-        cache_read = _int(attrs.get("cache_read_tokens"))
-        cache_write = _int(attrs.get("cache_creation_tokens"))
+        input_tokens = token_count(attrs.get("input_tokens"))
+        output_tokens = token_count(attrs.get("output_tokens"))
+        cache_read = token_count(attrs.get("cache_read_tokens"))
+        cache_write = token_count(attrs.get("cache_creation_tokens"))
         session = attrs.get("session.id")
         duration = attrs.get("duration_ms", duration_ms)
         cache_tokens_in_prompt = False
@@ -352,16 +355,16 @@ def _build_event(
         provider = attrs.get("provider_name") or "openai"
         model = attrs.get("model")
         if event_name == "codex.sse_event":
-            input_tokens = _int(attrs.get("input_token_count"))
-            output_tokens = _int(attrs.get("output_token_count"))
-            cache_read = _int(attrs.get("cached_token_count"))
-            reasoning = _int(attrs.get("reasoning_token_count"))
+            input_tokens = token_count(attrs.get("input_token_count"))
+            output_tokens = token_count(attrs.get("output_token_count"))
+            cache_read = token_count(attrs.get("cached_token_count"))
+            reasoning = token_count(attrs.get("reasoning_token_count"))
             event_id = _codex_event_id(attrs, None)
             duration = duration_ms
         else:  # codex.api_request (HTTP /models path)
-            input_tokens = _int(attrs.get("gen_ai.usage.input_tokens"))
-            output_tokens = _int(attrs.get("gen_ai.usage.output_tokens"))
-            cache_read = _int(attrs.get("gen_ai.usage.cache_read.input_tokens"))
+            input_tokens = token_count(attrs.get("gen_ai.usage.input_tokens"))
+            output_tokens = token_count(attrs.get("gen_ai.usage.output_tokens"))
+            cache_read = token_count(attrs.get("gen_ai.usage.cache_read.input_tokens"))
             event_id = _codex_event_id(attrs, attrs.get("gen_ai.response.id"))
             duration = attrs.get("duration_ms", duration_ms)
         cache_write = 0
@@ -371,14 +374,14 @@ def _build_event(
         provider = attrs.get("gen_ai.provider.name") or attrs.get("gen_ai.system")
         model = attrs.get("gen_ai.request.model") or attrs.get("gen_ai.response.model")
         event_id = attrs.get("gen_ai.response.id") or fallback_event_id
-        input_tokens = _int(attrs.get("gen_ai.usage.input_tokens"))
-        output_tokens = _int(attrs.get("gen_ai.usage.output_tokens"))
-        cache_read = _int(
+        input_tokens = token_count(attrs.get("gen_ai.usage.input_tokens"))
+        output_tokens = token_count(attrs.get("gen_ai.usage.output_tokens"))
+        cache_read = token_count(
             attrs.get("gen_ai.usage.cache_read_tokens")
             or attrs.get("gen_ai.usage.cache_read.input_tokens")
             or attrs.get("gen_ai.usage.cached_tokens")
         )
-        cache_write = _int(attrs.get("gen_ai.usage.cache_write_tokens"))
+        cache_write = token_count(attrs.get("gen_ai.usage.cache_write_tokens"))
         client = attrs.get("otari.client_name")
         source = _sanitize_source(str(client)) if client else _DEFAULT_SOURCE
         session = attrs.get("otari.user_session_label") or attrs.get("otari.session_label")
@@ -478,6 +481,16 @@ async def _release_after_auth(db: AsyncSession) -> None:
     await release_session(db)
 
 
+async def _content_generation(traces: TraceService, config: GatewayConfig, workspace_id: uuid.UUID) -> int | None:
+    """The workspace's content generation, or None where content is off or it cannot be read."""
+    if not config.trace_content_enabled:
+        return None
+    try:
+        return await traces.content_generation(workspace_id)
+    except DATABASE_ERRORS:
+        return None
+
+
 def _record_priced(request: Request, priced: list[PricedEvent], *, api_key: APIKey, config: GatewayConfig) -> None:
     """Hand each priced event's cost to the session it names: the session's cost is the ledger's."""
     writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
@@ -545,9 +558,16 @@ async def receive_traces(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    traces: TraceServiceDep,
 ) -> Response:
     """Ingest LLM usage from OTLP spans (GenAI semantic conventions)."""
     api_key = _require_import_key(auth_result[0])
+    # As the export is let in, before its body uploads: an upload that outlasts an
+    # erasure of its user, or a deletion or turning off of its workspace's content,
+    # is measured from here, so what it carries is never stored.
+    admitted_at = datetime.now(UTC)
+    writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
+    generation = await _content_generation(traces, config, api_key.workspace_id) if writer is not None else None
     await _release_after_auth(db)
     content_type = _content_type(request)
     body = _decode_body(await request.body(), request.headers.get("content-encoding"))
@@ -610,8 +630,12 @@ async def receive_traces(
 
     # Only an export whose usage was taken is recorded, best-effort and off the
     # request path; the writer is absent where nothing records traces.
-    writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
     if writer is not None and received:
+        # The switch after the generation: content captured while the switch is
+        # turned off then carries the generation the turning off ends.
+        keeps_content = generation is not None and await workspace_keeps_trace_content(
+            db, config, api_key.workspace_id, api_key.user_id
+        )
         record_otlp_export(
             writer,
             (_otlp_span(span, scope) for scope, span in received),
@@ -621,7 +645,9 @@ async def receive_traces(
             user_id=api_key.user_id,
             api_key_id=api_key.id,
             retention=timedelta(days=config.trace_retention_days),
-            content_enabled=config.trace_content_enabled,
+            content_enabled=keeps_content,
+            content_generation=generation,
+            admitted_at=admitted_at,
         )
     _record_priced(request, priced, api_key=api_key, config=config)
     return _otlp_response(content_type, response)

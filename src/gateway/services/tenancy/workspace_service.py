@@ -16,6 +16,7 @@ two-row insert here.
 """
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -235,18 +236,40 @@ class WorkspaceService:
             count=count,
         )
 
+    async def require_management_access(self, *, user: User, workspace_id: uuid.UUID) -> None:
+        """Refuse unless ``user`` manages this workspace of their active organization.
+
+        Raises the workspace's not-found error for a workspace outside it, and the
+        management error for a member who does not manage it.
+        """
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        await self._require_workspace_management_access(user=user, workspace=workspace)
+
     async def update_workspace(
         self,
         *,
         user: User,
         workspace_id: uuid.UUID,
         workspace_update: WorkspaceUpdate,
+        stop_content: Callable[[uuid.UUID], Awaitable[None]] | None = None,
     ) -> WorkspacePublic:
-        """Rename a workspace or change its description."""
+        """Rename a workspace, change its description, or turn keeping its trace content or tool output on or off.
+
+        Turning either off calls ``stop_content``, so nothing taken in before the
+        switch is stored after it. The order is the rule: only once the caller is
+        known to manage the workspace; before the switch, so a failure there changes
+        nothing; and again after it, for an export that read the switch on in between.
+        """
         workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
+        narrows = workspace_update.trace_content_enabled is False or workspace_update.trace_content_tool_output is False
+        if narrows and stop_content is not None:
+            await stop_content(workspace.id)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
+        for switch in ("trace_content_enabled", "trace_content_tool_output"):
+            if update_data.get(switch, False) is None:
+                del update_data[switch]
         if "name" in update_data:
             new_name = self._validated_name(update_data["name"])
             update_data["name"] = new_name
@@ -261,6 +284,8 @@ class WorkspaceService:
         except IntegrityError:
             await self.db.rollback()
             raise WorkspaceAlreadyExistsError(str(update_data.get("name", workspace.name))) from None
+        if narrows and stop_content is not None:
+            await stop_content(workspace.id)
         return WorkspacePublic.model_validate(updated)
 
     async def delete_workspace(self, *, user: User, workspace_id: uuid.UUID) -> None:
@@ -393,8 +418,11 @@ class WorkspaceService:
         if member is None:
             raise WorkspaceMemberNotFoundError(workspace_id, user_id)
 
-        updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
-        await self.db.commit()
+        async with self._uow:
+            # As in remove_member: a key minted while a demotion runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
+            updated = await self.members.update(member, WorkspaceMemberUpdate(role=role))
+            await self._membership_listener.member_role_changed(updated)
         return WorkspaceMemberPublic.model_validate(updated)
 
     async def remove_member(self, *, user: User, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -407,6 +435,9 @@ class WorkspaceService:
             return
 
         async with self._uow:
+            # The key write routes take the same lock before checking membership,
+            # so a key minted or re-enabled while this runs cannot outlive it.
+            await self.workspaces.lock(workspace.id)
             await self._membership_listener.member_removed(member)
             await self.members.delete(member)
 

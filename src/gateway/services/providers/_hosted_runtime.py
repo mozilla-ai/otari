@@ -15,8 +15,10 @@ from gateway.services.provider_kwargs import (
     keyless_placeholder_api_key,
     missing_declared_credential,
 )
+from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_sources import HostedSources
+from gateway.services.providers._workspace_hosted_access import ensure_workspace_may_use_hosted
 
 
 def organization_to_serve(organization_id: uuid.UUID | None) -> uuid.UUID:
@@ -42,7 +44,15 @@ async def hosted_credential_for(
     provider: str,
     model: str | None,
 ) -> HostedCredential | None:
-    """The deployment-owned credential the port resolves for a request, a request with no organization included."""
+    """The deployment-owned credential the port resolves for a request, a request with no organization included.
+
+    The workspace's own rule is applied before the port is asked, because the
+    port decides for the organization alone.
+
+    Raises:
+        HostedAccessDeniedError: the workspace or the organization may not use the upstream.
+    """
+    ensure_workspace_may_use_hosted(workspace_id, provider, model)
     return await port.resolve_hosted_credential(
         organization_id=organization_to_serve(organization_id),
         workspace_id=workspace_id,
@@ -95,6 +105,7 @@ async def serve_on_hosted_provider(
     organization_id: uuid.UUID | None,
     workspace_id: uuid.UUID | None,
     any_model: bool = False,
+    country_gate: CountryGate | None = None,
 ) -> ResolvedProvider | None:
     """``resolved`` served on the deployment's own credential where nothing declared serves it, else ``None``.
 
@@ -102,10 +113,12 @@ async def serve_on_hosted_provider(
     serves is never asked about. ``None`` also when the port has nothing for
     the candidate, or answers for another provider where only its own name may.
     ``any_model`` asks for the provider rather than for ``resolved.model``, for
-    a call that names no model (a batch's status, say).
+    a call that names no model (a batch's status, say). ``country_gate`` holds
+    the request to the provider's own ``supported_countries``.
 
     Raises:
         HostedAccessDeniedError: the organization may not use the upstream.
+        CountryNotServedError: the provider does not serve the request's country.
         UnknownHostedUpstreamError: the port named an upstream any-llm does not implement.
     """
     if missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs) is None:
@@ -121,6 +134,7 @@ async def serve_on_hosted_provider(
         credential.response_provider, resolved.instance
     ):
         return None
+    ensure_hosted_country(country_gate, credential.supported_countries)
     return dispatch_on_hosted_credential(credential, model=resolved.model, alias=resolved.alias)
 
 

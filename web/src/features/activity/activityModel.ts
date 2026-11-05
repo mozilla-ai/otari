@@ -129,6 +129,8 @@ export const STATUS_OPTIONS: { label: string; value: string }[] = [
   // rendered and styled distinctly, so an operator who spots one has to be able
   // to filter to the rest of them.
   { label: "Absorbed", value: "absorbed" },
+  // A stream the client abandoned, billed from an estimate.
+  { label: "Incomplete", value: "incomplete" },
 ]
 
 export const PRICED_OPTIONS: { label: string; value: string }[] = [
@@ -204,6 +206,7 @@ export function resolveExtentWindow(
 const STATUS_LABELS: Record<string, string> = {
   error: "Error",
   absorbed: "Absorbed",
+  incomplete: "Incomplete",
   skipped: "Skipped",
   success: "Success",
 }
@@ -489,6 +492,23 @@ export function findGroupsMissingEarlierAttempts(
     }
     return []
   })
+}
+
+// The row that stands for request `requestId` among `rows`: its outcome (the
+// attempt that served, or the terminal failure), else its latest attempt while the
+// request is still settling. `requestId` is the `Otari-Request-ID` the caller got
+// back, which every row the request wrote carries as its `request_group_id`.
+export function findRequestOutcome(
+  rows: readonly UsageEntry[],
+  requestId: string,
+): UsageEntry | undefined {
+  const attempts = sortPlanRows(
+    rows.filter((row) => row.request_group_id === requestId),
+  )
+  return (
+    attempts.find((row) => row.status !== "absorbed") ??
+    attempts[attempts.length - 1]
+  )
 }
 
 // One line of prose for a row's place in its plan, replacing the "attempt 1/2 ·

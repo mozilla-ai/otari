@@ -5,6 +5,9 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  BlockedEmailCreated,
+  BlockedEmails,
+  CreateBlockedEmailRequest,
   DashboardBuild,
   DeploymentAdminAccess,
   DeploymentUser,
@@ -60,7 +63,7 @@ export function useDashboardBuild() {
 // 404: a gate cannot be built on a failed request, and hiding a destination
 // grants nothing either way.
 //
-// Read by the deployment accounts and hosted providers pages, to word their own
+// Read by the deployment accounts, hosted providers and subagent router pages, to word their own
 // refusal, and each holds that decision until this lands. Nothing else asks: the rail and the
 // Overview index need the answer before their first paint, so they take
 // `deployment_operator` off the organization context, which is the same
@@ -76,7 +79,7 @@ export function useDeploymentAdminAccess() {
       ),
     staleTime: 60_000,
     // No `enabled` parameter: both callers sit behind routes whose surfaces
-    // (`admin`, `hosted_providers`) every gateway publishes. Not inferred from a
+    // (`admin`, `hosted_providers`, `agent_recommenders`) every gateway publishes. Not inferred from a
     // 404 either: the ordinary retry policy applies, and a failure is a failure.
   })
 }
@@ -147,5 +150,57 @@ export function useIssuePasswordLink() {
         `/admin/users/${encodeURIComponent(id)}/password-link`,
         { method: "POST" },
       ),
+  })
+}
+
+/** The blocklist reads' key prefix, which every blocklist write invalidates. */
+const BLOCKED_EMAILS = [DEPLOYMENT_ADMIN, "blocked-emails"] as const
+
+/** One page of the deployment's email blocklist, newest entry first. */
+export function useBlockedEmails(
+  { page, pageSize }: { page: number; pageSize: number },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...BLOCKED_EMAILS, page, pageSize],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        skip: String(page * pageSize),
+        limit: String(pageSize),
+      })
+      return apiFetch<BlockedEmails>(`/admin/blocked-emails?${params}`)
+    },
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    enabled,
+  })
+}
+
+export function useBlockEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateBlockedEmailRequest) =>
+      apiFetch<BlockedEmailCreated>("/admin/blocked-emails", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    // Blocking ends the matching accounts' sessions, which the accounts list
+    // does not show, so only the blocklist itself goes stale.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: BLOCKED_EMAILS })
+    },
+  })
+}
+
+export function useUnblockEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/admin/blocked-emails/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: BLOCKED_EMAILS })
+    },
   })
 }

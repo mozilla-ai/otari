@@ -220,6 +220,26 @@ def test_a_tool_list_names_configured_tools_or_the_star() -> None:
         validate_allowed_tools(_TOOLS, "deepseek")  # type: ignore[arg-type]
 
 
+def test_a_tool_list_names_fetch_tools_and_the_built_in_fetcher_too() -> None:
+    config = GatewayConfig(
+        search_tools={"exa-search": {"provider": "exa"}}, fetch_tools={"tab": {"provider": "tabstack"}}
+    )
+    assert validate_allowed_tools(config, ["tab", "builtin_fetch", "exa-search"]) == [
+        "tab",
+        "builtin_fetch",
+        "exa-search",
+    ]
+    with pytest.raises(ValueError, match="is not a search or fetch tool"):
+        validate_allowed_tools(config, ["nope"])
+
+
+def test_the_refusal_names_the_tools_kind() -> None:
+    assert tool_not_allowed_detail("tab", "tabstack:tab", kind="fetch").startswith("Fetch tool 'tab' is not permitted")
+    assert tool_not_allowed_detail("deepseek", "deepseek:deepseek").startswith(
+        "Search tool 'deepseek' is not permitted"
+    )
+
+
 def test_the_refusal_says_a_model_wildcard_grants_models_only_when_one_matched() -> None:
     plain = tool_not_allowed_detail("deepseek", "deepseek:deepseek")
     assert "Name it in allowed_tools" in plain and "wildcard" not in plain

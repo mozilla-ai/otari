@@ -185,3 +185,25 @@ export function memberLabel(member: OrganizationMember): string {
       : "Unknown member")
   )
 }
+
+/** The roles that may change a workspace's resources; everything but viewer. */
+const CONTRIBUTOR_ROLES: readonly string[] = ["owner", "admin", "member"]
+
+/**
+ * Whether the caller may change their own resources in a workspace, such as
+ * minting a key there: `canManage`'s organization arm, or viewer in neither the
+ * organization nor the workspace. The more restrictive role wins, as
+ * `OrganizationService.require_workspace_contributor_access` does on the server.
+ */
+export function canContributeToWorkspace(
+  context: OrganizationContext | undefined,
+  workspaceRole: string | undefined,
+): boolean {
+  if (canManage(context)) return true
+  if (context === undefined || !CONTRIBUTOR_ROLES.includes(context.role)) {
+    return false
+  }
+  return (
+    workspaceRole === undefined || CONTRIBUTOR_ROLES.includes(workspaceRole)
+  )
+}

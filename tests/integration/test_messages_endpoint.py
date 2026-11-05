@@ -4,7 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import anthropic
-import httpx
+import httpx2
 import pytest
 from any_llm.types.messages import (
     MessageResponse,
@@ -119,16 +119,16 @@ def test_messages_endpoint_validation_error(
 def _sdk(client: TestClient, api_key: str) -> anthropic.Anthropic:
     """Anthropic's SDK, sending its requests through the test app (see ``test_files_endpoint.anthropic_sdk``)."""
 
-    def forward(request: httpx.Request) -> httpx.Response:
+    def forward(request: httpx2.Request) -> httpx2.Response:
         sent = client.request(
             request.method, str(request.url), headers=request.headers.multi_items(), content=request.read()
         )
-        return httpx.Response(sent.status_code, headers=sent.headers.multi_items(), content=sent.content)
+        return httpx2.Response(sent.status_code, headers=sent.headers.multi_items(), content=sent.content)
 
     return anthropic.Anthropic(
         base_url=f"{client.base_url}{API_ROOT.removesuffix(f'/{API_VERSION}')}",
         api_key=api_key,
-        http_client=httpx.Client(transport=httpx.MockTransport(forward)),
+        http_client=httpx2.Client(transport=httpx2.MockTransport(forward)),
         max_retries=0,
     )
 

@@ -12,15 +12,18 @@ import functools
 import hashlib
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from gateway.log_config import logger
+from gateway.services.traces._context import ContextWeights
 from gateway.services.traces._identity import SessionRef
+from gateway.services.traces._turn_content import TurnContent, arguments_of
 from gateway.services.traces._turns import TurnFacts
-from gateway.types.traces import SpanRecord, TraceWrite, is_endpoint, is_identifier
+from gateway.types.traces import SPAN_CONTENT_MAX_LENGTH, SpanRecord, TraceWrite, is_endpoint, is_identifier
 
 # The settled status of an attempt a later candidate made up for, and of one that served.
 _ABSORBED = "absorbed"
@@ -102,6 +105,11 @@ def _never_raises[**P](record: Callable[P, None]) -> Callable[P, None]:
     return guarded
 
 
+def _clip(content: Mapping[str, str | None]) -> dict[str, str]:
+    """Content as a span holds it: the values present, each cut to what the store keeps."""
+    return {key: value[:SPAN_CONTENT_MAX_LENGTH] for key, value in content.items() if value and value.strip()}
+
+
 def _span_id() -> str:
     return uuid.uuid4().hex
 
@@ -119,6 +127,11 @@ class RequestTrace:
     A request that names its session joins that session's trace; one that names
     none is a trace of its own. A subagent's step opens no turn, since the
     subagent works inside its parent's.
+
+    Content is kept only with a ``content_generation``, which the preamble sets
+    when the request, its deployment and its workspace all keep content: the
+    turn's prompt on the step, each answered call's arguments on its tool span,
+    and a tool's result only with ``keep_tool_output``.
     """
 
     request_id: str
@@ -131,9 +144,22 @@ class RequestTrace:
     session: SessionRef | None = None
     harness: str | None = None
     turn: TurnFacts | None = None
+    context: ContextWeights | None = None
     subagent: bool = False
+    content: TurnContent | None = None
+    content_generation: int | None = None
+    keep_tool_output: bool = False
     spans: list[SpanRecord] = field(default_factory=list)
     dropped: int = 0
+
+    @property
+    def keeps_content(self) -> bool:
+        return self.content_generation is not None
+
+    def _tool_content(self, arguments: str | None, result: str | None) -> dict[str, str]:
+        if not self.keeps_content:
+            return {}
+        return _clip({"tool.input": arguments, "tool.output": result if self.keep_tool_output else None})
 
     def _add(self, span: SpanRecord) -> None:
         if len(self.spans) >= self.max_spans:
@@ -165,6 +191,9 @@ class RequestTrace:
             attributes["otari.routing.attempt_position"] = call.attempt_position
         if call.status_code is not None:
             attributes["http.response.status_code"] = call.status_code
+        # Every attempt sent the same request, so each carries the same weights.
+        if self.context is not None:
+            attributes.update(self.context.attributes())
         self._add(
             SpanRecord(
                 span_id=call.attempt_id[:64],
@@ -193,8 +222,20 @@ class RequestTrace:
         )
 
     @_never_raises
-    def record_tool_call(self, *, tool_name: str, tool_type: str, started: datetime, ok: bool) -> None:
-        """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool)."""
+    def record_tool_call(
+        self,
+        *,
+        tool_name: str,
+        tool_type: str,
+        started: datetime,
+        ok: bool,
+        arguments: Mapping[str, Any] | None,
+        result: str | None = None,
+    ) -> None:
+        """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool).
+
+        ``arguments`` and ``result`` are kept only where the request keeps content.
+        """
         ended = datetime.now(UTC)
         name = identifier_or_none(tool_name)
         self._add(
@@ -213,6 +254,7 @@ class RequestTrace:
                 tool_name=name,
                 tool_type=identifier_or_none(tool_type),
                 request_id=self.request_id,
+                content=self._tool_content(arguments_of(arguments) if self.keeps_content else None, result),
             )
         )
 
@@ -292,12 +334,13 @@ class RequestTrace:
             error_class = failed_call.error_class or "provider_error"
         else:
             error_class = _status_class(status_code) or "unknown"
+        opens_turn = self.turn is not None and self.turn.opens_turn and not self.subagent
         step = SpanRecord(
             span_id=self.request_id,
             kind="step",
             origin="gateway",
             name=self.endpoint if is_endpoint(self.endpoint) else "request",
-            opens_turn=self.turn is not None and self.turn.opens_turn and not self.subagent,
+            opens_turn=opens_turn,
             outcome="ok" if ok else "error",
             error_class=error_class,
             start_time=self.started_at,
@@ -305,6 +348,9 @@ class RequestTrace:
             duration_ms=_elapsed_ms(self.started_at, ended),
             request_id=self.request_id,
             attributes={"http.response.status_code": status_code} if status_code is not None else {},
+            content=_clip({"prompt": self.content.prompt})
+            if self.keeps_content and self.content is not None and opens_turn
+            else {},
         )
         return TraceWrite(
             workspace_id=self.workspace_id,
@@ -317,6 +363,9 @@ class RequestTrace:
             harness=self.harness,
             name=self.session.name if self.session else None,
             spans=(step, *self._client_tool_spans(), *self.spans),
+            # When the request came in, so one that outlasts an erasure of its user is not stored.
+            captured_at=self.started_at,
+            content_generation=self.content_generation,
         )
 
     def _client_tool_spans(self) -> list[SpanRecord]:
@@ -333,8 +382,10 @@ class RequestTrace:
         answered = self.turn.answered[:room]
         self.dropped += len(self.turn.answered) - len(answered)
         spans: list[SpanRecord] = []
+        held = self.content.calls if self.content is not None else {}
         for call in answered:
             name = identifier_or_none(call.name)
+            content = held.get((call.call_id, call.position))
             spans.append(
                 SpanRecord(
                     span_id=client_tool_span_id(call.call_id, call.position),
@@ -350,6 +401,7 @@ class RequestTrace:
                     tool_type="client",
                     tool_call_id=call_id_digest(self.workspace_id, call.call_id),
                     request_id=self.request_id,
+                    content=self._tool_content(content.arguments, content.result) if content is not None else {},
                 )
             )
         return spans
@@ -357,3 +409,32 @@ class RequestTrace:
 
 def _elapsed_ms(started: datetime, ended: datetime) -> int:
     return max(0, round((ended - started).total_seconds() * 1000))
+
+
+@dataclass(frozen=True)
+class ToolSpans:
+    """Records a gateway-run tool's calls on a request's trace, its type and its name bound once.
+
+    Over no trace it records nothing, so a backend never checks for one. An MCP pool
+    runs many tools under one type, so it names each call's tool instead.
+    """
+
+    trace: RequestTrace | None
+    tool_type: str
+    tool_name: str | None = None
+
+    def record(
+        self,
+        started: datetime,
+        *,
+        ok: bool,
+        arguments: Mapping[str, Any] | None,
+        result: str | None = None,
+        tool_name: str | None = None,
+    ) -> None:
+        """One call: ``arguments`` as the model sent them, ``result`` as the model reads it, None where it failed."""
+        name = tool_name or self.tool_name
+        if self.trace is not None and name is not None:
+            self.trace.record_tool_call(
+                tool_name=name, tool_type=self.tool_type, started=started, ok=ok, arguments=arguments, result=result
+            )

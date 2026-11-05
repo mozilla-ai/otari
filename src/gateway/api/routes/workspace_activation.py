@@ -18,18 +18,14 @@ identify: the call issues a key and rotates the previous one.
 """
 
 import uuid
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import ApiKeyFormatPortDep, CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, WorkspaceActivationServiceDep, verify_master_key
 from gateway.api.routes.organizations import Message
-from gateway.core.config import GatewayConfig
 from gateway.services.tenancy.workspace_activation_service import (
     ActivationApiKeyPublic,
     WorkspaceActivationPublic,
-    WorkspaceActivationService,
 )
 
 router = APIRouter(
@@ -37,18 +33,6 @@ router = APIRouter(
     tags=["workspace-activation"],
     dependencies=[Depends(verify_master_key)],
 )
-
-
-def get_workspace_activation_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    key_format: ApiKeyFormatPortDep,
-) -> WorkspaceActivationService:
-    """Build the service on the request's session, this app's config and its key format."""
-    return WorkspaceActivationService(db, config, key_format)
-
-
-WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(get_workspace_activation_service)]
 
 
 @router.get("")

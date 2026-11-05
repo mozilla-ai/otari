@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from any_fetch import FetchedPage
 from gateway.core.settings.tools import BUILTIN_FETCH_PROVIDER
-from gateway.services.tool_usage import is_tool_error
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, is_tool_error
 from gateway.services.tools._web_call_cap import FETCH_CALL_LIMIT_TEXT
 from gateway.services.tools._web_display import fetched_url
 from gateway.services.tools._web_fetch._builtin import (
@@ -51,7 +51,8 @@ from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     web_fetch_tool_definition,
 )
-from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure, failed_text
+from gateway.services.tools._web_tool_failure import BUDGET_EXCEEDED_TAG, CALL_LIMIT_TAG, WebToolFailure, failed_text
+from gateway.services.traces import ToolSpans
 from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_retrieval_policy import DomainPolicy
 
@@ -115,7 +116,7 @@ class WebFetchBackend:
         # The app's client, for a provider instance. None outside an app, where the provider opens its own per call.
         self._web_provider_client = web_provider_client
         self._tally = tally
-        self._trace = trace
+        self._spans = ToolSpans(trace, "otari_web_fetch", WEB_FETCH_TOOL_NAME)
         self._cap = cap
         self._stack = AsyncExitStack()
         self._client: httpx.AsyncClient | None = None
@@ -174,6 +175,13 @@ class WebFetchBackend:
         started = datetime.now(UTC)
         if self._cap is not None and not self._cap.claim():
             text = self._refused(CALL_LIMIT_TAG, FETCH_CALL_LIMIT_TEXT)
+        elif self._tally is not None and not await self._tally.admit(
+            WEB_FETCH_TOOL_NAME,
+            label=self._resolved.label,
+            rate_keys=self._resolved.rate_keys,
+            deployment_paid=not self._resolved.on_credential,
+        ):
+            text = self._refused(BUDGET_EXCEEDED_TAG, TOOL_BUDGET_EXCEEDED_TEXT)
         else:
             text = await self._fetch(arguments)
         if self._tally is not None:
@@ -188,10 +196,7 @@ class WebFetchBackend:
                 cost=page.cost if page is not None else None,
                 deployment_paid=not resolved.on_credential,
             )
-        if self._trace is not None:
-            self._trace.record_tool_call(
-                tool_name=WEB_FETCH_TOOL_NAME, tool_type="otari_web_fetch", started=started, ok=not is_tool_error(text)
-            )
+        self._spans.record(started, ok=not is_tool_error(text), arguments=arguments, result=text)
         return text
 
     async def _fetch(self, arguments: dict[str, Any]) -> str:

@@ -312,11 +312,10 @@ async def test_a_fetch_is_recorded_under_its_instances_label_rate_keys_and_repor
         LabelCalls(
             tool=WEB_FETCH_TOOL_NAME,
             label=f"fake:{_FAKE}",
-            rate_keys=(InstanceRateKey("fetch", _FAKE, f"fake:{_FAKE}"), "otari:web_fetch"),
+            rate_keys=(InstanceRateKey("fetch", _FAKE, f"fake:{_FAKE}"),),
             calls=2,
             unreported_calls=0,
             reported_cost=Decimal("0.004"),
-            enrichment_cost=Decimal(0),
             deployment_paid=True,
         )
     ], "a reported zero is a free call, and a failed call is never billed"
@@ -332,11 +331,10 @@ async def test_a_built_in_fetch_is_recorded_under_builtin_fetch_for_its_rate(fet
         LabelCalls(
             tool=WEB_FETCH_TOOL_NAME,
             label="builtin:builtin_fetch",
-            rate_keys=(InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"), "otari:web_fetch"),
+            rate_keys=(InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"),),
             calls=1,
             unreported_calls=1,
             reported_cost=Decimal(0),
-            enrichment_cost=Decimal(0),
             deployment_paid=True,
         )
     ]

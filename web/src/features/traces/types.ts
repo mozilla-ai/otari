@@ -3,6 +3,7 @@
 
 import type { TraceGateSummary, TraceToolCost } from "@/client"
 
+import type { ContextWeights, SessionRequests } from "./contextMap"
 import type { Explanation } from "./explain"
 import type { GatewayEvent, GuardrailVerdict } from "./gateway"
 import type { SessionStats } from "./sessionStats"
@@ -40,7 +41,13 @@ export interface Observation {
   cachedTokens?: number
   cacheWriteTokens?: number
   reasoningTokens?: number
+  /** The model's context window, where the catalog knows it. */
+  contextWindow?: number
+  /** Characters per kind of input, for a request the gateway served. */
+  context?: ContextWeights
   cost?: number
+  /** A gateway LLM call's request group: every attempt the request made. */
+  requestGroupId?: string
   input?: unknown
   output?: unknown
   metadata?: Record<string, string>
@@ -102,6 +109,8 @@ export interface Trace {
     /** What each tool cost, estimated; null when no call could be. */
     toolCosts: ToolCostBreakdown | null
     stats: SessionStats
+    /** Its last model request with any input, and its fullest, which the context map is read from. */
+    context?: SessionRequests
   }
 }
 

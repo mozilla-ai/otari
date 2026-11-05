@@ -44,8 +44,8 @@ from gateway.ports.code_execution_port import (
     SandboxUnavailableError,
 )
 from gateway.services.code_execution import CONTAINER_ID_PREFIX, ContainerLease, SandboxContainers, new_container_id
-from gateway.services.tool_usage import ToolUsageTally, is_tool_error
-from gateway.services.traces import RequestTrace
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally, is_tool_error
+from gateway.services.traces import RequestTrace, ToolSpans
 from gateway.types.code_execution import ResultBlock
 
 if TYPE_CHECKING:
@@ -277,6 +277,7 @@ class SandboxBackend:
         self._tally = tally
         # The request's trace, which records each run. None outside a request.
         self._trace = trace
+        self._spans = ToolSpans(trace, "otari_code_execution", CODE_EXECUTION_TOOL_NAME)
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
         self._timeout_s = timeout_s
         # How long the lease has to last, as against what one call may spend.
@@ -540,26 +541,24 @@ class SandboxBackend:
             raise KeyError(f"SandboxBackend does not own tool {name!r}")
         code = str(arguments.get("code") or "")
         started = datetime.now(UTC)
+        # The sandbox is the deployment's, whichever backend runs it.
+        if self._tally is not None and not await self._tally.admit(CODE_EXECUTION_TOOL_NAME, deployment_paid=True):
+            self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
+            self._spans.record(started, ok=False, arguments=arguments)
+            return TOOL_BUDGET_EXCEEDED_TEXT
         try:
             result, block, file_ids = await self._exec_tool(code)
         except Exception:
             self._executions.append(CodeExecution(code=code, result=None))
             if self._tally is not None:
                 self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
-            self._record_span(started, ok=False)
+            self._spans.record(started, ok=False, arguments=arguments)
             raise
         self._executions.append(CodeExecution(code=code, result=block, file_ids=file_ids))
         if self._tally is not None:
-            # The sandbox is the deployment's, whichever backend runs it.
             self._tally.record_result(CODE_EXECUTION_TOOL_NAME, result, deployment_paid=True)
-        self._record_span(started, ok=not is_tool_error(result))
+        self._spans.record(started, ok=not is_tool_error(result), arguments=arguments, result=result)
         return result
-
-    def _record_span(self, started: datetime, *, ok: bool) -> None:
-        if self._trace is not None:
-            self._trace.record_tool_call(
-                tool_name=CODE_EXECUTION_TOOL_NAME, tool_type="otari_code_execution", started=started, ok=ok
-            )
 
     async def _exec_tool(self, code: str) -> tuple[str, ResultBlock, dict[str, str]]:
         if self._session is None:

@@ -375,8 +375,9 @@ class ToolSettings(BaseModel):
     web_fetch_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=False,
         description=(
-            "Whether Otari may execute the managed otari_web_fetch tool. Off by default because "
-            "enabling it permits model-directed outbound requests to public web destinations."
+            "Whether Otari fetches pages: the managed otari_web_fetch tool and POST /api/v1/fetch. Off by "
+            "default because enabling it permits outbound requests to public web destinations, model-directed "
+            "ones included."
         ),
     )
     web_search_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -491,7 +492,7 @@ class ToolSettings(BaseModel):
     )
 
     # The config-file tools as loaded, before any dashboard-stored tool is
-    # overlaid by ``search_tool_store_service``, one baseline per map.
+    # overlaid by ``services/tools/_search_tool_overlay``, one baseline per map.
     _search_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
     _fetch_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 
@@ -743,6 +744,17 @@ def configured_fetch_default(settings: ToolSettings) -> str:
     """``web_fetch_default_tool`` as set, else ``builtin_fetch``."""
     value = _runtime_or_env(settings, "web_fetch_default_tool")
     return str(value) if value is not None else BUILTIN_FETCH
+
+
+def enrichment_enabled(settings: ToolSettings) -> bool:
+    """Whether a search's hits without page text have their pages read.
+
+    ``web_search_extract`` as set, else the environment, else yes.
+    """
+    value = _runtime_or_env(settings, "web_search_extract")
+    if isinstance(value, bool):
+        return value
+    return value is None or str(value).lower() not in {"0", "false", "no", "off"}
 
 
 def effective_web_search_max_calls(settings: ToolSettings) -> int:

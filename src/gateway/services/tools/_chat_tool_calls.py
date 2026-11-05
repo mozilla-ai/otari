@@ -1,4 +1,4 @@
-"""Chat Completions' ``otari_tool_calls``: the gateway's report of the web tool calls it ran (decision 67).
+"""Chat Completions' ``otari_tool_calls``: the gateway's report of the tool calls it ran (decision 67).
 
 Chat Completions has no vocabulary for a call the server ran, so the gateway adds a
 field of its own at the top level of the response and of each streamed chunk, beside
@@ -19,12 +19,19 @@ if TYPE_CHECKING:
 
 OTARI_TOOL_CALLS_FIELD = "otari_tool_calls"
 
+# The gateway's own MCP entry ids, beside the ``otari_ws_`` ids of its searches.
+MCP_CALL_ID_PREFIX = "otari_mcp_"
+
+# A tool's text can be a whole page or a long log; an entry carries at most this many
+# UTF-8 bytes of each, while the model reads it whole.
+REPORTED_TEXT_MAX_BYTES = 64 * 1024
+
 
 def chat_entry(
     call: NativeCall,
     *,
     id_prefix: str,
-    kind: Literal["web_search", "web_fetch"],
+    kind: Literal["web_search", "web_fetch", "code_execution", "mcp"],
     status: Literal["in_progress", "completed", "failed"],
     **fields: Any,
 ) -> dict[str, Any]:
@@ -35,6 +42,34 @@ def chat_entry(
     present = {name: value for name, value in fields.items() if value is not None}
     entry = OtariToolCall(id=f"{id_prefix}{call.token}", type=kind, status=status, **present)
     return entry.model_dump(mode="json", exclude_unset=True)
+
+
+def capped(text: str) -> tuple[str, bool]:
+    """``text`` cut to :data:`REPORTED_TEXT_MAX_BYTES` at a character boundary, and whether it was cut."""
+    encoded = text.encode()
+    if len(encoded) <= REPORTED_TEXT_MAX_BYTES:
+        return text, False
+    return encoded[:REPORTED_TEXT_MAX_BYTES].decode(errors="ignore"), True
+
+
+def mcp_entry(
+    call: NativeCall,
+    server: str,
+    status: Literal["in_progress", "completed", "failed"],
+    output: str | None = None,
+) -> dict[str, Any]:
+    """The entry for a call to an MCP server's tool, with the text it returned once it ended."""
+    text, truncated = capped(output) if output is not None else (None, None)
+    return chat_entry(
+        call,
+        id_prefix=MCP_CALL_ID_PREFIX,
+        kind="mcp",
+        status=status,
+        server=server,
+        name=call.name,
+        output=text,
+        truncated=truncated or None,
+    )
 
 
 def call_limit_error() -> OtariToolCallError:

@@ -532,7 +532,7 @@ describe("KeysPage", () => {
     expect(
       (
         within(reveal).getByLabelText(
-          "Python (Otari SDK)",
+          "Python (OpenAI SDK)",
         ) as HTMLTextAreaElement
       ).value,
     ).not.toContain(NEW_SECRET)
@@ -542,7 +542,7 @@ describe("KeysPage", () => {
     expect(within(reveal).getByLabelText("Secret key")).toHaveValue(NEW_SECRET)
     const curl = within(reveal).getByLabelText("curl") as HTMLTextAreaElement
     const python = within(reveal).getByLabelText(
-      "Python (Otari SDK)",
+      "Python (OpenAI SDK)",
     ) as HTMLTextAreaElement
     expect(curl.value).toContain(`Otari-Key: ${NEW_SECRET}`)
     expect(curl.value).toContain(
@@ -861,6 +861,57 @@ describe("KeysPage", () => {
     },
   )
 
+  it("keeps a member from switching back on a key an operator switched off", async () => {
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "locked",
+          is_active: false,
+          operator_disabled: true,
+        }),
+      ],
+      deploymentOperator: false,
+      role: "member",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("locked")).closest("tr")!
+    await user.click(
+      within(row).getByRole("button", { name: "Actions for locked" }),
+    )
+    const enable = await screen.findByRole("menuitem", { name: /^Enable/ })
+    expect(enable).toHaveAttribute("aria-disabled", "true")
+    expect(
+      within(enable).getByText("Switched off by an operator"),
+    ).toBeInTheDocument()
+  })
+
+  it("offers a viewer their keys to read and nothing that changes one", async () => {
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "issued" })],
+      deploymentOperator: false,
+      role: "viewer",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("issued")).closest("tr")!
+    expect(
+      screen.queryByRole("button", { name: "Create key" }),
+    ).not.toBeInTheDocument()
+    expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument()
+
+    // The trigger still opens the key's details, with no menu under them.
+    await user.click(
+      within(row).getByRole("button", { name: "Details for issued" }),
+    )
+    expect(await screen.findByText("Created:")).toBeInTheDocument()
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument()
+    expect(screen.queryAllByRole("menuitem")).toEqual([])
+  })
+
   it("regenerates a secret after an explicit confirm", async () => {
     mockApi({
       keys: [apiKey({ id: "key-1", key_name: "ci-bot", is_active: true })],
@@ -1159,6 +1210,75 @@ describe("KeysPage", () => {
       end_user_budget_ids: [],
       end_user_budget_id: null,
     })
+  })
+
+  it("lets an organization owner create the organization a service key", async () => {
+    const fetchMock = mockApi({
+      keys: [],
+      deploymentOperator: false,
+      role: "owner",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByLabelText("Service key"))
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/organizations/me/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      is_service_key: true,
+      end_user_budget_ids: [],
+      end_user_budget_id: null,
+    })
+  })
+
+  it("leaves an operator's service key to the operator on a member's edit form", async () => {
+    mockApi({
+      keys: [
+        apiKey({
+          id: "key-1",
+          key_name: "issued",
+          is_service_key: true,
+          end_user_budget_ids: ["deployment-budget"],
+        }),
+      ],
+      deploymentOperator: false,
+      role: "owner",
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("issued")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    const dialog = await screen.findByRole("dialog", { name: "Edit key" })
+
+    expect(within(dialog).getByLabelText("Name")).toBeInTheDocument()
+    expect(
+      within(dialog).queryByLabelText("Service key"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not offer a member a service key", async () => {
+    mockApi({ keys: [], deploymentOperator: false, role: "member" })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+
+    expect(screen.queryByLabelText("Service key")).not.toBeInTheDocument()
   })
 
   it("creates a budget-exempt key when the toggle is checked", async () => {
@@ -1763,7 +1883,9 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Advanced" }))
 
     expect(
-      screen.getByText(/search tool on \/v1\/search until you change/),
+      screen.getByText(
+        /search and fetch tool on \/v1\/search and \/v1\/fetch until/,
+      ),
     ).toBeInTheDocument()
     expect(
       screen.getByText(/model until you change this access/),

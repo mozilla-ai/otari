@@ -1,13 +1,11 @@
 import type { TraceToolCost } from "@/client"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
-import { formatCost, formatNumber } from "@/shared/helpers/format"
+import { formatCost } from "@/shared/helpers/format"
+
+import { plural } from "./format"
 
 const DOTTED =
   "underline decoration-dotted decoration-control-border underline-offset-4"
-
-function plural(count: number, word: string): string {
-  return `${formatNumber(count)} ${word}${count === 1 ? "" : "s"}`
-}
 
 function Part({
   term,

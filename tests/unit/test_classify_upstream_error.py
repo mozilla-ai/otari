@@ -5,6 +5,7 @@ whether an upstream failure falls through to the next routing-policy attempt.
 import asyncio
 
 import httpx
+import httpx2
 import pytest
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import APIStatusError as AnthropicAPIStatusError
@@ -15,7 +16,7 @@ from openai import APIStatusError as OpenAIAPIStatusError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._attempts import classify_local_attempt_error
-from gateway.services.inference import EmptyCompletionError
+from gateway.services.inference import EmptyCompletionError, is_upstream_connect_failure, is_upstream_stream_interrupted
 
 
 def _http_error(status: int) -> httpx.HTTPStatusError:
@@ -50,6 +51,9 @@ def test_provider_status_codes_fall_through(status: int) -> None:
         (asyncio.TimeoutError(), "timeout"),
         (httpx.TimeoutException("slow"), "timeout"),
         (httpx.ConnectError("refused"), "conn_err"),
+        # Anthropic's SDK runs on httpx2, and a stream it is reading raises httpx2's own errors.
+        (httpx2.ReadTimeout("slow"), "timeout"),
+        (httpx2.ConnectError("refused"), "conn_err"),
     ],
 )
 def test_network_and_timeout_errors_are_retryable(exc: BaseException, expected_class: str) -> None:
@@ -264,3 +268,14 @@ def test_bedrock_client_error_reports_its_http_status() -> None:
     )
 
     assert classify_local_attempt_error(exc) == (True, "http_400")
+
+
+@pytest.mark.parametrize("cut", [httpx.RemoteProtocolError("peer closed"), httpx2.RemoteProtocolError("peer closed")])
+def test_a_stream_cut_short_is_an_interruption_whichever_httpx_raised_it(cut: Exception) -> None:
+    assert is_upstream_stream_interrupted(cut) is True
+
+
+@pytest.mark.parametrize("refused", [httpx.ConnectError("refused"), httpx2.ConnectError("refused")])
+def test_a_connection_never_opened_is_no_interruption_whichever_httpx_raised_it(refused: Exception) -> None:
+    assert is_upstream_connect_failure(refused) is True
+    assert is_upstream_stream_interrupted(refused) is False

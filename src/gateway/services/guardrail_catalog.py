@@ -51,7 +51,10 @@ nothing storable can select.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
 import httpx
@@ -299,6 +302,50 @@ async def fetch_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
             "Guardrail catalog from %s held %d rows this gateway could not read", shown, len(body) - len(profiles)
         )
     return GuardrailCatalog(available=True, profiles=sorted(profiles, key=lambda spec: spec.profile))
+
+
+GUARDRAIL_CATALOG_TTL_S = 30.0
+"""How long one worker answers the profile list without asking the service again."""
+
+
+@dataclass
+class _CatalogCache:
+    url: str = ""
+    fetched_at: float = 0.0
+    catalog: GuardrailCatalog | None = None
+
+
+_cache = _CatalogCache()
+# Held across the fetch, so a burst of misses makes one request and a slow answer
+# cannot overwrite a newer one.
+_cache_lock = asyncio.Lock()
+
+
+def clear_guardrail_catalog_cache() -> None:
+    """Forget the cached profile list, so the next read asks the service."""
+    _cache.catalog = None
+
+
+async def cached_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
+    """:func:`fetch_guardrail_catalog`, answered from this worker's cache while it is fresh.
+
+    Any API key reaches this read, so without the cache every call would be a
+    request to the deployment's guardrails service on the caller's behalf. With
+    it, a worker sends at most one request per ``GUARDRAIL_CATALOG_TTL_S`` for the
+    same URL, however many reads arrive. An unavailable answer is cached too: an
+    outage is when a burst of reads costs the most, one timeout each. Only the
+    last URL is held, so an operator who changes ``guardrails_url`` sees the new
+    service on the next read.
+    """
+    url = (base_url or "").strip().rstrip("/")
+    async with _cache_lock:
+        fresh = time.monotonic() - _cache.fetched_at < GUARDRAIL_CATALOG_TTL_S
+        if _cache.catalog is not None and _cache.url == url and fresh:
+            return _cache.catalog
+        catalog = await fetch_guardrail_catalog(base_url)
+        # Stamped on arrival, so a slow answer is not already stale for the reads queued behind it.
+        _cache.url, _cache.fetched_at, _cache.catalog = url, time.monotonic(), catalog
+        return catalog
 
 
 # ---------------------------------------------------------------------------

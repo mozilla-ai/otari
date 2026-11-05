@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   ChartLegend,
   ChartTooltip,
+  releasedSelection,
   type SeriesDef,
   Sparkline,
   TrendChart,
@@ -160,6 +161,42 @@ describe("TrendChart", () => {
     expect(
       screen.getByRole("img", { name: "cost per day" }),
     ).toBeInTheDocument()
+  })
+})
+
+describe("releasedSelection", () => {
+  const press = (start: number, end: number, moved: boolean) => ({
+    start,
+    end,
+    moved,
+  })
+
+  it("selects the one bucket a mouse click lands on", () => {
+    expect(releasedSelection(press(2, 2, false), "release", 9)).toEqual([2, 2])
+  })
+
+  it("selects a dragged range in order, whichever way it was dragged", () => {
+    expect(releasedSelection(press(5, 2, true), "release", 9)).toEqual([2, 5])
+  })
+
+  it("selects nothing when the pointer leaves without having dragged", () => {
+    expect(releasedSelection(press(3, 3, false), "leave", 9)).toEqual([])
+    expect(releasedSelection(press(3, 4, true), "leave", 9)).toEqual([3, 4])
+  })
+
+  it("selects nothing for a touch that never crossed a bucket", () => {
+    // A finger that lands on the plot to scroll the page.
+    expect(releasedSelection(press(4, 4, false), "touch", 9)).toEqual([])
+  })
+
+  it("selects for a touch that crossed a bucket, even one that came back", () => {
+    expect(releasedSelection(press(1, 3, true), "touch", 9)).toEqual([1, 3])
+    expect(releasedSelection(press(4, 4, true), "touch", 9)).toEqual([4, 4])
+  })
+
+  it("clamps to a series that shrank mid-press, and needs a press", () => {
+    expect(releasedSelection(press(2, 8, true), "release", 5)).toEqual([2, 5])
+    expect(releasedSelection(undefined, "release", 5)).toEqual([])
   })
 })
 

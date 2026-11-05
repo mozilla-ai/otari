@@ -1,5 +1,5 @@
 import { useId, useState } from "react"
-import type { ToolSettingField } from "@/client"
+import type { ToolSettingField, UpdateToolSettingsRequest } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
@@ -60,6 +60,38 @@ export interface FieldCopy {
    * the backend lists in `options`. A value without an entry shows as itself.
    */
   optionLabels?: Record<string, string>
+}
+
+/** A field's copy, with the label its select gives the unset value. */
+export type SettingCopy = FieldCopy & { defaultLabel?: string }
+
+/**
+ * A field's copy from `copies`, else its key and the backend's description, so
+ * a key the backend adds renders before a page is told about it.
+ */
+export function copyFor(
+  copies: Readonly<Record<string, SettingCopy>>,
+  field: ToolSettingField,
+): SettingCopy {
+  return (
+    copies[field.key] ?? {
+      label: field.key,
+      help: field.description ?? "",
+      placeholder: "",
+      isMachineReadable: true,
+    }
+  )
+}
+
+/**
+ * One settable field as the update request that sets it alone, cast at this
+ * one boundary since the keys come from the backend's field list.
+ */
+export function oneField(
+  key: string,
+  value: boolean | number | string | null,
+): UpdateToolSettingsRequest {
+  return { [key]: value } as UpdateToolSettingsRequest
 }
 
 function useDraft(committed: string) {

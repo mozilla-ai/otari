@@ -55,6 +55,7 @@ import {
   useWorkspaces,
 } from "@/shared/api/workspaces"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
+import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 import {
   budgetLabel,
@@ -631,7 +632,10 @@ function DeploymentBudgetsPage() {
       new Map<string, string[]>(),
     )
   }, [workspaces.data, workspaceDefaults.data])
-  const editingBudget = rows.find((budget) => budget.budget_id === editing)
+  const editingTarget = useHeldDialogTarget(
+    rows.find((budget) => budget.budget_id === editing),
+  )
+  const editingBudget = editingTarget.held
   const historyBudget = rows.find((budget) => budget.budget_id === historyOpen)
   // Not gated on the dialog being closed: react-aria returns focus to the
   // element that opened the dialog, and an empty-state CTA that unmounts on
@@ -908,11 +912,13 @@ function DeploymentBudgetsPage() {
           setAddOpen(false)
         }}
       />
-      {/* Key on the row id so switching which budget is edited remounts the form,
-          its fields seed from `initial` on mount only. */}
+      {/* Key on the row id and the opening so each Edit remounts the form, its
+          fields seed from `initial` on mount only. Kept mounted through the
+          exit, which `isOpen` plays. */}
       {editingBudget ? (
         <EditBudgetDialog
-          key={editingBudget.budget_id}
+          key={`${editingBudget.budget_id}:${editingTarget.generation}`}
+          isOpen={editingTarget.isOpen}
           budget={editingBudget}
           users={users.data ?? []}
           rosterReady={rosterReady}
@@ -1006,6 +1012,7 @@ function DeploymentBudgetsPage() {
  * reseed the fields.
  */
 function EditBudgetDialog({
+  isOpen,
   budget: row,
   users,
   rosterReady,
@@ -1015,6 +1022,7 @@ function EditBudgetDialog({
   assigningUsers,
   onClose,
 }: {
+  isOpen: boolean
   budget: Budget
   users: User[]
   rosterReady: boolean
@@ -1035,7 +1043,7 @@ function EditBudgetDialog({
 
   return (
     <BudgetForm
-      isOpen
+      isOpen={isOpen}
       onOpenChange={(open) => {
         if (!open) onClose()
       }}

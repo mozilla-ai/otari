@@ -26,7 +26,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
+from gateway.api.routes._helpers import latest_user_text, routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -39,7 +39,6 @@ from gateway.api.routes._pipeline import (
     prepare_gateway_tools,
     provider_error_headers,
     provider_failure_detail,
-    rate_limit_headers,
     resolve_dispatch_provider,
     resolve_request_context,
     run_non_stream,
@@ -53,7 +52,7 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage, reasoning_tokens_of
+from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
@@ -92,7 +91,7 @@ from gateway.services.tools import (
     with_typed_code_execution_tool,
     without_otari_tool_calls,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -108,7 +107,6 @@ __all__ = [
     "ChatCompletionRequest",
     "chat_completions",
     "log_usage",
-    "rate_limit_headers",
     "router",
     "run_chat_completion",
 ]
@@ -120,13 +118,12 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     The completion-param fields are derived from any-llm's ``CompletionParams``
     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
     forwards. Fields below either tighten a derived field (``messages``,
-    ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
-    gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
-    ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-    before the request is forwarded upstream, or restate a derived field
-    unchanged to document it (``max_completion_tokens``), which is only worth
-    doing where the wire contract is not guessable from the field itself.
+    ``response_format``), add gateway-internal behavior (``mcp_servers``,
+    ``mcp_server_ids``, ``guardrails``, ``tools_header``,
+    ``max_tool_iterations``) that is stripped before the request is forwarded
+    upstream, or restate a derived field unchanged to document it
+    (``max_completion_tokens``), which is only worth doing where the wire
+    contract is not guessable from the field itself.
     """
 
     # A field beyond the ones below is set aside here rather than kept on the
@@ -142,21 +139,6 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # any-llm types ``stream`` as ``bool | None``; keep the OpenAI wire contract
     # (a non-nullable boolean defaulting to false) for stable SDK generation.
     stream: bool = False
-    # Part of the OpenAI chat wire contract, but absent from any-llm's
-    # ``CompletionParams``, so derivation cannot supply it and the derived base
-    # (pydantic's default ``extra="ignore"``) dropped a caller's value before the
-    # provider call. Declared here so it survives ``model_dump`` and rides
-    # any-llm's ``**kwargs`` passthrough into the provider request. Left as a
-    # free-form string rather than an enum: the tier vocabulary is
-    # provider-specific ("auto"/"default"/"flex"/"scale"/"priority" on OpenAI,
-    # "auto"/"standard_only" on Anthropic) and grows independently of this
-    # gateway, so the provider is the right place to reject an unknown value.
-    # ``ResponsesParams`` already declares it, so /api/v1/responses never had the gap.
-    #
-    # Stopgap: remove this declaration once ``CompletionParams`` models the param
-    # and the SDK pin is bumped (mozilla-ai/any-llm#1269, tracked in #565). Until
-    # then it also shadows whatever annotation any-llm picks for it.
-    service_tier: str | None = None
     # Redeclared only to carry a description: the field is derived, but the
     # relationship between the two output-cap fields is the whole reason a caller
     # gets a completion instead of a 502, and it is not guessable from the schema.
@@ -330,6 +312,7 @@ class _ChatAdapter:
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
             cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
+            cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
         return GatewayUsage(**fields)
@@ -379,7 +362,7 @@ class _ChatAdapter:
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
     ) -> ChatCompletion:
-        # ``native_tools`` names the web tools whose calls the answer reports in
+        # ``native_tools`` names the built-in tools whose calls the answer reports in
         # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
         # Each kwarg is passed only when set, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
@@ -404,8 +387,11 @@ class _ChatAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
         if native_tools:
@@ -601,6 +587,7 @@ async def run_chat_completion(
             credential_workspace_id=target.credential_workspace_id,
             hosted_credential=target.hosted_credential,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
@@ -632,9 +619,8 @@ async def run_chat_completion(
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             session_principal=session_principal,
-            routing_signal=lambda: routing_signal_from_messages(
-                request.messages, raw_request, has_tools=bool(request.tools)
-            ),
+            streaming=bool(request.stream),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             tools=request.tools,
             code_execution_policies=tool_ports.code_execution_policy,
@@ -642,6 +628,7 @@ async def run_chat_completion(
             idempotency=None if request.stream else idempotency,
             tags=resolved_tags(tags_header, request.metadata),
             turn=read_turn("chat", request.messages),
+            context=lambda: read_context("chat", request.messages, tools=request.tools),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:

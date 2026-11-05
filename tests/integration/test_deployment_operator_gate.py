@@ -50,12 +50,12 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/agent-telemetry/summary"),
     ("GET", f"{API_ROOT}/aliases"),
     ("GET", f"{API_ROOT}/routing/policies"),
-    ("GET", f"{API_ROOT}/routing/status"),
     ("GET", f"{API_ROOT}/models/discoverable"),
     ("GET", f"{API_ROOT}/search-tools"),
     ("GET", f"{API_ROOT}/settings"),
     ("GET", f"{API_ROOT}/settings/mail"),
     ("GET", f"{API_ROOT}/settings/maintenance-mode"),
+    ("GET", f"{API_ROOT}/settings/country-database"),
     ("GET", f"{API_ROOT}/health-checks"),
     # A run spends the deployment's provider credit.
     ("POST", f"{API_ROOT}/health-checks/run"),
@@ -92,15 +92,17 @@ _DATA_PLANE_PROBES: list[tuple[str, str]] = [
 
 # The exception, and the reason the data-plane dependency was split rather than
 # just tightened: these describe the deployment instead of acting on it, and the
-# dashboard's Models and Pricing pages are built on them. The built-in guardrail
-# catalog joins them because it describes the installed any-guardrail and dials
-# nothing; the profiles read beside it does dial the deployment's own guardrails
-# service, so that one is not here.
+# dashboard's Models and Pricing pages are built on them. The two guardrail
+# catalogs join them: the built-in one describes the installed any-guardrail, and
+# the profiles read names what any caller may send (otari#2690), answered from a
+# 30 second cache, so a worker sends the guardrails service at most one request
+# in that time.
 _CATALOG_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/models"),
     ("GET", f"{API_ROOT}/pricing"),
     ("GET", f"{API_ROOT}/tools"),
     ("GET", f"{API_ROOT}/tool-settings/guardrails/catalog"),
+    ("GET", f"{API_ROOT}/tool-settings/guardrails/profiles"),
 ]
 
 # Routers that resolve the caller and check their standing themselves. A plain

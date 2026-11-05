@@ -71,9 +71,6 @@ describe("nav registry", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Playground",
       "Overview",
-      "Activity",
-      "Sessions",
-      "Usage",
       "Models",
       "Routing",
       "Tools",
@@ -90,7 +87,8 @@ describe("nav registry", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
-      "Web search pricing",
+      "Subagent router",
+      "Web search",
       "Code execution pricing",
       "Health",
     ])
@@ -133,6 +131,7 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/recommender",
       "/admin/web-search",
       "/admin/code-execution",
       "/health-checks",
@@ -155,6 +154,7 @@ describe("nav registry", () => {
       "/settings",
       "/admin/accounts",
       "/admin/hosted-providers",
+      "/admin/recommender",
       "/admin/web-search",
       "/admin/code-execution",
       "/health-checks",
@@ -167,6 +167,7 @@ describe("nav registry", () => {
     expect(others).not.toContain("/settings")
     expect(others).not.toContain("/admin/accounts")
     expect(others).not.toContain("/admin/hosted-providers")
+    expect(others).not.toContain("/admin/recommender")
     expect(others).not.toContain("/admin/web-search")
     expect(others).not.toContain("/admin/code-execution")
     expect(others).not.toContain("/health-checks")
@@ -183,7 +184,8 @@ describe("nav registry", () => {
       ["/settings", "settings", "refused"],
       ["/admin/accounts", "admin", "unlisted"],
       ["/admin/hosted-providers", "hosted_providers", "unlisted"],
-      ["/admin/web-search", "pricing", "refused"],
+      ["/admin/recommender", "agent_recommenders", "unlisted"],
+      ["/admin/web-search", "tools", "refused"],
       ["/admin/code-execution", "pricing", "refused"],
       ["/health-checks", "health_checks", "refused"],
     ] as const) {
@@ -313,19 +315,15 @@ describe("nav registry", () => {
     expect(overview?.capability).toBeUndefined()
   })
 
-  it("names the surface each observability page reads", () => {
-    // Activity and Usage are two views over /v1/usage, so they gate together on
-    // the surface rather than each on a name of its own; Sessions reads traces.
-    const observability = NAV_SECTIONS.find(
-      (section) => section.id === "observe",
-    )
-    // The whole section now: the index moved out to its own group above, so
-    // there is nothing ungated left in here to skip past.
-    expect(observability?.items.map((item) => item.surface)).toEqual([
-      "usage",
-      "traces",
-      "usage",
-    ])
+  it("files the Overview's tabs under the index rather than a section", () => {
+    // Usage, Requests and Sessions are views of the landing page, each gated
+    // on its own surface inside it, so they add no row.
+    const overview = NAV_ITEMS.find((item) => item.label === "Overview")
+    expect(overview?.views).toEqual(["/requests", "/sessions"])
+    // The section stays declared, empty, for the rows an overlay files under it.
+    expect(
+      NAV_SECTIONS.find((section) => section.id === "observe")?.items,
+    ).toEqual([])
   })
 
   it("gates no base entry on a capability", () => {
@@ -377,6 +375,9 @@ describe("nav registry", () => {
       "organization_usage",
     )
     expect(navItemForPath("/organization/provider-keys")?.surface).toBe(
+      "organization_providers",
+    )
+    expect(navItemForPath("/organization/web-search-keys")?.surface).toBe(
       "organization_providers",
     )
     expect(navItemForPath("/organization/guardrails")?.surface).toBe(
@@ -443,6 +444,13 @@ describe("nav registry", () => {
       "Providers",
       "Guardrails",
       "Org settings",
+    ])
+    // Providers groups the organization's two kinds of provider key.
+    expect(
+      general?.items[0]?.children?.map((child) => [child.label, child.to]),
+    ).toEqual([
+      ["Inference", "/organization/provider-keys"],
+      ["Web search", "/organization/web-search-keys"],
     ])
   })
 
@@ -563,6 +571,13 @@ describe("isPathVisible", () => {
 
   it("inherits the gate of the destination a deeper path sits under", () => {
     expect(isPathVisible("/routing/new", without("routing"))).toBe(false)
+  })
+
+  it("answers a tab of the Overview with the Overview", () => {
+    expect(navItemForPath("/requests")?.label).toBe("Overview")
+    expect(navItemForPath("/sessions")?.label).toBe("Overview")
+    // Ungated, like the page it is a view of: each tab gates itself.
+    expect(isPathVisible("/sessions", without("traces"))).toBe(true)
   })
 
   it("leaves a path the registry does not declare ungated", () => {
@@ -750,7 +765,8 @@ describe("composeNavItems", () => {
 
 describe("pageLabelForPath", () => {
   it("names a rail page and a chrome page from one place", () => {
-    expect(pageLabelForPath("/usage")).toBe("Usage")
+    expect(pageLabelForPath("/keys")).toBe("API keys")
+    expect(pageLabelForPath("/sessions")).toBe("Overview")
     expect(pageLabelForPath("/invitations")).toBe("Invitations")
     expect(pageLabelForPath("/account")).toBe("Account")
     expect(pageLabelForPath("/nowhere")).toBeUndefined()

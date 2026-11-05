@@ -21,6 +21,7 @@ const PROVIDER_MARK_IDS: ReadonlySet<string> = new Set([
   "azure",
   "azureanthropic",
   "azureopenai",
+  "bedrock",
   "cerebras",
   "cohere",
   "dashscope",

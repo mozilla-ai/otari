@@ -129,7 +129,10 @@ def test_a_named_hosted_provider_is_listed_under_its_name(
 
     assert listed.status_code == 200, listed.text
     ids = {model["id"] for model in listed.json()["data"]}
-    assert {"openai-eu:gpt-4o", "openai:gpt-4o"} <= ids
+    assert "openai/gpt-4o" in ids
+    detail = client.get(f"{API_ROOT}/catalog/models/openai/gpt-4o", headers=api_key_header)
+    assert detail.status_code == 200, detail.text
+    assert {"openai-eu:gpt-4o", "openai:gpt-4o"} <= {offering["selector"] for offering in detail.json()["offerings"]}
 
 
 def test_a_name_nothing_defines_is_still_unknown(client: TestClient, master_key_header: dict[str, str]) -> None:

@@ -105,6 +105,12 @@ export type TraceList = Schemas["TraceListPublic"]
 export type TraceCount = Schemas["TraceCountPublic"]
 export type TraceSeries = Schemas["TraceSeriesPublic"]
 export type TraceDetail = Schemas["TraceDetailPublic"]
+export type TraceContentPolicy = Schemas["TraceContentPolicyPublic"]
+export type TraceContentShare = Schemas["ContentSharePublic"]
+export type TraceContentShareList = Schemas["ContentShareListPublic"]
+export type TraceContentShareCreate = Schemas["ContentShareCreate"]
+export type TraceShareAudience = Schemas["ContentSharePublic"]["audience"]
+export type TraceBreakGlassReadList = Schemas["BreakGlassReadListPublic"]
 export type TraceSpan = Schemas["SpanPublic"]
 export type TraceTurn = Schemas["TurnPublic"]
 export type TraceGateSummary = Schemas["GateSummaryPublic"]
@@ -316,6 +322,20 @@ export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
 export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 
+// The organization's own search and fetch keys. A workspace uses the key it
+// pinned, else the organization's default of the kind, else the deployment's
+// own search or fetch tool.
+export type OrgWebSearchKey = Schemas["OrgWebSearchKeyPublic"]
+export type OrgWebSearchKeys = Schemas["OrgWebSearchKeysPublic"]
+export type CreateOrgWebSearchKeyRequest =
+  Schemas["OrgWebSearchKeyCreateRequest"]
+export type UpdateOrgWebSearchKeyRequest =
+  Schemas["OrgWebSearchKeyUpdateRequest"]
+// One workspace's view of those keys: which of each kind it uses, and what its
+// searches and fetches run on.
+export type WorkspaceWebSearchKey = Schemas["WorkspaceWebSearchKeyPublic"]
+export type WorkspaceWebSearchKeys = Schemas["WorkspaceWebSearchKeysPublic"]
+
 // The models an organization offers on one of those keys. `price_source` names
 // the rung of the pricing ladder that answered, in the vocabulary the Models
 // page already uses, so a rate shown here and a rate shown there cannot claim
@@ -353,6 +373,15 @@ export type CreateHostedProviderRequest = Defaulted<
 >
 export type UpdateHostedProviderRequest = Schemas["HostedProviderUpdateRequest"]
 export type HostedModel = Schemas["HostedModelPublic"]
+
+// The decision models that pick a subagent's model when a coding agent asks,
+// and the two token rates a recommendation is charged at. Deployment-wide and
+// operator-only, like the hosted providers above, and keyed on a row id. A
+// stored key is known by its last four characters and nothing else.
+export type AgentRecommender = Schemas["AgentRecommenderPublic"]
+export type AgentRecommenders = Schemas["AgentRecommendersPublic"]
+export type CreateAgentRecommenderRequest = Schemas["AgentRecommenderCreate"]
+export type UpdateAgentRecommenderRequest = Schemas["AgentRecommenderUpdate"]
 export type HostedModels = Schemas["HostedModelsPublic"]
 export type CreateHostedModelRequest = Schemas["HostedModelCreateRequest"]
 export type UpdateHostedModelRequest = Schemas["HostedModelUpdateRequest"]
@@ -361,6 +390,11 @@ export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
 export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
 export type HostedCatalogProviderRefresh =
   Schemas["HostedCatalogProviderRefreshPublic"]
+export type HostedCatalogPriceUpdate = Schemas["HostedCatalogPriceUpdatePublic"]
+export type HostedCatalogUpdatePreview =
+  Schemas["HostedCatalogUpdatePreviewPublic"]
+export type HostedCatalogUpdateResult = Schemas["HostedCatalogUpdatePublic"]
+export type HostedCatalogUpdateRequest = Schemas["HostedCatalogUpdateRequest"]
 export type TestHostedProviderRequest = Schemas["HostedProviderTestRequest"]
 export type HostedProviderTestResult = Schemas["HostedProviderTestPublic"]
 export type ReencryptHostedProvidersResult =
@@ -391,7 +425,6 @@ export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
 }
 export type AliasResponse = Schemas["AliasResponse"]
 export type CreateAliasRequest = Schemas["AliasRequest"]
-export type RouterStatus = Schemas["RouterStatus"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails
@@ -404,6 +437,8 @@ export type MailSettings = Schemas["MailSettings"]
 export type SendTestMailRequest = Schemas["SendTestMailRequest"]
 export type SendTestMailResponse = Schemas["SendTestMailResponse"]
 export type MaintenanceMode = Schemas["MaintenanceMode"]
+export type CountryDatabaseStatus = Schemas["CountryDatabaseStatus"]
+export type StoredCountryDatabasePublic = Schemas["StoredCountryDatabasePublic"]
 export type ManagedTool = Schemas["ManagedTool"]
 export type ToolsResponse = Schemas["ToolsResponse"]
 export type ToolSettingField = Schemas["ToolSettingField"]
@@ -437,8 +472,12 @@ export type UpdateRateLimitRuleRequest = Schemas["RateLimitRuleUpdate"]
 // Search tools
 // ---------------------------------------------------------------------------
 export type SearchProviderInfo = Schemas["SearchProviderSchema"]
+export type SearchProviderOption = Schemas["SearchProviderOptionSchema"]
 export type StoredSearchTool = Schemas["StoredSearchToolSchema"]
-export type ConfigSearchTool = Schemas["ConfigSearchToolSchema"]
+export type CreatedSearchTool = Schemas["CreatedSearchToolSchema"]
+export type SearchToolTestRequest = Schemas["SearchToolTestRequest"]
+export type StoredSearchToolTestRequest = Schemas["StoredSearchToolTestRequest"]
+export type SearchToolTestResponse = Schemas["SearchToolTestResponse"]
 export type SearchToolsResponse = Schemas["SearchToolsResponse"]
 export type CreateSearchToolRequest = Schemas["CreateSearchToolRequest"]
 export type UpdateSearchToolRequest = Schemas["UpdateSearchToolRequest"]
@@ -514,6 +553,12 @@ export type DeploymentUsers = Schemas["DeploymentUsersPublic"]
 export type UpdateDeploymentUserRequest = Schemas["DeploymentUserUpdateRequest"]
 /** A link that sets an account's password: mailed, or returned to pass on. */
 export type PasswordLink = Schemas["PasswordLinkPublic"]
+/** An address or a domain blocked from holding an account on the deployment. */
+export type BlockedEmail = Schemas["BlockedEmailPublic"]
+export type BlockedEmails = Schemas["BlockedEmailsPublic"]
+/** A new entry, with how many existing accounts it now blocks. */
+export type BlockedEmailCreated = Schemas["BlockedEmailCreatedPublic"]
+export type CreateBlockedEmailRequest = Schemas["BlockedEmailCreateRequest"]
 
 export type Workspace = Schemas["WorkspacePublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
@@ -569,6 +614,16 @@ export type WorkspaceProviderKeyOverride =
 // sends one at a time and lets the gateway resolve the other.
 export type SetWorkspaceProviderKeyOverrideRequest =
   Schemas["WorkspaceProviderKeyOverrideRequest"]
+
+// One hosted provider as one workspace sees it: on or off, and narrowed to
+// `models` or not (`null` is every model the deployment serves on it).
+// `customized` says the workspace stores a departure; `served_models` is null
+// where the deployment advertises no roster for the provider.
+export type WorkspaceHostedProvider = Schemas["WorkspaceHostedProviderPublic"]
+export type SetWorkspaceHostedProviderRequest =
+  Schemas["WorkspaceHostedProviderAccessRequest"]
+// What one workspace requires of every provider serving it.
+export type WorkspaceProviderPolicy = Schemas["WorkspaceProviderPolicyPublic"]
 
 // The first-request setup guide's state, and the API key it issues. The wire
 // names carry the platform's "activation" vocabulary (see

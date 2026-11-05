@@ -13,6 +13,7 @@ from any_llm.exceptions import AnyLLMError, ModelNotFoundError, UnsupportedParam
 from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
 from any_llm.types.responses import Response
 
+from gateway.api.routes.responses import _ADAPTER
 from gateway.services.inference import (
     REASONING_ITEM_ID_PREFIX,
     aresponses_via_chat_completions,
@@ -828,3 +829,46 @@ async def test_a_safety_identifier_reaches_a_bridged_provider_in_its_own_field(
 
     assert "safety_identifier" not in captured
     assert {key: captured[key] for key in ("user", "metadata", "requestMetadata") if key in captured} == expected
+
+
+# ---------- an upstream Otari's stream ----------
+
+
+@pytest.mark.asyncio
+async def test_otari_provider_stream_of_raw_event_dicts_is_typed() -> None:
+    # Another Otari serving a bridged model (deepinfra, here) sends this sequence,
+    # which any-llm's Otari provider hands over as plain dicts.
+    bridged = await _stream(
+        {},
+        [
+            _chunk({"role": "assistant", "reasoning": {"content": "Hmm"}}),
+            _chunk({"content": "Hi"}),
+            _chunk({}, finish_reason="stop"),
+            _chunk(None, usage=_USAGE),
+        ],
+        provider=LLMProvider.DEEPINFRA,
+    )
+    raw = [event.model_dump(mode="json", exclude_none=True) for event in bridged]
+    closed = False
+
+    async def raw_events() -> AsyncIterator[dict[str, Any]]:
+        nonlocal closed
+        try:
+            for event in raw:
+                yield event
+        finally:
+            closed = True
+
+    async def native(**_: Any) -> Any:
+        return raw_events()
+
+    stream = await call_responses(
+        native, {"provider": LLMProvider.OTARI, "model": "deepinfra:m", "input_data": "hi", "stream": True}
+    )
+    events = [event async for event in stream]
+
+    assert [type(event) for event in events] == [type(event) for event in bridged]
+    assert [event.type for event in events] == [event["type"] for event in raw]
+    assert events[-1].response.usage.input_tokens == 11
+    assert all(_ADAPTER.format_chunk(event).startswith(f"event: {event.type}\n") for event in events)
+    assert closed

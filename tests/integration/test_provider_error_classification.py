@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import anthropic
 import httpx
+import httpx2
 import openai
 import pytest
 from any_llm.exceptions import UnsupportedParameterError
@@ -397,9 +398,9 @@ def test_messages_answers_a_provider_400_with_the_providers_sentence(
     messages_request_body: dict[str, Any],
 ) -> None:
     body = {"type": "error", "error": {"type": "invalid_request_error", "message": "max_tokens: Field required"}}
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     upstream = anthropic.BadRequestError(
-        f"Error code: 400 - {body}", response=httpx.Response(400, request=request, json=body), body=body
+        f"Error code: 400 - {body}", response=httpx2.Response(400, request=request, json=body), body=body
     )
     messages_request_body["metadata"] = {"user_id": "test-user"}
 

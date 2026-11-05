@@ -38,8 +38,9 @@ def test_an_entry_named_after_its_implementation_keeps_no_name_of_its_own() -> N
         ("anthropic", {"api_key": "sk"}, {"anthropic"}, "already holds the name"),
         ("bedrock", {"client_args": {"region_name": "eu-west-1"}}, set(), "names no key"),
         ("nope", {"provider_type": "not-a-provider", "api_key": "sk"}, set(), "not-a-provider"),
+        ("otari", {"api_base": "http://otari.test/v1"}, set(), "is reserved"),
     ],
-    ids=["extra-field", "another-providers-name", "taken", "ambient-credentials", "unknown-implementation"],
+    ids=["extra-field", "another-providers-name", "taken", "ambient-credentials", "unknown-implementation", "reserved"],
 )
 def test_an_entry_a_hosted_provider_cannot_hold_stays_in_config(
     name: str, entry: dict[str, object], hosted: set[str], reason: str

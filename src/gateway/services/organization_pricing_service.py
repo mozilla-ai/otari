@@ -40,7 +40,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -77,6 +77,7 @@ from gateway.services.provider_kwargs import is_deployment_instance_key, split_s
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.price_unit import PriceUnit
 
 
 @dataclass(frozen=True)
@@ -99,7 +100,8 @@ class PricingOverrideInput:
     pricing_tiers: list[dict[str, object]]
     effective_from: datetime
     effective_to: datetime | None
-    unit: str = "tokens"
+    unit: PriceUnit = "token"
+    rates: dict[str, Any] | None = None
 
 
 def _describe_period(effective_from: datetime, effective_to: datetime | None) -> str:
@@ -483,6 +485,7 @@ class OrganizationPricingService:
             effective_from=effective_from,
             effective_to=effective_to,
             unit=override.unit,
+            rates=override.rates,
             origin=await self._origin_for(user),
         )
         self.db.add(row)
@@ -608,6 +611,8 @@ class OrganizationPricingService:
         row.effective_from = effective_from
         row.effective_to = effective_to
         row.unit = override.unit
+        if override.rates is not None:
+            row.rates = override.rates
         # The rate is somebody's choice now, whatever it was before. A row the
         # offered-models surface seeded carries ``seed`` and its refresh moves it
         # to each day's community default; leaving that marking on a rate an
@@ -653,9 +658,9 @@ def validate_rates(override: PricingOverrideInput) -> None:
 
 
 def validate_unit(kind: PricingKind, unit: str) -> None:
-    """Refuse a search or fetch rate in any unit but ``requests``, since it is charged per call."""
-    if kind != MODEL_KIND and unit != "requests":
-        raise TenancyValidationError(f"a {kind} rate is per call, so its unit is 'requests'")
+    """Refuse a search or fetch rate in any unit but ``request``, since it is charged per call."""
+    if kind != MODEL_KIND and unit != "request":
+        raise TenancyValidationError(f"a {kind} rate is per call, so its unit is 'request'")
 
 
 def validate_period(effective_from: datetime, effective_to: datetime | None) -> None:

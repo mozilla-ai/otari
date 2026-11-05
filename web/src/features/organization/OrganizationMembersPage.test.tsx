@@ -402,6 +402,34 @@ describe("OrganizationMembersPage", () => {
     })
   })
 
+  it("invites a viewer as a viewer of the workspaces that were ticked", async () => {
+    const requests = mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    await user.type(screen.getByLabelText("Email addresses"), "ada@example.com")
+    await pickOption(user, "Role", "Viewer")
+    expect(await screen.findByLabelText("Production")).toBeChecked()
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Invite member",
+      }),
+    )
+
+    const post = requests.find((request) => request.method === "POST")
+    expect(post?.body).toEqual({
+      email: "ada@example.com",
+      role: "viewer",
+      workspace_assignments: [{ workspace_id: "ws-1", role: "viewer" }],
+    })
+  })
+
   it.each([false, true])(
     "offers the invitation whether or not mail can be sent (mail_ready: %s)",
     async (mailReady) => {

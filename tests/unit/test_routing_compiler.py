@@ -181,7 +181,7 @@ def _router_spec(*candidates: str) -> PolicySpec:
     pool = list(candidates) or ["openai:gpt-5-nano", "openai:gpt-5-mini"]
     return PolicySpec.model_validate(
         {
-            "select": [{"router": "knn", "candidates": pool}, {"default": "openai:gpt-5-mini"}],
+            "select": [{"router": "priority", "candidates": pool}, {"default": "openai:gpt-5-mini"}],
             "on_failure": [],
         }
     )
@@ -192,13 +192,13 @@ def test_no_ordering_serves_the_default_and_says_nothing(
 ) -> None:
     """Compiling without an ordering is silent, whichever reason produced it.
 
-    A decline (cold pool, low confidence, caller opted out) is normal operation, and
+    A decline (no usable candidate, caller opted out) is normal operation, and
     ``explain`` and the CLI compile with no request at all by design. Only the
     caller can tell those apart from a backend this build does not have, so the
     warning lives there (see ``test_routing_decide``); warning here made ``explain``
     report a misconfiguration that did not exist.
     """
-    for ordering in (None, RouterOrdering([], rationale="cold pool")):
+    for ordering in (None, RouterOrdering([], rationale="no candidate is usable")):
         plan = compile_policy(config, "routed", _router_spec(), router_ordering=ordering)
         assert [attempt.model for attempt in plan.attempts] == ["gpt-5-mini"]
         assert plan.selection_reason == "default"
@@ -217,21 +217,21 @@ def test_a_router_ranking_becomes_the_whole_plan(config: GatewayConfig) -> None:
     spec = PolicySpec.model_validate(
         {
             "select": [
-                {"router": "knn", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
+                {"router": "priority", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
                 {"default": "openai:gpt-5-mini"},
             ],
             "on_failure": ["openai:gpt-5"],
         }
     )
-    ordering = RouterOrdering(["openai:gpt-5-nano", "openai:gpt-5-mini"], confidence=0.8, rationale="knn")
+    ordering = RouterOrdering(["openai:gpt-5-nano", "openai:gpt-5-mini"], confidence=0.8, rationale="priority order")
 
     plan = compile_policy(config, "routed", spec, router_ordering=ordering)
 
     assert [attempt.model for attempt in plan.attempts] == ["gpt-5-nano", "gpt-5-mini", "gpt-5"]
-    assert plan.selection_reason == "router:knn"
+    assert plan.selection_reason == "router:priority"
     assert [attempt.selection_reason for attempt in plan.attempts] == [
-        "router:knn",
-        "router:knn",
+        "router:priority",
+        "router:priority",
         "on_failure",
     ]
     # Kept on the plan so the activity log can say why this model was chosen.
@@ -246,7 +246,7 @@ def test_a_routed_candidate_the_caller_may_not_use_is_still_dropped(config: Gate
     is the belt-and-braces case: a stale ordering, or a backend that returned
     something outside the pool, must not become an access-control bypass.
     """
-    ordering = RouterOrdering(["openai:gpt-5-nano", "openai:gpt-5-mini"], rationale="knn")
+    ordering = RouterOrdering(["openai:gpt-5-nano", "openai:gpt-5-mini"], rationale="priority order")
 
     plan = compile_policy(
         config,
@@ -264,15 +264,14 @@ def test_a_condition_ahead_of_the_router_means_the_router_is_not_consulted() -> 
     """Order decides whether the router runs at all.
 
     A ``when`` entry ahead of the router wins outright and the ranking is thrown
-    away, so asking a backend for one costs a paid embedding call plus a scan of the
-    caller's examples for nothing, and logs a decision the request did not use. The
+    away, so asking a backend for one logs a decision the request did not use. The
     pipeline gates on this before it ranks.
     """
     spec = PolicySpec.model_validate(
         {
             "select": [
                 {"when": {"budget_used_pct": {"gte": 80}}, "target": "openai:gpt-5-nano"},
-                {"router": "knn", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
+                {"router": "priority", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
                 {"default": "openai:gpt-5-mini"},
             ]
         }
@@ -398,10 +397,10 @@ def test_an_alias_claims_its_name_before_the_catalog(catalog_config: GatewayConf
     assert compile_catalog_plan(catalog_config, _CATALOG_ID) is None
 
 
-def test_a_catalog_offering_with_no_stored_credential_leaves_the_plain_path(
+def test_a_catalog_offering_with_no_stored_credential_stays_in_the_plan(
     catalog_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The plain path asks the hosted-credential port for that offering, and a plan does not."""
+    """The walk asks the hosted-credential port for that offering when it reaches it."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     catalog_config.providers["anthropic"] = {}
     _install_catalog(
@@ -409,4 +408,10 @@ def test_a_catalog_offering_with_no_stored_credential_leaves_the_plain_path(
         OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
     )
 
-    assert compile_catalog_plan(catalog_config, _CATALOG_ID) is None
+    plan = compile_catalog_plan(catalog_config, _CATALOG_ID)
+
+    assert plan is not None
+    assert [(attempt.instance, attempt.model) for attempt in plan.attempts] == [
+        ("openai", "m1-a"),
+        ("anthropic", "m1-b"),
+    ]

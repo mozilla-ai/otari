@@ -25,9 +25,9 @@ from gateway.models.tools import (
     WebSearchCredential,
     WebToolCredentialSource,
 )
-from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tools import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search import _resolve
+from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, InstanceRateKey
 
 _ORG = WebToolCredentialSource.ORG
@@ -99,7 +99,7 @@ _SEARCH_CASES = [
             "api_key": "exa-instance-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa",
-            "rate_keys": (InstanceRateKey("search", "exa", "exa:exa"), "otari:web_search"),
+            "rate_keys": (InstanceRateKey("search", "exa", "exa:exa"),),
             "timeout": 15.0,
         },
     ),
@@ -323,13 +323,16 @@ def test_an_organization_keys_label_carries_the_prefix_pricing_reads() -> None:
     assert resolved.label.startswith(ORGANIZATION_KEY_LABEL_PREFIX)
 
 
-def test_the_fallback_rate_keys_are_the_pricing_services_keys_for_the_tools() -> None:
-    search = resolve_search(GatewayConfig(search_tools={"test": _FAKE}), None, requested=None, request_options=None)
+def test_an_instance_is_priced_by_its_own_row_alone_in_the_loop_and_direct() -> None:
+    config = GatewayConfig(search_tools={"test": _FAKE})
+    in_loop = resolve_search(config, None, requested=None, request_options=None)
+    direct = resolve_search(config, None, requested="test", request_options=None)
     fetch = resolve_fetch(GatewayConfig(), None, requested=None, for_search=None)
 
-    assert search is not None
-    assert search.rate_keys[-1] == gateway_tool_pricing_key("web_search")
-    assert fetch.rate_keys[-1] == gateway_tool_pricing_key("web_fetch")
+    assert in_loop is not None
+    assert direct is not None
+    assert in_loop.rate_keys == direct.rate_keys == (InstanceRateKey("search", "test", "fake:test"),)
+    assert fetch.rate_keys == (InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"),)
 
 
 def test_a_name_no_search_instance_has_is_not_found() -> None:
@@ -754,7 +757,7 @@ _FETCH_CASES = [
             "api_key": "",
             "api_base": "",
             "label": "builtin:builtin_fetch",
-            "rate_keys": (InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"), "otari:web_fetch"),
+            "rate_keys": (InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"),),
             # The built-in fetcher's own deadline.
             "timeout": 5.0,
         },
@@ -768,7 +771,7 @@ _FETCH_CASES = [
             "api_key": "exa-fetch-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa-fetch",
-            "rate_keys": (InstanceRateKey("fetch", "exa-fetch", "exa:exa-fetch"), "otari:web_fetch"),
+            "rate_keys": (InstanceRateKey("fetch", "exa-fetch", "exa:exa-fetch"),),
             "timeout": 15.0,
         },
     ),
@@ -864,6 +867,39 @@ def test_fetch_options_layer_the_instances_and_take_out_the_count(caplog: pytest
     assert resolved.max_chars == 500
     assert dict(resolved.options) == {"title": "T", "account": "a"}
     assert "'max_results'" in _warnings(caplog)
+
+
+def test_a_direct_fetch_takes_the_request_layer_checked() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake", "options": {"title": "T"}}})
+
+    resolved = resolve_fetch(config, None, requested="test-fetch", for_search=None, request_options={"title": "R"})
+
+    assert dict(resolved.options) == {"title": "R"}
+    for refused in ({"nope": 1}, {"account": "ours"}):
+        with pytest.raises(WebSearchOptionRefusedError):
+            resolve_fetch(config, None, requested="test-fetch", for_search=None, request_options=refused)
+
+
+def test_a_direct_fetch_on_a_credential_keeps_the_instances_name_and_timeout() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake", "timeout": 4}})
+    credential = WebFetchCredential(provider="exa", source=_ORG, api_key="org-fetch-key")
+
+    resolved = resolve_fetch(config, None, requested="test-fetch", for_search=None, direct_credential=credential)
+
+    assert (resolved.name, resolved.provider, resolved.api_key, resolved.timeout) == (
+        "test-fetch",
+        "exa",
+        "org-fetch-key",
+        4.0,
+    )
+    assert (resolved.label, resolved.rate_keys, resolved.on_credential) == ("org:exa", ("otari:web_fetch",), True)
+
+
+def test_a_direct_fetch_on_an_instance_without_a_timeout_gets_the_direct_one() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake"}})
+
+    assert resolve_fetch(config, None, requested="test-fetch", for_search=None).timeout == 30.0
+    assert resolve_fetch(config, None, requested="builtin_fetch", for_search=None).timeout == NETWORK_DEADLINE_SECONDS
 
 
 def test_fetch_takes_no_workspace_layer() -> None:

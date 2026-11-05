@@ -22,7 +22,7 @@ from opentelemetry import trace
 
 from gateway.core.settings.tools import DEFAULT_SEARXNG_ENGINES
 from gateway.services._tool_loop import MaxToolIterationsExceeded
-from gateway.services.tool_usage import ToolUsageTally, is_tool_error
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally, is_tool_error
 from gateway.services.tools import DEFAULT_MAX_RESULTS as DEFAULT_MAX_RESULTS
 from gateway.services.tools import WEB_FETCH_TOOL_NAME as WEB_FETCH_TOOL_NAME
 from gateway.services.tools import WEB_RETRIEVAL_RESULT_MAX_BYTES as WEB_RETRIEVAL_RESULT_MAX_BYTES
@@ -37,7 +37,7 @@ from gateway.services.tools import (
 from gateway.services.tools import WEB_SEARCH_TOOL_NAME as WEB_SEARCH_TOOL_NAME
 from gateway.services.tools import web_fetch_tool_definition as web_fetch_tool_definition
 from gateway.services.tools import web_search_tool_definition as web_search_tool_definition
-from gateway.services.traces import RequestTrace
+from gateway.services.traces import RequestTrace, ToolSpans
 from gateway.services.web_fetch_service import WebFetchService
 from gateway.services.web_retrieval_network import (
     PinnedAsyncHTTPTransport,
@@ -168,6 +168,7 @@ class WebRetrievalBackend:
         self._tally = tally
         # The request's trace, which records each search and fetch. None outside a request.
         self._trace = trace
+        self._spans = ToolSpans(trace, "otari_web_search", WEB_SEARCH_TOOL_NAME)
         self._engines = engines
         # Clamp to [1, MAX_RESULTS_CAP]. Sub-1 values (e.g. ``0`` or ``-1``
         # from a misconfigured env var) would otherwise reach
@@ -319,21 +320,23 @@ class WebRetrievalBackend:
             self._last_failure = self._fetch.take_last_failure()
             return fetched
         started = datetime.now(UTC)
+        if self._tally is not None and not await self._tally.admit(
+            WEB_SEARCH_TOOL_NAME, deployment_paid=not self._on_credential
+        ):
+            self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
+            self._spans.record(started, ok=False, arguments=arguments)
+            return TOOL_BUDGET_EXCEEDED_TEXT
         try:
             result = await self._search_tool(arguments)
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
-            self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=False)
+            self._spans.record(started, ok=False, arguments=arguments)
             raise
         if self._tally is not None:
             self._tally.record_result(WEB_SEARCH_TOOL_NAME, result, deployment_paid=not self._on_credential)
-        self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=not is_tool_error(result))
+        self._spans.record(started, ok=not is_tool_error(result), arguments=arguments, result=result)
         return result
-
-    def _record_span(self, tool_name: str, tool_type: str, started: datetime, *, ok: bool) -> None:
-        if self._trace is not None:
-            self._trace.record_tool_call(tool_name=tool_name, tool_type=tool_type, started=started, ok=ok)
 
     async def _search_tool(self, arguments: dict[str, Any]) -> str:
         if self._client is None:

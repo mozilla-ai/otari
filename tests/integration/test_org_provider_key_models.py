@@ -152,7 +152,7 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]
             input_price_per_million=Decimal(input_rate),
             output_price_per_million=Decimal(output_rate),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
         )
 
     monkeypatch.setattr("gateway.services.organization_pricing_service.default_model_pricing", _stub)
@@ -462,16 +462,16 @@ async def test_an_offered_model_says_what_its_rate_is_per(
     await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
-    assert listed.data[0].unit == "tokens"
+    assert listed.data[0].unit == "token"
 
     [stored] = await _organization_rates(async_db)
     stored.input_price_per_million = Decimal("2000")
-    stored.unit = "requests"
+    stored.unit = "request"
     stored.origin = "api"
     await async_db.commit()
 
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
-    assert listed.data[0].unit == "requests"
+    assert listed.data[0].unit == "request"
     assert listed.data[0].input_price_per_million == 2000.0
 
 
@@ -586,7 +586,7 @@ async def test_a_deployment_priced_model_is_offered_without_a_seeded_rate(
             input_price_per_million=Decimal("1.0"),
             output_price_per_million=Decimal("4.0"),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
             origin="api",
         )
     )

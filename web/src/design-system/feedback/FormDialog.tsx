@@ -103,9 +103,9 @@ export interface FormDialogProps {
   /** A `TabRow` under the header. `lg` only, where a form has two shapes. */
   tabs?: ReactNode
   /**
-   * `Field`, `SecretField`, `Select`, `Checkbox`. A field with a description
-   * takes `reserveMessage`, so an error replaces that line instead of moving
-   * the footer; one with nothing to say under it reserves nothing.
+   * `Field`, `SecretField`, `Select`, `Checkbox`. A field reserves its message
+   * line by default, so an error replaces that line instead of moving the
+   * footer; one with nothing to say under it takes `shouldReserveMessage={false}`.
    */
   children: ReactNode
 }

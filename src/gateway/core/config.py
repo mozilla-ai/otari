@@ -28,6 +28,7 @@ from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.providers import ProviderSettings
+from gateway.core.settings.routing import RoutingSettings
 from gateway.core.settings.tools import ToolSettings
 from gateway.core.settings.traces import TraceSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
@@ -61,20 +62,18 @@ X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here
 # ``IdentityProviderPort`` can record a connection this tuple never named, and
 # a closed enum here would make that value unrepresentable.
 OAUTH_PROVIDERS: tuple[str, ...] = ("github", "google")
-# Per-request opt-out for a policy's learned router: "off" serves the policy's
-# default target and skips the router entirely. There is no "force on": the
-# router is enabled by the policy, not by the caller.
+# Per-request opt-out for a policy's router: "off" serves the policy's default
+# target and skips the router entirely. There is no "force on": the router is
+# enabled by the policy, not by the caller.
 ROUTER_HEADER = "Otari-Router"
-# Stable per-conversation id for trace-sticky routing. When set, it is the trace
-# identity (namespaced per user); absent, the router falls back to hashing the
-# conversation's opening messages, which cannot tell apart two conversations that
-# open identically. See docs/routing.md#per-request-control.
+# Stable per-conversation id: the trace session a request belongs to, and what
+# automatic routing keeps a conversation on.
 CONVERSATION_HEADER = "Otari-Conversation-Id"
-# Routing-memory partition (use case / category) for this request. When set, the
-# router votes only over records carrying the same task label and stays in
-# pass-through until that partition alone is warm; records from other tasks never
-# influence it. Submit the matching label via the /rank task_id.
-ROUTER_TASK_HEADER = "Otari-Router-Task"
+# Request header a client sends as ``keep`` to have the content of a request it
+# routes kept on its session's trace, where the deployment and the workspace keep
+# content. The client answers for its users' consent. See docs/traces.md.
+TRACE_CONTENT_HEADER = "Otari-Trace-Content"
+TRACE_CONTENT_KEEP = "keep"
 # Response header naming one inference request, minted by the gateway. Clients use
 # it to correlate a response with its usage record.
 REQUEST_ID_HEADER = "Otari-Request-ID"
@@ -128,7 +127,7 @@ OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 # Mapping fields an OTARI_<FIELD> variable sets as a JSON object. The variable
 # replaces the file's block whole, as a top-level key of OTARI_CONFIG_YAML does,
 # rather than merging into it per entry.
-JSON_ENV_FIELDS = ("hosted_providers",)
+JSON_ENV_FIELDS = ("hosted_providers", "provider_supported_countries", "automatic_routing")
 # GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
 # code. The read sites still consult otari_env() (they have no config object in
 # scope), so load_config bridges values set in the YAML config into the process
@@ -161,7 +160,6 @@ ENV_BRIDGED_FIELDS = (
 
 
 VISION_STRATEGIES = ("describe", "ocr", "off")
-ROUTER_GRANULARITIES = ("trace_sticky", "step")
 # Selectable mail transports, plus the two states that are not a transport:
 # "auto" derives one from whether SMTP is configured, "none" turns mail off
 # even when it is. See GatewayConfig.mail_transport.
@@ -201,16 +199,8 @@ MAX_AGENT_MODEL_CANDIDATES = 255
 """The most options a choice question takes, so a longer list fails at startup, not per request."""
 
 
-def validate_agent_recommender(model: str, candidates: dict[str, str | None]) -> None:
-    """Validate the agent recommender's settings, raising ``ValueError`` on any problem.
-
-    The decision provider itself is resolved per request, so a deployment that
-    never asks for a recommendation need not configure one.
-    """
-    provider, _, bare_model = model.partition(":")
-    if not provider.strip() or not bare_model.strip():
-        msg = "agent_recommender_model must name a decision model as '<provider>:<model>'."
-        raise ValueError(msg)
+def validate_agent_recommender_candidates(candidates: dict[str, str | None]) -> None:
+    """Validate ``agent_recommender_candidates``, raising ``ValueError`` on any problem."""
     if len(candidates) < 2:
         msg = "agent_recommender_candidates needs at least two models to choose between."
         raise ValueError(msg)
@@ -288,12 +278,15 @@ def _is_keyless(provider_type: str) -> bool:
 def hosted_provider_name_problem(name: str, provider: str) -> str | None:
     """Why ``name`` cannot name a hosted provider served by ``provider``, or None when it can.
 
-    The implementation's own name always may. Any other is the prefix of a
+    A reserved name never may, even an implementation's own (``otari``). The
+    implementation's own name otherwise always may. Any other is the prefix of a
     ``name:model`` selector, so it cannot hold the separators a selector splits
     on, and it follows the instance-name rules. Another implementation's name
     is refused, because a request for ``anthropic:...`` must not reach an
     OpenAI endpoint.
     """
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        return "is reserved; give the provider a name of its own"
     if name == provider:
         return None
     if not name or name != name.strip():
@@ -302,8 +295,6 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
         return "must be at most 64 characters"
     if ":" in name or "/" in name:
         return "must not contain ':' or '/'"
-    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
-        return "is reserved"
     if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
         return "names another provider"
     return None
@@ -562,6 +553,7 @@ def _validate_bedrock_client_config(instance: str, client_args: Any, *, block: s
 
 
 class GatewayConfig(
+    RoutingSettings,
     InferenceSettings,
     BudgetSettings,
     ApiKeySettings,
@@ -990,69 +982,6 @@ class GatewayConfig(
             "so 'aliases:' remains its shorthand."
         ),
     )
-    # Tuning for the learned (kNN) router a policy can name via `select: [{router: knn}]`.
-    # There is no on/off switch here on purpose: a policy naming the router is the
-    # switch, so the router cannot be enabled globally behind an operator's back,
-    # and two policies can never disagree about whether routing is on.
-    router_alpha: Annotated[float, OMITTED] = Field(
-        default=0.3,
-        ge=0.0,
-        description=(
-            "Learned router's cost-vs-quality dial: score(model) = predicted_quality - alpha * "
-            "normalized_cost. 0 ignores cost (always the best-predicted model); higher prefers "
-            "cheaper candidates more aggressively."
-        ),
-    )
-    router_k: Annotated[int, OMITTED] = Field(
-        default=5,
-        ge=1,
-        description=(
-            "Neighbor count for the learned router's vote. A request whose partition holds fewer "
-            "than k comparable examples stays on the policy's default target."
-        ),
-    )
-    router_embedding_model: Annotated[str, OMITTED] = Field(
-        default="openai:text-embedding-3-small",
-        description=(
-            "provider:model used to embed the task signal. Changing it invalidates existing "
-            "routing-memory records rather than mixing incomparable vector spaces, so the router "
-            "returns to pass-through until the new space is re-taught."
-        ),
-    )
-    router_confidence_floor: Annotated[float, OMITTED] = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Minimum share of the k neighbors that must agree on the winning candidate. Below it, "
-            "the policy's default target leads and the router's order becomes the failover chain."
-        ),
-    )
-    router_seed_count: Annotated[int, OMITTED] = Field(
-        default=20,
-        ge=0,
-        description=(
-            "Routing-memory records a pool needs before the router routes at all. Under it, every "
-            "request through the policy serves the default target."
-        ),
-    )
-    router_granularity: Annotated[str, OMITTED] = Field(
-        default="trace_sticky",
-        description=(
-            "'trace_sticky' (default) decides once per conversation and reuses that decision on "
-            "later turns; 'step' re-decides on every call."
-        ),
-    )
-    router_max_records_per_user: Annotated[int, OMITTED] = Field(
-        default=5000,
-        ge=0,
-        description=(
-            "Cap on stored routing-memory records per user; the oldest are evicted past it. The "
-            "store is scanned linearly, so this also bounds per-request routing latency. 0 disables "
-            "eviction rather than storing nothing, and the per-request read falls back to the default "
-            "bound, so the store grows without limit while each decision stays bounded."
-        ),
-    )
     decision_providers: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
         default_factory=dict,
         description=(
@@ -1061,14 +990,6 @@ class GatewayConfig(
             "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds."
-        ),
-    )
-    agent_recommender_model: Annotated[str, OMITTED] = Field(
-        default="typesafe:jev-latest",
-        description=(
-            "The decision model that recommends a subagent's model through POST /api/v1/routing/recommend, "
-            "as a decision_providers selector ('<provider>:<model>'). Resolved per request, so a deployment "
-            "that never asks need not configure the provider."
         ),
     )
     agent_recommender_candidates: Annotated[dict[str, str | None], OMITTED] = Field(
@@ -1154,22 +1075,21 @@ class GatewayConfig(
     models_dev_metadata: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
         default=True,
         description=(
-            "Enrich the model listing and the dashboard's model detail with metadata "
-            "(token limits, modalities, capabilities, knowledge cutoff) fetched from "
-            "the public models.dev catalog. Set false to disable the outbound call; "
-            "the gateway then reads the context window from the bundled or accepted "
-            "models.dev snapshot and lists no output limit. Pricing does not depend on it."
+            "Fetch the public models.dev catalog for the metadata the model listing and the "
+            "dashboard's model detail show (token limits, modalities, capabilities, knowledge "
+            "cutoff). Set false to disable the outbound call; the gateway then shows the "
+            "metadata of the models.dev catalog bundled with it. Pricing does not depend on it."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(
         default=86400,
         ge=0,
         description=(
-            "TTL in seconds for the cached models.dev catalog, and the interval at which a "
-            "background task refetches it (floored at 5 minutes). Above 0, the model listing, the "
-            "catalog and GET /api/v1/models/metadata answer from the cache instead of waiting on the "
-            "fetch; a failed fetch is held for one minute rather than the refresh interval. 0 "
-            "disables caching, so every read fetches."
+            "How often, in seconds, one worker downloads the models.dev catalog and stores it for "
+            "every worker to serve (floored at 5 minutes). Above 0, the model listing, the catalog "
+            "and GET /api/v1/models/metadata answer from the stored catalog instead of waiting on "
+            "the download; a failed download is tried again after one minute. 0 disables caching, "
+            "so every read fetches."
         ),
     )
     public_catalog: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
@@ -1310,9 +1230,9 @@ class GatewayConfig(
         min_length=32,
         description=(
             "Key for the keyed digest that names the provider account a copy of an attached file "
-            "is in. Required while files_provider_upload_enabled is on, and must differ from "
-            "OTARI_SECRET_KEY and the master key. Rotating it only makes the next request copy "
-            "each file again."
+            "is in. Without it, provider copies are off whatever files_provider_upload_enabled "
+            "says. It must differ from OTARI_SECRET_KEY and the master key. Rotating it only "
+            "makes the next request copy each file again."
         ),
     )
     files_provider_upload_ttl_hours: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
@@ -1696,7 +1616,7 @@ class GatewayConfig(
         nature, and an ID that moves silently orphans every passkey registered
         under the previous one. So it is configured (``webauthn_rp_id``) or
         derived once from a configured address (``public_base_url``), and
-        `docs/access-control.md` documents which.
+        `docs/sign-in.md` documents which.
 
         The derivation drops the port along with the scheme: a relying-party ID
         is a bare domain, so 'https://localhost:8000' yields 'localhost', which
@@ -2199,7 +2119,7 @@ class GatewayConfig(
         """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
         for name, entry in self.decision_providers.items():
             validate_decision_provider_entry(name, entry)
-        validate_agent_recommender(self.agent_recommender_model, self.agent_recommender_candidates)
+        validate_agent_recommender_candidates(self.agent_recommender_candidates)
 
     @model_validator(mode="after")
     def _validate_database_timeout_ordering(self) -> "GatewayConfig":
@@ -2348,15 +2268,6 @@ class GatewayConfig(
         normalized = value.strip().lower()
         if normalized not in VISION_STRATEGIES:
             msg = f"vision_strategy must be one of {sorted(VISION_STRATEGIES)}, got '{value}'"
-            raise ValueError(msg)
-        return normalized
-
-    @field_validator("router_granularity")
-    @classmethod
-    def _validate_router_granularity(cls, value: str) -> str:
-        normalized = value.strip().lower()
-        if normalized not in ROUTER_GRANULARITIES:
-            msg = f"router_granularity must be one of {sorted(ROUTER_GRANULARITIES)}, got '{value}'"
             raise ValueError(msg)
         return normalized
 
@@ -2586,6 +2497,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     if structured_env_config:
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
+    _warn_about_unknown_keys(config_dict)
 
     # Snapshot which bridged fields the YAML config set, before the env
     # overrides below inject OTARI_ values into the same dict: only YAML-set
@@ -2610,6 +2522,18 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.warn_about_half_configured_web_search()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
+
+
+def _warn_about_unknown_keys(config: dict[str, Any]) -> None:
+    """Warn about top-level config keys no setting reads.
+
+    ``GatewayConfig`` ignores extra input so an unrelated ``OTARI_*`` variable
+    cannot fail startup, which also lets a misspelled or misplaced key pass in
+    silence. Not fatal, so a key a newer version reads does not stop an older one.
+    """
+    unknown = sorted(str(key) for key in config if key not in GatewayConfig.model_fields)
+    if unknown:
+        logger.warning("Ignoring unknown config keys (no setting reads them): %s", ", ".join(unknown))
 
 
 def parse_bool_env(value: str) -> bool:

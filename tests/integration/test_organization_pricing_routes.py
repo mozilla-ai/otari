@@ -669,17 +669,17 @@ async def test_only_the_operator_sets_a_search_tools_rate(async_db: AsyncSession
 
     with pytest.raises(OrganizationPricingToolRateError, match="only the deployment operator sets its rate"):
         await service.create_for_caller(admin, "exa", _rates(input_price_per_million=0.0), kind="search")
-    created = await service.create_for_caller(operator, "exa", _rates(unit="requests"), kind="search")
+    created = await service.create_for_caller(operator, "exa", _rates(unit="request"), kind="search")
     model = await service.create_for_caller(operator, "exa:exa", _rates())
 
     assert (created.kind, created.model_key) == ("search", "exa")
     assert (model.kind, model.model_key) == ("model", "exa:exa")
 
     # A search rate is per call, on a create and on a replacement alike.
-    with pytest.raises(TenancyValidationError, match="unit is 'requests'"):
-        await service.create_for_caller(operator, "exa-news", _rates(unit="tokens"), kind="search")
-    with pytest.raises(TenancyValidationError, match="unit is 'requests'"):
-        await service.replace_for_caller(operator, created.id, _rates(unit="tokens"))
+    with pytest.raises(TenancyValidationError, match="unit is 'request'"):
+        await service.create_for_caller(operator, "exa-news", _rates(unit="token"), kind="search")
+    with pytest.raises(TenancyValidationError, match="unit is 'request'"):
+        await service.replace_for_caller(operator, created.id, _rates(unit="token"))
 
 
 @pytest.mark.asyncio
@@ -702,7 +702,7 @@ async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment
                 effective_at=earlier,
                 input_price_per_million=6_000.0,
                 output_price_per_million=0.0,
-                unit="requests",
+                unit="request",
             ),
             ModelPricing(
                 kind="search",
@@ -710,7 +710,7 @@ async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment
                 effective_at=earlier,
                 input_price_per_million=4_000.0,
                 output_price_per_million=0.0,
-                unit="requests",
+                unit="request",
             ),
         ]
     )
@@ -737,7 +737,7 @@ def test_a_tool_kind_override_is_keyed_by_a_bare_instance_name(
     assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
 
     created = client.post(
-        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="requests"), headers=master_key_header
+        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="request"), headers=master_key_header
     )
     assert created.status_code == status.HTTP_201_CREATED, created.text
     assert created.json()["kind"] == "search"
@@ -752,10 +752,10 @@ def test_a_tool_kind_override_is_per_call_and_named_as_its_instance(
     """Its unit defaults to requests and may be nothing else; the name follows the instance name rule."""
     defaulted = client.post(_ENDPOINT, json=_body(kind="fetch", model_key="team fetch"), headers=master_key_header)
     assert defaulted.status_code == status.HTTP_201_CREATED, defaulted.text
-    assert (defaulted.json()["model_key"], defaulted.json()["unit"]) == ("team fetch", "requests")
+    assert (defaulted.json()["model_key"], defaulted.json()["unit"]) == ("team fetch", "request")
 
     refused = client.post(
-        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="tokens"), headers=master_key_header
+        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="token"), headers=master_key_header
     )
     assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
 
@@ -1564,15 +1564,68 @@ def test_the_model_listing_states_the_organizations_own_rate(
         listing = listing_client.get(f"{API_ROOT}/models", headers=header)
         assert listing.status_code == status.HTTP_200_OK, listing.text
         by_id = {model["id"]: model for model in listing.json()["data"]}
-        assert by_id["openai:gpt-4o-mini"]["pricing_source"] == "organization"
-        assert by_id["openai:gpt-4o-mini"]["pricing"]["input_price_per_million"] == 2.5
+        assert by_id["openai/gpt-4o-mini"]["pricing_source"] == "organization"
+        assert by_id["openai/gpt-4o-mini"]["pricing"]["input_price_per_million"] == 2.5
         assert by_id["fast"]["pricing_source"] == "organization"
         assert by_id["fast"]["pricing"]["input_price_per_million"] == 2.5
-        assert by_id["openai:gpt-4.1"]["pricing_source"] == "configured"
-        assert by_id["openai:gpt-4.1"]["pricing"]["input_price_per_million"] == 3.0
+        assert by_id["openai/gpt-4.1"]["pricing_source"] == "configured"
+        assert by_id["openai/gpt-4.1"]["pricing"]["input_price_per_million"] == 3.0
 
-        for model_id in ("fast", "openai:gpt-4o-mini"):
+        for model_id in ("fast", "openai/gpt-4o-mini", "openai:gpt-4o-mini"):
             single = listing_client.get(f"{API_ROOT}/models/{model_id}", headers=header)
             assert single.status_code == status.HTTP_200_OK, single.text
             assert single.json()["pricing_source"] == "organization"
             assert single.json()["pricing"]["input_price_per_million"] == 2.5
+
+
+def test_an_override_given_as_rates_reads_back_with_both(client: TestClient, master_key_header: dict[str, str]) -> None:
+    block = {
+        "text": {"input": {"price": 2.5, "cache": {"read": 1.25}}, "output": {"price": 10}},
+        "web_search": {"price": 10},
+    }
+
+    created = client.post(_ENDPOINT, json={"model_key": _MODEL_KEY, "rates": block}, headers=master_key_header)
+
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    override = created.json()
+    assert (override["unit"], override["input_price_per_million"], override["cache_read_price_per_million"]) == (
+        "token",
+        2.5,
+        1.25,
+    )
+    assert override["rates"] == block
+
+    replaced = client.put(
+        f"{_ENDPOINT}/{override['id']}",
+        json={
+            "rates": {"image": {"output": {"price": 0.04, "unit": "image"}}},
+            "effective_from": override["effective_from"],
+        },
+        headers=master_key_header,
+    )
+
+    assert replaced.status_code == status.HTTP_200_OK, replaced.text
+    assert (replaced.json()["unit"], replaced.json()["input_price_per_million"]) == ("image", 40000.0)
+    assert replaced.json()["rates"] == {"image": {"output": {"price": 0.04, "unit": "image"}}}
+
+
+def test_an_override_given_as_columns_reads_back_with_rates(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    created = client.post(_ENDPOINT, json=_body(), headers=master_key_header)
+
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    assert created.json()["rates"] == {
+        "text": {"input": {"price": 2.5, "unit": "token"}, "output": {"price": 5.0, "unit": "token"}}
+    }
+
+
+def test_an_override_mixing_rates_and_columns_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(
+        _ENDPOINT,
+        json=_body(rates={"text": {"input": {"price": 1}, "output": {"price": 2}}}),
+        headers=master_key_header,
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, response.text
+    assert "remove input_price_per_million, output_price_per_million" in response.text

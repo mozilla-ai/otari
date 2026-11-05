@@ -1,4 +1,3 @@
-import { plural } from "./format"
 import type { SessionStats, ToolTally } from "./sessionStats"
 
 /** Past this share of the session, idle time is drawn shorter so the work beside it stays readable. */
@@ -62,12 +61,7 @@ export function timeBreakdown(stats: SessionStats): TimeBreakdown | null {
   const work = [
     { key: "model" as const, label: "Model requests", value: time.modelMs },
     { key: "tools" as const, label: "Running tools", value: time.toolsMs },
-    {
-      key: "waiting" as const,
-      label: "Waiting on you",
-      hint: "to approve a call",
-      value: time.waitingMs,
-    },
+    { key: "waiting" as const, label: "Waiting on you", value: time.waitingMs },
     { key: "hooks" as const, label: "Hooks", value: time.hooksMs },
   ]
     .filter((part) => part.value > 0)
@@ -128,25 +122,17 @@ export function costParts(stats: SessionStats): {
   by: "meter" | "model"
   parts: Part[]
 } {
-  const { cost, tokens } = stats
+  const { cost } = stats
   const byMeter = cost
-    ? shares(
-        METERS.map(({ key, label }) => ({
-          key,
-          label,
-          hint: plural(tokens[key], "token"),
-          value: cost[key],
-        })),
-      )
+    ? shares(METERS.map(({ key, label }) => ({ key, label, value: cost[key] })))
     : []
   if (byMeter.length > 0) return { by: "meter", parts: byMeter }
   return {
     by: "model",
     parts: shares(
-      stats.models.map(({ model, requests, cost }) => ({
+      stats.models.map(({ model, cost }) => ({
         key: `model:${model}` as const,
         label: model,
-        hint: plural(requests, "request"),
         value: cost ?? 0,
       })),
     ),

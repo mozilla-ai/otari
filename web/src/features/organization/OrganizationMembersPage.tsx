@@ -78,6 +78,7 @@ import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 import {
   asMembershipRole,
@@ -327,7 +328,8 @@ function InviteMemberForm({
           ? workspaceIds.map(
               (workspace_id): WorkspaceAssignment => ({
                 workspace_id,
-                role: "member",
+                // A viewer of the organization is a viewer of its workspaces.
+                role: role === "viewer" ? "viewer" : "member",
               }),
             )
           : null,
@@ -501,6 +503,7 @@ function InviteMemberForm({
  * admins cap their members here with the organization's own budgets.
  */
 function MemberEditor({
+  isOpen,
   member,
   spendRow,
   workspaces,
@@ -510,6 +513,7 @@ function MemberEditor({
   isOperator,
   onClose,
 }: {
+  isOpen: boolean
   member: OrganizationMember
   spendRow: MemberAttribution | undefined
   workspaces: Workspace[]
@@ -719,7 +723,7 @@ function MemberEditor({
 
   return (
     <FormDialog
-      isOpen
+      isOpen={isOpen}
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
@@ -752,8 +756,8 @@ function MemberEditor({
             }}
           />
           <ToolScopeControl
-            title="Search tool access (default for this member's keys)"
-            description="The search tools this member's keys may run on /v1/search by default. Left on its default, a key follows its own model access, or the member's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
+            title="Tool access (default for this member's keys)"
+            description="The search and fetch tools this member's keys may run on /v1/search and /v1/fetch by default. Left on its default, a key follows its own model access, or the member's when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
             inheritLabel="Default"
             initial={spendRow.allowed_tools ?? undefined}
             onChange={(value, isValid) => {
@@ -933,7 +937,10 @@ export function OrganizationMembersPage() {
   )
   const activeContext: OrganizationContext | undefined = context.data
   const manages = canManage(activeContext)
-  const editingRow = rows.find((row) => memberRowKey(row) === editingMember)
+  const editing = useHeldDialogTarget(
+    rows.find((row) => memberRowKey(row) === editingMember),
+  )
+  const editingRow = editing.held
 
   const columns = useMemo<DataTableColumn<OrganizationMember>[]>(() => {
     // Annotated here rather than inferred through the filter below, which would
@@ -1333,11 +1340,13 @@ export function OrganizationMembersPage() {
         />
       ) : null}
 
-      {/* Keyed on the row: its fields seed from the member on mount only, so
-          the next Edit has to arrive at a fresh form. */}
+      {/* Keyed on the row and the opening: its fields seed from the member on
+          mount only, so the next Edit has to arrive at a fresh form. Kept
+          mounted through the exit, which `isOpen` plays. */}
       {editingRow ? (
         <MemberEditor
-          key={memberRowKey(editingRow)}
+          key={`${memberRowKey(editingRow)}:${editing.generation}`}
+          isOpen={editing.isOpen}
           member={editingRow}
           spendRow={editingRow.attribution ?? undefined}
           isOperator={isOperator}

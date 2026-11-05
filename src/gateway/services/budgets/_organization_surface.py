@@ -11,6 +11,7 @@ A budget with no organization belongs to the deployment: nothing here lists, off
 and a ceiling that names one is still listed, with ``manageable`` false, because it caps this organization's spend.
 """
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,6 +20,7 @@ from gateway.exceptions.budget_exceptions import (
     BudgetStillReferencedError,
     OrganizationBudgetHeldElsewhereError,
     OrganizationBudgetInUseError,
+    OrganizationBudgetIsEndUserDefaultError,
     OrganizationBudgetNotFoundError,
     OrganizationScopedBudgetAlreadyExistsError,
     OrganizationScopedBudgetNotFoundError,
@@ -178,10 +180,13 @@ class _OrganizationSurface:
             raise OrganizationScopedBudgetAlreadyExistsError(request.scope_type, request.scope_id) from None
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
 
-    async def delete_budget(self, *, user: User, budget_id: str) -> None:
+    async def delete_budget(
+        self, *, user: User, budget_id: str, keys_defaulting_to: Callable[[str], Awaitable[list[str]]]
+    ) -> None:
         """Delete a budget of the organization's, refusing while anything names it.
 
-        Ceilings and member policies are counted so the refusal can say which.
+        Ceilings and member policies are counted so the refusal can say which, and so is a service key that starts
+        its end users on it (``keys_defaulting_to`` names those), which only the budget's owner gets to hear.
         A gateway user's assignment is counted but not named, because the admin cannot act on gateway users,
         and without the count the ORM would null the assignment out silently.
         The budget's reset history goes with it, as it does on the deployment's delete.
@@ -192,6 +197,9 @@ class _OrganizationSurface:
         defaults = await self._repositories.member_policies.count_for_budget(budget.budget_id)
         if ceilings or defaults:
             raise OrganizationBudgetInUseError(budget.budget_id, ceilings=ceilings, defaults=defaults)
+        # Before the delete, whose ``SET NULL`` would clear the default this looks for.
+        if keys := await keys_defaulting_to(budget.budget_id):
+            raise OrganizationBudgetIsEndUserDefaultError(keys)
         if await self._repositories.budgets.count_users_for_budget(budget.budget_id):
             raise OrganizationBudgetHeldElsewhereError(budget.budget_id)
         await self._repositories.budgets.remove_reset_logs(budget.budget_id)

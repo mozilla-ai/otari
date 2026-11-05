@@ -6,7 +6,7 @@ PostgreSQL: a newest-version read is a ``MAX`` subquery rather than
 ``DISTINCT ON``.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Never, cast
@@ -98,8 +98,9 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
         pricing_tiers: Sequence[dict[str, Any]],
         unit: str,
         origin: str,
+        rates: Mapping[str, Any] | None = None,
     ) -> ModelPricing:
-        """Stage one new version."""
+        """Stage one new version, with the cost block it came from where the caller has one."""
         version = ModelPricing(
             model_key=model_key,
             effective_at=effective_at,
@@ -110,6 +111,7 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
             pricing_tiers=list(pricing_tiers),
             unit=unit,
             origin=origin,
+            rates=None if rates is None else dict(rates),
         )
         self.db.add(version)
         return version

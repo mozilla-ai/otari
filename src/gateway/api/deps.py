@@ -1,39 +1,56 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated
+from decimal import Decimal
+from typing import Annotated, Any, cast
 
 import httpx
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy import ColumnElement, Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
 from gateway.container import Container
-from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
-from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    TRACE_CONTENT_HEADER,
+    TRACE_CONTENT_KEEP,
+    X_API_KEY_HEADER,
+    GatewayConfig,
+)
+from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db, release_session
 from gateway.core.feature import CoreFeature
-from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.core.settings.tools import ToolKind
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
+from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
+from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError, TraceBreakGlassUnnamedError
+from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
+from gateway.models.tenancy import MANAGEMENT_ROLES, Workspace
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
-from gateway.ports.billing_port import BillingPort
+from gateway.ports.billing_port import (
+    BillingPort,
+    InsufficientFundsError,
+)
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
-from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
@@ -53,26 +70,40 @@ from gateway.repositories.providers import (
     HostedProviderRepository,
     OrgProviderKeyModelRepository,
     ProviderEndpointRepository,
+    WorkspaceHostedAccessRepository,
+    WorkspaceProviderPolicyRepository,
 )
 from gateway.repositories.rate_limits import RateLimitRuleRepository
+from gateway.repositories.routing import AgentRecommenderRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationGuardrailDefinitionRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     OrgProviderKeyRepository,
+    UserRepository,
+    WorkspaceMemberRepository,
     WorkspaceRepository,
     ids_in_organization,
 )
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
+    SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.traces import TracesRepositories
-from gateway.repositories.usage_and_telemetry import UsageLogRepository
+from gateway.repositories.usage_and_telemetry import (
+    UsageLogRepository,
+    new_usage_row,
+)
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import (
+    API_KEY_NO_USER_DETAIL,
+    API_KEY_VALIDATION_FAILED_DETAIL,
+    MASTER_KEY_USER_REQUIRED_DETAIL,
+    USER_MISMATCH_DETAIL,
+    ApiKeyMembershipListener,
     ApiKeyService,
     FederatedTokenVerifier,
     FederationRefusedError,
@@ -81,17 +112,32 @@ from gateway.services.api_keys import (
     is_access_token,
     key_refusal,
     match_federation_rules,
+    names_end_user,
     read_access_token,
+    resolve_user_id,
     unverified_issuer,
 )
-from gateway.services.budgets import BudgetMembershipListener, BudgetService
+from gateway.services.budgets import (
+    BudgetMembershipListener,
+    BudgetScopeRequest,
+    BudgetService,
+    ReservationHandle,
+    reconcile_reservation,
+    refund_reservation,
+    reserve_budget,
+)
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService
 from gateway.services.identity import IdentityService
-from gateway.services.inference import InferenceService
+from gateway.services.inference import (
+    DeploymentCharge,
+    InferenceService,
+    admit_deployment_paid,
+    describe_port_error,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mail import Mailer
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -102,46 +148,83 @@ from gateway.services.organizations import InvitationMailLimit, UserAccess
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
+from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
+from gateway.services.pricing_service import (
+    RequestPrices,
+    model_context_window,
+    resolve_tool_rate,
+)
 from gateway.services.providers import (
+    HostedCatalogUpdate,
     HostedProviderService,
     HostedSources,
     OrgProviderModelService,
     ProviderEndpointService,
+    ScheduledRun,
+    WorkspaceHostedAccessService,
+    hosted_models_for,
     refresh_provider_endpoint_cache,
+    refresh_workspace_hosted_access_cache,
 )
 from gateway.services.rate_limits import RateLimitService
-from gateway.services.routing import RoutingService, clear_router_backend_cache
+from gateway.services.routing import (
+    AgentRecommenderService,
+    AutomaticRouter,
+    RoutingService,
+    clear_router_backend_cache,
+)
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     InvitationClaimSettings,
+    MembershipListener,
+    MembershipListeners,
     OrganizationDomainService,
     OrganizationService,
     organization_guardrail_runner,
 )
 from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
+from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
+from gateway.services.tenancy.workspace_activation_service import WorkspaceActivationService
+from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers, WorkspaceMcpServerService
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
+from gateway.services.tool_settings_service import load_overrides, stage_override
 from gateway.services.tools import (
+    DirectCaller,
+    DirectToolCall,
+    DirectToolLedger,
+    DirectToolService,
+    DirectToolUsage,
+    SearchToolService,
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceSearchKeys,
     web_search_configured,
 )
-from gateway.services.traces import TraceService
+from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
 from gateway.services.usage_admin_service import usage_in
 from gateway.services.usage_and_telemetry import UsageService
-from gateway.services.workspace_scope import default_workspace_id
-from gateway.types.traces import TraceScope
+from gateway.services.workspace_scope import (
+    default_workspace_id,
+    organization_for_key_id,
+    workspace_for_key_id,
+)
+from gateway.types.traces import (
+    ContentCapture,
+    ContentReader,
+    SessionOwners,
+    ShareAudience,
+    TraceScope,
+    WorkspaceContent,
+)
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -160,6 +243,20 @@ AUTH_FAILURES = Counter(
 def record_auth_failure(reason: str) -> None:
     """Record an authentication failure."""
     AUTH_FAILURES.labels(reason=reason).inc()
+
+
+def _invalid_api_key(reason: str) -> HTTPException:
+    """Every refusal answers alike, so a caller cannot tell which check failed; ``reason`` goes to the metric."""
+    record_auth_failure(reason)
+    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+
+def _authentication_unavailable(reason: str) -> HTTPException:
+    record_auth_failure(reason)
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Authentication temporarily unavailable, please retry",
+    )
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -187,7 +284,7 @@ def set_config(config: GatewayConfig) -> None:
     _config = config
 
 
-def get_config(request: Request) -> GatewayConfig:
+async def get_config(request: Request) -> GatewayConfig:
     """Return the config for the current app from ``request.app.state``.
 
     Every shared resource (rate limiter, log writer, file store) lives on
@@ -294,30 +391,18 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: A
                 detail=misdirected_key_detail(host),
             )
         case Malformed():
-            record_auth_failure("invalid_format")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid API key",
-            )
+            raise _invalid_api_key("invalid_format")
 
     key_hash = hash_key(token)
 
     try:
         result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
     except DATABASE_ERRORS as e:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from e
+        raise _authentication_unavailable("db_error") from e
     api_key = result.scalar_one_or_none()
 
     if not api_key:
-        record_auth_failure("invalid_key")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
-        )
+        raise _invalid_api_key("invalid_key")
 
     return await _admit_api_key(api_key)
 
@@ -377,23 +462,13 @@ async def _verify_federated_token(request: Request, db: AsyncSession, token: str
         )
         api_key = await ApiKeyRepository(db).get(match.api_key_id)
     except FederationUnavailableError as exc:
-        record_auth_failure("federation_unavailable")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("federation_unavailable") from exc
     except FederationRefusedError as exc:
-        record_auth_failure(exc.reason)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key") from exc
+        raise _invalid_api_key(exc.reason) from exc
     except DATABASE_ERRORS as exc:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("db_error") from exc
     if api_key is None:
-        record_auth_failure("federation_no_rule")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+        raise _invalid_api_key("federation_no_rule")
     logger.debug(
         "Federated token from %s matched rule(s) %s of API key %s",
         identity.issuer,
@@ -422,17 +497,11 @@ async def _verify_access_token(db: AsyncSession, token: str, config: GatewayConf
             raise FederationRefusedError("federation_unknown_issuer")
         api_key = await ApiKeyRepository(db).get(claims.api_key_id)
     except FederationRefusedError as exc:
-        record_auth_failure(exc.reason)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key") from exc
+        raise _invalid_api_key(exc.reason) from exc
     except DATABASE_ERRORS as exc:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("db_error") from exc
     if api_key is None:
-        record_auth_failure("federation_rule_gone")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+        raise _invalid_api_key("federation_rule_gone")
     return await _admit_api_key(api_key)
 
 
@@ -546,11 +615,7 @@ async def get_session_identity(
     try:
         return await resolve_dashboard_session(db, token)
     except DATABASE_ERRORS as exc:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("db_error") from exc
 
 
 def refuse_ended_session(request: Request, config: GatewayConfig) -> None:
@@ -590,11 +655,7 @@ async def _load_generated_master_key_hash(config: GatewayConfig, db: AsyncSessio
     try:
         stored_hash = await load_master_key_hash(db)
     except DATABASE_ERRORS as exc:
-        record_auth_failure("db_error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication temporarily unavailable, please retry",
-        ) from exc
+        raise _authentication_unavailable("db_error") from exc
     config._master_key_hash = stored_hash
     return stored_hash
 
@@ -796,6 +857,19 @@ async def verify_api_key_or_master_key(
     return api_key, False
 
 
+async def verify_api_key_or_master_key_for_upload(
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> tuple[APIKey | None, bool]:
+    """:func:`verify_api_key_or_master_key`, then free its connection before the route reads the body.
+
+    A route that parses its own upload does so after authentication, so a slow
+    client would otherwise pin the pooled connection the key lookup checked out.
+    """
+    await release_session(db)
+    return auth_result
+
+
 async def verify_catalog_reader(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -807,20 +881,25 @@ async def verify_catalog_reader(
     The narrow exception to the rule above, for the catalog reads that describe
     the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``,
     ``GET /api/v1/tools``, ``GET /api/v1/providers/catalog`` (with their by-id
-    variants), ``GET /api/v1/tool-settings/guardrails/catalog`` and
+    variants), ``GET /api/v1/tool-settings/guardrails/catalog``,
+    ``GET /api/v1/tool-settings/guardrails/profiles`` and
     ``GET /api/v1/search-tools/providers``. The
     dashboard's Models and Pricing pages are built on these, so a session has to
     reach them; they call no provider, write nothing, and bill nothing, so
     reaching them deployment-wide costs a signed-in caller's own organization
-    nothing.
+    nothing. The guardrail profiles read is the one that reaches a service, the
+    deployment's own guardrails service, and it answers from a 30 second
+    per-worker cache, so a worker sends that service at most one request in
+    that time.
 
-    The three catalogs are the reads a *tenant* rather than an operator needs. One
+    The four catalogs are the reads a *tenant* rather than an operator needs. One
     names the providers any-llm knows, which the organization provider-key form
     offers as the BYO choices; one names the guardrails any-guardrail reaches
     over a hosted API, which the organization guardrail form offers the same
-    way; and one names the providers any-search and any-fetch serve, for the
-    organization's own search keys. An owner or admin who reaches no operator
-    route still has to read all three.
+    way; one names the guardrail profiles the deployment serves, which any
+    caller may put in a request; and one names the providers any-search and
+    any-fetch serve, for the organization's own search keys. An owner or admin
+    who reaches no operator route still has to read all four.
 
     Split out rather than left as a branch inside the other dependency so that
     adding a route to this plane defaults to refusing the cookie. The six
@@ -902,9 +981,9 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
     return FileService(uow, FileRepositories.on(uow), backends, config, reject_unscoped_upload)
 
 
-def build_trace_service(uow: UnitOfWork) -> TraceService:
-    """Build the traces operations for a request or a worker job."""
-    return TraceService(uow, TracesRepositories.on(uow))
+def build_trace_service(uow: UnitOfWork, content: SpanContent, owners: SessionOwners) -> TraceService:
+    """Build the traces operations for a request or a worker job, sealing and opening content with ``content``."""
+    return TraceService(uow, TracesRepositories.on(uow), content, owners, model_context_window)
 
 
 def _file_backends(request: Request) -> FileBackends | None:
@@ -924,7 +1003,12 @@ def build_inference_service(uow: UnitOfWork, config: GatewayConfig) -> Inference
 
     It receives the Unit of Work and its own domain's repositories over it, never the session.
     """
-    return InferenceService(uow, InferenceRepositories.on(uow), config)
+    return InferenceService(
+        uow,
+        InferenceRepositories.on(uow),
+        config,
+        country_limited_providers=build_hosted_provider_service(uow, config=config).names_limited_to_countries,
+    )
 
 
 def build_sandbox_file_bridge(
@@ -998,14 +1082,28 @@ UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings in step with their memberships.
+    """Return the listener that keeps members' budget ceilings, own keys and session shares in step with memberships.
 
     It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
     """
-    return BudgetMembershipListener(BudgetRepositories.on(uow))
+    return MembershipListeners(
+        BudgetMembershipListener(BudgetRepositories.on(uow)),
+        ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
+        TraceMembershipListener(TracesRepositories.on(uow)),
+    )
 
 
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
+
+
+def get_inference_service(
+    uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
+) -> InferenceService:
+    """Build the inference service on the request's unit of work."""
+    return build_inference_service(uow, config)
+
+
+InferenceServiceDep = Annotated[InferenceService, Depends(get_inference_service)]
 
 
 def get_workspace_code_execution_policy_service(
@@ -1057,7 +1155,7 @@ def get_workspace_web_search_service(
 WorkspaceWebSearchServiceDep = Annotated[WorkspaceWebSearchService, Depends(get_workspace_web_search_service)]
 
 
-def get_workspace_code_execution_policies(
+async def get_workspace_code_execution_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceCodeExecutionPolicies:
@@ -1179,7 +1277,7 @@ def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiK
     return container.resolve(ApiKeyFormatPort, db)
 
 
-def get_code_execution_port(
+async def get_code_execution_port(
     config: Annotated[GatewayConfig, Depends(get_config)],
     container: ContainerDep,
 ) -> CodeExecutionPort | None:
@@ -1201,7 +1299,7 @@ def get_code_execution_port(
 CodeExecutionPortDep = Annotated[CodeExecutionPort | None, Depends(get_code_execution_port)]
 
 
-def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
+async def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
     """Resolve the billing adapter this build bound at startup."""
     return container.resolve(BillingPort, db)
 
@@ -1237,12 +1335,12 @@ def get_identity_provider_port(
     return container.resolve(IdentityProviderPort, db, uow=uow)
 
 
-def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
+async def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
     """Build the request path's reader of a workspace's MCP servers, on the request's session."""
     return WorkspaceMcpServers(db)
 
 
-def get_model_provider_port(
+async def get_model_provider_port(
     db: PortSessionDep,
     uow: UnitOfWorkDep,
     container: ContainerDep,
@@ -1290,7 +1388,7 @@ def get_web_provider_client(request: Request) -> httpx.AsyncClient:
     return client
 
 
-def get_optional_web_provider_client(request: Request) -> httpx.AsyncClient | None:
+async def get_optional_web_provider_client(request: Request) -> httpx.AsyncClient | None:
     """The app's web provider client, or ``None`` outside the app's lifespan, where a provider opens its own.
 
     For ``ToolPorts``, which every completion route takes, so a request that runs
@@ -1315,7 +1413,7 @@ def get_overview_service(
         OrganizationService(db, membership_listener=None),
         DeploymentUserService(db),
         # The listener is for writes; this service only reads, and the same
-        # pairing is what `routes/workspaces.py` builds.
+        # pairing is what `get_workspace_service` builds.
         WorkspaceService(db, uow=uow, membership_listener=membership_listener),
     )
 
@@ -1505,6 +1603,49 @@ ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_p
 RequestSessionModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_request_session_model_provider_port)]
 
 
+def get_workspace_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
+) -> WorkspaceService:
+    return WorkspaceService(db, uow=uow, membership_listener=membership_listener)
+
+
+WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
+
+
+def get_workspace_activation_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    key_format: ApiKeyFormatPortDep,
+) -> WorkspaceActivationService:
+    return WorkspaceActivationService(db, config, key_format)
+
+
+WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(get_workspace_activation_service)]
+
+
+def get_workspace_mcp_server_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServerService:
+    return WorkspaceMcpServerService(db)
+
+
+WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]
+
+
+def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrgProviderKeyService:
+    return OrgProviderKeyService(db)
+
+
+OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]
+
+
+def get_organization_guardrail_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationGuardrailService:
+    return OrganizationGuardrailService(db)
+
+
+OrganizationGuardrailServiceDep = Annotated[OrganizationGuardrailService, Depends(get_organization_guardrail_service)]
+
+
 def get_identity_service(
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -1585,6 +1726,50 @@ def get_provider_endpoint_service(
 ProviderEndpointServiceDep = Annotated[ProviderEndpointService, Depends(get_provider_endpoint_service)]
 
 
+def get_workspace_access(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
+) -> WorkspaceAccess:
+    """Build the workspace visibility and management checks on the request's session."""
+    return WorkspaceAccess(db, organizations)
+
+
+WorkspaceAccessDep = Annotated[WorkspaceAccess, Depends(get_workspace_access)]
+
+
+def get_workspace_hosted_access_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    access: WorkspaceAccessDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
+    model_provider: RequestSessionModelProviderPortDep,
+) -> WorkspaceHostedAccessService:
+    """Build the workspace hosted provider access service on the request's unit of work.
+
+    The hosted port answers which providers an organization may use, and the
+    organization's own keys which of them a workspace never asks the port
+    about. Both are other domains' answers, handed in as callables.
+    """
+
+    async def hosted_models(organization_id: uuid.UUID | None) -> HostedModels:
+        return await hosted_models_for(model_provider, organization_id=organization_id)
+
+    async def byo_providers(workspace_id: uuid.UUID) -> frozenset[str]:
+        return await org_provider_keys.get_workspace_byo_providers(workspace_id=workspace_id)
+
+    return WorkspaceHostedAccessService(
+        uow,
+        rules=WorkspaceHostedAccessRepository(uow),
+        policies=WorkspaceProviderPolicyRepository(uow),
+        access=access,
+        hosted_models=hosted_models,
+        byo_providers=byo_providers,
+        refresh_cache=lambda: refresh_workspace_hosted_access_cache(uow),
+    )
+
+
+WorkspaceHostedAccessServiceDep = Annotated[WorkspaceHostedAccessService, Depends(get_workspace_hosted_access_service)]
+
+
 def get_web_search_key_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1616,7 +1801,7 @@ def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> W
     )
 
 
-def get_workspace_web_search_policies(
+async def get_workspace_web_search_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceWebSearchPolicies:
@@ -1660,6 +1845,94 @@ def get_hosted_provider_service(
 
 
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
+
+
+def get_agent_recommender_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> AgentRecommenderService:
+    """Build the subagent router service on the request's unit of work."""
+    return AgentRecommenderService(uow, AgentRecommenderRepository(uow))
+
+
+AgentRecommenderServiceDep = Annotated[AgentRecommenderService, Depends(get_agent_recommender_service)]
+
+
+def build_hosted_catalog_update(uow: UnitOfWork, *, config: GatewayConfig) -> HostedCatalogUpdate:
+    """Build the catalog update on ``uow``; its price steps open sessions of their own."""
+    return HostedCatalogUpdate(build_hosted_provider_service(uow, config=config), ModelsDevPriceUpdates(config))
+
+
+def get_hosted_catalog_update(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> HostedCatalogUpdate:
+    """The catalog update for one request, on its Unit of Work."""
+    return build_hosted_catalog_update(uow, config=config)
+
+
+HostedCatalogUpdateDep = Annotated[HostedCatalogUpdate, Depends(get_hosted_catalog_update)]
+
+
+def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
+    """Build the catalog update worker's run, each on a Unit of Work of its own."""
+
+    async def run(policy: str, interval_seconds: float) -> str | None:
+        async with create_unit_of_work() as uow:
+            return await build_hosted_catalog_update(uow, config=config).run_scheduled(policy, interval_seconds)
+
+    return run
+
+
+def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config: GatewayConfig) -> SearchToolService:
+    """Build the search-tool service on ``uow``.
+
+    ``session`` is the session ``uow`` runs on. The runtime tool settings are
+    read and staged through it, so a default a create stores lands in the
+    create's commit.
+    """
+    return SearchToolService(
+        uow,
+        config=config,
+        tools=SearchToolRepository(uow),
+        read_settings=lambda: load_overrides(session, report_invalid=False),
+        stage_setting=lambda key, value: stage_override(session, key, value),
+    )
+
+
+def get_search_tool_service(
+    uow: UnitOfWorkDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SearchToolService:
+    """Build the search-tool service on the request's unit of work."""
+    return build_search_tool_service(uow, db, config=config)
+
+
+SearchToolServiceDep = Annotated[SearchToolService, Depends(get_search_tool_service)]
+
+
+async def get_search_tool_tester(
+    uow: UnitOfWorkDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SearchToolService:
+    """Build the search-tool service for a connection test, once authentication's database work has ended.
+
+    A test calls a provider, so no pooled connection is held across the call.
+    """
+    await release_session(db)
+    return build_search_tool_service(uow, db, config=config)
+
+
+SearchToolTesterDep = Annotated[SearchToolService, Depends(get_search_tool_tester)]
+
+
+def build_search_tool_refresh(config: GatewayConfig) -> Callable[[], Awaitable[set[str]]]:
+    """Build the search-tool refresher's tick, each on a unit of work of its own."""
+
+    async def refresh() -> set[str]:
+        async with create_unit_of_work_with_session() as (session, uow):
+            return await build_search_tool_service(uow, session, config=config).refresh()
+
+    return refresh
 
 
 def build_hosted_discovery(config: GatewayConfig) -> HostedDiscovery:
@@ -1716,9 +1989,189 @@ HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_s
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
-def get_trace_service(uow: UnitOfWorkDep) -> TraceService:
-    """Build the request's traces service on the request's Unit of Work."""
-    return build_trace_service(uow)
+async def is_workspace_member(
+    db: AsyncSession, workspace_id: uuid.UUID, user_id: str | None, workspace: Workspace | None = None
+) -> bool:
+    """Whether ``user_id`` names a person who currently sees the workspace.
+
+    An active owner or admin of its organization, or an active member of the
+    workspace itself: the people whose own sessions' content they can read. A
+    billing user no dashboard identity stands behind is none of them, and nor is
+    a deactivated account, which can no longer sign in to read or manage it.
+    """
+    person = _person(user_id)
+    if person is None:
+        return False
+    if workspace is None:
+        workspace = await WorkspaceRepository(db).get(workspace_id)
+    if workspace is None:
+        return False
+    account = await UserRepository(db).get(person)
+    if account is None or not account.is_active:
+        return False
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        workspace.organization_id, person
+    )
+    if membership is None:
+        return False
+    if membership.role in MANAGEMENT_ROLES:
+        return True
+    member = await WorkspaceMemberRepository(db).get_by_workspace_and_user(workspace_id, person)
+    return member is not None and member.status == "active"
+
+
+def _person(user_id: str | None) -> uuid.UUID | None:
+    """The identity a trace's user id names, or None for one that names no person.
+
+    The canonical spelling only: ownership compares the id as a string, so another
+    spelling of the same id would keep content its owner could never open.
+    """
+    if user_id is None:
+        return None
+    try:
+        person = uuid.UUID(user_id)
+    except ValueError:
+        return None
+    return person if str(person) == user_id else None
+
+
+async def workspace_members(
+    db: AsyncSession, pairs: Collection[tuple[uuid.UUID, str | None]]
+) -> set[tuple[uuid.UUID, str | None]]:
+    """Which of these (workspace, user) pairs :func:`is_workspace_member` holds for, in four queries."""
+    people = {pair: person for pair in pairs if (person := _person(pair[1])) is not None}
+    if not people:
+        return set()
+    workspaces = {
+        workspace.id: workspace.organization_id
+        for workspace in await WorkspaceRepository(db).get_by_ids({workspace_id for workspace_id, _ in people})
+    }
+    active = await UserRepository(db).get_active_ids(set(people.values()))
+    candidates = {pair: person for pair, person in people.items() if pair[0] in workspaces and person in active}
+    roles = await OrganizationMemberRepository(db).get_active_roles(
+        {workspaces[workspace_id] for workspace_id, _ in candidates}, set(candidates.values())
+    )
+    by_organization = {pair: roles.get((workspaces[pair[0]], person)) for pair, person in candidates.items()}
+    explicit = await WorkspaceMemberRepository(db).get_active_pairs(
+        {workspace_id for (workspace_id, _), role in by_organization.items() if role is not None},
+        {candidates[pair] for pair, role in by_organization.items() if role is not None},
+    )
+    return {
+        pair
+        for pair, role in by_organization.items()
+        if role is not None and (role in MANAGEMENT_ROLES or (pair[0], candidates[pair]) in explicit)
+    }
+
+
+class DatabaseSessionOwners:
+    """:class:`SessionOwners` over this deployment's memberships, on the request's session."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        return await is_workspace_member(self._db, workspace_id, user_id)
+
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        return await workspace_members(self._db, pairs)
+
+    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
+        workspace = await WorkspaceRepository(self._db).get(workspace_id)
+        if workspace is None or not workspace.trace_content_enabled:
+            return WorkspaceContent()
+        if not await is_workspace_member(self._db, workspace_id, user_id, workspace):
+            return WorkspaceContent()
+        return WorkspaceContent(keeps=True, tool_output=workspace.trace_content_tool_output)
+
+
+class NoSessionOwners:
+    """:class:`SessionOwners` for work that never opens a share: nobody is anybody's member."""
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        return False
+
+    async def members(self, pairs: Collection[tuple[uuid.UUID, str | None]]) -> set[tuple[uuid.UUID, str | None]]:
+        return set()
+
+    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
+        return WorkspaceContent()
+
+
+async def workspace_keeps_trace_content(
+    db: AsyncSession, config: GatewayConfig, workspace_id: uuid.UUID, user_id: str | None
+) -> bool:
+    """Whether what a span in this workspace was about is kept for this exporter.
+
+    The deployment allows it, the workspace turned it on, and the key exports for a
+    current member of the workspace: content nobody could ever read is not kept, so
+    a key with no user, or one for a billing user no person stands behind, keeps none.
+
+    Read fresh, not cached, so a workspace that turns it off keeps nothing from its next export on.
+    Fails closed: where any of it cannot be read, nothing is kept. The transaction the reads
+    open is ended at once, so no connection idles while the export's spans are handed on.
+    """
+    if not config.trace_content_enabled:
+        return False
+    try:
+        keeps = (await DatabaseSessionOwners(db).content_kept(workspace_id, user_id)).keeps
+        await release_session(db)
+    except DATABASE_ERRORS as exc:
+        logger.warning("Could not read whether a workspace keeps trace content (%s)", describe_database_error(exc))
+        return False
+    return keeps
+
+
+TRACE_CONTENT_HEADER_INVALID_DETAIL = f"{TRACE_CONTENT_HEADER} must be {TRACE_CONTENT_KEEP!r}, or be left out"
+
+
+def asks_to_keep_trace_content(request: Request) -> bool:
+    """Whether the request asks for its content to be kept, refusing a value it cannot mean.
+
+    A misspelled header is a caller mistake to report, as ``Otari-Code-Execution``'s
+    is: otherwise ``Otari-Trace-Content: true`` would keep nothing and say nothing.
+    """
+    value = request.headers.get(TRACE_CONTENT_HEADER)
+    if value is None or not value.strip():
+        return False
+    if value.strip().lower() != TRACE_CONTENT_KEEP:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=TRACE_CONTENT_HEADER_INVALID_DETAIL)
+    return True
+
+
+async def routed_trace_content(
+    request: Request,
+    uow: UnitOfWork,
+    db: AsyncSession,
+    config: GatewayConfig,
+    workspace_id: uuid.UUID,
+    user_id: str | None,
+) -> ContentCapture | None:
+    """What a routed request that asks for it (``Otari-Trace-Content: keep``) keeps of its content, or None.
+
+    The deployment has to be able to seal content, and then the traces service
+    applies the workspace's rule, on the request's own Unit of Work. Fails closed:
+    a read that fails keeps no content, and the request is served without it.
+    """
+    if not config.trace_content_enabled:
+        return None
+    content: SpanContent | None = getattr(request.app.state, "trace_content", None)
+    if content is None or not content.sealing:
+        return None
+    try:
+        return await get_trace_service(uow, request, db).routed_content(
+            workspace_id, user_id, tool_output=config.trace_content_tool_output
+        )
+    except DATABASE_ERRORS as exc:
+        logger.warning("Could not read whether a routed request keeps its content (%s)", describe_database_error(exc))
+        return None
+
+
+def get_trace_service(
+    uow: UnitOfWorkDep, request: Request, db: Annotated[AsyncSession, Depends(get_db)]
+) -> TraceService:
+    """Build the request's traces service on the request's Unit of Work, with the process's content keys."""
+    content: SpanContent = getattr(request.app.state, "trace_content", None) or SpanContent.disabled()
+    return build_trace_service(uow, content, DatabaseSessionOwners(db))
 
 
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
@@ -1759,19 +2212,124 @@ async def get_visible_workspaces(
 VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspaces)]
 
 
-async def get_organization_trace_scope(visible: VisibleWorkspacesDep, identity: CurrentIdentity) -> TraceScope:
+async def get_organization_trace_scope(
+    visible: VisibleWorkspacesDep,
+    identity: CurrentIdentity,
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> TraceScope:
     """The workspaces of their active organization this caller may read traces in.
 
-    An owner or admin reads every trace's content; anyone else only their own traces'.
+    Each reads their own sessions' content. An owner or admin also reads what a
+    session's user shared with the organization's admins. A header master key
+    names no person to record a read against, so it reads no content at all.
     """
+    if session_identity is None:
+        return TraceScope.workspaces(visible.workspace_ids)
     return TraceScope.workspaces(
-        visible.workspace_ids, all_content=visible.whole_organization, content_user_id=str(identity.id)
+        visible.workspace_ids,
+        reader=ContentReader(
+            user_id=identity.id,
+            email=identity.email or str(identity.id),
+            audiences=frozenset({"organization_admins"}) if visible.whole_organization else frozenset(),
+        ),
     )
 
 
+async def require_signed_in_reader(
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> None:
+    """Refuse a break-glass opening that a header master key, which names nobody, would make.
+
+    The record has to say which person opened the content; the bootstrap operator
+    a master key falls back to is an account, not a person.
+    """
+    if session_identity is None:
+        raise TraceBreakGlassUnnamedError
+
+
+@dataclass(frozen=True)
+class OrganizationBreakGlass:
+    """An organization owner about to open a session's content without its owner's share."""
+
+    scope: TraceScope
+    organization_id: uuid.UUID
+    reader: ContentReader
+
+
+async def get_organization_break_glass(
+    visible: VisibleWorkspacesDep, identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
+) -> OrganizationBreakGlass:
+    """The caller as an owner of their active organization, over every workspace in it.
+
+    Owners only, not admins: break-glass is kept to the smallest group that can answer for it.
+    """
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        visible.organization_id, identity.id
+    )
+    if membership is None or membership.role != "owner":
+        raise TraceBreakGlassForbiddenError
+    reader = ContentReader(user_id=identity.id, email=identity.email or str(identity.id))
+    return OrganizationBreakGlass(
+        scope=TraceScope.workspaces(visible.workspace_ids, reader=reader),
+        organization_id=visible.organization_id,
+        reader=reader,
+    )
+
+
+@dataclass(frozen=True)
+class PlatformBreakGlass:
+    """The deployment's operator about to open a session's content in a named workspace of any organization."""
+
+    reader: ContentReader
+    workspace_id: uuid.UUID
+    organization_id: uuid.UUID
+
+
+async def get_platform_break_glass(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_id: Annotated[uuid.UUID, Query(description="The workspace the session is in.")],
+) -> PlatformBreakGlass:
+    """The deployment's operator, where the deployment lets them open any organization's session content.
+
+    Answers 404 where it does not, as a path nothing serves would, and for a workspace that does not exist.
+    """
+    if not config.trace_platform_break_glass_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    workspace = await WorkspaceRepository(db).get(workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    return PlatformBreakGlass(
+        reader=ContentReader(user_id=identity.id, email=identity.email or str(identity.id)),
+        workspace_id=workspace_id,
+        organization_id=workspace.organization_id,
+    )
+
+
+def get_request_prices(db: AsyncSession, organization_id: uuid.UUID | None) -> RequestPrices:
+    """Build the request pricing cache with its batched pricing repository."""
+    return RequestPrices(organization_id, OrganizationModelPricingRepository(db))
+
+
+def get_automatic_router(request: Request) -> AutomaticRouter:
+    """Build one automatic router per application worker."""
+    app_state = getattr(request.scope.get("app"), "state", None)
+    router = getattr(app_state, "automatic_router", None)
+    if router is None:
+        router = AutomaticRouter()
+        if app_state is not None:
+            app_state.automatic_router = router
+    return router
+
+
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
-    """Build the routing service, and the usage service it reads traffic through, on the request's Unit of Work."""
-    return RoutingService(config, UsageService(uow, UsageLogRepository(uow)))
+    """Build the routing service, and the usage and key services it reads through, on the request's Unit of Work."""
+    return RoutingService(
+        config,
+        UsageService(uow, UsageLogRepository(uow)),
+        get_api_key_service(uow),
+    )
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
@@ -1797,7 +2355,7 @@ class ToolPorts:
     web_provider_client: httpx.AsyncClient | None = None
 
 
-def get_tool_ports(
+async def get_tool_ports(
     code_execution: CodeExecutionPortDep,
     code_execution_policy: WorkspaceCodeExecutionPoliciesDep,
     mcp_server: WorkspaceMcpServersDep,
@@ -1837,7 +2395,7 @@ def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable
     return _require
 
 
-def get_log_writer(request: Request) -> LogWriter:
+async def get_log_writer(request: Request) -> LogWriter:
     writer: LogWriter = request.app.state.log_writer
     return writer
 
@@ -1864,7 +2422,7 @@ def get_file_service(
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 
 
-def get_optional_file_service(
+async def get_optional_file_service(
     request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1921,12 +2479,12 @@ async def _caller_workspace_ids(
 CallerWorkspaces = Annotated[frozenset[uuid.UUID], Depends(_caller_workspace_ids)]
 
 
-def _caller_workspace_query(organization_id: CallerOrganization) -> Select[tuple[uuid.UUID]]:
+def _caller_workspace_query(organization_id: CallerOrganization) -> Select[uuid.UUID]:
     """The same workspaces as a subquery, so a read of a growing table filters in the database."""
     return ids_in_organization(organization_id)
 
 
-CallerWorkspaceQuery = Annotated[Select[tuple[uuid.UUID]], Depends(_caller_workspace_query)]
+CallerWorkspaceQuery = Annotated[Select[uuid.UUID], Depends(_caller_workspace_query)]
 
 
 def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]:
@@ -1937,9 +2495,33 @@ def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]
 CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
 
 
-def get_deployment_trace_scope(workspace_ids: CallerWorkspaces) -> TraceScope:
-    """The scope of the deployment-operator trace routes: every workspace in the caller's organization."""
-    return TraceScope.workspaces(workspace_ids, all_content=True)
+async def get_deployment_trace_scope(
+    workspace_ids: CallerWorkspaces,
+    organization_id: CallerOrganization,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> TraceScope:
+    """The scope of the deployment-operator trace routes: every workspace in the caller's organization.
+
+    The operator reads a session's content where it is their own, where its user shared it with the
+    operator, and, as an owner or admin of that organization too, where its user shared it with them.
+    A header master key names no person to record a read against, so it reads no content at all.
+    """
+    if session_identity is None:
+        return TraceScope.workspaces(workspace_ids)
+    audiences: set[ShareAudience] = {"deployment_operator"}
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        organization_id, identity.id
+    )
+    if membership is not None and membership.role in MANAGEMENT_ROLES:
+        audiences.add("organization_admins")
+    return TraceScope.workspaces(
+        workspace_ids,
+        reader=ContentReader(
+            user_id=identity.id, email=identity.email or str(identity.id), audiences=frozenset(audiences)
+        ),
+    )
 
 
 async def get_feedback_service(
@@ -1950,6 +2532,187 @@ async def get_feedback_service(
     await release_session(db)
     return FeedbackService()
 
+
+class _DirectToolAccounts:
+    """The direct tool service's accounts: the api-keys rules for who a call bills, and the budgets service."""
+
+    def __init__(self, config: GatewayConfig, api_keys: ApiKeyService, budgets: BudgetService) -> None:
+        self._config = config
+        self._api_keys = api_keys
+        self._budgets = budgets
+
+    def names_end_user(self, caller: DirectCaller) -> bool:
+        return names_end_user(caller.api_key, caller.user)
+
+    def billed_user(self, caller: DirectCaller) -> str:
+        return resolve_user_id(
+            user_id_from_request=caller.user,
+            api_key=caller.api_key,
+            is_master_key=caller.is_master_key,
+            master_key_error=DirectToolCallError(
+                MASTER_KEY_USER_REQUIRED_DETAIL, status_code=status.HTTP_400_BAD_REQUEST
+            ),
+            no_api_key_error=DirectToolCallError(
+                API_KEY_VALIDATION_FAILED_DETAIL, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            no_user_error=DirectToolCallError(
+                API_KEY_NO_USER_DETAIL, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            forbidden_user_error=DirectToolCallError(USER_MISMATCH_DETAIL, status_code=status.HTTP_403_FORBIDDEN),
+            reject_mismatch=self._config.reject_user_mismatch,
+        )
+
+    async def end_user(
+        self, api_key: APIKey, external_id: str, *, requested_budget_id: str | None
+    ) -> tuple[str, str | None]:
+        resolved = await self._budgets.resolve_end_user(
+            api_key=api_key, external_id=external_id, requested_budget_id=requested_budget_id
+        )
+        return resolved.user_id, resolved.budget_id
+
+    async def tool_refusal(self, api_key: APIKey | None, *, kind: ToolKind, provider: str, tool: str) -> str | None:
+        return await self._api_keys.tool_refusal(self._config, api_key, kind=kind, provider=provider, tool=tool)
+
+
+def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) -> DirectToolLedger:
+    """The direct tool service's ledger: the budget, pricing and funding functions that take the request's session.
+
+    Its methods close over that session.
+    """
+
+    class Ledger:
+        async def workspace_of(self, api_key_id: str | None) -> uuid.UUID:
+            return await workspace_for_key_id(db, api_key_id)
+
+        async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
+            return await organization_for_key_id(db, api_key_id)
+
+        async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
+            rate = await resolve_tool_rate(
+                db,
+                call.rate_keys,
+                label=call.label,
+                deployment_paid=call.deployment_paid,
+                organization_id=organization_id,
+            )
+            return rate.unit_rate if rate is not None else None
+
+        async def hold(
+            self, user_id: str, amount: Decimal, *, api_key: APIKey | None, provider: str, counts_toward_budget: bool
+        ) -> object:
+            return await reserve_budget(
+                db,
+                user_id,
+                amount,
+                # Not the pricing key: ``model`` only drives reserve_budget's free-model
+                # shortcut through any-llm, which a tool is not, and a tool named like an
+                # any-llm provider could skip the reservation through it.
+                model=None,
+                strategy=config.budget_strategy,
+                counts_toward_budget=counts_toward_budget,
+                # A tool is not a model, but it is billed to a workspace like one, so
+                # the scope carries the tool's provider as the narrowing axis.
+                scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider),
+            )
+
+        async def refund(self, hold: object) -> None:
+            await refund_reservation(db, cast(ReservationHandle, hold))
+
+        async def settle(self, hold: object, cost: Decimal) -> None:
+            await reconcile_reservation(db, cast(ReservationHandle, hold), cost)
+
+        async def admit_funding(
+            self, *, organization_id: uuid.UUID | None, api_key_id: str | None, user_id: str, request_id: str
+        ) -> object | None:
+            try:
+                return await admit_deployment_paid(
+                    billing,
+                    deployment_paid=True,
+                    organization_id=organization_id,
+                    api_key_id=api_key_id,
+                    user_id=user_id,
+                    request_id=request_id,
+                )
+            except InsufficientFundsError:
+                raise
+            except Exception as exc:
+                # Ends the transaction the port may have left failed, rolling it back
+                # when it cannot commit, so the refund that follows has a usable session.
+                await release_session(db)
+                raise FundsCheckFailedError(describe_port_error(exc)) from exc
+
+        async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
+            await cast(DeploymentCharge, funding).settle(
+                cost, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
+            )
+
+        async def release(self) -> bool:
+            return await release_session(db)
+
+    return Ledger()
+
+
+class _DirectToolGates:
+    """The direct tool service's gates: the request's rate limits and in-flight entry, and the usage log writer."""
+
+    def __init__(self, request: Request, config: GatewayConfig, budgets: BudgetService, log_writer: LogWriter) -> None:
+        self._request = request
+        self._config = config
+        self._budgets = budgets
+        self._log_writer = log_writer
+
+    async def check_rate_limit(self, user_id: str) -> dict[str, str]:
+        info = await check_rate_limit(self._request, user_id)
+        return rate_limit_headers(info) if info else {}
+
+    async def admit_rules(
+        self, *, api_key_id: str | None, user_id: str, budget_exempt: bool, provider: str, tool: str
+    ) -> None:
+        grant = await admit_rate_limit_rules(
+            self._request,
+            key_id=api_key_id,
+            user_id=user_id,
+            estimated_tokens=0,
+            budget_limits=None
+            if budget_exempt
+            else await self._budgets.minute_limits(user_id, strategy=self._config.budget_strategy),
+        )
+        if grant is not None:
+            # A `per: model` rule names a tool by its pricing key, <provider>:<tool>.
+            await grant.admit_model(provider, tool)
+
+    def track(self, *, endpoint: str, model: str, provider: str, user_id: str, api_key_id: str | None) -> None:
+        track_request(
+            self._request, endpoint=endpoint, model=model, provider=provider, user_id=user_id, api_key_id=api_key_id
+        )
+
+    async def record(self, usage: DirectToolUsage) -> None:
+        await self._log_writer.put(new_usage_row(**vars(usage)))
+
+
+def get_direct_tool_service(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    budgets: Annotated[BudgetService, Depends(get_budget_service)],
+    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    policies: WorkspaceWebSearchPoliciesDep,
+    billing: BillingPortDep,
+    web_client: WebProviderClientDep,
+) -> DirectToolService:
+    """Build the request's direct tool service; its ledger and its billing port share the request's session."""
+    return DirectToolService(
+        config=config,
+        accounts=_DirectToolAccounts(config, api_keys, budgets),
+        ledger=_ledger_on(db, config, billing),
+        gates=_DirectToolGates(request, config, budgets, log_writer),
+        policies=policies,
+        web_client=web_client,
+    )
+
+
+DirectToolServiceDep = Annotated[DirectToolService, Depends(get_direct_tool_service)]
 
 __all__ = [
     "AgentModelRecommenderPortDep",
@@ -1971,8 +2734,12 @@ __all__ = [
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
     "IdentityServiceDep",
+    "InferenceServiceDep",
     "ModelProviderPortDep",
+    "AgentRecommenderServiceDep",
     "HostedProviderServiceDep",
+    "SearchToolServiceDep",
+    "SearchToolTesterDep",
     "OrgProviderModelServiceDep",
     "RateLimitServiceDep",
     "HealthCheckServiceDep",
@@ -2004,4 +2771,6 @@ __all__ = [
     "verify_api_key_or_master_key",
     "verify_catalog_reader",
     "verify_master_key",
+    "DirectToolServiceDep",
+    "get_direct_tool_service",
 ]

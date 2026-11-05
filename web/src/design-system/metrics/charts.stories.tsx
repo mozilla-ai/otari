@@ -146,7 +146,7 @@ export const TrendWithRangeSelection: Story = {
         <p className="text-caption">
           {range
             ? `Buckets ${range.startIndex}-${range.endIndex} selected. Drag to change.`
-            : "Drag across the plot to select a range."}
+            : "Click a bar, or drag across the plot to select a range."}
         </p>
       </div>
     )

@@ -15,7 +15,9 @@ import type {
 } from "@/client"
 import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   budget,
   organizationContext,
   organizationMember,
@@ -24,6 +26,7 @@ import {
   workspaceMember,
   workspaceProviderKeyOverride,
 } from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 interface Request {
   url: string
@@ -119,7 +122,20 @@ function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+    </QueryClientProvider>,
+    {
+      // A workspace's name links to its own page, so the list needs a router.
+      wrapper: withRouter({
+        url: "/workspaces",
+        routes: [
+          { path: "/workspaces/$workspaceId", element: <p>Workspace page</p> },
+        ],
+      }),
+    },
+  )
 }
 
 const realMatchMedia = window.matchMedia
@@ -157,7 +173,7 @@ describe("WorkspacesPage", () => {
     expect(screen.getByText("Live traffic")).toBeInTheDocument()
   })
 
-  it("keeps Edit and Delete reachable on a phone", async () => {
+  it("keeps Delete reachable on a phone", async () => {
     stubPhone()
     mockApi({
       workspaces: [
@@ -169,9 +185,6 @@ describe("WorkspacesPage", () => {
 
     expect(await screen.findByText("Production")).toBeInTheDocument()
     expect(screen.queryByRole("grid")).not.toBeInTheDocument()
-    expect(
-      screen.getAllByRole("button", { name: "Edit" })[0],
-    ).toBeInTheDocument()
     expect(
       screen.getAllByRole("button", { name: "Delete" })[0],
     ).toBeInTheDocument()
@@ -457,39 +470,19 @@ describe("WorkspacesPage", () => {
     expect(
       screen.queryByRole("button", { name: "Create workspace" }),
     ).toBeNull()
-    expect(screen.getAllByRole("button", { name: "Edit" })[0]).toBeDisabled()
     expect(screen.getAllByRole("button", { name: "Delete" })[0]).toBeDisabled()
   })
 
-  it("opens the edit form in a dialog, naming the workspace", async () => {
+  it("links each workspace's name to its own page", async () => {
     mockApi({})
-    const user = userEvent.setup()
     renderPage(<WorkspacesPage />)
 
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
-
-    // A dialog rather than a band above the table: the row keeps its place, and
-    // the page under it does not shift by the height of a form (otari-ai#2125).
-    const dialog = await screen.findByRole("dialog", { name: "Edit workspace" })
-    expect(within(dialog).getByText("Default Workspace")).toBeInTheDocument()
-  })
-
-  it("renames a workspace through the update endpoint", async () => {
-    const requests = mockApi({})
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
-    const name = screen.getByLabelText("Name")
-    await user.clear(name)
-    await user.type(name, "Renamed")
-    await user.click(screen.getByRole("button", { name: "Save" }))
-
-    const patch = requests.find((request) => request.method === "PATCH")
-    expect(patch?.url).toContain(
-      `${API_ROOT}/workspaces/44444444-4444-4444-4444-444444444444`,
+    expect(
+      await screen.findByRole("link", { name: "Default Workspace" }),
+    ).toHaveAttribute(
+      "href",
+      "/workspaces/44444444-4444-4444-4444-444444444444",
     )
-    expect(patch?.body).toEqual({ name: "Renamed", description: null })
   })
 
   it("names the budget each workspace hands to its members", async () => {
@@ -571,140 +564,6 @@ describe("WorkspacesPage", () => {
     ).toBe(false)
   })
 
-  it("confirms before removing a per-provider budget default", async () => {
-    // otari-ai#2110: this Remove used to delete on the click, with no
-    // confirmation of any kind. It was the only delete in the dashboard that
-    // asked nothing.
-    const requests = mockApi({
-      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
-      budgetDefaults: {
-        "44444444-4444-4444-4444-444444444444": [
-          workspaceBudgetDefault({
-            id: "default-openai",
-            budget_id: "bud-team",
-            provider_key_id: "openai",
-          }),
-        ],
-      },
-    })
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
-    await screen.findByText("Per-provider defaults")
-    await user.click(
-      screen.getByRole("button", { name: "Remove default for openai" }),
-    )
-
-    // The click opens the dialog and sends nothing.
-    const dialog = await screen.findByRole("alertdialog")
-    expect(within(dialog).getByText(/openai fall back to/)).toBeVisible()
-    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
-
-    await user.click(
-      within(dialog).getByRole("button", { name: "Remove default" }),
-    )
-
-    const removed = requests.find((request) => request.method === "DELETE")
-    expect(removed?.url).toContain("default-openai")
-  })
-
-  it("keeps a per-provider default when the confirm is cancelled", async () => {
-    const requests = mockApi({
-      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
-      budgetDefaults: {
-        "44444444-4444-4444-4444-444444444444": [
-          workspaceBudgetDefault({
-            id: "default-openai",
-            budget_id: "bud-team",
-            provider_key_id: "openai",
-          }),
-        ],
-      },
-    })
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
-    await screen.findByText("Per-provider defaults")
-    await user.click(
-      screen.getByRole("button", { name: "Remove default for openai" }),
-    )
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Cancel",
-      }),
-    )
-
-    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
-  })
-
-  it("withholds the default-budget controls from a non-operator's edit form", async () => {
-    const requests = mockApi({
-      context: organizationContext({ deployment_operator: false }),
-    })
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
-    const name = await screen.findByLabelText("Name")
-    expect(
-      screen.queryByRole("button", { name: /Default member budget/ }),
-    ).toBeNull()
-    expect(screen.queryByText("Per-provider defaults")).toBeNull()
-
-    // The rename is theirs to make, and saving does not touch the withheld
-    // default: no delete for a "none" the caller never picked.
-    await user.clear(name)
-    await user.type(name, "Renamed")
-    await user.click(screen.getByRole("button", { name: "Save" }))
-
-    const patch = requests.find((request) => request.method === "PATCH")
-    expect(patch?.body).toEqual({ name: "Renamed", description: null })
-    const operatorOnly = [
-      `${API_ROOT}/budgets`,
-      `${API_ROOT}/providers`,
-      "member-budget-policies",
-    ]
-    expect(
-      requests.filter((request) =>
-        operatorOnly.some((path) => request.url.includes(path)),
-      ),
-    ).toEqual([])
-  })
-
-  it("offers the workspace's provider keys on an admin's edit form", async () => {
-    // The per-workspace half of the organization's provider keys, which the
-    // roles matrix has at Edit for an admin and hidden from everyone else. Not
-    // withheld from a non-operator, unlike the budget controls above it: these
-    // are the tenant's own credentials rather than the deployment's.
-    const requests = mockApi({
-      context: organizationContext({ deployment_operator: false }),
-    })
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
-
-    // Named twice on the page once the column exists, so this is the section
-    // inside the form rather than the header above the list.
-    expect(
-      within(await screen.findByRole("dialog")).getByText("Provider keys"),
-    ).toBeInTheDocument()
-    expect(
-      requests.some((request) =>
-        request.url.includes(
-          `${API_ROOT}/workspaces/44444444-4444-4444-4444-444444444444/provider-keys`,
-        ),
-      ),
-    ).toBe(true)
-    expect(
-      requests.some((request) =>
-        request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
-      ),
-    ).toBe(true)
-  })
-
   it("counts a workspace's departures on the list", async () => {
     // The support question this answers is "why is gpt-4o missing in Bravo",
     // which until now meant opening Edit on each workspace in turn (#2106).
@@ -779,9 +638,8 @@ describe("WorkspacesPage", () => {
   })
 
   it("keeps the provider keys and their reads away from a member", async () => {
-    // A member cannot open the edit form, which is where the section lives, so
-    // it is never mounted and neither of its reads is made. The gateway agrees
-    // on the writes (`require_workspace_management_access`) and refuses the
+    // The list reads no key on a member's behalf. The gateway agrees on the
+    // writes (`require_workspace_management_access`) and refuses the
     // organization's key list to anyone who does not manage the organization.
     const requests = mockApi({
       context: organizationContext({ role: "member" }),
@@ -790,7 +648,6 @@ describe("WorkspacesPage", () => {
     renderPage(<WorkspacesPage />)
 
     await screen.findByText("Bravo")
-    expect(screen.getAllByRole("button", { name: "Edit" })[0]).toBeDisabled()
     expect(screen.queryByText("Provider keys")).toBeNull()
     expect(
       requests.filter((request) => request.url.includes("provider-keys")),

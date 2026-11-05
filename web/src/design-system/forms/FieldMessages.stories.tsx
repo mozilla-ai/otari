@@ -41,20 +41,21 @@ export const TheReserve: Story = {
     return (
       <div className="flex w-80 flex-col gap-8">
         <div className="flex flex-col gap-1">
-          <span className="text-overline">reserveMessage off</span>
+          <span className="text-overline">shouldReserveMessage off</span>
           <Field
             label="Key name"
             value={without}
             onChange={setWithout}
             isInvalid={without.length > 0 && without.length < 3}
             errorMessage="At least 3 characters."
+            shouldReserveMessage={false}
           />
           <div className="border-t border-border pt-2 text-caption">
             This line moves when the message appears.
           </div>
         </div>
         <div className="flex flex-col gap-1">
-          <span className="text-overline">reserveMessage on</span>
+          <span className="text-overline">shouldReserveMessage on</span>
           <Field
             label="Key name"
             value={with_}

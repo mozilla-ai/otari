@@ -8,6 +8,19 @@ are still in the flat modules beside `services/`, and move here when the
 domain's migration reaches them (`DOMAINS.md`).
 """
 
+from gateway.services.providers._country_gate import (
+    CountryGate,
+    CountryNotServedError,
+    ensure_hosted_country,
+    ensure_provider_country,
+)
+from gateway.services.providers._hosted_catalog_update import (
+    HostedCatalogUpdate,
+    PriceUpdates,
+    ScheduledRun,
+    run_catalog_updater,
+)
+from gateway.services.providers._hosted_credentials import last4, normalize_api_base, public_api_base
 from gateway.services.providers._hosted_name_index import (
     hosted_implementation,
     load_hosted_names_at_startup,
@@ -34,7 +47,7 @@ from gateway.services.providers._missing_credential import (
     unpriced_model_refusal,
 )
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
-from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client
+from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client, owned_endpoint_sdk_client
 from gateway.services.providers._provider_clients import (
     acompletion,
     amessages,
@@ -50,37 +63,69 @@ from gateway.services.providers._provider_endpoint_cache import (
     run_provider_endpoint_refresher,
 )
 from gateway.services.providers._provider_endpoint_service import ProviderEndpointService
+from gateway.services.providers._workspace_hosted_access import (
+    WorkspaceHostedAccessDeniedError,
+    WorkspaceHostedAccessService,
+    load_workspace_hosted_access_at_startup,
+    narrow_hosted_models,
+    refresh_workspace_hosted_access_cache,
+    reset_workspace_hosted_access_cache,
+    run_workspace_hosted_access_refresher,
+    workspace_may_use_hosted,
+    workspace_requires_zero_data_retention,
+)
 
 __all__ = [
+    "CountryGate",
+    "CountryNotServedError",
+    "HostedCatalogUpdate",
     "HostedProviderService",
     "HostedSources",
     "LiveByoPairs",
     "OrganizationExists",
     "OrgProviderModelService",
     "OwnedEndpoint",
+    "PriceUpdates",
     "ProviderEndpointService",
     "ResolvedHostedProvider",
+    "ScheduledRun",
     "UnknownHostedUpstreamError",
+    "WorkspaceHostedAccessDeniedError",
+    "WorkspaceHostedAccessService",
     "acompletion",
     "amessages",
     "aresponses",
     "cached_owned_endpoint",
     "dispatch_on_hosted_credential",
+    "ensure_hosted_country",
+    "ensure_provider_country",
     "hosted_credential_for",
     "hosted_implementation",
+    "last4",
     "hosted_models_for",
     "load_hosted_names_at_startup",
     "load_provider_endpoints_at_startup",
+    "load_workspace_hosted_access_at_startup",
     "missing_provider_credential",
+    "narrow_hosted_models",
+    "normalize_api_base",
     "organization_to_serve",
     "owned_endpoint_http_client",
+    "owned_endpoint_sdk_client",
     "provider_for",
+    "public_api_base",
     "refresh_provider_endpoint_cache",
+    "refresh_workspace_hosted_access_cache",
     "refuse_unsafe_configured_endpoints",
     "reset_hosted_name_index",
     "reset_provider_endpoint_cache",
+    "reset_workspace_hosted_access_cache",
+    "run_catalog_updater",
     "run_hosted_name_refresher",
     "run_provider_endpoint_refresher",
+    "run_workspace_hosted_access_refresher",
     "serve_on_hosted_provider",
     "unpriced_model_refusal",
+    "workspace_may_use_hosted",
+    "workspace_requires_zero_data_retention",
 ]

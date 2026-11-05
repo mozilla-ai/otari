@@ -25,10 +25,11 @@ from enum import StrEnum
 from time import monotonic
 from typing import TYPE_CHECKING, Any, TypeVar
 
-import httpx
+import httpx2
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-from mcp.shared.exceptions import McpError
+from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import MCPError
+from mcp.types import PaginatedRequestParams
 
 from gateway.log_config import logger
 
@@ -243,7 +244,7 @@ def _encode(value: Any) -> bytes:
 def _as_jsonable(value: Any) -> Any:
     """Render a Pydantic model the way the response would, or refuse to size it."""
     if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json", exclude_none=True)
+        return value.model_dump(mode="json", by_alias=True, exclude_none=True)
     raise TypeError(type(value).__name__)
 
 
@@ -298,7 +299,7 @@ def screen_tool(tool: MCPTool) -> str | None:
         return WARN_DESCRIPTION_TOO_LARGE
     if tool.annotations is not None and _oversized(tool.annotations, TOOL_ANNOTATIONS_MAX_BYTES):
         return WARN_ANNOTATIONS_TOO_LARGE
-    if not _schema_is_supported(tool.inputSchema):
+    if not _schema_is_supported(tool.input_schema):
         return WARN_SCHEMA_UNSUPPORTED
     return None
 
@@ -325,7 +326,7 @@ def arguments_within_bounds(arguments: dict[str, Any]) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-async def enforce_content_length(response: httpx.Response) -> None:
+async def enforce_content_length(response: httpx2.Response) -> None:
     """Install the decoded response ceiling before the body is read.
 
     Registered as an httpx response event hook, which runs with the headers
@@ -348,15 +349,15 @@ async def enforce_content_length(response: httpx.Response) -> None:
             if length > TRANSPORT_MAX_BYTES:
                 raise TransportResponseTooLarge
 
-    if not isinstance(response.stream, httpx.AsyncByteStream):  # pragma: no cover - async client invariant
+    if not isinstance(response.stream, httpx2.AsyncByteStream):  # pragma: no cover - async client invariant
         raise TypeError("Expected an asynchronous HTTP response stream")
     response.stream = _BoundedResponseStream(response.stream, TRANSPORT_MAX_BYTES)
 
 
-class _BoundedResponseStream(httpx.AsyncByteStream):
+class _BoundedResponseStream(httpx2.AsyncByteStream):
     """Count response bytes while preserving streaming and close behavior."""
 
-    def __init__(self, stream: httpx.AsyncByteStream, ceiling: int) -> None:
+    def __init__(self, stream: httpx2.AsyncByteStream, ceiling: int) -> None:
         self._stream = stream
         self._ceiling = ceiling
 
@@ -372,38 +373,38 @@ class _BoundedResponseStream(httpx.AsyncByteStream):
         await self._stream.aclose()
 
 
-def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., httpx.AsyncClient]:
+def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., httpx2.AsyncClient]:
     """An MCP HTTP client factory with redirects disabled and a size pre-check.
 
-    The SDK's own factory sets ``follow_redirects=True``, which on a
-    credentialed request means httpx would replay the ``Authorization`` header,
-    and the request body, at whatever host the remote server names. Redirects
-    are excluded from the first version entirely: a later one
-    may follow them by validating each destination before anything is sent.
+    The SDK follows a redirect that stays on the endpoint's origin, up to the
+    client's ``max_redirects``, whatever its ``follow_redirects`` says. Redirects
+    are excluded from the first version entirely, so that budget is zero: a later
+    one may follow them by validating each destination before anything is sent.
 
     ``screen_answers`` adds :func:`refuse_unusable_answer` ahead of the size
     check, for a connection check that has to name why a server failed.
     """
-    response_hooks: list[Callable[[httpx.Response], Coroutine[Any, Any, None]]] = [enforce_content_length]
+    response_hooks: list[Callable[[httpx2.Response], Coroutine[Any, Any, None]]] = [enforce_content_length]
     if screen_answers:
         response_hooks.insert(0, refuse_unusable_answer)
 
     def factory(
         headers: dict[str, str] | None = None,
-        timeout: httpx.Timeout | None = None,
-        auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient:
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
+    ) -> httpx2.AsyncClient:
         client_headers = dict(headers or {})
         client_headers["Accept-Encoding"] = "identity"
         kwargs: dict[str, Any] = {
             "follow_redirects": False,
-            "timeout": timeout if timeout is not None else httpx.Timeout(CONNECT_TIMEOUT_S, read=CALL_TIMEOUT_S),
+            "max_redirects": 0,
+            "timeout": timeout if timeout is not None else httpx2.Timeout(CONNECT_TIMEOUT_S, read=CALL_TIMEOUT_S),
             "event_hooks": {"response": list(response_hooks)},
             "headers": client_headers,
         }
         if auth is not None:
             kwargs["auth"] = auth
-        return httpx.AsyncClient(**kwargs)
+        return httpx2.AsyncClient(**kwargs)
 
     return factory
 
@@ -484,15 +485,8 @@ async def open_session(server: ResolvedMcpServer, *, screen_answers: bool = Fals
     headers = {"Authorization": f"Bearer {server.authorization_token}"} if server.authorization_token else None
     async with AsyncExitStack() as stack:
         async with asyncio.timeout(CONNECT_TIMEOUT_S):
-            read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(
-                    server.url,
-                    headers=headers,
-                    timeout=CONNECT_TIMEOUT_S,
-                    sse_read_timeout=CALL_TIMEOUT_S,
-                    httpx_client_factory=build_http_client_factory(screen_answers=screen_answers),
-                )
-            )
+            client = await stack.enter_async_context(build_http_client_factory(screen_answers=screen_answers)(headers))
+            read, write = await stack.enter_async_context(streamable_http_client(server.url, http_client=client))
             session = await stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
         yield session
@@ -597,7 +591,7 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
     seen_cursors: set[str] = set()
 
     for _ in range(DISCOVERY_MAX_PAGES):
-        page = await session.list_tools(cursor)
+        page = await session.list_tools(params=None if cursor is None else PaginatedRequestParams(cursor=cursor))
         tools = getattr(page, "tools", None)
         if not isinstance(tools, list):
             raise McpDiscoveryRefused
@@ -623,7 +617,7 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
 
         if allowed is not None and allowed.issubset(collected):
             break
-        cursor = getattr(page, "nextCursor", None)
+        cursor = getattr(page, "next_cursor", None)
         if cursor is None:
             break
         if not isinstance(cursor, str) or cursor in seen_cursors:
@@ -707,15 +701,15 @@ def failure_for_status(http_status: int) -> CheckFailure:
     return CheckFailure.HTTP_ERROR
 
 
-def _answers_a_request(request: httpx.Request) -> bool:
+def _answers_a_request(request: httpx2.Request) -> bool:
     """Whether a POST carried a JSON-RPC request, which is owed a body, rather than a notification."""
     try:
         return "id" in json.loads(request.content)
-    except (ValueError, TypeError, httpx.RequestNotRead):
+    except (ValueError, TypeError, httpx2.RequestNotRead):
         return True
 
 
-async def refuse_unusable_answer(response: httpx.Response) -> None:
+async def refuse_unusable_answer(response: httpx2.Response) -> None:
     """Fail at the first POST answer an MCP client cannot use, naming why.
 
     A response hook, so it runs before the SDK reads the answer. The SDK reports
@@ -766,17 +760,17 @@ def classify_check_failure(exc: BaseException) -> tuple[CheckFailure, int | None
     for leaf in leaves:
         if isinstance(leaf, _UnusableAnswer):
             return leaf.failure, leaf.http_status
-        if isinstance(leaf, httpx.HTTPStatusError):
+        if isinstance(leaf, httpx2.HTTPStatusError):
             return failure_for_status(leaf.response.status_code), leaf.response.status_code
     for leaf in leaves:
-        if isinstance(leaf, httpx.ConnectError):
+        if isinstance(leaf, httpx2.ConnectError):
             return (CheckFailure.TLS_FAILED if _caused_by_tls(leaf) else CheckFailure.UNREACHABLE), None
     for leaf in leaves:
         if isinstance(leaf, (McpDiscoveryRefused, TransportResponseTooLarge)):
             return CheckFailure.LIMITS_EXCEEDED, None
-        if isinstance(leaf, (httpx.TimeoutException, TimeoutError)):
+        if isinstance(leaf, (httpx2.TimeoutException, TimeoutError)):
             return CheckFailure.TIMEOUT, None
-        if isinstance(leaf, McpError):
+        if isinstance(leaf, MCPError):
             return CheckFailure.NOT_MCP, None
     return CheckFailure.CONNECTION_FAILED, None
 

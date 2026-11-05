@@ -17,6 +17,10 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
+Accounts in otari.ai's EU region set
+`ANTHROPIC_BASE_URL="https://eu.api.otari.ai/api"` instead: `api.otari.ai`
+answers an EU key with `421 Misdirected Request`, naming the host to use.
+
 Claude Code puts a telemetry value in `metadata.user_id`; the next section
 says how a key accepts it.
 
@@ -27,7 +31,7 @@ Otari user ID, so create or update its API key with
 `reject_user_mismatch: false`, or pick **Always accept** for "Mismatched `user`
 field" under the dashboard key form's **Advanced** section. Spend still binds
 to the key's user; see
-[Mismatched `user` fields](access-control.md#mismatched-user-fields).
+[Mismatched `user` fields](api-keys.md#mismatched-user-fields).
 
 ```bash
 curl "$OTARI_URL/api/v1/keys" \
@@ -90,6 +94,25 @@ export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Conversation-Id: bug-fix-1234\nOtari-Tag
 It takes the place of Claude Code's own session id for grouping. See
 [Sessions from your own agent](traces.md#sessions-from-your-own-agent).
 
+A routed session can also keep what it was about: the prompt that opened each
+turn and each tool call's arguments, and what each tool returned where the
+deployment and the workspace keep tool output. The deployment and the workspace have to keep
+content, and Claude Code asks with a header:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS="Otari-Trace-Content: keep"
+```
+
+`ANTHROPIC_CUSTOM_HEADERS` holds every header Claude Code adds, so setting it
+again replaces the first value. To send this header and
+[`Otari-Tags`](#tag-claude-code-traffic) together, put one per line:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Trace-Content: keep\nOtari-Tags: agent=bug-fix'
+```
+
+See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+
 ## Budgets
 
 A request a budget refuses answers `403` with `Otari-Error-Code: budget_exceeded`.
@@ -145,71 +168,29 @@ for how fields translate.
 
 ## Let Otari choose a subagent's model
 
-Switching the model inside a running Claude Code conversation cold-starts its
-prompt cache. A new subagent has no cache yet, so the moment it is spawned is
-where a cheaper model is free. Claude Code can ask Otari at that moment, even
-when its own requests go to Anthropic directly.
+Install the `otari-router` plugin to have Otari pick the model each new Claude
+Code subagent starts on. Switching models inside a running conversation
+cold-starts its prompt cache, but a new subagent has no cache yet, so its spawn
+is where a cheaper model costs nothing in cache misses. The plugin asks Otari at
+that moment, even when Claude Code's own requests go to Anthropic directly, and
+each recommendation is one decision call billed to your key. The request and
+response are in the
+[API reference](api-reference.md#routing-recommendations), and how Otari
+decides is in [Agent model recommendations](routing.md#agent-model-recommendations).
 
-`POST /api/v1/routing/recommend` takes the facts a harness holds at spawn
-time and recommends the model to start the subagent on. Otari puts one choice
-question to a decision model, TypeSafe's Jev by default: given the subagent
-type, the task and the parent's model, which is the cheapest candidate that
-would do the task well? The candidate Jev picks is the recommendation. Any
-active API key may ask. The decision call is billed to the caller and recorded
-in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
-the harness acts on the answer with its own provider credentials.
-
-Who answers depends on the build. A self-run deployment asks the decision
-model `agent_recommender_model` names, which may be a local one, and the call
-costs what that provider charges. On otari.ai a managed recommender answers
-behind the same route, which you never configure, at the price of one
-recommendation.
-
-A self-run deployment needs a
-[decision provider](configuration.md#decision-providers) the
-`agent_recommender_model` selector resolves to, `typesafe` with an API key by
-default. Without one, the route answers 400 and the plugin falls back to the
-model the subagent would have had anyway.
-
-```bash
-curl "$OTARI_URL/api/v1/routing/recommend" \
-  -H "Authorization: Bearer $OTARI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "harness": "claude-code",
-    "session_id": "bf05abe2-5ff2-4eb0-8459-ab578d5c9468",
-    "tool_use_id": "toolu_01Ab3dEfGh",
-    "agent_type": "Explore",
-    "description": "Find the budget reservation code",
-    "prompt": "Find where budgets are reserved before dispatch.",
-    "parent_model": "claude-opus-5",
-    "requested_model": null
-  }'
-```
-
-```json
-{
-  "model": "haiku",
-  "reason": "jev-1.13.0 chose haiku with 81%",
-  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
-}
-```
-
-`model` is one of the `agent_recommender_candidates`, Claude Code's `haiku`,
-`sonnet` and `opus` aliases by default, because Claude Code sends the
-subagent's requests to Anthropic itself and resolves the alias on its side.
-`harness` is `claude-code` or `pi`, and it picks the list: a pi request
-sends its own `candidates`, Otari model ids with what each is for, and a
-Claude Code request may not send any (see
-[Agent model recommendations](configuration.md#agent-model-recommendations)).
-The caller's own `requested_model` is received as a fact but kept out of the
-question, so the orchestrator's guess cannot pull the answer toward itself.
-The task reaches the decision model shortened to its first 32,000 characters.
+On a gateway you run, an operator stores one or more decision models on the
+**Subagent router** page of the deployment view, each with its key and a price
+per million tokens, and switches one on; a recommendation is charged to the
+caller at that price (see [Subagent routers](routing.md#subagent-routers)). The
+router may be a local model, and both prices at 0 make it free. With no router
+stored, or every stored router switched off, the route answers `400` and every
+subagent starts on the model it would have had anyway. On otari.ai a managed
+router answers, with nothing to configure.
 
 ### Install the plugin
 
-The Claude Code side is the `otari-router` plugin, which this repository
-publishes as a plugin marketplace. In a Claude Code session:
+The plugin ships from this repository's plugin marketplace. In a Claude Code
+session:
 
 ```
 /plugin marketplace add mozilla-ai/otari
@@ -219,20 +200,18 @@ publishes as a plugin marketplace. In a Claude Code session:
 The install asks for the gateway URL and an API key. Both are required; the
 key goes to Claude Code's secure storage, never to a settings file. The URL
 must be `https` unless the gateway runs on the same machine, since the key
-travels in a header. The plugin is
-active from then on, in that session and
-every one after. The
+travels in a header. The plugin is active
+from then on, in that session and every one after. The
 [plugin's README](../plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
-The plugin hooks `agent.spawn`, sends the request above, and passes the
-answer on with `next({ ...e, model })`. A settings-file hook cannot do this:
-`SubagentStart` only adds context. A fork always inherits its parent's model,
-so the plugin does not ask about one. Each spawn leaves a dim line in the
-transcript naming the model Otari chose and why, and each finished subagent
-one with the model it ran on and its token counts. When Otari does not
-answer, the subagent starts on the model it would have had anyway, and the
-line says so.
+Once it is installed, each spawn leaves a dim line in the transcript naming the
+model Otari chose and why, and each finished subagent one with the model it ran
+on and its token counts. When Otari does not answer, the subagent starts on the
+model it would have had anyway, and the line says so. A fork always inherits
+its parent's model, so the plugin does not ask about one. The plugin hooks
+`agent.spawn` and passes the answer on with `next({ ...e, model })`; a
+settings-file hook cannot do this, because `SubagentStart` only adds context.
 
 ## Send Claude Code sessions to Otari
 
@@ -313,15 +292,20 @@ To keep them, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
 ```
 
 See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
-Do not both [route](#route-claude-code-through-otari) and export one session,
-or its cost appears twice.
+Do not both [route](#route-claude-code-through-otari) and export one session.
+Requests routed with Claude Code's own session id and spans exported under the
+same id, by the same person in the same workspace, land on one trace, so each
+turn and its cost appear twice. A request that sends `Otari-Conversation-Id`
+names a session of its own and joins neither. `otari hook` is the exception:
+its gates open no turn and carry no cost, so a routed session can report them.
 
 ## Import Claude Code usage without routing
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
-sessions that do not already route through Otari. It is the usage part of
+sessions that do not already route through Otari, and any Otari deployment
+accepts it. It is the usage part of
 [sending sessions to Otari](#send-claude-code-sessions-to-otari), without the
-session's turns and tools. Send it to any Otari deployment.
+session's turns and tools.
 
 Create a dedicated API key with `exclude_from_budget: true`, then configure the
 logs exporter. The optional metrics exporter adds content-free outcome counters.
@@ -391,7 +375,7 @@ payloads are never opened out of a transcript, and the endpoint rejects them.
 
 Each event carries a `session_label` of `<hostname>:<project>`, where the project
 is the session's working directory with the home-directory prefix dropped, so
-usage can be grouped per repository. Filter on it in Activity and Usage.
+usage can be grouped per repository. Filter on it on the Overview.
 
 Rows are unique on `(source, source_event_id)`, and the source event id here is the
 Anthropic response id, so re-running imports only what is new and reports the rest

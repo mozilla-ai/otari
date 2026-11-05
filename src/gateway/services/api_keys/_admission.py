@@ -18,3 +18,9 @@ def key_refusal(api_key: APIKey, now: datetime) -> tuple[str, str] | None:
     if expires_at is not None and expires_at < now:
         return "expired_key", "API key has expired"
     return None
+
+
+def operator_set_active(api_key: APIKey, is_active: bool) -> None:
+    """Switch ``api_key`` on or off as an operator; a switch-off is then not the owner's to undo."""
+    api_key.is_active = is_active
+    api_key.operator_disabled = not is_active

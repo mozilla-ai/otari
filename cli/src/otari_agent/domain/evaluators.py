@@ -170,6 +170,11 @@ def _matches_any(path: str, patterns: tuple[str, ...]) -> str | None:
     return None
 
 
+def any_path_matches(patterns: tuple[str, ...], paths: tuple[str, ...]) -> bool:
+    """Whether any of `paths` matches any of `patterns`, without collecting or sorting the matches."""
+    return any(_matches_any(path, patterns) is not None for path in paths)
+
+
 def matched_changed_paths(patterns: tuple[str, ...], changed_paths: tuple[str, ...]) -> tuple[str, ...]:
     """Every one of `changed_paths` that matches any of `patterns`, sorted.
 

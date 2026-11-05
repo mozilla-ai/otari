@@ -35,13 +35,12 @@ class SearchToolCredential(Base):
 
     The database counterpart of a ``search_tools:`` or ``fetch_tools:`` entry in
     config.yml, as ``kind`` says: it is merged over the config-file entries of
-    its kind at runtime (see ``search_tool_store_service``), with the stored row
-    winning on a name collision, exactly as ``ProviderCredential`` does for
-    providers. ``kind`` is fixed when the row is created, and ``fetch_tool`` is a
-    search row's enrichment instance. The API key is held encrypted
-    (``secret_box``) and is optional, because a ``searxng`` backend is normally
-    keyless; ``last4`` is kept in clear only so the UI can show which key is set
-    without ever decrypting.
+    its kind at runtime (see ``services/tools/_search_tool_overlay``), with the
+    stored row winning on a name collision. ``kind`` is fixed when the row is
+    created, and ``fetch_tool`` is a search row's enrichment instance. The API
+    key is held encrypted (``secret_box``) and is optional, because a
+    ``searxng`` backend is normally keyless; ``last4`` is kept in clear only so
+    the UI can show which key is set without ever decrypting.
     """
 
     __tablename__ = "search_tool_credentials"
@@ -347,6 +346,11 @@ class WorkspaceWebSearchConfig(Base):
     # forwarded to the backend, which is what lets a new provider need no
     # migration; the adapter in front of it whitelists what it understands.
     provider_options: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # NULL means "no workspace pin": the deployment's ``web_search_intercept`` and the
+    # request's header decide who runs a provider-named search or fetch keyword, as
+    # ``WorkspaceCodeExecutionPolicy.executor`` does for code. One of ``CodeExecutor``'s values.
+    search_executor: Mapped[str | None] = mapped_column(String(16), default=None)
+    fetch_executor: Mapped[str | None] = mapped_column(String(16), default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceCodeExecutionPolicy`` uses
     # it: these are serialized with ``.isoformat()`` for the dashboard, and a
     # plain ``DateTime(timezone=True)`` round-trips naive on SQLite. The Python
@@ -550,6 +554,9 @@ class ResolvedWebSearchConfig:
     credential: WebSearchCredential | None = None
     # The workspace's own fetch key, which its fetches and the enrichment of its searches use.
     fetch_credential: WebFetchCredential | None = None
+    # Who runs a provider-named search or fetch keyword, where the workspace pinned it.
+    search_executor: CodeExecutor | None = None
+    fetch_executor: CodeExecutor | None = None
 
 
 class SandboxContainer(Base):

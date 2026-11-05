@@ -89,7 +89,7 @@ export function PricingWarning() {
                   last hour.
                 </strong>{" "}
                 <Link
-                  to="/activity"
+                  to="/requests"
                   search={{ status: "error", range: "1h", source: "gateway" }}
                   className="underline underline-offset-2"
                 >

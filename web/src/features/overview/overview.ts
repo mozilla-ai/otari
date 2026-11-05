@@ -16,6 +16,9 @@ export type Health = "ok" | "warn" | "alert" | "neutral"
 // Thresholds (fractions): >=2% amber, >=10% red. See plan issue #302.
 export const ERROR_WARN = 0.02
 export const ERROR_ALERT = 0.1
+// Fewer requests than this cannot raise more than amber: one failure in the
+// first three of the day is a rate, not an incident.
+export const ERROR_ALERT_MIN_REQUESTS = 20
 
 export interface ErrorRateHealth {
   // null when there are no requests to derive a rate from (renders as "—").
@@ -31,7 +34,11 @@ export function errorRateHealth(
   }
   const rate = totals.error_count / totals.request_count
   const status: Health =
-    rate >= ERROR_ALERT ? "alert" : rate >= ERROR_WARN ? "warn" : "ok"
+    rate >= ERROR_ALERT && totals.request_count >= ERROR_ALERT_MIN_REQUESTS
+      ? "alert"
+      : rate >= ERROR_WARN
+        ? "warn"
+        : "ok"
   return { rate, status }
 }
 

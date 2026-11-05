@@ -1,7 +1,7 @@
 # Deployment
 
 Otari publishes `mzdotai/otari` on Docker Hub. Use the
-[Quickstart](quickstart.md) for local setup; this page covers production choices.
+[Self-hosted quickstart](self-hosted-quickstart.md) for local setup; this page covers production choices.
 
 ## Production checklist
 
@@ -9,19 +9,18 @@ A durable deployment should:
 
 - use PostgreSQL and back it up
 - set a strong master key in a secret store
-- set and back up `OTARI_SECRET_KEY` when storing provider credentials
-- set `OTARI_PROVIDER_ACCOUNT_PEPPER` to its own random value while provider copies are on
+- set and back up `OTARI_SECRET_KEY`, which encrypts the provider credentials it stores
+- set `OTARI_PROVIDER_ACCOUNT_PEPPER` to its own random value to turn on provider
+  copies of attached files, which are off without it (see
+  [Provider copies](configuration.md#provider-copies))
 - configure explicit pricing or deliberately enable default pricing
 - terminate TLS in front of the gateway
 - restrict database and management access
-- monitor `/api/v1/health/readiness` and, when enabled, `/metrics`
+- monitor `/api/v1/health/readiness` and, with `enable_metrics` (see
+  [Common settings](configuration.md#common-settings)), `/metrics`
 - pin an image version, [verify it](#verify-the-image), and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
-
-A `/metrics` scrape needs the `metrics` extra (`pip install gateway[metrics]`),
-which the Docker image installs. A source install that sets `enable_metrics`
-without it refuses to start rather than serving an empty scrape.
 
 ### Behind a reverse proxy
 
@@ -36,13 +35,16 @@ addresses or networks, comma-separated, so Otari reads the client address from
 `X-Forwarded-For`. Use `*` only where the proxy is the sole path to the
 container, as on Railway: any peer in the list can set its own client address.
 When it is unset, uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that
-only `127.0.0.1` is trusted.
+only `127.0.0.1` is trusted. A country file
+([Supported countries](configuration.md#supported-countries)) looks up the same
+client address.
 
 ### Watch the connection pool
 
 On PostgreSQL the gateway serves requests from a fixed pool of database
-connections, and running out of them makes every request fail at once. `/metrics`
-reports the pool directly, labeled by `pool` (`request` for request traffic,
+connections, and running out of them makes every request fail at once. Alert
+when checked-out connections stay close to capacity for a sustained period,
+from these `/metrics` series, labeled by `pool` (`request` for request traffic,
 `log` for the usage-log writer):
 
 | Metric | Meaning |
@@ -50,12 +52,10 @@ reports the pool directly, labeled by `pool` (`request` for request traffic,
 | `gateway_db_pool_connections_checked_out` | Connections in use right now |
 | `gateway_db_pool_connections_idle` | Connections available to hand out |
 | `gateway_db_pool_overflow_connections` | Connections open beyond the pool's base size |
-| `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once |
+| `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once: `db_pool_size` plus `db_max_overflow` for `request`, `db_log_pool_size` for `log`, which has no overflow |
 
-The `request` pool is sized by `db_pool_size` and may open `db_max_overflow`
-connections beyond it, so its capacity is the two added together. The `log`
-pool is sized by `db_log_pool_size` and has no overflow, so its capacity is
-that value.
+SQLite keeps no pool, so these series do not appear there. The pool settings
+are in [Database connections](configuration.md#database-connections).
 
 ### Watch providers and refusals
 
@@ -77,10 +77,6 @@ errors, latency and spend without reading the usage log:
 `provider:model` adds a series per distinct model, so restrict keys to the
 models they may use where callers are not trusted to pick.
 
-Alert on checked-out connections approaching capacity for a sustained period.
-These metrics do not appear on SQLite, which opens a connection per use and
-keeps no pool.
-
 ### Verify the image
 
 Each published image carries a signed build provenance attestation, which ties it
@@ -96,13 +92,9 @@ build, such as one pushed to Docker Hub with stolen credentials.
 
 ## Docker Compose
 
-The repository Compose stack runs Otari and PostgreSQL:
-
-```bash
-cp config.example.yml config.yml
-docker compose pull
-docker compose up -d
-```
+The repository Compose stack runs Otari and PostgreSQL. The
+[Self-hosted quickstart](self-hosted-quickstart.md) walks through its first start, including the
+`.env` secrets it needs.
 
 Use `docker-compose.build.yml` when testing source changes:
 
@@ -138,6 +130,56 @@ services are optional; requests that require an unconfigured backend fail
 without affecting ordinary inference.
 
 See [Built-in tools](tools.md) and [Guardrails](guardrails.md).
+
+## Upgrading from hosted or hybrid mode
+
+A deployment that ran in hosted mode serves inference and the Playground as
+well as management. Set `OTARI_PROVIDER_ACCOUNT_PEPPER` to keep provider copies
+of attached files on: without it, startup turns them off and logs a warning.
+`web_search_workspace_default` and `code_execution_workspace_default` default
+to `true`; set them to `false` to keep web access and code execution off for a
+workspace with no policy of its own.
+
+A gateway that ran in hybrid mode serves from its own database too: leftover
+`OTARI_MODE`, `OTARI_AI_TOKEN` and `OTARI_DATA_PLANE_URL` are ignored, so
+declare its providers and create its keys and budgets as a new deployment does.
+
+## The country file
+
+A provider that serves only some countries needs the country each request comes
+from ([Supported countries](configuration.md#supported-countries)). Where no
+proxy sets a country header, Otari looks the client address up in a MaxMind DB
+country file, such as GeoLite2 Country or DB-IP Lite Country. The Docker image
+has the reader but not the file. Give it the file one of two ways.
+
+The simpler way is to upload it in the Country file card on the dashboard's
+Settings page. Otari stores the file in its database, so every replica reads
+it and nothing is mounted. Upload a new file each time its provider publishes
+one to keep it current: DB-IP Lite each month, GeoLite2 twice a week.
+
+### A mounted country file
+
+Where you control the containers, mount the folder that holds the file and name
+the file's path. Add this to the `otari` service in Compose, with the file saved
+as `./geoip/countries.mmdb`:
+
+```yaml
+    volumes:
+      - ./geoip:/app/geoip:ro
+    environment:
+      - OTARI_CLIENT_COUNTRY_DATABASE=/app/geoip/countries.mmdb
+```
+
+Otari reads a replaced file again without a restart, so a job that writes a
+new file on its provider's schedule, such as [geoipupdate](https://github.com/maxmind/geoipupdate)
+for GeoLite2, keeps it current. Replace the file in one step (write a new file,
+then rename it over the old one), so Otari never reads a half-written file. Mount
+the folder rather than the file: a mount of one file keeps the old file after a
+rename. Every replica needs its own copy. While `client_country_database` is set, a file
+uploaded on the dashboard is not read.
+
+DB-IP Lite is under CC BY 4.0, which asks you to credit DB-IP where your
+service names its data sources, for example with a link to `https://db-ip.com`.
 
 ## Configuration
 

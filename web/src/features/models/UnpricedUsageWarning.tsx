@@ -97,7 +97,7 @@ export function UnpricedUsageWarning() {
             ) : null}
             . Their model tokens carried no cost.{" "}
             <Link
-              to="/activity"
+              to="/requests"
               search={{
                 status: "success",
                 priced: "false",

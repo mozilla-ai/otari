@@ -1,13 +1,15 @@
 """A catalog model's token limits and capabilities, from the live models.dev catalog and the pricing snapshot."""
 
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import BaseModel, Field
 
 from gateway.core.config import GatewayConfig
 from gateway.services.catalog._metadata import metadata_entry
+from gateway.services.catalog._model_type import model_type
 from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.pricing_service import model_context_window
+from gateway.types.models_dev import ModelsDevCatalog
 
 if TYPE_CHECKING:
     from gateway.services.merged_catalog_service import ModelObject
@@ -36,7 +38,7 @@ class ModelCapabilities(NamedTuple):
     output_modalities: list[str]
 
 
-def _entry(config: GatewayConfig, models_dev: dict[str, Any] | None, model_key: str) -> ModelCatalogEntry | None:
+def _entry(config: GatewayConfig, models_dev: ModelsDevCatalog | None, model_key: str) -> ModelCatalogEntry | None:
     """models.dev's entry for a ``provider:model`` key; a bare key names no provider to look it up under."""
     instance, separator, model_id = model_key.partition(":")
     if not separator:
@@ -44,7 +46,7 @@ def _entry(config: GatewayConfig, models_dev: dict[str, Any] | None, model_key: 
     return metadata_entry(models_dev, config.provider_instance_type(instance), model_id)
 
 
-def model_limits(config: GatewayConfig, models_dev: dict[str, Any] | None, model_key: str) -> ModelLimits:
+def model_limits(config: GatewayConfig, models_dev: ModelsDevCatalog | None, model_key: str) -> ModelLimits:
     """The token limits of a ``provider:model`` (or bare) key.
 
     The live models.dev catalog first, because it describes the model as that
@@ -63,7 +65,7 @@ def model_limits(config: GatewayConfig, models_dev: dict[str, Any] | None, model
 
 
 def model_capabilities(
-    config: GatewayConfig, models_dev: dict[str, Any] | None, model_key: str
+    config: GatewayConfig, models_dev: ModelsDevCatalog | None, model_key: str
 ) -> ModelCapabilities | None:
     """A model's capabilities, or ``None`` when models.dev does not describe it.
 
@@ -90,7 +92,7 @@ def model_capabilities(
 
 def apply_model_metadata(
     config: GatewayConfig,
-    models_dev: dict[str, Any] | None,
+    models_dev: ModelsDevCatalog | None,
     obj: "ModelObject",
     metadata_selector: str | None = None,
     *,
@@ -105,6 +107,7 @@ def apply_model_metadata(
     limits = model_limits(config, models_dev, selector)
     obj.context_window = limits.context_window
     obj.max_output_tokens = limits.max_output_tokens
+    obj.type = model_type(config, models_dev, selector)
     capabilities = model_capabilities(config, models_dev, selector)
     if capabilities is None:
         obj.name = obj.supported_parameters = obj.architecture = None

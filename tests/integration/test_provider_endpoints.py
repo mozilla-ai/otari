@@ -169,7 +169,7 @@ def test_one_name_per_owner(client: TestClient) -> None:
         ({"name": "hosted"}, "names a provider"),
         ({"name": "my:vllm"}, "letters, digits"),
         ({"provider": "bedrock"}, "must be one of"),
-        ({"api_base": "http://127.0.0.1:8000/v1"}, "api_base refused"),
+        ({"api_base": "http://127.0.0.1:8000/v1"}, "added as a hosted provider instead"),
         ({"api_base": "http://169.254.169.254/latest"}, "api_base refused"),
         ({"api_base": "http://100.100.100.200/"}, "api_base refused"),
         ({"default_params": {"api_base": "http://10.0.0.1"}}, "cannot be endpoint defaults"),
@@ -243,6 +243,29 @@ def test_a_keyless_endpoint_never_falls_back_to_the_deployment_key(
 
     assert resp.status_code == 200, resp.text
     assert call["api_key"] not in {"sk-operator", "sk-deployment"}
+
+
+def test_a_workspace_requiring_zero_data_retention_refuses_its_own_endpoint_and_a_configured_instance(
+    client: TestClient,
+) -> None:
+    """Neither can be declared zero data retention, so neither serves a workspace that requires it."""
+    headers = _user_with_key(client, "alice")
+    assert _create(client, user_id="alice", api_key="sk-alice-1234").status_code == 201
+    [workspace] = client.get(f"{API_ROOT}/workspaces", headers=HEADERS).json()["data"]
+    policy = client.put(
+        f"{API_ROOT}/workspaces/{workspace['id']}/provider-policy",
+        json={"require_zero_data_retention": True},
+        headers=HEADERS,
+    )
+    assert policy.status_code == 200, policy.text
+
+    owned, owned_calls = _chat(client, headers, "my-vllm:qwen3")
+    configured, configured_calls = _chat(client, headers, "openai:gpt-4o")
+
+    assert owned.status_code == 403, owned.text
+    assert configured.status_code == 403, configured.text
+    assert owned_calls == []
+    assert configured_calls == []
 
 
 def test_default_params_go_beneath_the_callers_fields(client: TestClient) -> None:

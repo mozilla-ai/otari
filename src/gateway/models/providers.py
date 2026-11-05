@@ -215,6 +215,9 @@ class HostedProvider(Base):
     # Serve a model the roster does not list, as a ``config.yml`` instance does.
     # A model the roster switches off is still refused.
     serves_unlisted_models: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The operator's declaration that the upstream keeps no prompt or completion
+    # data. Shown in the catalog; nothing is enforced on it.
+    zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
     # The one organization served on this provider, or None for every one. Any
     # other organization is answered as if the provider were not configured.
     # RESTRICT: SET NULL would open the provider to every organization, and
@@ -223,15 +226,19 @@ class HostedProvider(Base):
     restricted_to_organization_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("organization.id", ondelete="RESTRICT"), index=True, default=None
     )
+    # The ISO country codes whose requests this provider serves, or None for
+    # every country. Checked as well as ``provider_supported_countries``.
+    supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
     )
 
 
-HostedModelDisabledReason = Literal["unpriced", "operator"]
+HostedModelDisabledReason = Literal["unpriced", "operator", "unavailable"]
 DISABLED_UNPRICED: HostedModelDisabledReason = "unpriced"
 DISABLED_BY_OPERATOR: HostedModelDisabledReason = "operator"
+DISABLED_UNAVAILABLE: HostedModelDisabledReason = "unavailable"
 
 
 class HostedProviderModel(Base):
@@ -249,7 +256,8 @@ class HostedProviderModel(Base):
 
     ``disabled_reason`` says why a row is off, and is null exactly when it is
     on: ``unpriced`` while it waits for a rate, ``operator`` while an operator
-    has switched it off. ``serves_unpriced`` marks a row switched on without a
+    has switched it off, ``unavailable`` since its provider refused to serve it
+    on the deployment's credential. ``serves_unpriced`` marks a row switched on without a
     rate on purpose, so a refresh does not hold it for one.
     """
 
@@ -280,3 +288,56 @@ class ConfiguredProviderImport(Base):
 
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class WorkspaceHostedProviderAccess(Base):
+    """One workspace's narrowing of a hosted provider its organization may use.
+
+    No row means the workspace inherits the provider whole, which is every
+    workspace's state until an admin changes it. A row either switches the
+    provider off for the workspace (``enabled`` false) or narrows it to
+    ``models``; ``models`` is null for every model the deployment serves on it.
+    A row in the inherited state is never stored: the service deletes it.
+
+    ``provider`` is the hosted provider's name, not a foreign key, for the same
+    reason as ``HostedProviderModel.provider``: a hosted provider declared in
+    configuration has no row of its own.
+    """
+
+    __tablename__ = "workspace_hosted_provider_access"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "provider", name="uq_workspace_hosted_provider_access_workspace_provider"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64))
+    enabled: Mapped[bool] = mapped_column(default=True)
+    models: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
+
+
+class WorkspaceProviderPolicy(Base):
+    """What one workspace requires of every provider that serves it.
+
+    No row requires nothing. ``require_zero_data_retention`` refuses every source
+    not declared zero data retention: an organization key or a hosted provider
+    whose operator did not declare it, and every configured instance, which
+    cannot be declared at all.
+    """
+
+    __tablename__ = "workspace_provider_policies"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    require_zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )

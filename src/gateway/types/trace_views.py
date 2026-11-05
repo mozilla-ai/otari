@@ -4,12 +4,13 @@ A leaf type, so the traces service can build it and the response schemas can map
 it without either importing the other.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from gateway.types.traces import SpanRecord, TraceSummary
+from gateway.types.traces import ContentAccess, ContentShare, SpanRecord, TraceSummary
 
 TurnState = Literal["active", "completed", "failed", "incomplete"]
 SessionState = Literal["active", "idle"]
@@ -93,3 +94,7 @@ class TraceView:
     truncated: bool
     gates: tuple[GateSummary, ...] = ()
     tool_costs: tuple[ToolCost, ...] = ()
+    # The context window of each model request's model, by span id, where one is known.
+    context_windows: Mapping[str, int] = field(default_factory=dict)
+    content_access: ContentAccess = "none"
+    content_share: ContentShare | None = None

@@ -18,20 +18,19 @@ import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import anyio
 import anyio.lowlevel
-import httpx
+import httpx2
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
 from gateway.services.mcp_stateless import failure_class
-from gateway.services.tool_usage import ToolUsageTally
-from gateway.services.traces import RequestTrace
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
+from gateway.services.traces import RequestTrace, ToolSpans
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -42,13 +41,13 @@ if TYPE_CHECKING:
     from gateway.models.mcp import McpServerConfig
 
 
-def _effective_port(url: httpx.URL) -> int | None:
+def _effective_port(url: httpx2.URL) -> int | None:
     if url.port is not None:
         return url.port
     return {"http": 80, "https": 443}.get(url.scheme)
 
 
-def _is_allowed_mcp_redirect(base: httpx.URL, target: httpx.URL) -> bool:
+def _is_allowed_mcp_redirect(base: httpx2.URL, target: httpx2.URL) -> bool:
     same_host = base.host == target.host
     same_origin = same_host and base.scheme == target.scheme and _effective_port(base) == _effective_port(target)
     https_upgrade = (
@@ -64,21 +63,20 @@ def _is_allowed_mcp_redirect(base: httpx.URL, target: httpx.URL) -> bool:
 def _origin_bound_http_client(
     base_url: str,
     headers: dict[str, str] | None = None,
-    timeout: httpx.Timeout | None = None,
-    auth: httpx.Auth | None = None,
-) -> httpx.AsyncClient:
+    timeout: httpx2.Timeout | None = None,
+    auth: httpx2.Auth | None = None,
+) -> httpx2.AsyncClient:
     """Create an MCP HTTP client that refuses redirects outside the vetted origin."""
-    base = httpx.URL(base_url)
+    base = httpx2.URL(base_url)
 
-    async def enforce_origin(request: httpx.Request) -> None:
+    async def enforce_origin(request: httpx2.Request) -> None:
         if not _is_allowed_mcp_redirect(base, request.url):
-            raise httpx.RequestError("MCP redirect target is outside the validated origin", request=request)
+            raise httpx2.RequestError("MCP redirect target is outside the validated origin", request=request)
 
-    return httpx.AsyncClient(
+    return httpx2.AsyncClient(
         headers=headers,
-        timeout=timeout if timeout is not None else httpx.Timeout(30.0),
+        timeout=timeout if timeout is not None else httpx2.Timeout(30.0, read=300.0),
         auth=auth,
-        follow_redirects=True,
         event_hooks={"request": [enforce_origin]},
     )
 
@@ -94,7 +92,7 @@ def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
         "function": {
             "name": tool.name,
             "description": tool.description or "",
-            "parameters": tool.inputSchema or {"type": "object", "properties": {}},
+            "parameters": tool.input_schema or {"type": "object", "properties": {}},
         },
     }
 
@@ -141,6 +139,7 @@ class MCPClientPool:
         self._tally = tally
         # The request's trace, which records each connection and call. None outside a request.
         self._trace = trace
+        self._spans = ToolSpans(trace, "mcp")
         self._owner: asyncio.Task[None] | None = None
         self._release = asyncio.Event()
 
@@ -230,14 +229,8 @@ class MCPClientPool:
         if cfg.authorization_token:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
 
-        transport = await self._stack.enter_async_context(
-            streamablehttp_client(
-                cfg.url,
-                headers=headers,
-                httpx_client_factory=partial(_origin_bound_http_client, cfg.url),
-            )
-        )
-        read, write, _ = transport
+        client = await self._stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
+        read, write = await self._stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
         session = await self._stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
 
@@ -291,11 +284,11 @@ class MCPClientPool:
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
-            if self._trace is not None:
-                self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=False)
+            self._spans.record(started, ok=False, arguments=arguments, tool_name=name)
             raise
-        if self._trace is not None:
-            self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=not result.isError)
+        self._spans.record(
+            started, ok=not result.is_error, arguments=arguments, result=_result_text(result), tool_name=name
+        )
         return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
@@ -309,6 +302,13 @@ class MCPClientPool:
         """
         if name not in self._tool_owner:
             raise KeyError(f"No MCP server owns tool {name!r}")
+        if self._tally is not None and not await self._tally.admit(name):
+            self._tally.record_failure(name)
+            return MCPToolCallOutcome(
+                content=TOOL_BUDGET_EXCEEDED_TEXT,
+                activity_content=TOOL_BUDGET_EXCEEDED_TEXT.removeprefix(f"{TOOL_ERROR_SENTINEL} "),
+                is_error=True,
+            )
         try:
             result = await self._call_tool_result(name, arguments)
         except Exception as exc:
@@ -319,15 +319,14 @@ class MCPClientPool:
                 is_error=True,
                 transport_error=True,
             )
-        parts = [_render_content_block(block) for block in result.content]
-        flattened = "\n".join(p for p in parts if p)
-        rendered = f"[tool error] {flattened}" if result.isError else flattened
+        flattened = _result_text(result)
+        rendered = f"[tool error] {flattened}" if result.is_error else flattened
         if self._tally is not None:
             self._tally.record_result(name, rendered)
         return MCPToolCallOutcome(
             content=rendered,
             activity_content=flattened,
-            is_error=bool(result.isError),
+            is_error=bool(result.is_error),
         )
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -416,3 +415,8 @@ def _render_content_block(block: Any) -> str:
         uri = getattr(resource, "uri", None) if resource else None
         return f"[resource uri={uri or '?'}]"
     return f"[content type={btype}]"
+
+
+def _result_text(result: CallToolResult) -> str:
+    """An MCP result as the text the model reads, without the error marker the loop adds."""
+    return "\n".join(part for part in (_render_content_block(block) for block in result.content) if part)

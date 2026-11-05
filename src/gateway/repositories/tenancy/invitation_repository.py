@@ -135,7 +135,7 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
         # nothing can produce that (there is no organization deletion, and the
         # foreign key cascades), and keeping the two in step is what stops a
         # later change from making it reachable.
-        def joined(statement: Select[Any]) -> Select[Any]:
+        def joined[*Ts](statement: Select[*Ts]) -> Select[*Ts]:
             return statement.join(
                 OrganizationMember,
                 col(Invitation.organization_member_id) == col(OrganizationMember.id),

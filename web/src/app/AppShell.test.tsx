@@ -252,12 +252,13 @@ describe("AppShell responsive layout", () => {
     await renderShell(bootstrap(), { url: "/organization" })
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(await screen.findByRole("link", { name: "Providers" }))
+    await user.click(await screen.findByRole("button", { name: "Providers" }))
+    await user.click(await screen.findByRole("link", { name: "Inference" }))
 
     expect(
       await screen.findByText("ORG PROVIDER KEYS PAGE"),
     ).toBeInTheDocument()
-    expect(document.title).toBe("Providers · Otari")
+    expect(document.title).toBe("Inference · Otari")
     // Navigating closes the drawer so the page it landed on is not hidden behind it.
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
@@ -283,15 +284,16 @@ describe("AppShell responsive layout", () => {
     )
 
     await user.click(await screen.findByRole("link", { name: "Organization" }))
-    const providers = await screen.findByRole("link", { name: "Providers" })
-    expect(providers).not.toHaveAttribute("aria-current")
+    await user.click(await screen.findByRole("button", { name: "Providers" }))
+    const inference = await screen.findByRole("link", { name: "Inference" })
+    expect(inference).not.toHaveAttribute("aria-current")
 
-    await user.click(providers)
+    await user.click(inference)
 
     expect(
       await screen.findByText("ORG PROVIDER KEYS PAGE"),
     ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Inference" })).toHaveAttribute(
       "aria-current",
       "page",
     )
@@ -601,7 +603,7 @@ describe("the rail's closing rules", () => {
   // unconditional one, mirroring the scope band at the head of the rail, so the
   // footer's is the one that gives way.
   const footerOf = (container: HTMLElement) =>
-    container.querySelector('[class*="pb-[env(safe-area-inset-bottom)]"]')
+    container.querySelector('[class*="-mx-3 flex flex-col gap-1 px-3 pt-1"]')
 
   it("keeps the footer rule where a row sits below it", async () => {
     mockMatchMedia(false)
@@ -627,6 +629,34 @@ describe("the rail's closing rules", () => {
   })
 })
 
+describe("the shell's outer box", () => {
+  // Found by walking up from the content region rather than by its classes, so
+  // the search cannot assert what it is looking for.
+  const outerBoxOf = (container: HTMLElement) => {
+    const main = container.querySelector("main#main-content")
+    if (!main) throw new Error("the shell rendered no content region")
+    let box = main as HTMLElement
+    while (box.parentElement && box.parentElement !== container) {
+      box = box.parentElement
+    }
+    return box
+  }
+
+  // `overflow: hidden` here would make this box a scroll container that focus
+  // can scroll, taking the top bar and the rail off screen with no scrollbar
+  // and no wheel to bring them back. jsdom computes no layout, so what is
+  // pinned is the class that causes it; e2e/parity.models.spec.ts covers the
+  // behavior in a browser.
+  it("clips its overflow instead of becoming a scroll container", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell()
+
+    const box = outerBoxOf(container)
+    expect(box).toHaveClass("overflow-clip")
+    expect(box).not.toHaveClass("overflow-hidden")
+  })
+})
+
 describe("AppShell surface gating", () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -648,14 +678,7 @@ describe("AppShell surface gating", () => {
       within(screen.getByRole("navigation", { name: "Sidebar" }))
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual([
-      "Overview",
-      "Activity",
-      "Usage",
-      "Models",
-      "API keys",
-      "Members",
-    ])
+    ).toEqual(["Overview", "Models", "API keys", "Members"])
     // Routing and Tools nest destinations, so they expand rather than
     // navigate; their children are links once the group is open.
     expect(
@@ -673,7 +696,7 @@ describe("AppShell surface gating", () => {
     // Awaited so the rail has settled before the snapshot below.
     await within(
       screen.getByRole("navigation", { name: "Sidebar" }),
-    ).findByRole("link", { name: "Providers" })
+    ).findByRole("button", { name: "Providers" })
 
     expect(
       within(screen.getByRole("navigation", { name: "Sidebar" }))
@@ -685,10 +708,15 @@ describe("AppShell surface gating", () => {
       "Members & roles",
       "Email domains",
       "Spend & budgets",
-      "Providers",
       "Guardrails",
       "Org settings",
     ])
+    // Providers nests the organization's two kinds of provider key.
+    expect(
+      within(screen.getByRole("navigation", { name: "Sidebar" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Providers"])
     // Settings and Accounts are on the deployment rail now, not this one.
     expect(
       within(screen.getByRole("navigation", { name: "Sidebar" })).queryByRole(
@@ -699,27 +727,33 @@ describe("AppShell surface gating", () => {
     expect(screen.getByText("General")).toBeInTheDocument()
   })
 
-  it("sends the organization's own Providers row to its provider keys", async () => {
+  it("sends the organization's Providers rows to its two key pages", async () => {
     mockMatchMedia(false)
-    // The registry test reads the declaration and the page's own tests render
-    // it without a rail, so nothing else asserts the rail draws it.
+    // The registry test reads the declaration and the pages' own tests render
+    // them without a rail, so nothing else asserts the rail draws them.
     await renderShell(bootstrap(), { url: "/organization/members" })
     const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
-    const providers = await within(sidebar).findByRole("link", {
-      name: "Providers",
+    const user = userEvent.setup()
+    await user.click(
+      await within(sidebar).findByRole("button", { name: "Providers" }),
+    )
+    const inference = await within(sidebar).findByRole("link", {
+      name: "Inference",
     })
-    expect(providers).toHaveAttribute("href", "/organization/provider-keys")
-    // Guardrails then Org settings after it, read off the rendered order rather
-    // than off the registry.
+    expect(inference).toHaveAttribute("href", "/organization/provider-keys")
+    expect(
+      within(sidebar).getByRole("link", { name: "Web search" }),
+    ).toHaveAttribute("href", "/organization/web-search-keys")
+    // Guardrails then Org settings after them, read off the rendered order
+    // rather than off the registry.
     expect(
       within(sidebar)
         .getAllByRole("link")
         .map((link) => link.textContent)
-        .slice(-3),
-    ).toEqual(["Providers", "Guardrails", "Org settings"])
+        .slice(-4),
+    ).toEqual(["Inference", "Web search", "Guardrails", "Org settings"])
 
-    const user = userEvent.setup()
-    await user.click(providers)
+    await user.click(inference)
 
     expect(
       await screen.findByText("ORG PROVIDER KEYS PAGE"),
@@ -751,9 +785,8 @@ describe("AppShell surface gating", () => {
     // them served, an empty heading over nothing is worse than no heading.
     expect(screen.queryByText("Access")).toBeNull()
     expect(screen.getByText("Build")).toBeInTheDocument()
-    // "Observe" goes with them. It labels the request log and the usage
-    // rollups, both gated on the usage surface, and the index that used to keep
-    // the heading alive now sits in its own group above it. The front page is
+    // "Observe" has no base rows (the request log and the usage rollups are
+    // the Overview's tabs), so it draws no heading either. The front page is
     // still there, which is the part that matters: a deployment with no
     // management surface at all is left with a landing row and no headings it
     // cannot fill.
@@ -1530,7 +1563,8 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/organization/members" })
 
-    await user.click(await screen.findByRole("link", { name: "Providers" }))
+    await user.click(await screen.findByRole("button", { name: "Providers" }))
+    await user.click(await screen.findByRole("link", { name: "Inference" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "provider-keys",

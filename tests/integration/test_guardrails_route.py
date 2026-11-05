@@ -12,6 +12,7 @@ service. The service contract itself is covered in
 
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -136,6 +137,38 @@ def test_monitor_mode_forwards_and_annotates(
     provider.assert_awaited_once()
     assert GUARDRAILS_RESULT_HEADER in resp.headers
     assert "prompt-injection" in resp.headers[GUARDRAILS_RESULT_HEADER]
+
+
+def test_a_monitor_check_with_no_service_says_why_it_has_no_verdict(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Otari#2690: the request is served, and the header says the check did not run."""
+    provider = AsyncMock(return_value=_text_message_response("answered"))
+
+    with patch("gateway.api.routes.messages.amessages", new=provider):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "x"}],
+                "max_tokens": 100,
+                "guardrails": [{"profile": "prompt-injection", "mode": "monitor"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert json.loads(resp.headers[GUARDRAILS_RESULT_HEADER]) == [
+        {
+            "profile": "prompt-injection",
+            "mode": "monitor",
+            "valid": None,
+            "score": None,
+            "status": "unavailable",
+            "reason": "not_configured",
+        }
+    ]
 
 
 def test_valid_input_passes_through_and_field_is_stripped(

@@ -18,6 +18,7 @@ from typing import Any
 
 import anthropic
 import httpx
+import httpx2
 import openai
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
@@ -149,7 +150,7 @@ def test_sdk_wrapped_timeout_maps_to_504() -> None:
     as a 504, not fall through to the generic 502."""
     for exc in (
         OpenAIAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
-        AnthropicAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
+        AnthropicAPITimeoutError(request=httpx2.Request("POST", "http://upstream")),
     ):
         assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
         assert failure_status_code(exc) == 504
@@ -1341,9 +1342,9 @@ def _openai_status_error(status_code: int, error: dict[str, Any]) -> openai.APIS
 def _anthropic_bad_request(message: str) -> anthropic.BadRequestError:
     """An Anthropic SDK 400, whose body keeps the ``{"type": "error", "error": {...}}`` envelope."""
     body = {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     return anthropic.BadRequestError(
-        f"Error code: 400 - {body}", response=httpx.Response(400, request=request, json=body), body=body
+        f"Error code: 400 - {body}", response=httpx2.Response(400, request=request, json=body), body=body
     )
 
 
@@ -1487,9 +1488,9 @@ _OPENAI_LOGPROBS_MSG = "You are not allowed to request logprobs from this model"
 
 def _anthropic_forbidden() -> anthropic.PermissionDeniedError:
     body = {"type": "error", "error": {"type": "permission_error", "message": "Your API key does not have permission"}}
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     return anthropic.PermissionDeniedError(
-        f"Error code: 403 - {body}", response=httpx.Response(403, request=request, json=body), body=body
+        f"Error code: 403 - {body}", response=httpx2.Response(403, request=request, json=body), body=body
     )
 
 

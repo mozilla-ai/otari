@@ -56,7 +56,7 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.money import as_float, to_usd, to_usd_or_none
-from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource, rates_of
 from gateway.models.provider_keys import (
     OrgProviderKey,
     OrgProviderKeyModel,
@@ -78,6 +78,7 @@ from gateway.services.pricing_service import default_model_pricing, normalize_ef
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.price_unit import PriceUnit
 
 # What a client is told about where a rate came from. The spellings are
 # ``models.pricing.PriceSource``, so the models panel and the Models page name
@@ -109,7 +110,7 @@ class _Price:
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
     pricing_id: uuid.UUID | None = None
-    unit: str = "tokens"
+    unit: PriceUnit = "token"
 
 
 def _quantized(value: Decimal | None) -> Decimal | None:
@@ -166,7 +167,7 @@ def _price_from(rate: EffectiveRate) -> _Price:
         cache_read_price_per_million=as_float(rate.rates.cache_read_price_per_million),
         cache_write_price_per_million=as_float(rate.rates.cache_write_price_per_million),
         pricing_id=rate.row.id if rate.row is not None else None,
-        unit=rate.rates.unit or "tokens",
+        unit=rate.rates.unit or "token",
     )
 
 
@@ -182,7 +183,8 @@ def _seeded_row(
         cache_read_price_per_million=to_usd_or_none(as_float(default.cache_read_price_per_million)),
         cache_write_price_per_million=to_usd_or_none(as_float(default.cache_write_price_per_million)),
         pricing_tiers=list(default.pricing_tiers or []),
-        unit=default.unit or "tokens",
+        unit=default.unit or "token",
+        rates=rates_of(default),
         origin=SEED_ORIGIN,
         effective_from=effective_from,
         effective_to=None,
@@ -201,6 +203,7 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.cache_read_price_per_million = to_usd_or_none(as_float(default.cache_read_price_per_million))
     row.cache_write_price_per_million = to_usd_or_none(as_float(default.cache_write_price_per_million))
     row.pricing_tiers = list(default.pricing_tiers or [])
+    row.rates = rates_of(default)
 
 
 def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> dict[str, ModelPricing]:
@@ -224,7 +227,7 @@ def _model_public(row: OrgProviderKeyModel, price: _Price | None) -> OrgProvider
         cache_write_price_per_million=price.cache_write_price_per_million if price else None,
         price_source=price.source if price else None,
         pricing_id=price.pricing_id if price else None,
-        unit=price.unit if price else "tokens",
+        unit=price.unit if price else "token",
         enabled=row.enabled,
         created_at=row.created_at,
         updated_at=row.updated_at,

@@ -154,6 +154,82 @@ function hostedRow(page: Page): Locator {
   return row(page, "Hosted providers", new RegExp(`^${PROVIDER}`))
 }
 
+const ROUTER_A = "parity-router-a"
+const ROUTER_B = "parity-router-b"
+// Never sent anywhere: the page stores it and the decision model is never asked.
+const DECISION_KEY = "ts-parity-not-a-real-key-wxyz"
+
+test.describe("subagent router setup", () => {
+  test("adds routers, switches between them, never shows a key again, and removes them", async ({
+    page,
+  }) => {
+    await login(page)
+    const menu = await openAccountMenu(page)
+    await menu.getByRole("link", { name: "Deployment" }).click()
+    await openPage(page, "Subagent router", "Subagent router")
+    await expect(page.getByText("No router added")).toBeVisible()
+
+    async function add(model: string): Promise<void> {
+      await page.getByRole("button", { name: "Add router" }).first().click()
+      const dialog = page.getByRole("dialog", { name: "New router" })
+      await dialog.getByRole("textbox", { name: "Model" }).fill(model)
+      await dialog.getByLabel("API key", { exact: true }).fill(DECISION_KEY)
+      await dialog
+        .getByRole("textbox", { name: "Input, per 1M tokens (USD)" })
+        .fill("0.15")
+      await dialog.getByRole("button", { name: "Add router" }).click()
+      await expect(dialog).toBeHidden({ timeout: 30_000 })
+    }
+    const serving = (model: string) =>
+      page.getByRole("switch", { name: `Route with ${model}` })
+
+    // The first one added is switched on; a later one waits.
+    await add(ROUTER_A)
+    await expect(serving(ROUTER_A)).toBeChecked()
+    await add(ROUTER_B)
+    await expect(serving(ROUTER_B)).not.toBeChecked()
+    await expect(routerRow(page, ROUTER_B)).toContainText(
+      "$0.15 in, $0 out per 1M tokens",
+    )
+
+    // One is on at a time: switching the second on switches the first off.
+    await serving(ROUTER_B).click()
+    await expect(serving(ROUTER_B)).toBeChecked()
+    await expect(serving(ROUTER_A)).not.toBeChecked()
+
+    // The edit names the stored key by its tail, and no part of the page
+    // carries the key back.
+    await routerRow(page, ROUTER_A)
+      .getByRole("button", { name: `Edit ${ROUTER_A}` })
+      .click()
+    const editRouter = page.getByRole("dialog", { name: "Edit router" })
+    await expect(
+      editRouter.getByLabel("API key", { exact: true }),
+    ).toHaveAttribute(
+      "placeholder",
+      "Stored key ends in wxyz. Leave blank to keep it.",
+    )
+    await editRouter.getByRole("button", { name: "Cancel" }).click()
+    await expect(editRouter).toBeHidden()
+    await expect(page.locator("body")).not.toContainText(DECISION_KEY)
+
+    for (const model of [ROUTER_A, ROUTER_B]) {
+      await routerRow(page, model)
+        .getByRole("button", { name: `Remove ${model}` })
+        .click()
+      const confirmRouter = page.getByRole("alertdialog")
+      await expect(confirmRouter).toContainText(model)
+      await confirmRouter.getByRole("button", { name: "Remove router" }).click()
+      await expect(routerRow(page, model)).toHaveCount(0)
+    }
+    await expect(page.getByText("No router added")).toBeVisible()
+  })
+})
+
+function routerRow(page: Page, model: string): Locator {
+  return row(page, "Subagent routers", new RegExp(`^${model}$`))
+}
+
 test.describe("api keys", () => {
   test("issues a key, and will not delete one until it is disabled", async ({
     page,

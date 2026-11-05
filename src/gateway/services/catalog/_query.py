@@ -49,6 +49,7 @@ def _matching_models(
     vendors = set(query.vendor)
     input_modalities = set(query.input_modality)
     output_modalities = set(query.output_modality)
+    types = set(query.type)
 
     def matches(model: CatalogModelSummary) -> bool:
         if term and not any(
@@ -59,6 +60,8 @@ def _matching_models(
         if providers and not providers.intersection(model.providers):
             return False
         if vendors and (model.vendor or "") not in vendors:
+            return False
+        if types and model.type not in types:
             return False
         if not input_modalities.issubset(model.input_modalities):
             return False
@@ -73,6 +76,8 @@ def _matching_models(
         ):
             return False
         if not _pricing_matches(model, query.pricing) or not _source_matches(model, query.source):
+            return False
+        if query.zero_data_retention and not model.zero_data_retention_providers:
             return False
         return not query.released_within_days or (
             model.release_date is not None and released_after <= model.release_date <= released_before
@@ -122,6 +127,7 @@ def _catalog_facets(models: Sequence[CatalogModelSummary]) -> CatalogFacets:
             CatalogVendorFacet(value=vendor, vendor_slug=vendor_slugs[vendor])
             for vendor in sorted(vendor_slugs, key=lambda vendor: (vendor.casefold(), vendor))
         ],
+        types=sorted({model.type for model in models if model.type is not None}),
     )
 
 

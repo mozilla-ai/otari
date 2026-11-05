@@ -25,7 +25,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content, with_retry_hint
+from gateway.api.routes._helpers import latest_user_text, routing_signal, text_from_content, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -82,7 +82,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -147,24 +147,6 @@ def _responses_input_text(value: Any) -> str:
     if isinstance(value, list):
         return latest_user_text(value)
     return text_from_content(value)
-
-
-def _routing_text(body: Any) -> str:
-    """The task signal a policy's router reads for a Responses request.
-
-    ``instructions`` is part of the task, not decoration: the same ``input`` under
-    "answer in one word" and "write a proof" are different jobs with different
-    quality bars. Embedding only ``input`` gave both the same routing decision and,
-    under trace-sticky granularity, the same conversation identity. Guardrails read
-    ``input`` alone because they screen what the user sent; routing has to read what
-    the model was actually asked to do.
-    """
-    instructions = getattr(body, "instructions", None)
-    parts = [
-        instructions if isinstance(instructions, str) else "",
-        _responses_input_text(body.input),
-    ]
-    return "\n".join(part for part in parts if part)
 
 
 def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
@@ -389,8 +371,11 @@ class _ResponsesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
         if native_tools:
@@ -480,6 +465,7 @@ async def create_response(
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,
@@ -510,9 +496,8 @@ async def create_response(
             estimate_max_output_tokens=max_output_tokens,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
-            routing_signal=lambda: routing_signal_from_text(
-                _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
-            ),
+            streaming=bool(request_body.stream),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             tools=request_body.tools,
             code_execution_policies=tool_ports.code_execution_policy,
@@ -520,6 +505,12 @@ async def create_response(
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=resolved_tags(tags_header, request_body.metadata),
             turn=read_turn("responses", request_body.input),
+            context=lambda: read_context(
+                "responses",
+                request_body.input,
+                tools=request_body.tools,
+                system=getattr(request_body, "instructions", None),
+            ),
             session_label=request_body.session_label,
         )
     except IdempotentReplay as replay:

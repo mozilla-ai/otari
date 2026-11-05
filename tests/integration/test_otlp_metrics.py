@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, event
+from sqlalchemy import Engine, event, inspect
 from sqlalchemy.orm import Session
 
 from gateway.api.routes.otlp import _MAX_METRIC_DATA_POINTS
@@ -31,6 +31,8 @@ _POINT = 1784000060000000000
 # be far enough below the point count to rule out a row-at-a-time regression.
 _BULK_POINTS = 1000
 _MAX_BULK_INSERT_STATEMENTS = 10
+# UUIDs and hex digests, which cannot carry a stored attribute value.
+_OPAQUE_COLUMNS = {"id", "api_key_id", "dedup_key", "series_key"}
 
 
 @contextmanager
@@ -102,7 +104,14 @@ def test_metrics_export_records_outcome_counters(
     assert sorted(row.value or 0.0 for row in lines) == [5.0, 12.0]
     assert len({row.series_key for row in lines}) == 2
     # Content-free: the ``type`` dimension is folded into the series hash, not stored.
-    assert all("added" not in str(row.__dict__) for row in rows)
+    # The opaque columns are skipped because "added" is itself a hex string, so a
+    # UUID or hash can contain it by chance.
+    assert all(
+        "added" not in str(getattr(row, attr.key))
+        for row in rows
+        for attr in inspect(AgentTelemetry).column_attrs
+        if attr.key not in _OPAQUE_COLUMNS
+    )
     assert db_session.query(UsageLog).count() == 0
 
 
