@@ -95,6 +95,12 @@ it can measure before the call: image generation the images asked for at the
 `size` asked for, speech the characters of its input, moderations one request,
 and transcription nothing, because the audio's length is not read here
 ([Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit)).
+Every hold is priced at the rules of the model's price the request meets
+before the call: its estimated context, the tier it asks for, an image's size
+and a video's resolution, and the time it starts. Settlement prices the call
+at the rules it met, the tier the provider reports serving it at included, so
+a request that asks for one tier and is served at a dearer one can settle
+above its hold ([Overrides and multipliers](configuration.md#overrides-and-multipliers)).
 
 ### Per-minute limits
 

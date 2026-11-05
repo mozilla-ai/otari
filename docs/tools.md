@@ -299,7 +299,9 @@ budget carry what the provider will charge. They are priced at the operator's
 the model's own rate carries, per 1,000 searches, which the catalog gives a
 model whose provider searches (Anthropic's is $10 per 1,000) and a `rates`
 block can set ([Every price in its unit](configuration.md#every-price-in-its-unit-rates)),
-else, with `default_pricing` on, at the provider's list price. An
+else, with `default_pricing` on, at the provider's list price. The model's own
+price applies its rules, a tier multiplier included
+([Overrides and multipliers](configuration.md#overrides-and-multipliers)). An
 organization's override prices them as it prices the call's tokens, so a
 search on the organization's own provider key takes its override. With
 none of these, the searches stay on the row at no cost. Searches across the rounds
