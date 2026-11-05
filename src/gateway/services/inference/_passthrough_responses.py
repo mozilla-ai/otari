@@ -1,8 +1,10 @@
 """Gateway-owned response bodies for the pass-through endpoints, built from the provider's result."""
 
 from decimal import Decimal
+from typing import Any
 
 from any_llm.types.completion import CreateEmbeddingResponse
+from any_llm.types.image import ImagesResponse
 from any_llm.types.rerank import RerankResponse as ProviderRerankResponse
 
 from gateway.core.metered_pricing import quantize_cost
@@ -72,6 +74,27 @@ def embeddings_response(
         if result.usage is not None
         else None,
     )
+
+
+def images_response(
+    result: ImagesResponse,
+    *,
+    pricing: ResolvedPricing | None,
+    cost: Decimal | None,
+) -> dict[str, Any]:
+    """The images response for ``result``: the provider's body with the inline cost on ``usage``.
+
+    ``pricing`` and ``cost`` are as for :func:`rerank_response`. The provider's
+    body is returned as it came, so a priced request with no ``usage`` from the
+    provider (OpenAI's DALL-E models send none) gets one holding only the two
+    cost fields, and one with token counts keeps them beside the fields.
+    """
+    body = result.model_dump()
+    cost_fields = _inline_cost(cost, pricing).model_dump()
+    if cost_fields:
+        usage = body.get("usage")
+        body["usage"] = {**(usage if isinstance(usage, dict) else {}), **cost_fields}
+    return body
 
 
 def _inline_cost(cost: Decimal | None, pricing: ResolvedPricing | None) -> InlineCost:

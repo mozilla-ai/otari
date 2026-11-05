@@ -130,8 +130,11 @@ its own time and the provider's in `Server-Timing`; see
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
-[rerank](#rerank) and embeddings endpoints carry the same two fields
-on their `usage`. On a stream the fields ride the terminal usage event: for Chat
+[rerank](#rerank), embeddings and images (`/images/generations` and
+`/images/edits`) endpoints carry the same two fields on their `usage`; an image
+model whose provider sends no `usage` (OpenAI's DALL-E models) gets one holding
+just the two fields, and one that sends token counts keeps them beside the
+fields. On a stream the fields ride the terminal usage event: for Chat
 Completions, the last chunk that reports usage and either has no choices (OpenAI's
 `stream_options.include_usage` chunk) or finishes a choice (providers such as Cohere
 and Gemini report usage on the chunk carrying `finish_reason`); `message_delta` for

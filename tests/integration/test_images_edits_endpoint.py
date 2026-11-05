@@ -407,3 +407,20 @@ def test_edits_bills_per_image_and_logs_usage(
     assert row["billing_meters"] == {"images": 2}
     assert row["pricing_breakdown"] == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": pytest.approx(0.08)}]
     assert row["cost"] == pytest.approx(0.08)
+    # The settled cost rides the provider's usage, beside its token counts.
+    assert resp.json()["usage"] == {**usage.model_dump(), "cost_usd": "0.080000", "pricing_source": "deployment"}
+
+
+def test_edits_without_pricing_carry_no_inline_cost(client: TestClient, api_key_header: dict[str, str]) -> None:
+    usage = Usage(
+        input_tokens=1132,
+        input_tokens_details=UsageInputTokensDetails(image_tokens=1120, text_tokens=12),
+        output_tokens=1751,
+        total_tokens=2883,
+    )
+    with patch(_PATCH_TARGET, new_callable=AsyncMock, return_value=_edit_response(usage=usage)):
+        resp = client.post(
+            _EDITS_URL, data=_form(), files={"image": ("cat.png", _PNG, "image/png")}, headers=api_key_header
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["usage"] == usage.model_dump()

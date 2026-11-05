@@ -102,6 +102,8 @@ def test_an_images_rate_holds_the_requested_images_and_settles_the_returned_ones
     assert row.pricing_source == "deployment"
     assert row.billing_meters == {"images": 2}
     assert row.pricing_breakdown == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": 0.08}]
+    # The response carries what the row records, as a completion's usage does.
+    assert response.json()["usage"] == {"cost_usd": f"{row.cost:.6f}", "pricing_source": row.pricing_source}
     _settled(client, master_key_header, 0.08)
 
 
@@ -127,6 +129,12 @@ def test_a_token_rate_on_images_keeps_its_per_image_reading_and_records_the_toke
     assert row.cost == Decimal("0.04")
     assert row.billing_meters == {"images": 1}
     assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (50, 4160, 4210)
+    # The provider's token counts stay on ``usage``, with the settled cost beside them.
+    assert response.json()["usage"] == {
+        **usage.model_dump(),
+        "cost_usd": f"{row.cost:.6f}",
+        "pricing_source": row.pricing_source,
+    }
     _settled(client, master_key_header, 0.04)
 
 

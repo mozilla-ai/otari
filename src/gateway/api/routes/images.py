@@ -20,15 +20,17 @@ from gateway.api.deps import (
     verify_api_key_or_master_key_for_upload,
 )
 from gateway.api.routes._helpers import bounded_body
-from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._passthrough import PassthroughOutcome, run_passthrough
+from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.schemas.inference import ImageEditForm
 from gateway.services.budgets import count_estimate
-from gateway.services.inference import IMAGES_BILLING
+from gateway.services.inference import IMAGES_BILLING, InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
 
@@ -77,6 +79,11 @@ async def create_image(
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
+
+    A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+    USD string) and `pricing_source`, as a chat completion does; a provider that
+    sends no `usage` gets one holding just those two fields. An unpriced
+    response carries neither.
     """
     # Reserve for the requested image count; reconciled to the actual count below.
     # `is None` (not `or`) so an explicit n=0 isn't silently treated as 1.
@@ -124,7 +131,21 @@ async def create_image(
         billing=IMAGES_BILLING,
         relabel=False,
     )
-    return outcome.result.model_dump()
+    return _priced_body(outcome)
+
+
+def _priced_body(outcome: PassthroughOutcome[ImagesResponse]) -> dict[str, Any]:
+    """The provider's body with the settled cost on ``usage``, never failing a served image over the cost."""
+    if outcome.cost is None or outcome.pricing is None:
+        return outcome.result.model_dump()
+    try:
+        body = InferenceService.images_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
+    except Exception as exc:
+        logger.warning("Failed to attach inline cost: %s", exc)
+        record_inline_cost_settlement("unattached")
+        return outcome.result.model_dump()
+    record_inline_cost_settlement("attached")
+    return body
 
 
 # ``image[]`` is how OpenAI's SDKs send several images.
@@ -234,6 +255,11 @@ async def edit_image(
     - Master key: the ``user`` field is required and names an existing user.
     - API key: usage and spend go to the key's own user. A ``user`` naming a
       different user is refused with 403, or ignored when mismatch rejection is off.
+
+    A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+    USD string) and `pricing_source`, as a chat completion does; a provider that
+    sends no `usage` gets one holding just those two fields. An unpriced
+    response carries neither.
     """
     # Read here rather than as File parameters, which FastAPI parses before the
     # auth check runs, and through a capped body, so nobody can make the gateway
@@ -304,4 +330,4 @@ async def _run_edit(
         billing=IMAGES_BILLING,
         relabel=False,
     )
-    return outcome.result.model_dump()
+    return _priced_body(outcome)

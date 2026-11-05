@@ -230,6 +230,25 @@ def test_images_cost_tracked_with_pricing(
     assert image_logs[0]["cost"] > 0
     # Cost should be n_images * input_price_per_million = 2 * 0.04 = 0.08
     assert image_logs[0]["cost"] == pytest.approx(0.08)
+    # DALL-E sends no usage, so the response gets one holding just the settled cost.
+    assert resp.json()["usage"] == {"cost_usd": "0.080000", "pricing_source": "deployment"}
+
+
+def test_images_without_pricing_carry_no_inline_cost(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """An unpriced generation returns the provider's body as it came, with no cost fields."""
+    with patch(
+        "gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=_mock_images_response()
+    ):
+        resp = client.post(
+            f"{API_ROOT}/images/generations",
+            json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert resp.json()["usage"] is None
 
 
 def test_images_billing_meters_tracked_with_pricing(
