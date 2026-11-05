@@ -317,6 +317,7 @@ describe("OrganizationBudgetsPage", () => {
     })
 
     await user.click(await within(table).findByRole("button", { name: "Edit" }))
+    expect(screen.getByLabelText("Token limit")).toBeVisible()
     expect(screen.getByLabelText("Token limit")).toHaveValue("5000")
     expect(screen.getByLabelText("Request limit")).toHaveValue("10")
 
@@ -342,7 +343,11 @@ describe("OrganizationBudgetsPage", () => {
     await user.click(
       screen.getByRole("button", { name: "Token and request limits" }),
     )
-    await user.type(screen.getByLabelText("Request limit"), "1.5")
+    // Rounds to a whole 1 once converted, so it must be refused as typed.
+    await user.type(
+      screen.getByLabelText("Request limit"),
+      "1.0000000000000001",
+    )
 
     const submit = screen.getAllByRole("button", { name: "Add budget" }).at(-1)
     expect(submit).toBeDisabled()
