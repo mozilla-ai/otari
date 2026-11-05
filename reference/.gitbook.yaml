@@ -1,0 +1,5 @@
+root: ./
+
+structure:
+  readme: api-reference.md
+  summary: SUMMARY.md

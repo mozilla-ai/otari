@@ -1,0 +1,5 @@
+root: ./
+
+structure:
+  readme: self-hosted-quickstart.md
+  summary: SUMMARY.md
