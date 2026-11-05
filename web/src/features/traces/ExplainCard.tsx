@@ -20,7 +20,11 @@ export function ExplainCard({ explanation }: { explanation: Explanation }) {
                   <Link
                     to="/tools/mcp-servers/$serverId"
                     params={{ serverId: link.serverId }}
-                    search={{ key: link.key, tool: link.tool }}
+                    search={{
+                      workspace: link.workspace,
+                      key: link.key,
+                      tool: link.tool,
+                    }}
                     className="text-link hover:text-link-hover"
                   >
                     {value}

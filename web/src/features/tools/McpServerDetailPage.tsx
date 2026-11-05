@@ -25,19 +25,33 @@ import {
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /**
- * One stored MCP server of the selected workspace, on one page in the order a
- * call meets it: the tools it exposes, which of them are read, its ACL, then
- * how otari reaches it.
+ * One stored MCP server, on one page in the order a call meets it: the tools
+ * it exposes, which of them are read, its ACL, then how otari reaches it.
  *
- * Takes the id as a prop rather than reading the router, so a test can hand it
- * one without a route tree.
+ * The server is read from `workspaceId` when a link names one (a trace names
+ * the workspace its call ran in), else from the selected workspace.
+ *
+ * Takes the ids as props rather than reading the router, so a test can hand
+ * them over without a route tree.
  */
-export function McpServerDetailPage({ serverId }: { serverId: string }) {
+export function McpServerDetailPage({
+  serverId,
+  workspaceId: linkedWorkspaceId,
+}: {
+  serverId: string
+  workspaceId?: string
+}) {
   const navigate = useNavigate()
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
-  const canManage = canManageWorkspace(context.data, selected?.role)
-  const workspaceId = selected ? selected.workspace_id : null
+  const workspaceId =
+    linkedWorkspaceId ?? (selected ? selected.workspace_id : null)
+  const membership = linkedWorkspaceId
+    ? context.data?.workspace_memberships?.find(
+        (entry) => entry.workspace_id === linkedWorkspaceId,
+      )
+    : selected
+  const canManage = canManageWorkspace(context.data, membership?.role)
   const query = useWorkspaceMcpServer(workspaceId, serverId)
   const update = useUpdateWorkspaceMcpServer()
   const remove = useDeleteWorkspaceMcpServer()

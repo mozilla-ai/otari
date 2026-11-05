@@ -393,6 +393,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           blockedBy.get(span.span_id) ?? [],
           tally,
           summary.api_key_id ?? null,
+          summary.workspace_id,
         ),
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),

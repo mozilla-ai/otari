@@ -11,9 +11,13 @@ export interface Explanation {
   facts: Fact[]
 }
 
-/** An MCP server's page, with its access test set to one key and tool when both are known. */
+/**
+ * An MCP server's page, in the workspace the call ran in, with its access test
+ * set to one key and tool when both are known.
+ */
 export interface McpServerLink {
   serverId: string
+  workspace?: string
   key?: string
   tool?: string
 }
@@ -127,6 +131,7 @@ function tool(
   blockedBy: readonly string[],
   gates: GateTally | undefined,
   apiKeyId: string | null,
+  workspaceId: string | null,
 ): Explanation {
   const source = decisionSource(span)
   const decision = span.attributes["otari.tool.decision"]
@@ -145,7 +150,10 @@ function tool(
           ? "It ran and returned an error, which the agent read."
           : "It ran."
   const serverId = span.attributes["otari.mcp.server_id"]
-  const server = typeof serverId === "string" ? { serverId } : undefined
+  const server =
+    typeof serverId === "string"
+      ? { serverId, workspace: workspaceId ?? undefined }
+      : undefined
   return {
     sentence: `The agent called ${asked(span)}. ${outcome}`,
     facts: facts(
@@ -207,10 +215,12 @@ export function explainSpan(
   blockedBy: readonly string[],
   gates: GateTally | undefined,
   apiKeyId: string | null = null,
+  workspaceId: string | null = null,
 ): Explanation | undefined {
   if (span.operation === "tool.blocked_on_user") return permission(span, parent)
   if (span.operation === "tool.execution") return ran(span)
-  if (span.kind === "tool") return tool(span, blockedBy, gates, apiKeyId)
+  if (span.kind === "tool")
+    return tool(span, blockedBy, gates, apiKeyId, workspaceId)
   if (span.kind === "llm") return llm(span)
   if (span.kind === "step" && span.operation === "interaction")
     return prompt(span)

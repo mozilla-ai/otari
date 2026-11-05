@@ -30,18 +30,30 @@ describe("explainSpan for a direct MCP call", () => {
       },
     })
 
-    const explained = explainSpan(span, undefined, [], undefined, "key-bo")
+    const explained = explainSpan(
+      span,
+      undefined,
+      [],
+      undefined,
+      "key-bo",
+      "ws-1",
+    )
 
     expect(explained?.sentence).toBe(
       "The agent called create_issue. It never ran.",
     )
     expect(explained?.facts).toEqual([
       ["Tool", "create_issue"],
-      ["MCP server", "github", { serverId: "srv-1" }],
+      ["MCP server", "github", { serverId: "srv-1", workspace: "ws-1" }],
       [
         "Decision",
         "Refused by the key's rule on this MCP server",
-        { serverId: "srv-1", key: "key-bo", tool: "create_issue" },
+        {
+          serverId: "srv-1",
+          workspace: "ws-1",
+          key: "key-bo",
+          tool: "create_issue",
+        },
       ],
     ])
   })

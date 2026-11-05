@@ -43,6 +43,7 @@ export function mockMcpServerApi({
   workspaceRole = "admin",
   accessStatus,
   deploymentOperator = true,
+  otherWorkspaces = [],
 }: {
   server?: WorkspaceMcpServer
   access?: WorkspaceMcpServerAccess
@@ -59,6 +60,8 @@ export function mockMcpServerApi({
   /** A refusal of the access list, as a viewer earns. */
   accessStatus?: number
   deploymentOperator?: boolean
+  /** Workspaces the caller also belongs to, after the selected one. */
+  otherWorkspaces?: { workspace_id: string; name: string; role: string }[]
 } = {}): McpCall[] {
   const calls: McpCall[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -86,6 +89,13 @@ export function mockMcpServerApi({
       return Response.json(method === "GET" ? access : (written ?? access))
     }
     if (url.includes("/mcp-servers/")) {
+      // Read from any other workspace, the server is not there.
+      if (!url.includes(`/workspaces/${server.workspace_id}/`)) {
+        return Response.json(
+          { detail: `MCP server ${server.id} not found` },
+          { status: 404 },
+        )
+      }
       if (method === "DELETE") return new Response(null, { status: 204 })
       return Response.json(method === "PATCH" ? { ...server, ...body } : server)
     }
@@ -114,6 +124,7 @@ export function mockMcpServerApi({
         deployment_operator: deploymentOperator,
         workspace_memberships: [
           { workspace_id: WORKSPACE, name: "Alpha", role: workspaceRole },
+          ...otherWorkspaces,
         ],
       }),
     )
@@ -126,7 +137,11 @@ export function mcpWrites(calls: McpCall[]): McpCall[] {
   return calls.filter((call) => call.method !== "GET")
 }
 
-export function renderMcpServerPage(serverId: string, search = "") {
+export function renderMcpServerPage(
+  serverId: string,
+  search = "",
+  workspaceId?: string,
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -134,7 +149,7 @@ export function renderMcpServerPage(serverId: string, search = "") {
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
-        <McpServerDetailPage serverId={serverId} />
+        <McpServerDetailPage serverId={serverId} workspaceId={workspaceId} />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
     {

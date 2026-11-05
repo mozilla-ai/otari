@@ -511,6 +511,39 @@ describe("McpServerDetailPage, Access", () => {
     ).toBeVisible()
   })
 
+  it("reads the server from the workspace a trace links it in, not the selected one", async () => {
+    const other = "66666666-6666-6666-6666-666666666666"
+    const calls = mockMcpServerApi({
+      server: workspaceMcpServer({ workspace_id: other }),
+      role: "member",
+      workspaceRole: "member",
+      otherWorkspaces: [{ workspace_id: other, name: "Beta", role: "admin" }],
+    })
+    renderMcpServerPage(SERVER.id, "", other)
+
+    await screen.findByRole("heading", { level: 1, name: "github" })
+    expect(
+      calls.some((call) =>
+        call.url.endsWith(`/workspaces/${other}/mcp-servers/${SERVER.id}`),
+      ),
+    ).toBe(true)
+    // Managing follows the role in the linked workspace, not the selected one.
+    expect(screen.getByRole("button", { name: "Disable" })).toBeVisible()
+  })
+
+  it("does not find a server of another workspace without a link naming it", async () => {
+    mockMcpServerApi({
+      server: workspaceMcpServer({
+        workspace_id: "66666666-6666-6666-6666-666666666666",
+      }),
+    })
+    renderMcpServerPage(SERVER.id)
+
+    expect(
+      await screen.findByText(`MCP server ${SERVER.id} not found`),
+    ).toBeVisible()
+  })
+
   it("is read-only for someone who cannot manage the workspace", async () => {
     const calls = mockMcpServerApi({
       server: workspaceMcpServer({
