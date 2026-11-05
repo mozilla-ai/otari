@@ -428,7 +428,8 @@ def _prices_in(pricing: ModelsDevPricing, slot: _Slot) -> tuple[ModelsDevUnitPri
 
 def _unit_of(price: ModelsDevUnitPrice | None) -> PriceUnit:
     unit = "token" if price is None or price.unit is None else price.unit
-    assert unit in PRICE_UNITS
+    if unit not in PRICE_UNITS:
+        raise ValueError(f"a price per {unit} is not in a unit a rate column holds")
     return unit
 
 
