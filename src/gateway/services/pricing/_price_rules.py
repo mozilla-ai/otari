@@ -265,7 +265,7 @@ def _holds(when: object, values: Mapping[str, object]) -> bool | None:
     for key, condition in when.items():
         found: bool | None
         if key in ("all", "any"):
-            if not isinstance(condition, list):
+            if not isinstance(condition, (list, tuple)):
                 return None
             each = [_holds(item, values) for item in condition]
             if any(item is None for item in each):
@@ -292,7 +292,7 @@ def _meets(value: object, condition: object) -> bool | None:
     if operator == "equals":
         return None if not _scalar(operand) else value is not None and _same(value, operand)
     if operator == "in":
-        if not isinstance(operand, list) or not all(_scalar(item) for item in operand):
+        if not isinstance(operand, (list, tuple)) or not all(_scalar(item) for item in operand):
             return None
         return value is not None and any(_same(value, item) for item in operand)
     if operator in _COMPARISONS:

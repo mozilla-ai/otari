@@ -22,7 +22,15 @@ from gateway.services.pricing import (
     reset_generations,
     set_accepted_generations,
 )
-from gateway.types.models_dev import CATALOG_FORMAT, read_catalog_document, snapshot_document
+from gateway.services.pricing._price_rules import PriceFacts
+from gateway.types.models_dev import (
+    CATALOG_FORMAT,
+    MODELS_DEV_CONDITION_KEYS,
+    condition_keys,
+    condition_problem,
+    read_catalog_document,
+    snapshot_document,
+)
 
 
 def _rates(input_: float, output: float, cache_read: float, cache_write: float) -> dict[str, Any]:
@@ -185,3 +193,29 @@ def test_the_release_script_refuses_a_document_it_cannot_read(tmp_path: Path) ->
     assert result.returncode == 1
     assert "models.dev v2 catalog refused: the document lists no models" in result.stderr
     assert not (tmp_path / "out.json").exists()
+
+
+def _bundled_conditions() -> list[object]:
+    """Every rule's condition in the bundled catalog: each override's and each multiplier's."""
+    found: list[object] = []
+    for provider in read_catalog_document(json.loads(_bundled_text())).providers.values():
+        for model in provider.models.values():
+            pricing = model.pricing
+            if pricing is None:
+                continue
+            prices = [pricing.web_search, *(p for m in pricing.modalities.values() for p in (m.input, m.output))]
+            found.extend(override.when for price in prices if price is not None for override in price.overrides)
+            found.extend(multiplier.when for multiplier in pricing.multipliers)
+    return found
+
+
+def test_every_rule_in_the_bundled_catalog_is_a_condition_models_dev_allows() -> None:
+    conditions = _bundled_conditions()
+
+    assert conditions
+    assert [problem for when in conditions if (problem := condition_problem(when)) is not None] == []
+
+
+def test_every_fact_otari_answers_is_a_condition_models_dev_lists() -> None:
+    assert set(PriceFacts().values()) <= set(MODELS_DEV_CONDITION_KEYS)
+    assert {key for when in _bundled_conditions() for key in condition_keys(when)} <= set(MODELS_DEV_CONDITION_KEYS)  # type: ignore[arg-type]
