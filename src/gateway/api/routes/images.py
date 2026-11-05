@@ -32,6 +32,7 @@ from gateway.schemas.inference import ImageEditForm
 from gateway.services.budgets import report_estimate
 from gateway.services.inference import InferenceService, image_billing, image_quantities
 from gateway.services.log_writer import LogWriter
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["images"])
@@ -90,6 +91,7 @@ async def create_image(
     # silently treated as 1.
     requested_images = request.n if request.n is not None else 1
     billing = image_billing(request.size)
+    facts = PriceFacts(resolution=request.size, quality=request.quality, style=request.style)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return report_estimate(
@@ -97,6 +99,7 @@ async def create_image(
             slot=billing.slot,
             quantities=image_quantities(request.size, requested_images),
             units={"images": requested_images},
+            facts=facts,
         )
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
@@ -130,6 +133,7 @@ async def create_image(
         enforce_require_pricing=True,
         billing=billing,
         relabel=False,
+        price_facts=facts,
     )
     return _priced_body(outcome)
 
@@ -290,6 +294,7 @@ async def _run_edit(
     request_params = {*set_fields, *(("mask",) if mask is not None else ())}
     requested_images = fields.n if fields.n is not None else 1
     billing = image_billing(fields.size)
+    facts = PriceFacts(resolution=fields.size, quality=fields.quality)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return report_estimate(
@@ -297,6 +302,7 @@ async def _run_edit(
             slot=billing.slot,
             quantities=image_quantities(fields.size, requested_images),
             units={"images": requested_images},
+            facts=facts,
         )
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
@@ -333,5 +339,6 @@ async def _run_edit(
         enforce_require_pricing=True,
         billing=billing,
         relabel=False,
+        price_facts=facts,
     )
     return _priced_body(outcome)
