@@ -34,7 +34,7 @@ import {
   useDeleteWorkspaceMcpServer,
   useWorkspaceMcpServers,
 } from "@/shared/api/tools"
-import { useWorkspaces } from "@/shared/api/workspaces"
+import { useWorkspace } from "@/shared/api/workspaces"
 import { formatDateTime } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
@@ -148,8 +148,7 @@ export function WorkspaceMcpServersCard({
   const navigate = useNavigate()
   // The workspace row carries the request-named servers switch; only a manager
   // is offered it, so only a manager pays for the read.
-  const workspaces = useWorkspaces(manages)
-  const workspace = workspaces.data?.find((entry) => entry.id === workspaceId)
+  const workspace = useWorkspace(workspaceId, manages)
 
   const [isDialogOpen, setDialogOpen] = useState(false)
   // Bumped on every open and used as the dialog's key, so the draft is cleared
@@ -350,6 +349,7 @@ export function WorkspaceMcpServersCard({
 
       <ErrorBanner error={query.error} />
       <ErrorBanner error={check.error} />
+      <ErrorBanner error={workspace.error} />
 
       <TableScrollFrame className="otari-mcp-table">
         <DataTable
@@ -366,11 +366,8 @@ export function WorkspaceMcpServersCard({
         />
       </TableScrollFrame>
 
-      {/* Keyed on the open count, so each open remounts the form: it seeds its
-          fields on mount, and one row's draft must not survive into the next
-          row's dialog. */}
-      {manages && workspace ? (
-        <WorkspaceRequestMcpServers workspace={workspace} />
+      {manages && workspace.data ? (
+        <WorkspaceRequestMcpServers workspace={workspace.data} />
       ) : null}
 
       {/* Keyed on the open count, so each open starts from a blank form. */}

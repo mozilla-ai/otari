@@ -39,6 +39,22 @@ export function useWorkspaces(enabled = true) {
   })
 }
 
+// One workspace's row, for a page about that workspace alone, which would
+// otherwise walk every page of the list to find it. Nested under the workspaces
+// key, so the writes that invalidate the list refresh it too.
+export function useWorkspace(workspaceId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<Workspace>(
+        `/workspaces/${encodeURIComponent(workspaceId as string)}`,
+      ),
+    enabled: enabled && workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
 // One workspace's roster. Nested under the workspaces key so deleting a
 // workspace drops its roster with it.
 export function useWorkspaceMembers(workspaceId: string | null) {
@@ -646,7 +662,10 @@ export function useSetWorkspaceRequestMcpServers() {
         method: "PATCH",
         body: JSON.stringify({ request_mcp_servers_allowed: allowed }),
       }),
-    onSuccess: () => {
+    // Exact, so the workspace's members, budget defaults and provider keys
+    // nested under it are not refetched for a switch that moves none of them.
+    onSuccess: (workspace) => {
+      queryClient.setQueryData([WORKSPACES, workspace.id], workspace)
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES],
         exact: true,

@@ -35,6 +35,7 @@ function mockApi({
   writeStatus,
   writeDetail,
   role = "owner",
+  workspaceStatus,
 }: {
   memberships?: { workspace_id: string; name: string; role: string }[]
   servers?: WorkspaceMcpServer[]
@@ -46,6 +47,8 @@ function mockApi({
   writeDetail?: string
   // The caller's organization role; a member-view test lowers it.
   role?: OrganizationContext["role"]
+  // Refuses the read of the workspace's own row with this status.
+  workspaceStatus?: number
 } = {}): Call[] {
   const calls: Call[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -84,9 +87,18 @@ function mockApi({
             : undefined,
       })
       const row = workspace({ id: ALPHA, name: "Alpha" })
-      return method === "GET"
+      if (method !== "GET") {
+        return Response.json({ ...row, request_mcp_servers_allowed: false })
+      }
+      if (workspaceStatus !== undefined) {
+        return Response.json(
+          { detail: "Workspace unavailable" },
+          { status: workspaceStatus },
+        )
+      }
+      return url.includes("/workspaces?")
         ? Response.json({ data: [row], count: 1 })
-        : Response.json({ ...row, request_mcp_servers_allowed: false })
+        : Response.json(row)
     }
     return Response.json(
       organizationContext({ role, workspace_memberships: memberships }),
@@ -684,6 +696,38 @@ describe("WorkspaceMcpServersCard", () => {
         )?.body,
       ).toEqual({ request_mcp_servers_allowed: false }),
     )
+    // The written row replaces the one read, so the switch shows what was saved.
+    await waitFor(() => expect(toggle).not.toBeChecked())
+  })
+
+  it("reads the selected workspace's own row, not the whole list", async () => {
+    const calls = mockApi({ servers: [workspaceMcpServer()] })
+    await renderLoaded([workspaceMcpServer()])
+
+    expect(
+      await screen.findByRole("switch", {
+        name: "Let requests name their own MCP servers",
+      }),
+    ).toBeInTheDocument()
+    expect(
+      calls.some(
+        (call) =>
+          call.method === "GET" && call.url.endsWith(`/workspaces/${ALPHA}`),
+      ),
+    ).toBe(true)
+    expect(calls.some((call) => call.url.includes("/workspaces?"))).toBe(false)
+  })
+
+  it("says why the workspace's request switch could not be read", async () => {
+    mockApi({ servers: [workspaceMcpServer()], workspaceStatus: 500 })
+    await renderLoaded([workspaceMcpServer()])
+
+    expect(await screen.findByText("Workspace unavailable")).toBeVisible()
+    expect(
+      screen.queryByRole("switch", {
+        name: "Let requests name their own MCP servers",
+      }),
+    ).not.toBeInTheDocument()
   })
 
   it("offers the request switch only to those who manage the workspace", async () => {
