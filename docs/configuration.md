@@ -400,15 +400,17 @@ deployment that declares a key does not mint and print one.
 ### Mismatched `user` fields
 
 `reject_user_mismatch` (default `true`) is the deployment-wide answer to a request
-whose `user` field names someone other than the key's user; a key's own value
+whose `user` field names someone other than an ordinary key's user (service
+keys and the master key name users by design); a key's own value
 overrides it, as [Mismatched `user` fields](api-keys.md#mismatched-user-fields)
 describes. It is a runtime setting, changed on the Settings page or with
 `PATCH /api/v1/settings`.
 
 ### Search tools on a key's model list
 
-A key or user with no `allowed_tools` still reaches search tools through its
-`allowed_models`, a deprecated form described in
+When neither a key nor its user has an `allowed_tools` list, the key still
+reaches search tools through its `allowed_models`; when either has one, even an
+empty one, that list decides. The model-list route is a deprecated form, described in
 [Model and search tool access](api-keys.md#model-and-search-tool-access). Startup
 counts the keys and users that still rely on it, and names the tools some reached
 only through a wildcard, which no longer grants them. Give those keys and users an
