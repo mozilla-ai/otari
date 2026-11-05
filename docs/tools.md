@@ -185,7 +185,11 @@ comes from: `own`, the tool's own row; `config`, that row while the tool's
 `config.yml` entry sets `price_per_call`, which each start writes to it again;
 `old_key`, its old `<provider>:<instance>` row; or `none`, with a null
 `price_per_call`. An override the operator set for one
-organization prices that organization's calls instead.
+organization prices that organization's calls instead. An organization's owner
+or admin may override `otari:web_search` and `otari:web_fetch` on
+`/api/v1/organizations/me/pricing`, for the calls on the organization's own
+keys, but not `otari:code_execution` or a price of kind `search` or `fetch`:
+those calls run on the deployment's account, so the write is refused with `403`.
 
 With `require_pricing: true`, a gateway-run tool whose calls no row would price
 is refused before the model call, with a `402` and the code `pricing_required`.
@@ -1111,6 +1115,17 @@ The request, the response and the errors are in the
 
 Each note applies when upgrading from the release it names to a later one.
 
+### From 0.38: only the operator prices code execution
+
+An organization owner's or admin's override of `otari:code_execution` on
+`/api/v1/organizations/me/pricing` is refused with `403`, as a price of kind
+`search` or `fetch` already is. Such an override has priced no sandbox run since
+0.33, because code execution runs on the deployment's account. It did price an
+MCP tool named `code_execution`, which is priced under the same key and now
+takes the deployment's price. An override already stored stays: the
+organization can delete it, not change it, and the operator can replace or
+delete it. The operator sets the price with the master key.
+
 ### From 0.37: the pages a search reads are billed as fetches
 
 The pages a search reads to enrich its results are billed as fetches on the
@@ -1157,7 +1172,7 @@ makes the default) cannot be decrypted here, a workspace that used the next key
 now uses the deployment's instance. Check the keys' `usable` field before
 upgrading.
 
-### From 0.31: tool prices follow whose account runs the call
+### From 0.32: tool prices follow whose account runs the call
 
 An organization's own override of `otari:code_execution` or `otari:web_search`
 no longer prices code execution or a search on the legacy settings, since both
