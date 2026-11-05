@@ -313,6 +313,8 @@ def test_a_claude_1h_write_bills_at_twice_the_input_rate() -> None:
         ("meta.llama3-70b-instruct-v1:0", "0.000500"),
         # A non-ASCII digit is not a version, so the instance name stays ignored.
         ("claude-proxy:\u00b2", "0.000500"),
+        # Digits followed by more than a colon start a model id, not a version.
+        ("claude-proxy:4o-mini", "0.000500"),
         # A provider and a Bedrock id that carries its own version suffix.
         ("bedrock:us.anthropic.claude-haiku-5-5-v1:0", "0.000800"),
     ],
