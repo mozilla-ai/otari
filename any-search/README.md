@@ -243,6 +243,32 @@ is dropped rather than failing the search, and the count is filled from the item
 knowledge graph and Serply's other SERP features come in fields of their own, which the adapter
 does not read, so a field Serply adds breaks nothing.
 
+## Synthetic
+
+`synthetic` calls Synthetic's [search API](https://dev.synthetic.new/docs/synthetic/search),
+`POST /v2/search`, with the key read from `SYNTHETIC_API_KEY` when not passed. The key travels as
+a Bearer token in the `Authorization` header, and the query in the JSON body.
+
+| `SearchHit` | From Synthetic |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | always `""`: Synthetic returns page text and no snippet |
+| `text` | `text`, when present and not empty |
+| `published` | `published`, an ISO 8601 date-time; one without a zone is UTC |
+
+Synthetic reports no cost and takes nothing but the query: it has no native options, no result
+count and no recency filter. `max_results` cuts the hits it returns, at most 10, and `time_range`
+drops the hits dated before the range's first day, in UTC; a hit without a date is kept.
+
+Synthetic signals every failure with an HTTP status and an `error` sentence in the body. Any
+status from 400 raises `ProviderError`, tagged `invalid_api_key`, `missing_api_key` or, for a key whose
+account has no subscription, `subscription_required`, from how the sentence starts, else `http_error`; the sentence itself never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `url` or `title`, or with either of the wrong type, or with a `text` or `published` that is
+neither a string nor null, or a `published` that does not parse, raises `ProviderError` with the
+tag `unexpected_response`. Fields the adapter does not read are ignored.
+
 ## The fake provider
 
 `fake` is a provider like any other, in the `test` tier. It answers from canned data and takes its

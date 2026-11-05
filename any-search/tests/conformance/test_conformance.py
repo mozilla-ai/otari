@@ -82,6 +82,14 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "empty": Scenario(handler=_replay("serply", "empty")),
         "error": Scenario(handler=_replay("serply", "error")),
     },
+    # Synthetic's "normal" is the example its documentation gives, and "empty" that shape with no
+    # results; neither is a recording, since a search needs a subscription. Record both once one is
+    # available.
+    "synthetic": {
+        "normal": Scenario(handler=_replay("synthetic", "normal")),
+        "empty": Scenario(handler=_replay("synthetic", "empty")),
+        "error": Scenario(handler=_replay("synthetic", "error")),
+    },
 }
 
 PROVIDERS = AnySearch.get_supported_providers()

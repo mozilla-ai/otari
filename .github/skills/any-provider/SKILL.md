@@ -280,3 +280,21 @@ returns a scraped results page.
 - A documentation's default can be wrong: Serply documents `desktop` as its `X-User-Agent`
   default, but its answers reported `mobile`. Describe an option by what it does, not by a default
   you have not seen.
+
+### 2026-11-05, Synthetic (any-search)
+
+The first provider added without a recorded success: its search answers only a subscribed key.
+
+- A provider can refuse a valid key for want of a plan, with the same status as a bad one:
+  Synthetic answers both with a 401, and only the `error` sentence tells them apart
+  (`Invalid API Key.` against `The search API is subscription-only: ...`). Probe with a real key
+  before choosing tags, and give the plan refusal a tag of its own (`subscription_required`), so an
+  operator is not sent to rotate a key that works.
+- When no key can record a success, the `normal` fixture is the documentation's own example and
+  `empty` that shape with no results, said in a comment beside the conformance scenarios, and the
+  live workflow skips the provider on every trigger rather than failing a scheduled run without
+  the secret. What a recording would settle stays open in the PR: the most results a search
+  returns, whether `text` is page text or an excerpt, and whether `published` can be null.
+- A provider can take nothing but the query. Then `max_results` only cuts the hits, and
+  `time_range` filters them by date after the answer, keeping the undated ones, since nothing
+  says they fall outside the range.

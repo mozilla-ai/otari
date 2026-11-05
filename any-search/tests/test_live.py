@@ -47,6 +47,8 @@ EXPECTED: dict[str, Expected] = {
     "mojeek": Expected(reports_cost=False, dated={}, snippets=True),
     # Serply returns Google's snippet and no page text, and dates no hit.
     "serply": Expected(reports_cost=False, snippets=True),
+    # Synthetic returns page text and no snippet; it dates hits by default.
+    "synthetic": Expected(reports_cost=False, dated={}),
 }
 
 
