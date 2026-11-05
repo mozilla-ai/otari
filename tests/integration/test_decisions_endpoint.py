@@ -189,6 +189,34 @@ def test_decisions_bills_the_configured_token_rate(
     assert user["reserved"] == pytest.approx(0.0)
 
 
+def test_a_decision_line_names_the_rules_that_changed_its_price(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    long = {"context": {"gt": 500}}
+    created = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "typesafe:jev-latest",
+            "rates": {
+                "text": {"input": {"price": 2, "overrides": [{"when": long, "price": 4}]}, "output": {"price": 10}}
+            },
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+
+    with _mock_decision():
+        assert client.post(f"{API_ROOT}/decisions", json=PAYLOAD, headers=api_key_header).status_code == 200
+
+    (row,) = _decision_rows(client, master_key_header, api_key_obj["user_id"])
+    # 1000 input tokens at the long-context $4/M plus 10 output tokens at $10/M.
+    assert float(row["cost"]) == pytest.approx(0.0041)
+    assert {line["meter"]: line.get("rules") for line in row["pricing_breakdown"]} == {"input": [long], "output": None}
+
+
 def test_decisions_falls_back_to_the_provider_reported_cost(
     client: TestClient,
     master_key_header: dict[str, str],

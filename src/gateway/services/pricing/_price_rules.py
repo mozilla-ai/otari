@@ -17,21 +17,27 @@ through the one reader every rate goes through.
 """
 
 import copy
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from gateway.core.metered_pricing import ChargeLine
 from gateway.models.pricing import ModelPricing
 from gateway.repositories.pricing import transient_pricing
 from gateway.types.models_dev import parse_pricing
-from gateway.types.price_rates import columns_from_pricing
+from gateway.types.price_rates import column_paths, columns_from_pricing
 from gateway.types.price_unit import PRICE_UNITS
 
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _DIRECTIONS = ("input", "output")
 _COMPARISONS = ("gt", "gte", "lt", "lte")
+# The cache price each cache meter bills at. A one-hour write is priced from the input price.
+_CACHE_METERS = {"cache_read": "read", "cache_write": "write"}
+
+# A cache price's name in a rule's path: the TTL prices are the cache write's.
+_CACHE_PRICE = {"write_ttls": "write"}
 
 # One rule's condition, as the document writes it.
 Condition = Mapping[str, Any]
@@ -95,10 +101,38 @@ class ResolvedRates:
 
 @dataclass(frozen=True)
 class AppliedRate:
-    """A rate with the rules its request meets applied, and the conditions that changed each price."""
+    """A rate with the rules its request meets applied, and the conditions that changed each price.
+
+    ``columns`` names the prices the rate columns were read from, the input
+    columns' and the output column's, or is ``None`` where the row kept its own.
+    """
 
     rate: ModelPricing
     rules: Mapping[str, tuple[Condition, ...]] = field(default_factory=dict)
+    columns: tuple[str, str | None] | None = None
+
+    def explain(self, lines: Sequence[ChargeLine], *, path: str | None = None) -> list[ChargeLine]:
+        """``lines`` with each naming, under ``rules``, the conditions that changed the price it bills at.
+
+        ``path`` is the price every line bills at. Without it a line bills at
+        the price the columns were read from: the ``output`` line at the output
+        price, a cache line at the input price's cache price, and every other
+        line at the input price. A line no rule changed is left as it is.
+        """
+        explained: list[ChargeLine] = []
+        for line in lines:
+            found = self.rules.get(path if path is not None else self._column_path(line) or "")
+            explained.append({**line, "rules": [dict(rule) for rule in found]} if found else line)
+        return explained
+
+    def _column_path(self, line: ChargeLine) -> str | None:
+        if self.columns is None:
+            return None
+        given, made = self.columns
+        meter = line.get("meter")
+        if meter == "output":
+            return made
+        return f"{given}.cache.{_CACHE_METERS[meter]}" if meter in _CACHE_METERS else given
 
 
 def resolve_rates(document: Mapping[str, Any], facts: PriceFacts) -> ResolvedRates:
@@ -127,9 +161,8 @@ def resolve_rates(document: Mapping[str, Any], facts: PriceFacts) -> ResolvedRat
         when = multiplier.get("when")
         if _holds(when, values) is not True:
             continue
-        for path in _price_paths(resolved):
-            if _reaches(factor, path):
-                rules.setdefault(".".join(path), []).append(_plain(when))
+        for path in dict.fromkeys(path for path, steps in _price_paths(resolved) if _reaches(factor, steps)):
+            rules.setdefault(path, []).append(_plain(when))
         resolved = _scaled(resolved, factor)
     return ResolvedRates(resolved, {path: tuple(found) for path, found in rules.items()})
 
@@ -150,21 +183,21 @@ def apply_rules(rate: ModelPricing, facts: PriceFacts) -> AppliedRate:
     try:
         pricing, _ = parse_pricing(resolved.document, units=PRICE_UNITS, path="rates")
         columns = columns_from_pricing(pricing)
+        paths = column_paths(pricing)
     except (TypeError, ValueError):
-        columns = None
+        columns, paths = None, None
     if columns is None or columns.unit != unit:
-        applied = transient_pricing(rate, rates=resolved.document)
-    else:
-        applied = transient_pricing(
-            rate,
-            rates=resolved.document,
-            input_price_per_million=columns.input_price_per_million,
-            output_price_per_million=columns.output_price_per_million,
-            cache_read_price_per_million=columns.cache_read_price_per_million,
-            cache_write_price_per_million=columns.cache_write_price_per_million,
-            pricing_tiers=[dict(tier) for tier in columns.pricing_tiers],
-        )
-    return AppliedRate(applied, resolved.rules)
+        return AppliedRate(transient_pricing(rate, rates=resolved.document), resolved.rules)
+    applied = transient_pricing(
+        rate,
+        rates=resolved.document,
+        input_price_per_million=columns.input_price_per_million,
+        output_price_per_million=columns.output_price_per_million,
+        cache_read_price_per_million=columns.cache_read_price_per_million,
+        cache_write_price_per_million=columns.cache_write_price_per_million,
+        pricing_tiers=[dict(tier) for tier in columns.pricing_tiers],
+    )
+    return AppliedRate(applied, resolved.rules, paths)
 
 
 def _resolved_price(price: object, values: Mapping[str, object], rules: dict[str, list[Condition]], path: str) -> Any:
@@ -179,9 +212,22 @@ def _resolved_price(price: object, values: Mapping[str, object], rules: dict[str
         when = override.get("when")
         if _holds(when, values) is not True:
             continue
-        _merge(resolved, {key: value for key, value in override.items() if key not in ("when", "unit", "overrides")})
-        rules.setdefault(path, []).append(_plain(when))
+        fields = {key: value for key, value in override.items() if key not in ("when", "unit", "overrides")}
+        _merge(resolved, fields)
+        for changed in dict.fromkeys(_changed_paths(fields, path)):
+            rules.setdefault(changed, []).append(_plain(when))
     return resolved
+
+
+def _changed_paths(fields: Mapping[str, Any], path: str) -> list[str]:
+    """The path of each price an override's ``fields`` change: a cache price by its own path, the rest by ``path``."""
+    changed: list[str] = []
+    for key, value in fields.items():
+        if key == "cache" and isinstance(value, Mapping):
+            changed.extend(f"{path}.cache.{_CACHE_PRICE.get(name, name)}" for name in value)
+        else:
+            changed.append(path)
+    return changed
 
 
 def _merge(target: dict[str, Any], source: Mapping[str, Any]) -> None:
@@ -297,14 +343,27 @@ def _a_factor(factor: object) -> bool:
     return number is not None and number >= 0
 
 
-def _price_paths(document: Mapping[str, Any]) -> list[tuple[str, ...]]:
-    """The path of every price a resolved block holds: each modality's input and output, and the web search price."""
-    paths: list[tuple[str, ...]] = []
+def _price_paths(document: Mapping[str, Any]) -> list[tuple[str, tuple[str, ...]]]:
+    """Every price a resolved block holds, by its path and the steps a factor takes to it.
+
+    A price is each modality's input and output, each of their cache prices,
+    and the web search price.
+    """
+    paths: list[tuple[str, tuple[str, ...]]] = []
     for key, entry in document.items():
         if key == "web_search":
-            paths.append((key,))
+            paths.append((key, (key, "price")))
         elif isinstance(entry, Mapping):
-            paths.extend((key, direction) for direction in _DIRECTIONS if direction in entry)
+            for direction in _DIRECTIONS:
+                price = entry.get(direction)
+                if not isinstance(price, Mapping):
+                    continue
+                paths.append((f"{key}.{direction}", (key, direction, "price")))
+                cache = price.get("cache")
+                paths.extend(
+                    (f"{key}.{direction}.cache.{_CACHE_PRICE.get(name, name)}", (key, direction, "cache", name))
+                    for name in (cache if isinstance(cache, Mapping) else ())
+                )
     return paths
 
 

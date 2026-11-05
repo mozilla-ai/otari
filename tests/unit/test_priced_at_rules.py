@@ -11,13 +11,17 @@ from gateway.models.pricing import ModelPricing
 from gateway.services.budgets import count_estimate, estimate_cost, report_estimate
 from gateway.services.pricing import (
     PriceFacts,
+    ToolRate,
+    charge_tool_calls,
     estimate_video_cost,
     model_search_rate,
     price_completion,
     price_usage,
     price_video,
+    tool_rate_lookup,
 )
 from gateway.types.price_rates import columns_from_rates
+from gateway.types.tool_charges import LabelCalls
 
 _BEFORE = datetime(2026, 12, 31, 23, 0, tzinfo=UTC)
 _AFTER = datetime(2027, 1, 1, 1, 0, tzinfo=UTC)
@@ -132,3 +136,147 @@ def test_a_search_the_provider_ran_is_priced_at_the_rules_met() -> None:
 
     assert before is not None and after is not None
     assert (before.unit_rate, after.unit_rate) == (Decimal("0.035"), Decimal("0.070"))
+
+
+def test_each_completion_line_names_the_rules_that_changed_its_price() -> None:
+    cached = _row(
+        {
+            "text": {
+                "input": {
+                    "price": 1,
+                    "cache": {"read": 0.1},
+                    "overrides": [{"when": {"context": {"gt": 10}}, "price": 2}],
+                },
+                "output": {"price": 10},
+            }
+        }
+    )
+    usage = CompletionUsage(
+        prompt_tokens=100,
+        completion_tokens=5,
+        total_tokens=105,
+        prompt_tokens_details={"cached_tokens": 40},  # type: ignore[arg-type]
+    )
+
+    priced = price_completion(cached, usage, succeeded=True, facts=PriceFacts(at=_BEFORE))
+
+    assert priced is not None
+    rules = {line["meter"]: line.get("rules") for line in priced[2]}
+    assert rules == {"input": [{"context": {"gt": 10}}], "cache_read": None, "output": None}
+
+
+def test_a_cache_line_names_the_rules_that_changed_its_cache_price() -> None:
+    long = {"context": {"gt": 10}}
+    tier = {"service_tier": {"equals": "flex"}}
+    cached = _row(
+        {
+            "text": {
+                "input": {"price": 1, "cache": {"read": 0.1}, "overrides": [{"when": long, "cache": {"read": 0.2}}]},
+                "output": {"price": 10},
+            },
+            "multipliers": [{"when": tier, "factor": {"text": {"input": {"price": 0.5}}}}],
+        }
+    )
+    usage = CompletionUsage(
+        prompt_tokens=100,
+        completion_tokens=5,
+        total_tokens=105,
+        prompt_tokens_details={"cached_tokens": 40},  # type: ignore[arg-type]
+    )
+
+    priced = price_completion(cached, usage, succeeded=True, facts=PriceFacts(service_tier="flex", at=_BEFORE))
+
+    assert priced is not None
+    rules = {line["meter"]: line.get("rules") for line in priced[2]}
+    assert rules == {"input": [tier], "cache_read": [long], "output": None}
+
+
+def test_a_line_no_rule_changed_carries_no_rules() -> None:
+    priced = price_completion(
+        _LONG_CONTEXT,
+        CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        succeeded=True,
+        facts=PriceFacts(at=_BEFORE),
+    )
+
+    assert priced is not None
+    assert all("rules" not in line for line in priced[2])
+
+
+def test_a_video_line_names_the_rules_that_changed_its_price() -> None:
+    video = _row(
+        {
+            "video": {"output": {"price": 0.1, "unit": "second"}},
+            "multipliers": [{"when": _NEW_YEAR, "factor": {"video": 1.5}}],
+        }
+    )
+
+    charge = price_video(video, 10, facts=PriceFacts(at=_AFTER))
+
+    assert charge is not None
+    assert [line["rules"] for line in charge.lines] == [[_NEW_YEAR]]
+
+
+def test_a_measured_slot_line_names_the_rules_of_its_slot() -> None:
+    per_image = _row(
+        {
+            "image": {
+                "output": {
+                    "price": 0.04,
+                    "unit": "image",
+                    "overrides": [{"when": {"date": {"gte": "2027-01-01"}}, "price": 0.05}],
+                }
+            },
+        }
+    )
+
+    charge = price_usage(
+        per_image, tokens=None, units={}, quantities={"image": 2}, slot=("image", "output"), facts=PriceFacts(at=_AFTER)
+    )
+
+    assert charge is not None
+    assert charge.cost == Decimal("0.100000")
+    assert [line["rules"] for line in charge.lines] == [[_NEW_YEAR]]
+
+
+def test_a_provider_search_line_names_the_rules_that_changed_its_price() -> None:
+    found = model_search_rate(_LONG_CONTEXT, "defaults", facts=PriceFacts(at=_AFTER))
+    assert found is not None
+    calls = [
+        LabelCalls(
+            tool="web_search",
+            label="openai:web_search",
+            rate_keys=("openai:web_search",),
+            calls=2,
+            unreported_calls=2,
+            reported_cost=Decimal(0),
+        )
+    ]
+    lookup = tool_rate_lookup(calls[0])
+    assert lookup is not None
+    rate = ToolRate("openai:web_search", found.unit_rate, found.source, rules=found.rules)
+
+    charges = charge_tool_calls(calls, {lookup: rate})
+
+    assert found.rules == (_NEW_YEAR,)
+    assert [line["rules"] for line in charges.lines] == [[_NEW_YEAR]]
+
+
+def test_a_search_line_keeps_each_rule_its_rate_applied_twice() -> None:
+    calls = [
+        LabelCalls(
+            tool="web_search",
+            label="openai:web_search",
+            rate_keys=("openai:web_search",),
+            calls=1,
+            unreported_calls=1,
+            reported_cost=Decimal(0),
+        )
+    ]
+    lookup = tool_rate_lookup(calls[0])
+    assert lookup is not None
+    rate = ToolRate("openai:web_search", Decimal("0.04"), "defaults", rules=(_NEW_YEAR, _NEW_YEAR))
+
+    charges = charge_tool_calls(calls, {lookup: rate})
+
+    assert [line["rules"] for line in charges.lines] == [[_NEW_YEAR, _NEW_YEAR]]

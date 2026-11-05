@@ -1,5 +1,5 @@
 {
-  "description": "What one successful pass-through attempt costs at a rate. Shared by otari's settlement tests and otari.ai's, so both editions are held to one table. Rates are per million: tokens, requests or images. A token rate prices the tokens an attempt reports, on every endpoint. Every expected cost is worked out by hand from the rate and the counts, not generated from the code. An expected value of null means the rate prices nothing the attempt reported.",
+  "description": "What one successful pass-through attempt costs at a rate. Shared by otari's settlement tests and otari.ai's, so both editions are held to one table. Rates are per million: tokens, requests or images. A token rate prices the tokens an attempt reports, on every endpoint. Every expected cost is worked out by hand from the rate and the counts, not generated from the code. An expected value of null means the rate prices nothing the attempt reported. A rate may also carry its models.dev cost block under rates, and a case the facts its attempt states under facts. The rules the attempt meets apply as models.dev orders them, overrides and then multipliers, a rule on a condition no fact answers is skipped, and each line names under rules the conditions that changed the price it bills at.",
   "cases": [
     {
       "name": "a requests rate bills the requests count",
@@ -497,6 +497,238 @@
       },
       "units": {},
       "expected": null
+    },
+    {
+      "name": "an override on context reprices every token of an attempt past its bound",
+      "rate": {
+        "unit": "token",
+        "input": "1",
+        "output": "10",
+        "rates": {
+          "text": {
+            "input": {
+              "price": 1,
+              "overrides": [
+                {
+                  "when": {
+                    "context": {
+                      "gt": 1000
+                    }
+                  },
+                  "price": 2
+                }
+              ]
+            },
+            "output": {
+              "price": 10,
+              "overrides": [
+                {
+                  "when": {
+                    "context": {
+                      "gt": 1000
+                    }
+                  },
+                  "price": 20
+                }
+              ]
+            }
+          }
+        }
+      },
+      "tokens": {
+        "input": 2000,
+        "output": 100
+      },
+      "units": {},
+      "expected": {
+        "cost": "0.006000",
+        "meters": {
+          "total_input_tokens": 2000,
+          "fresh_input_tokens": 2000,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "cache_write_1h_tokens": 0,
+          "completion_tokens": 100
+        },
+        "lines": [
+          {
+            "meter": "input",
+            "units": 2000,
+            "rate_per_million": 2.0,
+            "cost": 0.004,
+            "rules": [
+              {
+                "context": {
+                  "gt": 1000
+                }
+              }
+            ]
+          },
+          {
+            "meter": "output",
+            "units": 100,
+            "rate_per_million": 20.0,
+            "cost": 0.002,
+            "rules": [
+              {
+                "context": {
+                  "gt": 1000
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "an override on context leaves an attempt at its bound on the base price",
+      "rate": {
+        "unit": "token",
+        "input": "1",
+        "output": "10",
+        "rates": {
+          "text": {
+            "input": {
+              "price": 1,
+              "overrides": [
+                {
+                  "when": {
+                    "context": {
+                      "gt": 1000
+                    }
+                  },
+                  "price": 2
+                }
+              ]
+            },
+            "output": {
+              "price": 10,
+              "overrides": [
+                {
+                  "when": {
+                    "context": {
+                      "gt": 1000
+                    }
+                  },
+                  "price": 20
+                }
+              ]
+            }
+          }
+        }
+      },
+      "tokens": {
+        "input": 1000,
+        "output": 100
+      },
+      "units": {},
+      "expected": {
+        "cost": "0.002000"
+      }
+    },
+    {
+      "name": "a multiplier the attempt meets scales its price",
+      "rate": {
+        "unit": "request",
+        "input": "2000",
+        "rates": {
+          "text": {
+            "input": {
+              "price": 0.002,
+              "unit": "request"
+            },
+            "output": {
+              "price": 0,
+              "unit": "request"
+            }
+          },
+          "multipliers": [
+            {
+              "when": {
+                "service_tier": {
+                  "equals": "flex"
+                }
+              },
+              "factor": 0.5
+            }
+          ]
+        }
+      },
+      "facts": {
+        "service_tier": "flex"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 1
+      },
+      "expected": {
+        "cost": "0.001000",
+        "meters": {
+          "requests": 1
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 1,
+            "unit_rate": 0.001,
+            "cost": 0.001,
+            "rules": [
+              {
+                "service_tier": {
+                  "equals": "flex"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a rule on a condition no fact answers is skipped",
+      "rate": {
+        "unit": "request",
+        "input": "2000",
+        "rates": {
+          "text": {
+            "input": {
+              "price": 0.002,
+              "unit": "request"
+            },
+            "output": {
+              "price": 0,
+              "unit": "request"
+            }
+          },
+          "multipliers": [
+            {
+              "when": {
+                "region": {
+                  "equals": "us"
+                }
+              },
+              "factor": 2
+            }
+          ]
+        }
+      },
+      "tokens": null,
+      "units": {
+        "requests": 1
+      },
+      "expected": {
+        "cost": "0.002000",
+        "meters": {
+          "requests": 1
+        },
+        "lines": [
+          {
+            "meter": "request",
+            "units": 1,
+            "unit_rate": 0.002,
+            "cost": 0.002
+          }
+        ]
+      }
     },
     {
       "name": "no rate prices nothing",

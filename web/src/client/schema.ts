@@ -18424,7 +18424,9 @@ export interface components {
          *
          *     ``rate_per_million`` is the discriminator: its presence (rather than
          *     ``unit_rate``) is what tells a reader, and a renderer, which unit convention
-         *     applies. See ``gateway.services.pricing_service``.
+         *     applies. See ``gateway.services.pricing_service``. A line whose price an
+         *     override or a multiplier changed also carries ``rules``: each one's
+         *     condition, in the order they applied.
          */
         TokenChargeLine: {
             /**
@@ -18824,7 +18826,8 @@ export interface components {
          * @description A charge line billed per call, for gateway-run tools and per-request routes.
          *
          *     ``unit_rate`` is the discriminator, in the same sense as
-         *     :class:`TokenChargeLine`'s ``rate_per_million``.
+         *     :class:`TokenChargeLine`'s ``rate_per_million``. A line whose price an
+         *     override or a multiplier changed also carries ``rules``, as a token line does.
          */
         UnitChargeLine: {
             /**

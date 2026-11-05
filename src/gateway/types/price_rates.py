@@ -241,17 +241,38 @@ def columns_from_pricing(pricing: ModelsDevPricing) -> RateColumns:
         ValueError: The block prices nothing a column can hold, prices text
             input and output in different units, or holds a rate no column can.
     """
+    slot = _column_slot(pricing)
+    given, made = _prices_in(pricing, slot)
+    priced = [price for price in (given, made) if price is not None and price.price is not None]
+    unit = _unit_of(priced[0])
+    # An unpriced object that names a unit or carries a cache price is in a unit too; an empty one is not.
+    in_a_unit = [p for p in (given, made) if p is not None and (p.price is not None or p.unit or p.cache)]
+    if any(_unit_of(price) != unit for price in in_a_unit):
+        raise ValueError(f"rates price {slot.modality} input and output in different units")
+    return _columns(direction_cost(given, made), unit)
+
+
+def column_paths(pricing: ModelsDevPricing) -> tuple[str, str | None]:
+    """The paths of the prices the columns are read from: the input columns' price, and the output column's.
+
+    A path is a modality and a direction (``text.input``), or ``web_search``.
+    The output column of a one-price slot reads no price, so its path is ``None``.
+
+    Raises:
+        ValueError: The block prices nothing a column can hold.
+    """
+    slot = _column_slot(pricing)
+    if slot.modality is None:
+        return "web_search", None
+    return f"{slot.modality}.{slot.given}", None if slot.made is None else f"{slot.modality}.{slot.made}"
+
+
+def _column_slot(pricing: ModelsDevPricing) -> _Slot:
+    """The slot the columns are read from: the text prices, else the first other slot that is priced."""
     for slot in _READ_ORDER:
         given, made = _prices_in(pricing, slot)
-        priced = [price for price in (given, made) if price is not None and price.price is not None]
-        if not priced:
-            continue
-        unit = _unit_of(priced[0])
-        # An unpriced object that names a unit or carries a cache price is in a unit too; an empty one is not.
-        in_a_unit = [p for p in (given, made) if p is not None and (p.price is not None or p.unit or p.cache)]
-        if any(_unit_of(price) != unit for price in in_a_unit):
-            raise ValueError(f"rates price {slot.modality} input and output in different units")
-        return _columns(direction_cost(given, made), unit)
+        if any(price is not None and price.price is not None for price in (given, made)):
+            return slot
     raise ValueError("rates price nothing a rate column can hold: no text, image, audio, video or web_search price")
 
 
