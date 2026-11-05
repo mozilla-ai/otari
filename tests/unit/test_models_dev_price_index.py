@@ -499,6 +499,32 @@ def test_hosts_that_agree_on_the_whole_block_give_it() -> None:
     assert entry.pricing.web_search is not None and entry.pricing.web_search.price == 10
 
 
+def _two_audio_hosts(first: float, second: float, *, second_search: float | None = None) -> ModelsDevPriceIndex:
+    from gateway.types.models_dev import parse_catalog_v2
+
+    def host(name: str, price: float, search: float | None) -> dict[str, Any]:
+        cost: dict[str, Any] = {"audio": {"input": {"price": price, "unit": "minute"}}}
+        if search is not None:
+            cost["web_search"] = {"price": search}
+        return {"id": name, "models": {"shared-model": {"id": "shared-model", "cost": cost}}}
+
+    return ModelsDevPriceIndex.from_catalog(
+        parse_catalog_v2({"hosta": host("hosta", first, None), "hostb": host("hostb", second, second_search)})
+    )
+
+
+def test_a_model_priced_only_in_a_measured_slot_is_priced_where_the_hosts_agree_on_it() -> None:
+    """A per-minute audio price with no text price still prices the model, and still has to agree across hosts."""
+    agreed = _two_audio_hosts(0.006, 0.006).resolve(None, "shared-model")
+
+    assert agreed is not None and agreed.priced
+    assert agreed.slot_columns is not None
+    assert (agreed.slot_columns.unit, agreed.slot_columns.input_price_per_million) == ("minute", Decimal(6000))
+    assert _two_audio_hosts(0.006, 0.01).resolve(None, "shared-model") is None
+    # The slot price is read from the block, so hosts that differ elsewhere in it give no default.
+    assert _two_audio_hosts(0.006, 0.006, second_search=10).resolve(None, "shared-model") is None
+
+
 def test_hosts_that_write_the_same_block_in_another_order_still_agree() -> None:
     from gateway.types.models_dev import parse_catalog_v2
 

@@ -97,8 +97,9 @@ def test_the_bundled_snapshot_is_the_whole_catalog_and_stays_bounded() -> None:
 def test_the_bundled_prices_are_those_a_stored_price_snapshot_of_it_gives() -> None:
     stored = ModelsDevPriceIndex.from_document(json.loads(json.dumps(_bundled_prices())))
 
-    # A price snapshot is the v1 trim, which carries no cost block; the prices are what it keeps.
-    bundled = [replace(entry, pricing=None) for entry in load_bundled_index().entries()]
+    # A price snapshot is the v1 trim, which carries no cost block and so no slot read
+    # out of one; the text prices are what it keeps.
+    bundled = [replace(entry, pricing=None, slot_columns=None) for entry in load_bundled_index().entries()]
     assert sorted(bundled, key=lambda entry: entry.reference) == sorted(
         stored.entries(), key=lambda entry: entry.reference
     )

@@ -214,6 +214,10 @@ def test_the_derived_columns_agree_with_the_price_index() -> None:
             if model.pricing is None or entry is None or not entry.priced:
                 continue
             columns = columns_from_rates(pricing_document(model.pricing))
+            if entry.slot_columns is not None:
+                # No text price: the columns are the one measured slot the block prices.
+                assert columns == entry.slot_columns, model.id
+                continue
             assert columns == RateColumns(
                 unit="token",
                 input_price_per_million=entry.input,  # type: ignore[arg-type]

@@ -205,25 +205,41 @@ def default_pricing_match(
 ) -> tuple[ModelPricing, str] | None:
     """:func:`default_model_pricing` with the reference of the entry that answered, from one resolution."""
     entry = _resolve_default(provider, model, as_of, implementation)
-    if entry is None or entry.input is None or entry.output is None:
+    if entry is None:
         return None
-
     model_key = f"{provider}:{model}" if provider else model
+    rates = None if entry.pricing is None else pricing_document(entry.pricing)
+    if entry.input is not None and entry.output is not None:
+        pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=as_of,
+            input_price_per_million=entry.input,
+            output_price_per_million=entry.output,
+            cache_read_price_per_million=entry.cache_read,
+            cache_write_price_per_million=entry.cache_write,
+            pricing_tiers=entry.pricing_tiers(),
+            rates=rates,
+        )
+    elif (columns := entry.slot_columns) is not None:
+        # A model with no text price, priced in the one slot its block gives: per minute of audio, per character.
+        pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=as_of,
+            input_price_per_million=columns.input_price_per_million,
+            output_price_per_million=columns.output_price_per_million,
+            cache_read_price_per_million=columns.cache_read_price_per_million,
+            cache_write_price_per_million=columns.cache_write_price_per_million,
+            pricing_tiers=[dict(tier) for tier in columns.pricing_tiers],
+            unit=columns.unit,
+            rates=rates,
+        )
+    else:
+        return None
     logger.debug(
         "Using models.dev default pricing for '%s' (matched %s)",
         # codeql[py/clear-text-logging-sensitive-data]
         model_key,
         entry.reference,
-    )
-    pricing = ModelPricing(
-        model_key=model_key,
-        effective_at=as_of,
-        input_price_per_million=entry.input,
-        output_price_per_million=entry.output,
-        cache_read_price_per_million=entry.cache_read,
-        cache_write_price_per_million=entry.cache_write,
-        pricing_tiers=entry.pricing_tiers(),
-        rates=None if entry.pricing is None else pricing_document(entry.pricing),
     )
     return pricing, entry.reference
 
