@@ -1,0 +1,17 @@
+"""Whether some organization a person belongs to admits them only through its own connection."""
+
+from typing import Protocol
+
+from gateway.models.tenancy import User
+
+
+class SsoEnforcement(Protocol):
+    """Answers whether some organization a person actively belongs to refuses them a way in outside its own connection.
+
+    The identity domain implements it. NOTE: an implementation reads through the request's Unit of Work, so call
+    it before staging any write, or inside a block already open on that Unit of Work.
+    """
+
+    async def blocks_any_membership(self, *, user: User) -> bool:
+        """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
+        ...

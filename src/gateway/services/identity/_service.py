@@ -36,7 +36,10 @@ from gateway.models.tenancy import Organization, OrganizationDomainRole, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
-from gateway.services.identity._enforcement import linked_providers_for_organization
+from gateway.services.identity._enforcement import (
+    linked_providers_for_organization,
+    sso_enforcement_blocks_any_membership,
+)
 from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
@@ -390,23 +393,12 @@ class IdentityService:
                 "No organization still has this unverified address as a member or invitee. "
                 "Add or invite it again first."
             )
-        if await self._sso_enforcement_blocks_any_membership(account):
+        if await sso_enforcement_blocks_any_membership(
+            account, organizations=self._organizations, connections=self._connections, links=self._links
+        ):
             raise PasswordLinkUnavailableError(
                 "An organization this account belongs to requires sign-in through its own connection."
             )
-
-    async def _sso_enforcement_blocks_any_membership(self, account: User) -> bool:
-        """Whether some organization ``account`` belongs to refuses it a way in outside its own connection."""
-        for membership in await self._organizations.members.get_by_user(account.id, active_only=True):
-            organization = await self._organizations.organizations.get(membership.organization_id)
-            if organization is None:
-                continue
-            linked = await linked_providers_for_organization(
-                organization, account.id, connections=self._connections, links=self._links
-            )
-            if sso_blocks_membership(organization=organization, user=account, linked_providers=linked):
-                return True
-        return False
 
     def _stage_reset_token(self, account: User, token: str) -> datetime:
         expires_at = datetime.now(UTC) + timedelta(hours=self._password_reset_expiry_hours)

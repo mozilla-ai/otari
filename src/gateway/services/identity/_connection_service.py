@@ -23,7 +23,10 @@ from gateway.repositories.identity import IdentityRepositories
 from gateway.schemas.identity import OIDCConnectionDomain, OIDCConnectionPublic, OIDCConnectionRequest
 from gateway.services.identity._connection_clients import client_for, pending_flow_provider
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
-from gateway.services.identity._enforcement import linked_providers_for_organization
+from gateway.services.identity._enforcement import (
+    linked_providers_for_organization,
+    sso_enforcement_blocks_any_membership,
+)
 from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.organizations import ClaimedDomain, ClaimedDomains
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
@@ -418,6 +421,13 @@ class OIDCConnectionService:
                 organization, user.id, connections=self._connections, links=self._links
             )
         return sso_blocks_membership(organization=organization, user=user, linked_providers=linked)
+
+    async def blocks_any_membership(self, *, user: User) -> bool:
+        """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
+        async with self._uow:
+            return await sso_enforcement_blocks_any_membership(
+                user, organizations=self._organizations, connections=self._connections, links=self._links
+            )
 
     async def _store_first(
         self,

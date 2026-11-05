@@ -3,9 +3,10 @@
 import uuid
 
 from gateway.models.identity import oidc_identity_provider
-from gateway.models.tenancy import Organization
+from gateway.models.tenancy import Organization, User
 from gateway.repositories.identity.oauth_identity_link_repository import OAuthIdentityLinkRepository
 from gateway.repositories.identity.oidc_connection_repository import OIDCConnectionRepository
+from gateway.services.tenancy import OrganizationService, sso_blocks_membership
 
 
 async def linked_providers_for_organization(
@@ -28,4 +29,22 @@ async def linked_providers_for_organization(
     return frozenset({provider})
 
 
-__all__ = ["linked_providers_for_organization"]
+async def sso_enforcement_blocks_any_membership(
+    user: User,
+    *,
+    organizations: OrganizationService,
+    connections: OIDCConnectionRepository,
+    links: OAuthIdentityLinkRepository,
+) -> bool:
+    """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
+    for membership in await organizations.members.get_by_user(user.id, active_only=True):
+        organization = await organizations.organizations.get(membership.organization_id)
+        if organization is None:
+            continue
+        linked = await linked_providers_for_organization(organization, user.id, connections=connections, links=links)
+        if sso_blocks_membership(organization=organization, user=user, linked_providers=linked):
+            return True
+    return False
+
+
+__all__ = ["linked_providers_for_organization", "sso_enforcement_blocks_any_membership"]

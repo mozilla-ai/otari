@@ -11,6 +11,7 @@ from gateway.services.organizations._claimed_domains import (
     OrganizationClaimedDomains,
 )
 from gateway.services.organizations._invitation_mail_limit import InvitationMailLimit
+from gateway.services.organizations._sso_enforcement import SsoEnforcement
 from gateway.services.organizations._user_access import UserAccess
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "ClaimedDomains",
     "InvitationMailLimit",
     "OrganizationClaimedDomains",
+    "SsoEnforcement",
     "UserAccess",
 ]

@@ -562,7 +562,7 @@ class EmailAlreadyInUseError(TenancyConflictError):
 
 
 class PasswordLinkUnavailableError(TenancyConflictError):
-    """An operator asked for a password link for an account that cannot use one."""
+    """An account cannot be given a usable password right now."""
 
 
 class InvalidEmailError(TenancyValidationError):

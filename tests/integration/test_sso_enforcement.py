@@ -37,6 +37,7 @@ from gateway.services.tenancy import (
     OrganizationService,
     VerifiedDomainLookup,
     forget_unproven_access,
+    hash_token,
     sso_blocks_membership,
 )
 
@@ -548,6 +549,83 @@ async def test_a_password_link_is_refused_for_a_member_of_an_enforcing_organizat
 
     with pytest.raises(PasswordLinkUnavailableError):
         await _identity_service(async_db).issue_password_link(member.id)
+
+
+async def test_setting_a_dashboard_password_is_refused_for_a_member_of_an_enforcing_organization(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    token = await _dashboard_session(async_db, member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    response = client.put(f"{API_ROOT}/auth/password", json={"new_password": "correct-horse-battery-staple"})
+
+    assert response.status_code == 409, response.text
+    await async_db.refresh(member)
+    assert member.hashed_password is None
+
+
+async def test_requesting_a_password_reset_cannot_be_told_apart_from_an_unknown_address(
+    client: TestClient,
+    async_db: AsyncSession,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    member.hashed_password = "not-a-real-hash"
+    member.email_verified_at = datetime.now(UTC)
+    async_db.add(member)
+    await async_db.commit()
+
+    blocked = client.post(f"{API_ROOT}/auth/password/reset", json={"email": "mo@acme.example"})
+    unknown = client.post(f"{API_ROOT}/auth/password/reset", json={"email": "nobody@acme.example"})
+
+    assert blocked.status_code == unknown.status_code == 200, (blocked.text, unknown.text)
+    assert blocked.json() == unknown.json()
+    await async_db.refresh(member)
+    assert member.password_reset_token_hash is None
+
+
+async def test_resetting_a_password_is_refused_for_an_account_an_enforcing_organization_blocks(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    member.hashed_password = "not-a-real-hash"
+    member.email_verified_at = datetime.now(UTC)
+    token = "a-reset-token"
+    member.password_reset_token_hash = hash_token(token)
+    member.password_reset_token_expires_at = datetime.now(UTC) + timedelta(hours=1)
+    async_db.add(member)
+    await async_db.commit()
+
+    response = client.post(
+        f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": "a-new-password"}
+    )
+
+    assert response.status_code == 400, response.text
+    await async_db.refresh(member)
+    assert member.hashed_password == "not-a-real-hash"
 
 
 # =============================================================================
