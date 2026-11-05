@@ -67,6 +67,16 @@ async def no_sso_enforcement(_organization: Organization) -> bool:
     return False
 
 
+class _NoSsoEnforcement:
+    """An ``SsoEnforcement`` that refuses no membership, for a test that is not about it."""
+
+    async def blocks_any_membership(self, *, user: User) -> bool:
+        return False
+
+
+NO_SSO_ENFORCEMENT = _NoSsoEnforcement()
+
+
 def claim_writes(db: AsyncSession) -> dict[str, Any]:
     """Build the Unit of Work and the organization service a claim writes through, as the claim routes do."""
     writes = membership_writes(db)
