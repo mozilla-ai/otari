@@ -13443,8 +13443,8 @@ export interface components {
          *
          *     ``used_*`` counts what the budget gate counts: recorded use plus the holds of
          *     requests still in flight. On a cap the key shares with the rest of its
-         *     workspace or organization the limit and the use are left out, so a key holder
-         *     reads how much room is left without reading what everyone else has spent.
+         *     workspace or organization the limit and the use are left out, and only what
+         *     is left is reported; that still moves as the others spend.
          */
         KeyLimitPublic: {
             /** Limit Requests */

@@ -47,7 +47,7 @@ from gateway.schemas.usage_and_telemetry import (
 )
 from gateway.services.usage_and_telemetry import UsageFilters, UsageScope, parse_tag_filters
 
-# An API key and nothing else: the master key and a dashboard session have no key of their own to answer for.
+# An API key and nothing else, declared on the router so a route added here inherits it.
 router = APIRouter(prefix="/key", tags=["key"], dependencies=[Depends(verify_api_key)])
 
 
