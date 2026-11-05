@@ -3260,6 +3260,21 @@ def test_repo_only_still_enforces_the_repos_own_gates(tmp_path: Path, isolated_h
     assert "shared is forbidden" in result.output
 
 
+def test_repo_only_with_both_origins_still_leaves_the_user_level_gate_unenforced(
+    tmp_path: Path, isolated_home: Path
+) -> None:
+    """A repo guardrail existing too must not bring the user's own gates back in."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+
+    result = CliRunner().invoke(
+        hook_cli.hook, ["--repo-only"], input=json.dumps(_edit_payload(tmp_path, "personal.txt"))
+    )
+    assert result.exit_code == 0, result.output
+    assert "personal is forbidden" not in result.output
+
+
 @pytest.mark.parametrize("error", [RuntimeError("no home"), PermissionError("unreadable home")])
 def test_a_home_directory_that_cannot_be_found_leaves_the_repo_gates_on(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: Exception
