@@ -24,7 +24,7 @@ from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
-from gateway.api.deps import get_api_key_service
+from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
@@ -679,6 +679,7 @@ def _budget_service(db: AsyncSession, organizations: OrganizationService | None 
         organizations,
         get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
+        users=get_user_access(uow),
     )
 
 

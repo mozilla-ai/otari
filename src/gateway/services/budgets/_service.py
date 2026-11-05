@@ -52,6 +52,7 @@ from gateway.services.budgets._reservation_moves import (
 )
 from gateway.services.budgets._reservations import EstimateInputs, ReservationHandle, _normalize_strategy
 from gateway.services.budgets._scopes import ScopeOwnership
+from gateway.services.organizations import UserAccess
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.attempt import Attempt
@@ -70,6 +71,8 @@ class BudgetService:
         organizations: OrganizationService,
         api_keys: ApiKeyService,
         workspace_access: WorkspaceAccess,
+        *,
+        users: UserAccess,
     ) -> None:
         self._uow = uow
         self._repositories = repositories
@@ -82,7 +85,7 @@ class BudgetService:
         self._deployment = _DeploymentSurface(repositories)
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
         self._moves = _ReservationMoves(repositories)
-        self._key_limits = _KeyLimits(repositories, organizations)
+        self._key_limits = _KeyLimits(repositories, organizations, users)
 
     async def list_deployment_budgets(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
         """A page of the budgets the deployment owns and the operator's organization owns."""

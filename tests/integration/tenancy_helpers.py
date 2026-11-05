@@ -10,7 +10,7 @@ from typing import Any, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_api_key_service
+from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget
 from gateway.models.tenancy import Organization, User, Workspace
@@ -78,6 +78,7 @@ def budget_service(db: AsyncSession) -> BudgetService:
         organizations,
         get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
+        users=get_user_access(uow),
     )
 
 

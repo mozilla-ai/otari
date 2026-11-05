@@ -1561,6 +1561,7 @@ def get_budget_service(
         organizations,
         get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
+        users=get_user_access(uow),
     )
 
 
