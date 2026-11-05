@@ -42,6 +42,7 @@ from gateway.services.pricing import (
     resolve_as_of,
     tool_rate_lookup,
 )
+from gateway.types.models_dev import pricing_document
 from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER as GATEWAY_TOOL_PRICING_PROVIDER,
 )
@@ -222,6 +223,7 @@ def default_pricing_match(
         cache_read_price_per_million=entry.cache_read,
         cache_write_price_per_million=entry.cache_write,
         pricing_tiers=entry.pricing_tiers(),
+        rates=None if entry.pricing is None else pricing_document(entry.pricing),
     )
     return pricing, entry.reference
 
@@ -253,6 +255,7 @@ def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricin
         cache_write_price_per_million=override.cache_write_price_per_million,
         pricing_tiers=override.pricing_tiers or [],
         unit=override.unit or "token",
+        rates=override.rates,
     )
 
 
@@ -1136,6 +1139,11 @@ async def _deployment_rates(
     return found
 
 
+def _is_old_key(rate_key: RateKey, kind: str) -> bool:
+    """Whether a row of ``kind`` that spells ``rate_key`` is an instance's old model-kind key."""
+    return isinstance(rate_key, InstanceRateKey) and kind == MODEL_KIND
+
+
 def _first_tool_rate(
     lookup: ToolRateLookup,
     overrides: Mapping[str, dict[str, list[OverridePeriod]]],
@@ -1154,10 +1162,14 @@ def _first_tool_rate(
                 overrides.get(kind, {}), [key], as_of, deployment_paid=lookup.operator_set_only
             )
             if override is not None:
-                return ToolRate(rate_key, flat_request_cost(override), "organization")
-        stored = next((deployment[form] for form in forms if form in deployment), None)
-        if stored is not None:
-            return ToolRate(rate_key, flat_request_cost(stored), "deployment")
+                return ToolRate(
+                    rate_key, flat_request_cost(override), "organization", old_key=_is_old_key(rate_key, kind)
+                )
+        form = next((form for form in forms if form in deployment), None)
+        if form is not None:
+            return ToolRate(
+                rate_key, flat_request_cost(deployment[form]), "deployment", old_key=_is_old_key(rate_key, form[0])
+            )
     if default_pricing_enabled():
         for rate_key in lookup.rate_keys:
             list_price = PROVIDER_TOOL_LIST_PRICES.get(rate_key) if isinstance(rate_key, str) else None

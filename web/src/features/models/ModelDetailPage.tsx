@@ -44,6 +44,7 @@ import {
   formatReleaseDate,
 } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { providerModelId } from "./modelKey"
 
@@ -218,6 +219,7 @@ function offeringColumns({
                   ? `${providerDisplayName(row.provider_type)} · `
                   : ""}
                 {credentialLabel(row.credential)}
+                {row.zero_data_retention ? " · Zero data retention" : ""}
                 {row.quantization ? ` · ${row.quantization}` : ""}
               </span>
             </span>
@@ -374,7 +376,13 @@ export function ModelDetailView({
   // organization's owner, and excluding them would leave the one caller who can
   // set a rate without the link to set it.
   const canOverride = !publicView && canManage(organization.data)
-  const selected = useCatalogModel(modelId)
+  // The offerings the selected workspace may call, as the list beside it shows.
+  const workspace = useSelectedWorkspace()
+  const selected = useCatalogModel(
+    modelId,
+    workspace.selected?.workspace_id ?? "",
+    workspace.isSettled,
+  )
   const [quantization, setQuantization] = useState("all")
   const [useModel, setUseModel] = useState(false)
   const [sort, setSort] = useState<{

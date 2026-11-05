@@ -56,7 +56,7 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.money import as_float, to_usd, to_usd_or_none
-from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource, rates_of
 from gateway.models.provider_keys import (
     OrgProviderKey,
     OrgProviderKeyModel,
@@ -184,6 +184,7 @@ def _seeded_row(
         cache_write_price_per_million=to_usd_or_none(as_float(default.cache_write_price_per_million)),
         pricing_tiers=list(default.pricing_tiers or []),
         unit=default.unit or "token",
+        rates=rates_of(default),
         origin=SEED_ORIGIN,
         effective_from=effective_from,
         effective_to=None,
@@ -202,6 +203,7 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.cache_read_price_per_million = to_usd_or_none(as_float(default.cache_read_price_per_million))
     row.cache_write_price_per_million = to_usd_or_none(as_float(default.cache_write_price_per_million))
     row.pricing_tiers = list(default.pricing_tiers or [])
+    row.rates = rates_of(default)
 
 
 def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> dict[str, ModelPricing]:

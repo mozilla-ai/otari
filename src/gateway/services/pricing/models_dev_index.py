@@ -10,7 +10,7 @@ spelling.
 import re
 from bisect import bisect_right
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -21,6 +21,7 @@ from gateway.types.models_dev import (
     ModelsDevCatalog,
     ModelsDevCost,
     ModelsDevModel,
+    ModelsDevPricing,
     ModelsDevProvider,
     ModelsDevRates,
     models_dev_provider_id,
@@ -84,6 +85,8 @@ class ModelsDevPrice:
     provider_name: str | None
     provider_doc: str | None
     canonical_model_id: str | None
+    pricing: ModelsDevPricing | None = None
+    """Every price the document gives the model, in its unit; ``None`` for a v1 entry."""
 
     @property
     def reference(self) -> str:
@@ -118,7 +121,7 @@ def parse_rate(value: object) -> Decimal | None:
     Rejects booleans, negatives, non-finite numbers, anything above
     ``MAX_RATE_PER_MILLION`` and anything that does not fit ``Numeric(18, 8)``.
     """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
         return None
     try:
         rate = Decimal(str(value))
@@ -177,6 +180,7 @@ def _entry(provider: ModelsDevProvider, model: ModelsDevModel) -> ModelsDevPrice
         provider_name=provider.name,
         provider_doc=provider.doc,
         canonical_model_id=model.canonical_model_id,
+        pricing=model.pricing,
     )
 
 
@@ -346,7 +350,11 @@ class ModelsDevPriceIndex:
         if len({c.price_signature() for c in candidates}) != 1:
             return None
         vendor = (candidates[0].canonical_model_id or "").partition("/")[0]
-        return min(candidates, key=lambda c: (c.provider_id != vendor, c.provider_id, c.model_id))
+        agreed = min(candidates, key=lambda c: (c.provider_id != vendor, c.provider_id, c.model_id))
+        # The text prices agree; the rest of a block (a web search price, an
+        # image price) is one host's, so it is given only where every host's is the same.
+        same_block = all(c.pricing == agreed.pricing for c in candidates)
+        return agreed if same_block else replace(agreed, pricing=None)
 
 
 def _utc(moment: datetime) -> datetime:

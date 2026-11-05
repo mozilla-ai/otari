@@ -227,11 +227,14 @@ test.describe("tenancy", () => {
     await expect(created).toBeVisible()
     await expect(created).toContainText("Created by the parity suite")
 
-    await created.getByRole("button", { name: "Edit" }).click()
-    const editDialog = page.getByRole("dialog", { name: "Edit workspace" })
-    await editDialog.getByLabel("Name").fill(RENAMED_WORKSPACE)
-    await editDialog.getByRole("button", { name: "Save" }).click()
-    await expect(editDialog).toBeHidden()
+    // Renamed on the workspace's own page, which its name opens.
+    await created.getByRole("link", { name: WORKSPACE }).click()
+    await page.getByLabel("Name").fill(RENAMED_WORKSPACE)
+    await page.getByRole("button", { name: "Save" }).click()
+    await expect(
+      page.getByRole("heading", { name: RENAMED_WORKSPACE, level: 1 }),
+    ).toBeVisible()
+    await page.getByRole("link", { name: "← Workspaces" }).click()
 
     const renamed = workspaceRow(page, RENAMED_WORKSPACE)
     await expect(renamed).toBeVisible()

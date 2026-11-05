@@ -41,6 +41,9 @@ class ToolRate(NamedTuple):
     #: USD per call.
     unit_rate: Decimal
     source: PriceSource
+    #: True when an instance's rate is stored under its old model-kind
+    #: ``<provider>:<instance>`` key, the second spelling of its own.
+    old_key: bool = False
 
 
 class ToolRateLookup(NamedTuple):

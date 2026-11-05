@@ -39,7 +39,6 @@ from gateway.api.routes._pipeline import (
     prepare_gateway_tools,
     provider_error_headers,
     provider_failure_detail,
-    rate_limit_headers,
     resolve_dispatch_provider,
     resolve_request_context,
     run_non_stream,
@@ -108,7 +107,6 @@ __all__ = [
     "ChatCompletionRequest",
     "chat_completions",
     "log_usage",
-    "rate_limit_headers",
     "router",
     "run_chat_completion",
 ]

@@ -725,7 +725,7 @@ async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment
     agreed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek", organization_id=organization.id)
     listed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek")
 
-    assert agreed == ToolRate(key, Decimal("0.003"), "organization")
+    assert agreed == ToolRate(key, Decimal("0.003"), "organization", old_key=True)
     assert listed == ToolRate(key, Decimal("0.004"), "deployment")
 
 
@@ -1576,3 +1576,56 @@ def test_the_model_listing_states_the_organizations_own_rate(
             assert single.status_code == status.HTTP_200_OK, single.text
             assert single.json()["pricing_source"] == "organization"
             assert single.json()["pricing"]["input_price_per_million"] == 2.5
+
+
+def test_an_override_given_as_rates_reads_back_with_both(client: TestClient, master_key_header: dict[str, str]) -> None:
+    block = {
+        "text": {"input": {"price": 2.5, "cache": {"read": 1.25}}, "output": {"price": 10}},
+        "web_search": {"price": 10},
+    }
+
+    created = client.post(_ENDPOINT, json={"model_key": _MODEL_KEY, "rates": block}, headers=master_key_header)
+
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    override = created.json()
+    assert (override["unit"], override["input_price_per_million"], override["cache_read_price_per_million"]) == (
+        "token",
+        2.5,
+        1.25,
+    )
+    assert override["rates"] == block
+
+    replaced = client.put(
+        f"{_ENDPOINT}/{override['id']}",
+        json={
+            "rates": {"image": {"output": {"price": 0.04, "unit": "image"}}},
+            "effective_from": override["effective_from"],
+        },
+        headers=master_key_header,
+    )
+
+    assert replaced.status_code == status.HTTP_200_OK, replaced.text
+    assert (replaced.json()["unit"], replaced.json()["input_price_per_million"]) == ("image", 40000.0)
+    assert replaced.json()["rates"] == {"image": {"output": {"price": 0.04, "unit": "image"}}}
+
+
+def test_an_override_given_as_columns_reads_back_with_rates(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    created = client.post(_ENDPOINT, json=_body(), headers=master_key_header)
+
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    assert created.json()["rates"] == {
+        "text": {"input": {"price": 2.5, "unit": "token"}, "output": {"price": 5.0, "unit": "token"}}
+    }
+
+
+def test_an_override_mixing_rates_and_columns_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(
+        _ENDPOINT,
+        json=_body(rates={"text": {"input": {"price": 1}, "output": {"price": 2}}}),
+        headers=master_key_header,
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, response.text
+    assert "remove input_price_per_million, output_price_per_million" in response.text

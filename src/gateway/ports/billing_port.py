@@ -27,6 +27,9 @@ import uuid
 from decimal import Decimal
 from typing import Protocol
 
+# What a caller is told when the billing port cannot say whether an organization's funds cover a request.
+FUNDS_CHECK_UNAVAILABLE_DETAIL = "This organization's funds could not be checked. Retry later."
+
 
 class InsufficientFundsError(Exception):
     """Raised when an organization's funds cannot cover a deployment-paid request.

@@ -37,6 +37,7 @@ GLM = model(
     context_window=200_000,
     release_date="2026-07-01",
     providers=["fireworks", "nebius"],
+    zero_data_retention_providers=["fireworks"],
     provider_count=2,
     selectors=["fireworks:accounts/fireworks/models/glm-5p3", "nebius:zai-org/GLM-5.3"],
     price_sources=["defaults", "deployment"],
@@ -102,6 +103,8 @@ MODELS = [GLM, KIMI, LOCAL]
         ({"type": ["chat"]}, [GLM]),
         ({"type": ["chat", "image"]}, [GLM, KIMI]),
         ({"type": ["embedding"]}, []),
+        ({"zero_data_retention": True}, [GLM]),
+        ({"zero_data_retention": True, "provider": ["nebius"]}, [GLM]),
     ],
 )
 def test_filters_preserve_the_dashboard_semantics(filters: dict[str, Any], expected: list[CatalogModelSummary]) -> None:

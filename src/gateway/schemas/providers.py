@@ -41,6 +41,13 @@ class OrgProviderKeyCreateRequest(SQLModel):
     api_key: str | None = Field(default=None)
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
+    zero_data_retention: bool = Field(
+        default=False,
+        description=(
+            "The organization's declaration that the provider account behind this key keeps no prompt or "
+            "completion data. The catalog shows it and filters on it; nothing is enforced on it."
+        ),
+    )
 
 
 class OrgProviderKeyUpdateRequest(SQLModel):
@@ -50,6 +57,7 @@ class OrgProviderKeyUpdateRequest(SQLModel):
     api_key: str | None = None
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
+    zero_data_retention: bool | None = None
 
 
 class OrgProviderKeyPublic(SQLModel):
@@ -63,6 +71,7 @@ class OrgProviderKeyPublic(SQLModel):
     client_args: dict[str, Any] | None = None
     last4: str | None = None
     is_org_default: bool
+    zero_data_retention: bool = False
     usable: bool = Field(
         description=(
             "False when the stored credential cannot be decrypted on this deployment, so the key "
@@ -117,6 +126,7 @@ class OrgProviderKeyPublic(SQLModel):
             client_args=redact_secret_like_values(key.client_args),
             last4=key.last4,
             is_org_default=key.is_org_default,
+            zero_data_retention=key.zero_data_retention,
             usable=usable,
             offered_count=offered_count,
             serving_count=serving_count,
@@ -165,6 +175,9 @@ class WorkspaceProviderKeyOverridePublic(SQLModel):
     # fetching it per key turns one read into one per key. Empty is the common
     # answer and means every model the key serves, never none of them.
     allowed_models: list[str]
+    # The organization's declaration on the key, so a workspace that requires
+    # zero data retention can be shown which of its keys that leaves.
+    zero_data_retention: bool = False
 
 
 class WorkspaceProviderKeyOverridesPublic(SQLModel):
@@ -368,6 +381,8 @@ class HostedProviderCreateRequest(SQLModel):
     whether or not something prices it. ``supported_countries`` keeps the
     provider to requests from those ISO country codes, checked as well as
     ``provider_supported_countries``; null serves every country.
+    ``zero_data_retention`` declares that the upstream keeps no prompt or
+    completion data; the catalog shows it and nothing enforces it.
     """
 
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
@@ -381,6 +396,7 @@ class HostedProviderCreateRequest(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
     supported_countries: list[str] | None = Field(default=None, max_length=300)
+    zero_data_retention: bool = False
 
     @field_validator("supported_countries")
     @classmethod
@@ -413,6 +429,7 @@ class HostedProviderUpdateRequest(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool | None = None
     supported_countries: list[str] | None = Field(default=None, max_length=300)
+    zero_data_retention: bool | None = None
 
     @field_validator("supported_countries")
     @classmethod
@@ -440,7 +457,8 @@ class HostedProviderPublic(SQLModel):
     ``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.
     ``serves_unlisted_models`` is true for one that serves a model its roster
     does not list. ``supported_countries`` is null for one that serves every
-    country.
+    country. ``zero_data_retention`` is the operator's declaration that the
+    upstream keeps no prompt or completion data.
     """
 
     id: uuid.UUID | None = None
@@ -456,6 +474,7 @@ class HostedProviderPublic(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
     supported_countries: list[str] | None = None
+    zero_data_retention: bool = False
     shadows_config: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -491,6 +510,7 @@ class HostedProviderPublic(SQLModel):
             restricted_to_organization_id=row.restricted_to_organization_id,
             serves_unlisted_models=row.serves_unlisted_models,
             supported_countries=row.supported_countries,
+            zero_data_retention=row.zero_data_retention,
             shadows_config=shadows_config,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -509,6 +529,7 @@ class HostedProviderPublic(SQLModel):
         enabled: bool,
         restricted_to_organization_id: uuid.UUID | None,
         supported_countries: list[str] | None = None,
+        zero_data_retention: bool = False,
     ) -> HostedProviderPublic:
         """Read one configuration entry for the API, masked as a row is.
 
@@ -525,6 +546,7 @@ class HostedProviderPublic(SQLModel):
             enabled=enabled,
             restricted_to_organization_id=restricted_to_organization_id,
             supported_countries=supported_countries,
+            zero_data_retention=zero_data_retention,
         )
 
 
@@ -945,6 +967,59 @@ class HostedAvailableModelsPublic(SQLModel):
     discovery_unsupported: bool = False
 
 
+class WorkspaceHostedProviderAccessRequest(SQLModel):
+    """What one workspace may do with one hosted provider. Replaces whatever it stored before."""
+
+    enabled: bool = Field(description="False switches the provider off for this workspace.")
+    models: list[str] | None = Field(
+        default=None,
+        max_length=1000,
+        description=(
+            "The models this workspace may call on the provider. Null for every model the deployment serves on it, "
+            "including ones added later. A list must name at least one model."
+        ),
+    )
+
+
+class WorkspaceHostedProviderPublic(SQLModel):
+    """One hosted provider as one workspace sees it."""
+
+    provider: str = Field(description="The hosted provider's name, as a request's selector prefix spells it.")
+    enabled: bool
+    models: list[str] | None = Field(description="This workspace's model list, or null for every served model.")
+    customized: bool = Field(description="Whether this workspace stores a departure from full inheritance.")
+    served_models: list[str] | None = Field(
+        description=(
+            "The models the deployment serves on the provider for this organization, or null for any priced one."
+        ),
+    )
+    served_by_own_key: bool = Field(
+        description="Whether the workspace calls this provider on the organization's own key, so this row is not used."
+    )
+    zero_data_retention: bool = Field(
+        default=False, description="Whether the deployment declares this provider keeps no prompt or completion data."
+    )
+
+
+class WorkspaceHostedProvidersPublic(SQLModel):
+    data: list[WorkspaceHostedProviderPublic]
+
+
+class WorkspaceProviderPolicyRequest(SQLModel):
+    """What one workspace requires of every provider serving it."""
+
+    require_zero_data_retention: bool = Field(
+        description=(
+            "Refuse every provider not declared zero data retention: an organization key or a hosted provider "
+            "nobody declared, and every provider configured in config.yml or endpoint the workspace owns."
+        )
+    )
+
+
+class WorkspaceProviderPolicyPublic(SQLModel):
+    require_zero_data_retention: bool
+
+
 __all__ = [
     "DeploymentProviderMigrationOutcome",
     "DeploymentProviderMigrationPublic",
@@ -983,6 +1058,11 @@ __all__ = [
     "ProviderEndpointUpdateRequest",
     "ProviderEndpointsPublic",
     "WorkspaceProviderKeyOverridePublic",
+    "WorkspaceHostedProviderAccessRequest",
+    "WorkspaceHostedProviderPublic",
+    "WorkspaceHostedProvidersPublic",
+    "WorkspaceProviderPolicyPublic",
+    "WorkspaceProviderPolicyRequest",
     "WorkspaceProviderKeyOverrideRequest",
     "WorkspaceProviderKeyOverridesPublic",
     "WorkspaceProviderModelRestrictionRequest",

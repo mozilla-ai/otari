@@ -60,7 +60,7 @@ export const WithValue: Story = {
  * holding a stale message cannot flash it while the value is being fixed.
  *
  * The message replaces the description rather than adding a row, and
- * `reserveMessage` holds that line open so the form does not move when it
+ * `shouldReserveMessage` holds that line open so the form does not move when it
  * appears.
  */
 export const Invalid: Story = {

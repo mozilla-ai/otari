@@ -100,8 +100,8 @@ class ModelCatalogEntry:
             last_updated=model.last_updated,
             open_weights=model.open_weights,
             deprecated=model.status == "deprecated",
-            cost_input=None if rates is None else rates.input,
-            cost_output=None if rates is None else rates.output,
+            cost_input=None if rates is None or rates.input is None else float(rates.input),
+            cost_output=None if rates is None or rates.output is None else float(rates.output),
             type=models_dev_model_type(model.type),
             endpoints=list(models_dev_endpoints(api.protocol for api in model.api)),
         )

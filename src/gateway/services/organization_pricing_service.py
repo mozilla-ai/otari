@@ -40,7 +40,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -101,6 +101,7 @@ class PricingOverrideInput:
     effective_from: datetime
     effective_to: datetime | None
     unit: PriceUnit = "token"
+    rates: dict[str, Any] | None = None
 
 
 def _describe_period(effective_from: datetime, effective_to: datetime | None) -> str:
@@ -484,6 +485,7 @@ class OrganizationPricingService:
             effective_from=effective_from,
             effective_to=effective_to,
             unit=override.unit,
+            rates=override.rates,
             origin=await self._origin_for(user),
         )
         self.db.add(row)
@@ -609,6 +611,8 @@ class OrganizationPricingService:
         row.effective_from = effective_from
         row.effective_to = effective_to
         row.unit = override.unit
+        if override.rates is not None:
+            row.rates = override.rates
         # The rate is somebody's choice now, whatever it was before. A row the
         # offered-models surface seeded carries ``seed`` and its refresh moves it
         # to each day's community default; leaving that marking on a rate an

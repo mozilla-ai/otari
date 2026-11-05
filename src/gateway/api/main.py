@@ -25,6 +25,7 @@ from gateway.api.routes import (
     decisions,
     embeddings,
     end_users,
+    fetch,
     files,
     health,
     hook_guardrails,
@@ -71,6 +72,7 @@ from gateway.api.routes import (
     web_search_keys,
     workspace_activation,
     workspace_code_execution_policy,
+    workspace_hosted_providers,
     workspace_mcp_servers,
     workspace_member_budget_policies,
     workspace_web_search,
@@ -150,6 +152,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # since the harness dispatches the subagent to its own provider.
     agent_routing.router,
     search.router,
+    fetch.router,
     code_execution.router,
     batches.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
@@ -209,6 +212,8 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     web_search_keys.workspace_router,
     org_provider_keys.org_router,
     org_provider_keys.workspace_router,
+    workspace_hosted_providers.router,
+    workspace_hosted_providers.policy_router,
     budgets.router,
     scoped_budgets.router,
     overview.router,

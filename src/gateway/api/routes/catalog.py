@@ -37,6 +37,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.api.deps import (
+    HostedProviderServiceDep,
+    OrgProviderKeyServiceDep,
     RequestSessionModelProviderPortDep,
     get_config,
     get_db,
@@ -68,6 +70,8 @@ from gateway.services.merged_catalog_service import (
     served_on_deployment_key,
     viewer_organization,
     viewer_price,
+    viewer_zero_data_retention,
+    withholds_offering,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.model_identity import (
@@ -84,11 +88,13 @@ from gateway.services.pricing_service import (
     normalize_effective_at,
     pricing_key_forms,
 )
+from gateway.services.providers import HostedProviderService
 from gateway.services.selector_index_service import (
     offering_seed,
     real_offerings,
     rebuild_selector_index,
 )
+from gateway.services.tenancy import OrgProviderKeyService
 from gateway.types.model_endpoint import ModelEndpoint
 from gateway.types.models_dev import ModelsDevCatalog, models_dev_provider_id
 
@@ -169,6 +175,14 @@ class CatalogOffering(BaseModel):
         ),
     )
     discovered: bool = Field(description="Whether the provider itself reported this model.")
+    zero_data_retention: bool = Field(
+        default=False,
+        description=(
+            "Whether whoever holds the serving key declared that the provider keeps no prompt or completion data: "
+            "the operator for a `hosted` offering, the organization for one on its own keys, where every usable "
+            "key of the provider must declare it. A declaration, not something the gateway can verify."
+        ),
+    )
     context_window: int | None = None
     max_output_tokens: int | None = None
     quantization: str | None = Field(default=None, description="From the provider's id, when it names one.")
@@ -362,6 +376,8 @@ async def _group(
     *,
     caller: CatalogCaller,
     session_identity: TenancyUser | None,
+    hosted_providers: HostedProviderService,
+    org_provider_keys: OrgProviderKeyService,
 ) -> _Grouped:
     """The merged catalog's offerings grouped into models, each priced at the viewer's rate."""
     catalog = merged.models_dev
@@ -377,10 +393,19 @@ async def _group(
         else {}
     )
     configured_types = {models_dev_provider_id(config.provider_instance_type(i)) for i in config.providers}
+    zero_retention = await viewer_zero_data_retention(hosted_providers, org_provider_keys, organization_id)
     seeds: list[OfferingSeed] = []
     offerings: dict[str, _Offering] = {}
     for obj in real:
         seed, metadata, instance, model_id, provider_type = offering_seed(config, catalog, obj)
+        credential = _get_credential(
+            config,
+            instance,
+            hosted=obj.deployment_managed or served_on_deployment_key(merged.deployment_key_models, obj.id),
+        )
+        declared = zero_retention.declared(instance, credential.value)
+        if withholds_offering(merged, zero_data_retention=declared):
+            continue
         seeds.append(seed)
 
         pricing, source, reference = viewer_price(obj, overrides, instance=instance, model_id=model_id, as_of=now)
@@ -391,12 +416,9 @@ async def _group(
                 short_selector=short_selector_for(obj.id, organization_id=organization_id),
                 provider=instance,
                 provider_type=provider_type,
-                credential=_get_credential(
-                    config,
-                    instance,
-                    hosted=obj.deployment_managed or served_on_deployment_key(merged.deployment_key_models, obj.id),
-                ),
+                credential=credential,
                 discovered=obj.id in merged.discovered_keys,
+                zero_data_retention=declared,
                 # From the merged catalog, so the flat listing reports the same limits.
                 context_window=obj.context_window,
                 max_output_tokens=obj.max_output_tokens,
@@ -522,6 +544,9 @@ def _summary(
         offering_count=len(members),
         provider_count=len({member.wire.provider for member in members}),
         providers=sorted({member.wire.provider for member in members}),
+        zero_data_retention_providers=sorted(
+            {member.wire.provider for member in members if member.wire.zero_data_retention}
+        ),
         selectors=sorted(member.wire.selector for member in members),
         price_sources=sorted({member.wire.price_source for member in members if member.wire.price_source}),
         unpriced_count=sum(1 for member in members if member.wire.pricing is None),
@@ -561,13 +586,19 @@ async def _merged_for(
     caller: CatalogCaller,
     session_identity: TenancyUser | None,
     model_provider: ModelProviderPort,
+    workspace_id: uuid.UUID | None = None,
 ) -> MergedCatalog:
     if caller is None:
         return await build_real_model_catalog(
             db, config, auth=(None, False), session_identity=None, anonymous=True, model_provider=model_provider
         )
     return await build_real_model_catalog(
-        db, config, auth=caller, session_identity=session_identity, model_provider=model_provider
+        db,
+        config,
+        auth=caller,
+        session_identity=session_identity,
+        model_provider=model_provider,
+        workspace_id=workspace_id,
     )
 
 
@@ -578,6 +609,8 @@ async def list_catalog(
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
+    hosted_providers: HostedProviderServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
     query: Annotated[CatalogQuery, Query()],
 ) -> CatalogResponse:
     """The models this caller may use, one entry each however many providers serve it.
@@ -589,8 +622,16 @@ async def list_catalog(
     models every organization reaches, at the deployment's rates, and nothing
     that belongs to a tenant.
     """
-    merged = await _merged_for(db, config, caller, session_identity, model_provider)
-    grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, query.workspace_id)
+    grouped = await _group(
+        db,
+        config,
+        merged,
+        caller=caller,
+        session_identity=session_identity,
+        hosted_providers=hosted_providers,
+        org_provider_keys=org_provider_keys,
+    )
     models = [
         _summary(
             identity,
@@ -619,6 +660,12 @@ async def get_catalog_model(
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: RequestSessionModelProviderPortDep,
+    hosted_providers: HostedProviderServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the offerings a request billed to this workspace may call."),
+    ] = None,
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 
@@ -633,8 +680,16 @@ async def get_catalog_model(
     A signed-in caller's offerings also carry their organization's own usage of
     each over the last 30 days.
     """
-    merged = await _merged_for(db, config, caller, session_identity, model_provider)
-    grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
+    grouped = await _group(
+        db,
+        config,
+        merged,
+        caller=caller,
+        session_identity=session_identity,
+        hosted_providers=hosted_providers,
+        org_provider_keys=org_provider_keys,
+    )
     identity = next((identity for identity in grouped.identities.values() if identity.id == model_id), None)
     if identity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")

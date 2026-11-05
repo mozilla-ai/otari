@@ -31,9 +31,9 @@ you have more than a handful.
 3. Enter a **Name** and, optionally, a **Description**, and click
    **Create workspace**.
 
-A new workspace can use every provider key its organization holds. To choose
-which key a workspace uses for a provider, click **Edit** (the pencil icon) on
-the workspace; see [Control workspace access](provider-keys.md#control-workspace-access).
+A new workspace can use every provider key and hosted provider its organization
+can. To narrow that, select the workspace and open its **Providers** tab; see
+[Control workspace access](provider-keys.md#control-workspace-access).
 
 The API, an SDK or automation addresses a workspace by its id, which
 `GET /api/v1/workspaces` lists.
@@ -69,6 +69,11 @@ keys, pricing overrides, guardrail policy, and organization-wide usage views.
 A workspace groups the resources used by a team or application. API keys, usage,
 aliases, routing policies, MCP servers, and tool policy are resolved in a
 workspace.
+
+Each workspace has its own page under **Organization**, then **Workspaces**:
+**General** for its name and defaults, and **Providers** for the providers and
+models it may use
+([Control workspace access](provider-keys.md#control-workspace-access)).
 
 ### Roles
 

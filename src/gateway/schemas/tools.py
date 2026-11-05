@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import pydantic
 from sqlmodel import Field, SQLModel
@@ -296,9 +296,38 @@ class StoredSearchToolSchema(pydantic.BaseModel):
         *,
         decryptable: bool = True,
         shadows_config: bool = False,
-    ) -> "StoredSearchToolSchema":
-        """The public view of a stored row: never the key, only its last four characters."""
-        return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config)
+        **fields: Any,
+    ) -> Self:
+        """The public view of a stored row: never the key, only its last four characters.
+
+        ``fields`` sets those a subclass adds.
+        """
+        return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config, **fields)
+
+
+# Where a listed tool's price comes from: its own price row, that row while its
+# config.yml entry sets ``price_per_call``, its old ``<provider>:<name>`` row,
+# or no row.
+ToolPriceSource = Literal["own", "config", "old_key", "none"]
+
+_PRICE_PER_CALL_DESCRIPTION = (
+    "USD for one call on the deployment's own account when the provider reports no cost of its own, from the "
+    "deployment's price list. An override the operator set for one organization prices that organization's "
+    "calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused."
+)
+_PRICE_SOURCE_DESCRIPTION = (
+    "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', "
+    "that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the "
+    "rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old "
+    "<provider>:<name> row, which prices it while it has no row of its own; 'none', no row."
+)
+
+
+class ListedSearchToolSchema(StoredSearchToolSchema):
+    """A stored instance as the listing shows it: with what one of its calls costs."""
+
+    price_per_call: float | None = pydantic.Field(description=_PRICE_PER_CALL_DESCRIPTION)
+    price_source: ToolPriceSource = pydantic.Field(description=_PRICE_SOURCE_DESCRIPTION)
 
 
 class CreatedSearchToolSchema(StoredSearchToolSchema):
@@ -335,12 +364,14 @@ class ConfigSearchToolSchema(pydantic.BaseModel):
         default=False,
         description="True when a stored instance of the same name and kind overrides this entry.",
     )
+    price_per_call: float | None = pydantic.Field(description=_PRICE_PER_CALL_DESCRIPTION)
+    price_source: ToolPriceSource = pydantic.Field(description=_PRICE_SOURCE_DESCRIPTION)
 
 
 class SearchToolsResponse(pydantic.BaseModel):
     """Every search instance ``POST /api/v1/search`` can name, or every fetch instance, by where it came from."""
 
-    stored: list[StoredSearchToolSchema]
+    stored: list[ListedSearchToolSchema]
     config: list[ConfigSearchToolSchema]
 
 
@@ -548,6 +579,81 @@ class SearchResponse(pydantic.BaseModel):
     object: Literal["search"] = "search"
     search_tool: str = pydantic.Field(description="The configured search tool that served the request")
     results: list[SearchResultItem]
+    raw: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        exclude_if=lambda raw: raw is None,
+        description="The provider's whole response, untouched; only when the request set include_raw.",
+    )
+
+
+class FetchRequest(pydantic.BaseModel):
+    """A direct fetch request: one page, read through the deployment's fetch tool or the one named."""
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={"example": {"url": "https://example.com/article", "max_chars": 20000}},
+    )
+
+    url: str = pydantic.Field(min_length=1, description="The page to fetch: one public http or https URL.")
+    fetch_tool_name: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "Configured fetch tool to run on, builtin_fetch included. Optional: the deployment's "
+            "web_fetch_default_tool serves, else builtin_fetch. Ignored on POST /api/v1/fetch/{fetch_tool_name}."
+        ),
+    )
+    max_chars: int | None = pydantic.Field(
+        default=None,
+        ge=1,
+        description=(
+            "Cut the page text to this many characters. Unset, the tool's own max_chars option applies, "
+            "else the provider's own limits."
+        ),
+    )
+    include_raw: bool = pydantic.Field(
+        default=False,
+        description=(
+            "Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw "
+            "holds only content_kind and redirect_count."
+        ),
+    )
+    provider_options: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        description=(
+            "Native options for the provider that serves the call, under the provider's own names, as "
+            "GET /api/v1/search-tools/providers?kind=fetch lists them. An option the provider does not take from a "
+            "request is refused with a 400. On a call that names no tool they go to whichever provider "
+            "serves it, so name the tool when they are meant for one provider."
+        ),
+    )
+    user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
+
+
+class FetchResponse(pydantic.BaseModel):
+    """A completed direct fetch: one page's text and where it came from."""
+
+    object: Literal["fetch"] = "fetch"
+    fetch_tool: str = pydantic.Field(description="The configured fetch tool that served the request")
+    url: str = pydantic.Field(description="The URL fetched, as asked, in canonical form.")
+    final_url: str = pydantic.Field(
+        description=(
+            "Where the page was found after redirects. The URL asked for when the provider does not report "
+            "where a redirect led (reports_final_url in the provider catalog)."
+        )
+    )
+    title: str = pydantic.Field(default="", description="The page's title; empty when the provider gave none.")
+    content_type: str = pydantic.Field(
+        default="", description="The page's content type; empty when the provider does not report one."
+    )
+    text: str = pydantic.Field(description="The page's text, as the provider extracted it.")
+    published: datetime | None = pydantic.Field(
+        default=None, description="When the page was published, where the provider reports it."
+    )
+    truncated: bool = pydantic.Field(
+        description=(
+            "Whether text is less than the whole page: the body or the extracted text hit a limit of the "
+            "provider's, or max_chars cut it."
+        )
+    )
     raw: dict[str, Any] | None = pydantic.Field(
         default=None,
         exclude_if=lambda raw: raw is None,

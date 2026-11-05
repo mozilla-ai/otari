@@ -47,24 +47,24 @@ would have a prop list mostly ignored at each call site.
 ```ts
 Field: { label, value, onChange: (next: string) => void, placeholder?, type = "text",
   isRequired?, isDisabled?, isInvalid?, errorMessage?, description?, autoFocus?,
-  reserveMessage? }
+  shouldReserveMessage? }
 TextArea: { label, value, onChange, placeholder?, rows = 4, description?, isRequired?,
-  isDisabled?, isInvalid?, errorMessage?, reserveMessage?, className? }
-SecretField: { label, value, onChange, placeholder?, description?, reserveMessage?,
+  isDisabled?, isInvalid?, errorMessage?, shouldReserveMessage?, className? }
+SecretField: { label, value, onChange, placeholder?, description?, shouldReserveMessage?,
   isDisabled?, isRequired?, isInvalid?, errorMessage? }
 SearchField: { label, value, onChange, placeholder = "Search", isDisabled?, className? }
 Toggle: { label, isSelected, onChange: (next: boolean) => void, isDisabled? }
 Checkbox: { isSelected, onChange: (next: boolean) => void, isDisabled?, ariaLabel?,
   children }
 Select: { label, value, onChange, options: SelectOption[], description?, placeholder?,
-  isRequired?, isDisabled?, isInvalid?, errorMessage?, reserveMessage?, className? }
+  isRequired?, isDisabled?, isInvalid?, errorMessage?, shouldReserveMessage?, className? }
 ComboBoxField: { label, value, onChange, onQueryChange?, options: ComboBoxOption[],
   description?, placeholder?, isRequired?, isDisabled?, isInvalid?, errorMessage?,
-  reserveMessage?, className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus",
+  shouldReserveMessage?, className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus",
   shouldSelectOnFocus?, isSourceEmpty?, emptyMessage?, noMatchesMessage? }
 MultiSelect: { label, value: readonly string[], onChange: (next: string[]) => void,
   options: readonly MultiSelectOption[] ({ id, label, hint? }), description?,
-  isInvalid?, errorMessage?, reserveMessage?, searchPlaceholder?, emptyMessage?,
+  isInvalid?, errorMessage?, shouldReserveMessage?, searchPlaceholder?, emptyMessage?,
   noMatchesMessage?, countNoun?: { one, other }, maxVisible = 50, autoFocus? }
 RadioGroup: { label, value, onChange, options: RadioOption[], description?,
   orientation = "vertical", isRequired?, isDisabled?, isInvalid?, errorMessage?,
@@ -77,8 +77,8 @@ FilterSelect: { value, onChange: (next: string) => void, options: { value, label
 filter in a toolbar wants; `ariaLabel` is for the case where the visible label would
 repeat what is already on screen. Pass one or the other, never neither.
 
-`onChange` takes the **value**, never an event. `reserveMessage` defaults to off, so
-a field in a form has to opt in; a field in a table row or a toolbar leaves it off.
+`onChange` takes the **value**, never an event. `shouldReserveMessage` defaults to on, so
+a field in a form needs nothing; a field in a table row or a toolbar sets it to `false`.
 
 `Toggle` used to say `checked` and `disabled` where every HeroUI-backed control
 says `isSelected` and `isDisabled`, and this file called that a real
@@ -99,7 +99,7 @@ the one still saying `disabled`, because it is a filter rather than a field.
   description="Lowercase, hyphens, no spaces."
   isInvalid={Boolean(error)}
   errorMessage={error}
-  reserveMessage
+  shouldReserveMessage
 />
 
 // Incorrect: a placeholder is an example, never a label. With the label gone the
@@ -113,8 +113,9 @@ Rules:
   HeroUI's `Label`, so never hand-roll a `<span>` above an `<input>`.
 - Never add a manual `*` for `isRequired`. HeroUI marks it through CSS and you get
   two.
-- `reserveMessage` holds one caption line open so an error does not move the form.
-  On for a field in a form, off for one in a table row or a toolbar.
+- `shouldReserveMessage` holds one caption line open so an error does not move the form.
+  On by default, which suits a field in a form; set it to `false` for one in a table row
+  or a toolbar.
 - An error message **replaces** the description line rather than adding a row.
 - Inputs on public pages are 16px (`text-base`), which is what stops iOS from
   zooming on focus.

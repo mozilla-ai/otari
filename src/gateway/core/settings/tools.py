@@ -375,8 +375,9 @@ class ToolSettings(BaseModel):
     web_fetch_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=False,
         description=(
-            "Whether Otari may execute the managed otari_web_fetch tool. Off by default because "
-            "enabling it permits model-directed outbound requests to public web destinations."
+            "Whether Otari fetches pages: the managed otari_web_fetch tool and POST /api/v1/fetch. Off by "
+            "default because enabling it permits outbound requests to public web destinations, model-directed "
+            "ones included."
         ),
     )
     web_search_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(

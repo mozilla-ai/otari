@@ -1,5 +1,6 @@
 """Request and response shapes for the caller's grouped model catalog."""
 
+import uuid
 from enum import StrEnum
 from typing import Literal
 
@@ -58,6 +59,12 @@ class CatalogModelSummary(BaseModel):
     offering_count: int
     provider_count: int
     providers: list[str] = Field(description="The provider instances offering it, sorted.")
+    zero_data_retention_providers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The provider instances offering it that are declared to keep no prompt or completion data, sorted."
+        ),
+    )
     selectors: list[str] = Field(description="Every offering's selector, so the list can be searched by one.")
     price_sources: list[PriceSource] = Field(
         description="Which price lists the priced offerings came from, distinct and sorted."
@@ -95,6 +102,14 @@ class CatalogQuery(BaseModel):
         max_length=200,
         description="Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
     )
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "For a signed-in caller, list only what a request billed to this workspace may call, with its "
+            "own disabled keys and model lists applied. A workspace the caller cannot see answers 404. "
+            "Ignored for an API key, which already names its workspace."
+        ),
+    )
     skip: int = Field(default=0, ge=0, description="Number of matching models to skip.")
     limit: int = Field(default=100, ge=1, le=1000, description="Maximum number of models to return.")
     provider: list[str] = Field(default_factory=list, max_length=100, description="Match any named provider instance.")
@@ -120,6 +135,10 @@ class CatalogQuery(BaseModel):
     )
     pricing: Literal["all", "custom", "default", "priced", "unpriced"] = "all"
     source: Literal["all", "discovered", "custom"] = "all"
+    zero_data_retention: bool = Field(
+        default=False,
+        description="Only models at least one provider declared to keep no prompt or completion data offers.",
+    )
     released_within_days: int = Field(
         default=0,
         ge=0,

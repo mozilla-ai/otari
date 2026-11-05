@@ -80,6 +80,8 @@ describe("listWebTools", () => {
         options: { type: "fast" },
         decryptable: true,
         shadows_config: true,
+        price_per_call: 0.004,
+        price_source: "own",
       },
     ],
     config: [
@@ -89,6 +91,8 @@ describe("listWebTools", () => {
         provider: "exa",
         has_api_key: true,
         shadowed: true,
+        price_per_call: 0.004,
+        price_source: "own",
       },
       {
         name: "mojeek",
@@ -96,6 +100,8 @@ describe("listWebTools", () => {
         provider: "mojeek",
         has_api_key: true,
         shadowed: false,
+        price_per_call: null,
+        price_source: "none",
       },
     ],
   }
@@ -124,6 +130,8 @@ describe("listWebTools", () => {
           provider: "builtin",
           has_api_key: false,
           shadowed: false,
+          price_per_call: 0,
+          price_source: "own",
         },
       ],
     })
