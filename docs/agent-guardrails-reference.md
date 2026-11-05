@@ -171,7 +171,10 @@ differences:
 - When a gate from `~/.otari/` fails, the message shows its `user:` ID, and,
   when more than one file composes, its file, for example
   `[~/.otari/guardrails/git-safety.yml]`.
-- A repository cannot turn them off. When the combined set cannot load,
+- A repository's guardrail files cannot turn them off. Only the hook's own
+  registration can, with `otari hook setup --repo-only`, and a repository that
+  commits its `.claude/settings.json` could already have removed the hook entry
+  outright. When the combined set cannot load,
   because of a clash, a broken file, or too many files, the hook enforces the
   `~/.otari/` gates alone, and says that the repository's gates are off each
   time it reports anything. When the `~/.otari/` files are the broken ones, it
@@ -180,7 +183,9 @@ differences:
 - A repository checked out at your home directory owns `~/.otari/` itself, so
   its files are read once, as the repository's.
 - `otari guardrails validate` includes them unless given `--repo-only`, and
-  `otari guardrails check` never reads them.
+  `otari guardrails check` never reads them. `otari hook --repo-only` leaves
+  them out the same way, for a repository whose conventions differ from yours;
+  `otari hook setup --repo-only` writes that flag into the registration.
 
 ## When a gate runs: `runs`
 
@@ -781,6 +786,7 @@ stderr, and 0 otherwise, with any notice in `systemMessage`.
 | Option | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
 | `--harness` | | `claude-code` | `claude-code` or `codex`: the integration sending the callback. |
+| `--repo-only` | | off | Enforce this repository's guardrail alone, leaving out your own in `~/.otari/`. |
 | `--judge-model` | `OTARI_HOOK_JUDGE_MODEL` | see [Choosing a judge CLI](#choosing-a-judge-cli) | Model for judge gate calls. |
 | `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | the harness's own CLI | Comma-separated, ordered judge CLIs to try (`claude`, `codex`). A gate's `judge_cli` overrides it. |
 | `--judge-dry-run` | `OTARI_HOOK_JUDGE_DRY_RUN` | off | Skip the judge model calls and report what would have run. |
@@ -833,6 +839,11 @@ repository has no guardrail, it offers to write a starter
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`. |
+| `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. |
+
+Re-running `setup` rewrites the registered command in place, matching an
+existing entry on the binary and `hook` alone. So a flag added to the settings
+file by hand does not survive a re-run: pass `--repo-only` to `setup` instead.
 
 ### `otari guardrails validate`
 

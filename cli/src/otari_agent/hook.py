@@ -383,11 +383,13 @@ def _hook_discover_guardrail_files(root: Path) -> list[Path]:
     return files
 
 
-def _hook_guardrail_files(root: Path) -> list[GuardrailFile]:
+def _hook_guardrail_files(root: Path, *, repo_only: bool = False) -> list[GuardrailFile]:
     """Every guardrail file the hook composes in this repo: the repo's own, then the user's in `~/.otari/`.
 
     A repo file that links to one of the user's files is read once, as the user's, so the repo cannot turn it off.
     A repo checked out at the home directory owns `~/.otari/`, so its files are the repo's.
+    `repo_only` returns the repo's own files alone, for a person turning their own rules off in this one repo.
+    The user's files are still discovered, because a repo file that links to one is theirs and goes with them.
     """
     repo_paths = _hook_discover_guardrail_files(root)
     try:
@@ -398,10 +400,12 @@ def _hook_guardrail_files(root: Path) -> list[GuardrailFile]:
         home_is_repo = True
     user_paths = [] if home_is_repo else _hook_discover_guardrail_files(home)
     user_targets = {path.resolve() for path in user_paths}
-    return [
-        *(GuardrailFile(path, GuardrailOrigin.REPO) for path in repo_paths if path.resolve() not in user_targets),
-        *(GuardrailFile(path, GuardrailOrigin.USER) for path in user_paths),
+    repo_files = [
+        GuardrailFile(path, GuardrailOrigin.REPO) for path in repo_paths if path.resolve() not in user_targets
     ]
+    if repo_only:
+        return repo_files
+    return [*repo_files, *(GuardrailFile(path, GuardrailOrigin.USER) for path in user_paths)]
 
 
 def _guardrail_file_origin(path: Path, root: Path) -> GuardrailOrigin:
@@ -496,13 +500,13 @@ def _compose_guardrail(sources: list[PolicyFile], policy_id: str) -> PolicySpec:
     return compose_policy(sources, policy_id=policy_id)
 
 
-def _hook_guardrail_spec(root: Path) -> PolicySpec | None:
-    """The gates the hook enforces in this repo, the user's own included, or None when none load.
+def _hook_guardrail_spec(root: Path, *, repo_only: bool = False) -> PolicySpec | None:
+    """The gates the hook enforces in this repo, the user's own included unless `repo_only`, or None when none load.
 
     It reports no load error, so it suits a caller that only reads the gates.
     When the combined set does not load, it returns the side the hook falls back to.
     """
-    files = _hook_guardrail_files(root)
+    files = _hook_guardrail_files(root, repo_only=repo_only)
     if not files:
         return None
     try:
@@ -2304,6 +2308,12 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
     show_default=True,
     help="Agent integration sending this callback.",
 )
+@click.option(
+    "--repo-only",
+    is_flag=True,
+    default=False,
+    help=f"Enforce this repo's guardrail alone, leaving out your own in {GuardrailOrigin.USER.directory}.",
+)
 # Accepted and ignored, not rejected. A hook registered by an older `otari
 # hook setup` still passes `--api-key <value>` on every tool call, and Click
 # exits 2 on an option it does not know, which both supported harnesses read
@@ -2365,6 +2375,7 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
 def hook(
     ctx: click.Context,
     harness: str,
+    repo_only: bool,
     judge_model: str | None,
     judge_cli: tuple[str, ...] | None,
     judge_dry_run: bool,
@@ -2375,8 +2386,15 @@ def hook(
     Reads one JSON hook payload on stdin, collects the evidence that payload
     carries (a PreToolUse call's own target path, or a Stop event's Git
     status), and checks it in process against this repository's guardrail.
-    The user's own guardrail in `~/.otari/` composes with it.
+    The user's own guardrail in `~/.otari/` composes with it, unless
+    `--repo-only` leaves it out.
     No server and no credential are involved. See docs/agent-guardrails.md.
+
+    `--repo-only` is for a person whose own rules do not suit one repository.
+    It means what it does on `otari guardrails validate`, so a dry run there
+    agrees with this. Pass it to `otari hook setup` rather than editing the
+    settings file: a later `setup` run rewrites the registered command, so a
+    flag added by hand does not survive one.
 
     Exit code is this harness's own protocol, not otari policy check's:
     Claude Code's and Codex's PreToolUse and Stop hooks both take 0 (proceed)
@@ -2423,7 +2441,7 @@ def hook(
     if root is None:
         return
 
-    guardrail_files = _hook_guardrail_files(root)
+    guardrail_files = _hook_guardrail_files(root, repo_only=repo_only)
     if not guardrail_files:
         # Silence is right for a repo that never had a guardrail, and wrong for
         # one whose guardrail this build stopped finding; see
@@ -2970,7 +2988,16 @@ _HOOK_SETUP_BY_HARNESS = {
     show_default=True,
     help="Agent integration to configure.",
 )
-def hook_setup(harness: str) -> None:
+@click.option(
+    "--repo-only",
+    is_flag=True,
+    default=False,
+    help=(
+        "Register the hook to enforce this repo's guardrail alone, leaving out your own in "
+        f"{GuardrailOrigin.USER.directory}."
+    ),
+)
+def hook_setup(harness: str, repo_only: bool) -> None:
     """Register otari hook in this repository, in a supported agent's own settings.
 
     Writes or updates a PreToolUse hook entry and a Stop hook entry in the
@@ -2982,6 +3009,11 @@ def hook_setup(harness: str) -> None:
     (whether it needs to cover the shell tool, the read tool, or both) from
     whatever gates the guardrail turns out to have; Stop needs no matcher;
     see docs/agent-guardrails.md for why both are registered unconditionally.
+
+    `--repo-only` writes that flag into the registered command, so the hook
+    enforces this repo's guardrail alone here. The matcher is then picked from
+    the repo's own gates, because a matcher widened for a gate the hook will
+    not run invokes it on every such tool call for nothing.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -2999,7 +3031,7 @@ def hook_setup(harness: str) -> None:
             starter.parent.mkdir(parents=True, exist_ok=True)
             starter.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
             click.echo(f"Wrote {starter}. Split it into {GUARDRAIL_DIR}/ when it grows.")
-        elif _hook_guardrail_spec(root) is not None:
+        elif not repo_only and _hook_guardrail_spec(root) is not None:
             click.echo(
                 f"Skipping. otari hook will still be registered below and will check your own gates in "
                 f"{GuardrailOrigin.USER.directory} here. This repo's gates start once {GUARDRAIL_FILE} or "
@@ -3012,7 +3044,7 @@ def hook_setup(harness: str) -> None:
             )
 
     setup = _HOOK_SETUP_BY_HARNESS[harness]
-    needs = _guardrail_matcher_needs(_hook_guardrail_spec(root))
+    needs = _guardrail_matcher_needs(_hook_guardrail_spec(root, repo_only=repo_only))
     matcher_parts = [setup.edit_matcher]
     if needs.read and setup.read_matcher is not None:
         matcher_parts.append(setup.read_matcher)
@@ -3022,7 +3054,10 @@ def hook_setup(harness: str) -> None:
 
     # No credential, and no prompt for one: `otari hook` evaluates the
     # guardrail in process and has nothing to authenticate against.
-    command = shlex.join([_otari_binary_path(), "hook", "--harness", harness])
+    argv = [_otari_binary_path(), "hook", "--harness", harness]
+    if repo_only:
+        argv.append("--repo-only")
+    command = shlex.join(argv)
 
     settings_path = root / setup.settings_dir / setup.settings_name
     pretooluse_created = _merge_hook_entry(settings_path, "PreToolUse", command, matcher=matcher)
@@ -3958,7 +3993,7 @@ def guardrails_validate(
             )
         files = [GuardrailFile(guardrail_file_option, _guardrail_file_origin(guardrail_file_option, root))]
     else:
-        files = [file for file in _hook_guardrail_files(root) if not repo_only or file.origin is GuardrailOrigin.REPO]
+        files = _hook_guardrail_files(root, repo_only=repo_only)
         if not files:
             where = "" if repo_only else f", and nothing in {GuardrailOrigin.USER.directory}"
             raise click.ClickException(

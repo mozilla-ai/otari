@@ -146,6 +146,42 @@ def test_a_user_level_read_gate_adds_read_to_the_matcher(repo: Path, isolated_ho
     assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read"
 
 
+def test_repo_only_writes_the_flag_into_the_registration(repo: Path) -> None:
+    """The flag has to reach the registered command, or a later `setup` run silently drops it.
+
+    `_merge_hook_entry` matches an existing entry on the binary and "hook" alone and then replaces
+    the whole command string, so a flag added to the file by hand does not survive a re-run.
+    """
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    settings = _read_settings(repo)
+    for event in ("PreToolUse", "Stop"):
+        command = settings["hooks"][event][0]["hooks"][0]["command"]
+        assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only"
+
+
+def test_without_repo_only_the_registration_carries_no_such_flag(repo: Path) -> None:
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    command = _read_settings(repo)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code"
+
+
+def test_repo_only_keeps_a_user_level_read_gate_out_of_the_matcher(repo: Path, isolated_home: Path) -> None:
+    """The matcher is picked from the gates the hook will run, so `--repo-only` must narrow it too.
+
+    Without this, a personal read gate widens the matcher for a repo that never checks it, and the
+    hook is invoked on every Read for nothing.
+    """
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(isolated_home).write_text(_READ_GATES.replace("id: g\n", "id: personal\n"), encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit"
+
+
 def test_a_broken_repo_file_still_leaves_the_user_level_gates_in_the_matcher(repo: Path, isolated_home: Path) -> None:
     """The hook still enforces the user's gates when the repo's files fail, so it must still be called for them."""
     _guardrail_path(repo).write_text("gates: [", encoding="utf-8")
