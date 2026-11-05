@@ -4486,7 +4486,7 @@ export interface paths {
          *     This changes which organization every later request is scoped to, so
          *     workspaces, keys, budgets and usage all follow it. Answers 404 for an
          *     organization the caller holds no active membership in, whether or not it
-         *     exists.
+         *     exists, and for one whose own SSO enforcement refuses the caller.
          */
         post: operations["organizations-switch_active_organization"];
         delete?: never;

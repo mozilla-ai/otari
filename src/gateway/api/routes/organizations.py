@@ -220,6 +220,7 @@ async def list_caller_organization_memberships(
 @router.post("/me/switch")
 async def switch_active_organization(
     service: MembershipOrganizationServiceDep,
+    connections: OIDCConnectionServiceDep,
     current_identity: CurrentIdentity,
     body: SwitchActiveOrganizationRequest,
 ) -> OrganizationMembershipContextPublic:
@@ -229,11 +230,16 @@ async def switch_active_organization(
     This changes which organization every later request is scoped to, so
     workspaces, keys, budgets and usage all follow it. Answers 404 for an
     organization the caller holds no active membership in, whether or not it
-    exists.
+    exists, and for one whose own SSO enforcement refuses the caller.
     """
+
+    async def blocked(organization: Organization) -> bool:
+        return await connections.blocks_membership(user=current_identity, organization=organization)
+
     return await service.switch_active_organization_for_user(
         user=current_identity,
         organization_id=body.organization_id,
+        blocked=blocked,
     )
 
 

@@ -6,14 +6,15 @@
 
 import functools
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionNotFoundError,
@@ -27,6 +28,7 @@ from gateway.models.tenancy import DashboardSession, InviteOrganizationMemberReq
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.identity import IdentityService, OIDCConnectionService
 from gateway.services.mail import Mailer
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -126,6 +128,21 @@ async def _link_member(db: AsyncSession, member: User, connection: OIDCConnectio
         )
     )
     await db.flush()
+
+
+async def _dashboard_session(db: AsyncSession, user: User) -> str:
+    """Give ``user`` a live dashboard session, and return its cookie token."""
+    token = f"otari-sess-{user.id}"
+    db.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=12),
+        )
+    )
+    await db.flush()
+    return token
 
 
 def _identity_service(db: AsyncSession) -> IdentityService:
@@ -598,3 +615,86 @@ async def test_switching_enforcement_on_leaves_a_linked_members_session_alive(as
     )
 
     assert await _live_session_count(async_db, linked_member.id) == 1
+
+
+# =============================================================================
+# Switching into an enforcing organization
+# =============================================================================
+
+
+async def test_switching_into_an_enforcing_organization_is_refused_for_a_blocked_member(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    other = await create_organization(async_db, slug="other")
+    member = await _member_with_email(
+        async_db, enforcing, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=other.id, user_id=member.id, role="member"
+    )
+    member.active_organization_id = other.id
+    async_db.add(member)
+    token = await _dashboard_session(async_db, member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    response = client.post(f"{API_ROOT}/organizations/me/switch", json={"organization_id": str(enforcing.id)})
+
+    assert response.status_code == 404, response.text
+    await async_db.refresh(member)
+    assert member.active_organization_id == other.id
+
+
+async def test_switching_into_an_enforcing_organization_succeeds_for_a_linked_member(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    other = await create_organization(async_db, slug="other")
+    linked_member = await _member_with_email(
+        async_db, enforcing, role="member", email="li@acme.example", full_name="Li Linked"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=other.id, user_id=linked_member.id, role="member"
+    )
+    linked_member.active_organization_id = other.id
+    async_db.add(linked_member)
+    connection = await _add_connection(async_db, enforcing.id, first_sign_in_at=datetime.now(UTC))
+    await _link_member(async_db, linked_member, connection)
+    token = await _dashboard_session(async_db, linked_member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    response = client.post(f"{API_ROOT}/organizations/me/switch", json={"organization_id": str(enforcing.id)})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["organization"]["id"] == str(enforcing.id)
+
+
+async def test_switching_into_a_non_enforcing_organization_is_unaffected(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    other = await create_organization(async_db, slug="other")
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=other.id, user_id=member.id, role="member"
+    )
+    member.active_organization_id = other.id
+    async_db.add(member)
+    token = await _dashboard_session(async_db, member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    response = client.post(f"{API_ROOT}/organizations/me/switch", json={"organization_id": str(organization.id)})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["organization"]["id"] == str(organization.id)
