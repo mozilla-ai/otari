@@ -137,6 +137,13 @@ def test_describe_says_the_query_travels_in_the_url_without_the_key(capsys: pyte
     assert "The key travels" not in out
 
 
+def test_describe_says_a_keyless_provider_needs_a_base_url(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("searxng", capsys)
+    assert "API key: none" in out
+    assert "API base: required, from SEARXNG_BASE_URL" in out
+    assert '  method (string, operator only), default "get"' in out
+
+
 def test_describe_refuses_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         main(["--describe", "nope"])

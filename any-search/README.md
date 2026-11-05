@@ -211,6 +211,47 @@ request (`timestamp` with `date=1`), so neither is required: the date is read fr
 is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
 behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
 
+## SearXNG
+
+`searxng` calls a [SearXNG](https://docs.searxng.org/dev/search_api.html) instance's search API,
+`GET /search` with `format=json`, at the instance's root URL, passed as `api_base` or read from
+`SEARXNG_BASE_URL`. It needs no key. The instance must list `json` under `search.formats` in its
+`settings.yml`; otherwise it answers 403. The query travels in the URL, which the log filter above
+keeps out of httpx's log; `method="post"` sends the same fields as form data, which keeps the
+query out of the instance's access log too. Any other `method` is refused before a request.
+
+| `SearchHit` | From SearXNG |
+|---|---|
+| `url` | `url`; a result without one is dropped |
+| `title` | `title`, empty when absent |
+| `snippet` | `content`, empty when absent; SearXNG returns no page text, so `text` is always `None` |
+| `published` | `publishedDate`, ISO 8601, often `null`; without a zone, UTC; in another form, `None`, and the value stays in `raw` |
+
+SearXNG reports no cost and has no count parameter: it answers one page of the merged results of
+its engines, which the adapter cuts to `max_results`, at most 100. `time_range` is sent as it is,
+since SearXNG takes `day`, `week`, `month` and `year`; an engine with no time filter is left out of
+a search that sets one. The other native options are SearXNG's own parameters, `engines`,
+`categories`, `language`, `safesearch` and `pageno`, and `method`; `--describe searxng` lists
+them. `engines` and `method` are operator-only. An option set to `None` is not sent.
+
+An engine that fails, by a timeout, a CAPTCHA or a suspension, is named in `unresponsive_engines`
+inside a 200. A search that leaves no usable hit while at least one engine failed is returned as
+`SearchResult.error`, tagged `engines_unresponsive`; with hits, the failures stay in `raw`. Any
+status from 400 raises `ProviderError`: a 403 tagged `forbidden`, which SearXNG answers when
+`json` is not enabled and which a proxy in front of it can answer too; a 400 whose `error` starts
+`Invalid value` or `Empty` tagged `invalid_parameter`; any other `http_error`. SearXNG's sentence
+never reaches the error.
+
+SearXNG's documentation describes none of its answer's fields, so only `results`, without which
+the adapter cannot answer, is required. `unresponsive_engines` must be a list when present. Each
+item read before the count is reached must have a `url` that is a string, `null` or absent, a
+`title` and a `content` that are strings or absent, and a `publishedDate` that, when it starts
+like an ISO 8601 date, is one; anything else raises `ProviderError` with the tag
+`unexpected_response`. A result whose `url` is `null`, absent, or not an http or https URL with a
+host, such as a torrent engine's `magnet:` link, is dropped, and the count is filled from the
+items after it. Infoboxes, answers and suggestions come in fields of their own, which the adapter
+does not read.
+
 ## Serply
 
 `serply` calls Serply's [Google Search API](https://serply.io/docs/resources/google-search),

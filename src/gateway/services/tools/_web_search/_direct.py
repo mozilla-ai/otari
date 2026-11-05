@@ -289,14 +289,12 @@ async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> Dir
 
 async def _on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     # Imported here, as in run_direct_search; looked up on each call, so a test that stubs a client still reaches it.
-    from gateway.services.search_backend import run_keyed_search, run_search, search_tool
+    from gateway.services.search_backend import run_keyed_search
 
-    if search.credential is not None:
-        outcome = await run_keyed_search(
-            search.credential, search.query, timeout_s=search.resolved.timeout, client=client
-        )
-    else:
-        outcome = await run_search(search_tool(search.resolved), search.query, client=client)
+    if search.credential is None:
+        # Unreachable: only an organization key on Tavily or Brave runs on the old client.
+        raise SearchToolMisconfiguredError(search.instance.name)
+    outcome = await run_keyed_search(search.credential, search.query, timeout_s=search.resolved.timeout, client=client)
     return DirectSearchResult(
         response=SearchResponse(
             search_tool=search.instance.name,

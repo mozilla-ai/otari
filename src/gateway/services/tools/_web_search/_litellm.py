@@ -4,8 +4,8 @@
 any-search's shared parameters, so they are mapped per provider: the domain
 filter, the country and the page budget become a provider's native options
 where it has them, and otherwise the hits are filtered and cut here. The count
-is the shared ``max_results``. The old clients left in
-``services/search_backend.py`` read the same query and use the same helpers.
+is the shared ``max_results``. The old client left in
+``services/search_backend.py`` reads the same query and uses the same helpers.
 """
 
 from collections.abc import Callable, Mapping, Sequence

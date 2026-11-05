@@ -298,3 +298,44 @@ The first provider added without a recorded success: its search answers only a s
 - A provider can take nothing but the query. Then `max_results` only cuts the hits, and
   `time_range` filters them by date after the answer, keeping the undated ones, since nothing
   says they fall outside the range.
+
+### 2026-11-05, SearXNG (any-search)
+
+The first provider with no key and no address of its own, and the first that replaced code otari
+already had for it.
+
+- An adapter speaks the provider's own API: its parameter names, its defaults and its fields,
+  nothing carried over from a client the host had before. otari's old SearXNG client read
+  `published_date` and `extracted_content`, which only otari's own SearXNG-shaped services sent;
+  the adapter reads `publishedDate` and `content`, as SearXNG sends them. When the provider has
+  no SDK, follow its server's own default: SearXNG's `server.method` is GET.
+- A provider that every user runs for themselves has no default address: set
+  `requires_api_base`, and an `env_api_base` so the CLI and the live tests can find an instance.
+  The conformance fixture gives every such variable a fake value, as it does a key.
+- What an instance answers depends on how its operator configured it. A name in `engines` that
+  SearXNG does not know is not an error: with no name it knows, it searches its default engines
+  (`mojeek` is not among its engines). `wikipedia` answers an infobox and no results. The engines that scrape search
+  sites (`duckduckgo`, `qwant`) answer a laptop and a CI runner with CAPTCHAs, on some calls and
+  not others. The live tests therefore pin two engines that call public APIs, `wikinews` and
+  `arxiv`, which date their hits; neither has a time filter, and SearXNG leaves an engine
+  without one out of a search that sets it, so that search comes back empty without an error.
+- An error inside a 200 can be partial: `unresponsive_engines` names each engine that failed,
+  beside the results of those that did not. Only a search that leaves no usable hit while an
+  engine failed is the search's error; with hits, the failures stay in `raw`.
+- When a provider documents none of its answer's fields, the 2026-10-13 rule applies in full:
+  require only what the adapter cannot answer without (SearXNG's `results`), take the rest as
+  optional but type-checked, and drop an item without a usable URL. A date in a form the provider
+  does not hold stays in `raw`; one that starts like ISO 8601 and does not parse
+  (`2026-13-40`) fails the call, since it means the provider's serializer broke.
+- Tag a status by what it can mean, not by its likeliest cause: SearXNG answers 403 when `json`
+  is not enabled, but so can a proxy in front of it, so the tag is `forbidden` and the docs name
+  the likely cause. An option whose values only the adapter acts on (`method`) is refused
+  outside its enum before any request; SearXNG cannot refuse what the adapter never sends.
+- For a provider the host runs itself, the live workflow starts it: a
+  container from a dated image, with the settings the host's compose file mounts, and the
+  workflow runs again when those settings change.
+- Fixture recipes: the `in_body_error` with `engines=google news`, which answers "access denied";
+  the `error` with `pageno` set to a word, a 400 with a sentence in `error` (an empty value gives
+  `Empty pageno parameter`); an empty search with `engines=wikinews` and words no article holds.
+  A 403 is SearXNG's answer when `json` is not among the instance's `search.formats`, which no
+  fixture records.

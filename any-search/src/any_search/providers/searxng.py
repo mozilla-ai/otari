@@ -148,7 +148,9 @@ class SearxngProvider(AnySearch):
         if time_range is not None:
             fields["time_range"] = time_range
 
-        method = options.get("method") or _METHODS[0]
+        method = options.get("method")
+        if method is None:
+            method = _METHODS[0]
         if method not in _METHODS:
             raise ValueError(f"method must be one of {', '.join(_METHODS)}")
 
@@ -193,6 +195,8 @@ def _status_tag(response: httpx.Response, body: Any) -> str:
     """The tag for a failed answer, so none of SearXNG's text reaches an error."""
     if response.status_code == 403:
         return "forbidden"
+    if response.status_code != 400:
+        return "http_error"
     error = body.get("error") if isinstance(body, dict) else None
     lowered = error.strip().lower() if isinstance(error, str) else ""
     return next((tag for start, tag in _ERROR_TAGS if lowered.startswith(start)), "http_error")
