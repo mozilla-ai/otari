@@ -94,7 +94,9 @@ class BillingPort(Protocol):
         """
         ...
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID, billed: BilledModel | None) -> None:
+    async def require_funds_on_deposit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+    ) -> None:
         """Refuse unless the organization has funds paid in that can pay for ``billed``.
 
         Counts what the organization has paid in and disregards holds, so it
@@ -104,7 +106,9 @@ class BillingPort(Protocol):
         :meth:`hold` is what settles between them.
 
         ``billed`` is the model the call is served on, or ``None`` for a call
-        that is not a model's, such as a gateway tool.
+        that is not a model's, such as a gateway tool. ``actor_user_id`` is the
+        user :meth:`charge` will attribute the call to, so funds that pay for
+        one member alone are judged for the member they would pay for.
 
         Raises:
             InsufficientFundsError: If the organization has no funds paid in.
@@ -112,12 +116,15 @@ class BillingPort(Protocol):
         """
         ...
 
-    async def concurrency_limit(self, *, organization_id: uuid.UUID, billed: BilledModel) -> int | None:
+    async def concurrency_limit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
+    ) -> int | None:
         """How many of the organization's calls on ``billed`` may be in flight at once, or ``None`` for no limit.
 
-        Asked once a call passes :meth:`require_funds_on_deposit`. The caller
-        counts the organization's calls under one limit, whichever models they
-        are on, and a call waits briefly for a slot before it is refused.
+        Asked once a call passes :meth:`require_funds_on_deposit`, for the same
+        ``actor_user_id``. The caller counts every call the port limits under one
+        limit per organization, whichever models they are on, and a call waits
+        briefly for a slot before it is refused.
         """
         ...
 

@@ -96,7 +96,7 @@ class ProbeBilling:
     async def apply_due_credit(self, *, organization_id):
         GATES.append(("apply_due_credit", str(organization_id)))
 
-    async def require_funds_on_deposit(self, *, organization_id, billed):
+    async def require_funds_on_deposit(self, *, organization_id, billed, actor_user_id):
         GATES.append(("require_funds_on_deposit", str(organization_id)))
         BILLED.append(("gate", billed))
         if "funds" in FAULTS:
@@ -104,7 +104,7 @@ class ProbeBilling:
         if FUNDS["available"] <= 0:
             raise InsufficientFundsError(FUNDS["available"])
 
-    async def concurrency_limit(self, *, organization_id, billed):
+    async def concurrency_limit(self, *, organization_id, billed, actor_user_id):
         return LIMIT["concurrency"]
 
     async def require_unheld_funds(self, *, organization_id):

@@ -87,10 +87,10 @@ class ProbeBilling:
     async def apply_due_credit(self, *, organization_id):
         pass
 
-    async def require_funds_on_deposit(self, *, organization_id, billed):
+    async def require_funds_on_deposit(self, *, organization_id, billed, actor_user_id):
         pass
 
-    async def concurrency_limit(self, *, organization_id, billed):
+    async def concurrency_limit(self, *, organization_id, billed, actor_user_id):
         return LIMIT["concurrency"]
 
     async def require_unheld_funds(self, *, organization_id):

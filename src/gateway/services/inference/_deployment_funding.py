@@ -174,14 +174,19 @@ async def admit_deployment_paid(
     """
     if not deployment_paid or organization_id is None:
         return None
+    actor_user_id = _actor_user_id(user_id)
     await billing.apply_due_credit(organization_id=organization_id)
-    await billing.require_funds_on_deposit(organization_id=organization_id, billed=billed)
-    limit = await billing.concurrency_limit(organization_id=organization_id, billed=billed) if billed else None
+    await billing.require_funds_on_deposit(organization_id=organization_id, billed=billed, actor_user_id=actor_user_id)
+    limit = (
+        await billing.concurrency_limit(organization_id=organization_id, billed=billed, actor_user_id=actor_user_id)
+        if billed
+        else None
+    )
     return DeploymentCharge(
         billing=billing,
         organization_id=organization_id,
         api_key_id=api_key_id,
-        actor_user_id=_actor_user_id(user_id),
+        actor_user_id=actor_user_id,
         request_id=request_id,
         billed=billed,
         concurrency_limit=limit,

@@ -800,13 +800,17 @@ class RecordingBilling:
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
         self.calls.append(("apply_due_credit", organization_id))
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID, billed: BilledModel | None) -> None:
+    async def require_funds_on_deposit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+    ) -> None:
         self.calls.append(("require_funds_on_deposit", organization_id))
         self.billed.append(billed)
         if self.refuse is not None:
             raise self.refuse
 
-    async def concurrency_limit(self, *, organization_id: uuid.UUID, billed: BilledModel) -> int | None:
+    async def concurrency_limit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
+    ) -> int | None:
         return None
 
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:

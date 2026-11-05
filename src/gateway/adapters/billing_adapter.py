@@ -27,12 +27,16 @@ class NullBillingAdapter(BillingPort):
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
         return None
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID, billed: BilledModel | None) -> None:
+    async def require_funds_on_deposit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+    ) -> None:
         # Returns rather than raises: nothing is owed here, so no request is
         # ever refused for want of funds.
         return None
 
-    async def concurrency_limit(self, *, organization_id: uuid.UUID, billed: BilledModel) -> int | None:
+    async def concurrency_limit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
+    ) -> int | None:
         return None
 
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:

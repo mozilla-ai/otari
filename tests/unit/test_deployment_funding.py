@@ -35,13 +35,17 @@ class _Billing:
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
         self.calls.append(("apply_due_credit", organization_id))
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID, billed: BilledModel | None) -> None:
-        self.calls.append(("require_funds_on_deposit", organization_id, billed))
+    async def require_funds_on_deposit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+    ) -> None:
+        self.calls.append(("require_funds_on_deposit", organization_id, billed, actor_user_id))
         if self.refuse:
             raise InsufficientFundsError(Decimal(0))
 
-    async def concurrency_limit(self, *, organization_id: uuid.UUID, billed: BilledModel) -> int | None:
-        self.calls.append(("concurrency_limit", organization_id, billed))
+    async def concurrency_limit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
+    ) -> int | None:
+        self.calls.append(("concurrency_limit", organization_id, billed, actor_user_id))
         return self.limit
 
     async def charge(self, **kwargs: Any) -> None:
@@ -79,8 +83,8 @@ async def test_admission_grants_credit_then_checks_funds() -> None:
     charge = await _admit(billing)
     assert billing.calls == [
         ("apply_due_credit", ORGANIZATION_ID),
-        ("require_funds_on_deposit", ORGANIZATION_ID, BILLED),
-        ("concurrency_limit", ORGANIZATION_ID, BILLED),
+        ("require_funds_on_deposit", ORGANIZATION_ID, BILLED, IDENTITY_ID),
+        ("concurrency_limit", ORGANIZATION_ID, BILLED, IDENTITY_ID),
     ]
     assert (charge.organization_id, charge.api_key_id, charge.actor_user_id, charge.request_id, charge.billed) == (
         ORGANIZATION_ID,
@@ -253,7 +257,7 @@ async def test_a_gateway_tools_admission_bills_no_model() -> None:
     assert charge.concurrency_limit is None
     assert all(call[0] != "concurrency_limit" for call in billing.calls)
     await charge.charge(Decimal("0.01"), tools=NO_TOOLS, description="otari_web_search")
-    assert billing.calls[1] == ("require_funds_on_deposit", ORGANIZATION_ID, None)
+    assert billing.calls[1] == ("require_funds_on_deposit", ORGANIZATION_ID, None, None)
     assert billing.calls[-1][1]["billed"] is None
 
 
