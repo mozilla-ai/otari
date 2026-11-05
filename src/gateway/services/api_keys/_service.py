@@ -57,9 +57,12 @@ class ApiKeyService:
         return await self._keys.get_key_ids_in_workspaces(workspace_ids)
 
     async def key_names(
-        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID]
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID] | None
     ) -> dict[str, str | None]:
-        """Each of these keys that still exists in these workspaces, to its name, read in a block of its own."""
+        """Each of these keys that still exists in these workspaces, or in any with ``None``, to its name.
+
+        Read in a block of its own.
+        """
         async with self._uow:
             return await self._keys.names_by_id(key_ids, workspace_ids=workspace_ids)
 
