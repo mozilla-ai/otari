@@ -16,7 +16,12 @@ from fastapi import APIRouter, Depends, status
 
 from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_config, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.schemas.identity import OIDCConnectionPublic, OIDCConnectionRequest, OrganizationSsoPublic
+from gateway.schemas.identity import (
+    OIDCConnectionPublic,
+    OIDCConnectionRequest,
+    OrganizationSsoEnforcementRequest,
+    OrganizationSsoPublic,
+)
 from gateway.services.oauth_service import redirect_uri as _oauth_redirect_uri
 
 # Master key on the router, as the rest of the ``/api/v1/organizations/me`` surface
@@ -91,3 +96,24 @@ async def delete_organization_sso(
     Refused with 404 when the organization has not saved a connection yet.
     """
     await connections.delete_for_user(user=identity)
+
+
+@router.put("/enforcement", status_code=status.HTTP_204_NO_CONTENT)
+async def put_organization_sso_enforcement(
+    request: OrganizationSsoEnforcementRequest,
+    identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
+) -> None:
+    """Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.
+
+    Refused with 404 when the organization has not configured a connection yet. Requiring sign-in is refused
+    with 400 before anybody has signed in through the connection, when it names no owner who keeps another
+    way in and waives none, or when the named account is not one of the organization's own owners. Turning
+    enforcement off has none of these preconditions.
+    """
+    await connections.set_sso_enforcement_for_user(
+        user=identity,
+        required=request.required,
+        break_glass_user_id=request.break_glass_user_id,
+        break_glass_waived=request.break_glass_waived,
+    )

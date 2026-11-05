@@ -180,6 +180,20 @@ class OIDCConnectionPublic(BaseModel):
     )
 
 
+class OrganizationSsoEnforcementRequest(BaseModel):
+    """What an organization administrator submits to require, or stop requiring, sign-in through its own connection."""
+
+    required: bool = Field(description="Whether this organization requires sign-in through its own connection.")
+    break_glass_user_id: uuid.UUID | None = Field(
+        default=None,
+        description="One of the organization's own owners who keeps a non-SSO sign-in route when required is true.",
+    )
+    break_glass_waived: bool = Field(
+        default=False,
+        description="Whether the organization explicitly waives a break-glass owner when enforcement is required.",
+    )
+
+
 class OrganizationSsoPublic(BaseModel):
     """An organization's own OIDC connection, and what to register at the provider."""
 
@@ -292,6 +306,7 @@ __all__ = [
     "OIDCConnectionDomain",
     "OIDCConnectionPublic",
     "OIDCConnectionRequest",
+    "OrganizationSsoEnforcementRequest",
     "OrganizationSsoPublic",
     "PasswordLinkPublic",
     "SsoAuthorizeResponse",

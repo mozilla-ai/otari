@@ -17490,6 +17490,40 @@
         "title": "OrganizationScopedBudgetsPublic",
         "type": "object"
       },
+      "OrganizationSsoEnforcementRequest": {
+        "description": "What an organization administrator submits to require, or stop requiring, sign-in through its own connection.",
+        "properties": {
+          "break_glass_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One of the organization's own owners who keeps a non-SSO sign-in route when required is true.",
+            "title": "Break Glass User Id"
+          },
+          "break_glass_waived": {
+            "default": false,
+            "description": "Whether the organization explicitly waives a break-glass owner when enforcement is required.",
+            "title": "Break Glass Waived",
+            "type": "boolean"
+          },
+          "required": {
+            "description": "Whether this organization requires sign-in through its own connection.",
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "required"
+        ],
+        "title": "OrganizationSsoEnforcementRequest",
+        "type": "object"
+      },
       "OrganizationSsoPublic": {
         "description": "An organization's own OIDC connection, and what to register at the provider.",
         "properties": {
@@ -43795,6 +43829,49 @@
           }
         ],
         "summary": "Put Organization Sso",
+        "tags": [
+          "organization-sso"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/sso/enforcement": {
+      "put": {
+        "description": "Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.\n\nRefused with 404 when the organization has not configured a connection yet. Requiring sign-in is refused\nwith 400 before anybody has signed in through the connection, when it names no owner who keeps another\nway in and waives none, or when the named account is not one of the organization's own owners. Turning\nenforcement off has none of these preconditions.",
+        "operationId": "organization-sso-put_organization_sso_enforcement",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationSsoEnforcementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put Organization Sso Enforcement",
         "tags": [
           "organization-sso"
         ]

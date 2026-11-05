@@ -100,7 +100,7 @@ def _link(session: Session, *, provider: str, subject: str, user_id: uuid.UUID) 
     return link
 
 
-def _connection(organization_id: uuid.UUID) -> OIDCConnection:
+def _connection(organization_id: uuid.UUID, *, first_sign_in_at: datetime | None = None) -> OIDCConnection:
     return OIDCConnection(
         organization_id=organization_id,
         issuer=_ISSUER,
@@ -117,6 +117,7 @@ def _connection(organization_id: uuid.UUID) -> OIDCConnection:
         discovered_at=datetime.now(UTC),
         default_role="member",
         enabled=True,
+        first_sign_in_at=first_sign_in_at,
     )
 
 
@@ -336,3 +337,215 @@ def test_put_then_test_then_delete_round_trip(
     gone = _call(client, owner_token, "GET", _ENDPOINT)
     assert gone.status_code == status.HTTP_200_OK, gone.text
     assert gone.json()["connection"] is None
+
+
+def _enforcement_body(**overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {"required": True, "break_glass_user_id": None, "break_glass_waived": True}
+    body.update(overrides)
+    return body
+
+
+def test_enforcement_succeeds_with_a_proven_connection_and_a_waiver(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforce-on")
+        owner_token = _identity(
+            session, email="owner@acme-enforce-on.test", organization_id=organization.id, role="owner"
+        )
+        session.add(_connection(organization.id, first_sign_in_at=datetime.now(UTC)))
+        session.commit()
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "PUT", f"{_ENDPOINT}/enforcement", json=_enforcement_body())
+    assert response.status_code == status.HTTP_204_NO_CONTENT, response.text
+
+    session = db_session_factory()
+    try:
+        stored = session.get(Organization, organization_id)
+        assert stored is not None
+        assert stored.sso_required is True
+        assert stored.sso_break_glass_waived is True
+    finally:
+        session.close()
+
+
+def test_enforcement_refuses_404_with_no_connection_saved(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforce-unconfigured")
+        owner_token = _identity(
+            session, email="owner@acme-enforce-unconfigured.test", organization_id=organization.id, role="owner"
+        )
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "PUT", f"{_ENDPOINT}/enforcement", json=_enforcement_body())
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+    session = db_session_factory()
+    try:
+        stored = session.get(Organization, organization_id)
+        assert stored is not None
+        assert stored.sso_required is False
+    finally:
+        session.close()
+
+
+def test_enforcement_refuses_before_a_sign_in_is_proven(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforce-unproven")
+        owner_token = _identity(
+            session, email="owner@acme-enforce-unproven.test", organization_id=organization.id, role="owner"
+        )
+        session.add(_connection(organization.id))
+        session.commit()
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    response = _call(
+        client, owner_token, "PUT", f"{_ENDPOINT}/enforcement", json=_enforcement_body(break_glass_waived=True)
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+
+    session = db_session_factory()
+    try:
+        stored = session.get(Organization, organization_id)
+        assert stored is not None
+        assert stored.sso_required is False
+    finally:
+        session.close()
+
+
+def test_enforcement_refuses_with_no_break_glass_owner_and_no_waiver(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforce-no-waiver")
+        owner_token = _identity(
+            session, email="owner@acme-enforce-no-waiver.test", organization_id=organization.id, role="owner"
+        )
+        session.add(_connection(organization.id, first_sign_in_at=datetime.now(UTC)))
+        session.commit()
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    response = _call(
+        client, owner_token, "PUT", f"{_ENDPOINT}/enforcement", json=_enforcement_body(break_glass_waived=False)
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+
+    session = db_session_factory()
+    try:
+        stored = session.get(Organization, organization_id)
+        assert stored is not None
+        assert stored.sso_required is False
+    finally:
+        session.close()
+
+
+def test_enforcement_refuses_a_break_glass_account_that_is_not_an_owner(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforce-not-owner")
+        owner_token = _identity(
+            session, email="owner@acme-enforce-not-owner.test", organization_id=organization.id, role="owner"
+        )
+        session.add(_connection(organization.id, first_sign_in_at=datetime.now(UTC)))
+        session.commit()
+        member = _member(session, organization_id=organization.id)
+        member_id = member.id
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    response = _call(
+        client,
+        owner_token,
+        "PUT",
+        f"{_ENDPOINT}/enforcement",
+        json=_enforcement_body(break_glass_user_id=str(member_id), break_glass_waived=False),
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+
+    session = db_session_factory()
+    try:
+        stored = session.get(Organization, organization_id)
+        assert stored is not None
+        assert stored.sso_required is False
+    finally:
+        session.close()
+
+
+def test_enforcement_refuses_a_caller_who_is_only_a_member(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforce-member")
+        member_token = _identity(
+            session, email="member@acme-enforce-member.test", organization_id=organization.id, role="member"
+        )
+        session.add(_connection(organization.id, first_sign_in_at=datetime.now(UTC)))
+        session.commit()
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    response = _call(client, member_token, "PUT", f"{_ENDPOINT}/enforcement", json=_enforcement_body())
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.text
+
+    session = db_session_factory()
+    try:
+        stored = session.get(Organization, organization_id)
+        assert stored is not None
+        assert stored.sso_required is False
+    finally:
+        session.close()
+
+
+def test_enforcement_turns_off_with_no_precondition(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforce-off")
+        owner_token = _identity(
+            session, email="owner@acme-enforce-off.test", organization_id=organization.id, role="owner"
+        )
+        session.add(_connection(organization.id))
+        session.commit()
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    response = _call(
+        client,
+        owner_token,
+        "PUT",
+        f"{_ENDPOINT}/enforcement",
+        json=_enforcement_body(required=False, break_glass_user_id=None, break_glass_waived=False),
+    )
+    assert response.status_code == status.HTTP_204_NO_CONTENT, response.text
+
+    session = db_session_factory()
+    try:
+        stored = session.get(Organization, organization_id)
+        assert stored is not None
+        assert stored.sso_required is False
+    finally:
+        session.close()

@@ -4422,6 +4422,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/sso/enforcement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Organization Sso Enforcement
+         * @description Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.
+         *
+         *     Refused with 404 when the organization has not configured a connection yet. Requiring sign-in is refused
+         *     with 400 before anybody has signed in through the connection, when it names no owner who keeps another
+         *     way in and waives none, or when the named account is not one of the organization's own owners. Turning
+         *     enforcement off has none of these preconditions.
+         */
+        put: operations["organization-sso-put_organization_sso_enforcement"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/sso/test": {
         parameters: {
             query?: never;
@@ -16362,6 +16387,28 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrganizationScopedBudgetPublic"][];
+        };
+        /**
+         * OrganizationSsoEnforcementRequest
+         * @description What an organization administrator submits to require, or stop requiring, sign-in through its own connection.
+         */
+        OrganizationSsoEnforcementRequest: {
+            /**
+             * Break Glass User Id
+             * @description One of the organization's own owners who keeps a non-SSO sign-in route when required is true.
+             */
+            break_glass_user_id?: string | null;
+            /**
+             * Break Glass Waived
+             * @description Whether the organization explicitly waives a break-glass owner when enforcement is required.
+             * @default false
+             */
+            break_glass_waived: boolean;
+            /**
+             * Required
+             * @description Whether this organization requires sign-in through its own connection.
+             */
+            required: boolean;
         };
         /**
          * OrganizationSsoPublic
@@ -29210,6 +29257,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "organization-sso-put_organization_sso_enforcement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationSsoEnforcementRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
