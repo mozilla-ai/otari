@@ -461,21 +461,28 @@ async def test_a_failed_search_on_the_legacy_provider_pair_is_counted_but_never_
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
     model_pricing: dict[str, Any],
     search_pricing: dict[str, Any],
     db_session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
+    """The failed search is an error on the row, and the request is charged its model calls alone."""
     _serve_search_on_the_legacy_provider_pair(monkeypatch, test_config)
+    user_id = api_key_obj["user_id"]
+    before = _spend(db_session_factory, user_id)
     failed = AsyncMock(side_effect=WebSearchProviderError("unreachable", tag="http_error", status=503))
 
     _search_on_the_legacy_provider_pair(client, api_key_header, failed)
 
     failed.assert_awaited_once()
-    row = _latest_row(db_session_factory, api_key_obj["user_id"])
+    row = _latest_row(db_session_factory, user_id)
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"] == {"billed": 0, "errors": 1}
     assert not any(entry["meter"] == "web_search_calls" for entry in (row.pricing_breakdown or []))
+    assert _spend(db_session_factory, user_id) - before == pytest.approx(float(row.cost or 0), rel=1e-6)
+    user = client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header).json()
+    assert user["reserved"] == pytest.approx(0.0), "the search's hold was released at settlement"
 
 
 @pytest.mark.asyncio

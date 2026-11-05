@@ -425,7 +425,7 @@ def test_a_search_on_an_instance_is_narrowed_by_the_workspace_row(
     A workspace option the provider does not take is dropped with a warning, and the
     request's own options are layered over the instance's.
     """
-    serve_search_on_fake()
+    serve_search_on_fake({"cost": 0.001, "delay": 0.0})
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(
         client,
@@ -451,7 +451,43 @@ def test_a_search_on_an_instance_is_narrowed_by_the_workspace_row(
     assert isinstance(search, WebSearchBackend)
     assert search._max_results == 2
     assert search._policy.blocked == canonicalize_domain_rules(["banned.example"])
-    assert dict(search._search.options) == {"cost": 0.01}
+    assert dict(search._search.options) == {"cost": 0.01, "delay": 0.0}
+
+
+def test_a_search_on_the_legacy_provider_pair_is_narrowed_by_the_workspace_row(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """The ceiling and the block list reach the old backend, which serves the legacy Tavily pair."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    monkeypatch.setattr(test_config, "web_search_provider", "tavily")
+    monkeypatch.setattr(test_config, "web_search_provider_api_key", "tvly-key")
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_config(
+        client, master_key_header, workspace_id, enabled=True, max_results=2, blocked_domains=["banned.example"]
+    )
+    built: dict[str, Any] = {}
+
+    def fake_backend(**kwargs: Any) -> Any:
+        built.update(kwargs)
+        backend = AsyncMock()
+        backend.purpose_hints = lambda: []
+        return AsyncMock(__aenter__=AsyncMock(return_value=backend), __aexit__=AsyncMock(return_value=None))
+
+    tool = {"type": "otari_web_search", "max_results": 15, "blocked_domains": ["noise.example"]}
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=AsyncMock(return_value=_text_response())),
+        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
+    ):
+        response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "tools": [tool]}, headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    assert built["provider"] == "tavily"
+    assert built["max_results"] == 2
+    assert set(built["blocked_domains"]) == {"noise.example", "banned.example"}
 
 
 def test_a_request_allow_list_is_intersected_with_the_workspace_one(
