@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/dde0ae110fd194dfcfba0c263cb2c548bc92268f/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/dde0ae110fd194dfcfba0c263cb2c548bc92268f/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/eca744ccf17f12679e3b10dc7fd5715d8dfbd5c8/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/eca744ccf17f12679e3b10dc7fd5715d8dfbd5c8/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 ## Base URL
@@ -617,8 +617,7 @@ tool, and restricted model access runs only a tool named by its deprecated
 | `user` | string | Who the search is billed to; see below. |
 
 Until any-search has their adapters, `include_raw` and `provider_options` are a
-400 on a `searxng` tool and on a call a Tavily or Brave organization key serves;
-`false` and `{}` pass.
+400 on a call a Tavily or Brave organization key serves; `false` and `{}` pass.
 
 **Response.**
 
