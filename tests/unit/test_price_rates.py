@@ -16,6 +16,7 @@ from gateway.types.price_rates import (
     TIER_THRESHOLD,
     RateColumns,
     RatesDocument,
+    column_paths,
     columns_from_rates,
     dump_rates,
     load_rates,
@@ -482,3 +483,20 @@ def test_a_price_that_rounds_to_a_zero_column_is_refused() -> None:
     with pytest.raises(ValueError, match="too small"):
         columns_from_rates({"text": {"input": {"price": 1e-9}}})
     assert columns_from_rates({"text": {"input": {"price": 0}}}).input_price_per_million == Decimal(0)
+
+
+@pytest.mark.parametrize(
+    ("document", "paths"),
+    [
+        ({"text": {"input": {"price": 1}, "output": {"price": 2}}}, ("text.input", "text.output")),
+        ({"image": {"output": {"price": 0.04, "unit": "image"}}}, ("image.output", None)),
+        ({"audio": {"input": {"price": 0.006, "unit": "minute"}}}, ("audio.input", "audio.output")),
+        ({"web_search": {"price": 10}}, ("web_search", None)),
+    ],
+)
+def test_the_column_paths_name_the_prices_the_columns_read(
+    document: dict[str, Any], paths: tuple[str, str | None]
+) -> None:
+    pricing, _ = parse_pricing(document, units=PRICE_UNITS, path="rates")
+
+    assert column_paths(pricing) == paths
