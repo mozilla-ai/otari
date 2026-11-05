@@ -22,6 +22,7 @@ from typing import Any, ClassVar, Protocol, TypeAlias, TypeVar
 from urllib.request import getproxies_environment
 
 import httpx
+import httpx2
 
 from gateway.services.url_safety import UnsafeURLError, validate_federation_url
 from gateway.services.web_retrieval_policy import (
@@ -645,6 +646,63 @@ class BoundedFederationTransport(httpx.AsyncBaseTransport):
             headers=response.headers,
             stream=CappedFederationStream(response.stream, max_bytes=self._max_bytes),
             extensions=response.extensions,
+        )
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
+
+class _Httpx2StreamRelay(httpx.AsyncByteStream, httpx2.AsyncByteStream):
+    """Relay one byte stream's chunks and close, answering to both ``httpx`` and ``httpx2``'s own stream type.
+
+    Each package's client accepts only a stream that isinstance-checks against its own class, so a
+    stream built for one side of :class:`Httpx2CompatTransport` is rewrapped for the other without
+    being buffered or read twice.
+    """
+
+    def __init__(self, source: httpx.AsyncByteStream | httpx2.AsyncByteStream) -> None:
+        self._source = source
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        async for chunk in self._source:
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._source.aclose()
+
+
+class Httpx2CompatTransport(httpx2.AsyncBaseTransport):
+    """Present a classic HTTPX transport to a caller built on ``httpx2``.
+
+    NOTE: apron-auth sends its token-endpoint request through authlib, whose async client is an
+    ``httpx2.AsyncClient`` subclass, while every other apron-auth call (discovery, revocation,
+    userinfo, signing keys) builds a classic ``httpx.AsyncClient``. One ``transport_factory`` serves
+    both, so the one call that lands in ``httpx2`` needs its transport translated: ``httpx2``
+    asserts the response stream it receives is its own ``AsyncByteStream``, which a classic
+    transport's response never is.
+    """
+
+    def __init__(self, transport: httpx.AsyncBaseTransport) -> None:
+        self._transport = transport
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        if not isinstance(request.stream, httpx2.AsyncByteStream):
+            raise httpx2.TransportError("httpx2 request carried a synchronous stream")
+        classic_request = httpx.Request(
+            request.method,
+            str(request.url),
+            headers=request.headers.raw,
+            stream=_Httpx2StreamRelay(request.stream),
+            extensions=dict(request.extensions),
+        )
+        response = await self._transport.handle_async_request(classic_request)
+        if not isinstance(response.stream, httpx.AsyncByteStream):
+            raise httpx2.TransportError("wrapped transport returned a synchronous stream")
+        return httpx2.Response(
+            response.status_code,
+            headers=response.headers.raw,
+            stream=_Httpx2StreamRelay(response.stream),
+            extensions=dict(response.extensions),
         )
 
     async def aclose(self) -> None:

@@ -1,21 +1,28 @@
 """Build the apron-auth client an organization's own OIDC connection signs in through.
 
 Discovery is never exercised here: ``metadata`` is handed in already resolved, the shape
-``_connection_service.metadata_for_sign_in`` serves. Nothing here reaches the network: a
-callback exchange is exercised only up to the check it is testing, by monkeypatching
-``apron_auth.OAuthClient.exchange_code`` the way ``tests/unit/test_oauth_service.py`` and
-``tests/integration/test_oauth_api.py`` already patch apron-auth's client to test a code
-exchange's outcome without one.
+``_connection_service.metadata_for_sign_in`` serves. Most of a callback exchange is exercised only
+up to the check it is testing, by monkeypatching ``apron_auth.OAuthClient.exchange_code`` the way
+``tests/unit/test_oauth_service.py`` and ``tests/integration/test_oauth_api.py`` already patch
+apron-auth's client to test a code exchange's outcome without one. A few tests go one layer
+deeper, through a stubbed classic transport the way ``tests/unit/test_oidc_discovery.py`` stubs
+one, to prove the token-endpoint request itself, and the SSRF check it carries, still work.
 """
 
+import json
 import uuid
+from base64 import urlsafe_b64encode
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+import httpx
+import httpx2
 import pytest
 from apron_auth import INVALID_CLIENT, INVALID_GRANT, OAuthClient, ServerMetadata, StoredStateClient, TokenExchangeError
 from apron_auth.errors import AuthorizationResponseError, IssuerValidationError, StateError
 from apron_auth.models import AuthorizationCallback
+from apron_auth.models import OAuthPendingState as PendingState
 from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +38,12 @@ from gateway.services.identity._connection_clients import (
 )
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
+from gateway.services.url_safety import UnsafeURLError
+from gateway.services.web_retrieval_network import (
+    CheckedFederationTransport,
+    Httpx2CompatTransport,
+    RetrievalTargetError,
+)
 
 _ISSUER = "https://sso.example.test"
 _REDIRECT_URI = "https://otari.example.com/auth/sso/callback"
@@ -48,10 +61,12 @@ def _clear_handler_cache() -> None:
     _connection_clients._handler_cache.clear()
 
 
-def _server_metadata(*, issuer: str = _ISSUER, iss_parameter_supported: bool = True) -> ServerMetadata:
+def _server_metadata(
+    *, issuer: str = _ISSUER, iss_parameter_supported: bool = True, token_url: str | None = None
+) -> ServerMetadata:
     return ServerMetadata(
         authorize_url=f"{issuer}/authorize",
-        token_url=f"{issuer}/token",
+        token_url=token_url or f"{issuer}/token",
         jwks_url=f"{issuer}/jwks",
         userinfo_url=f"{issuer}/userinfo",
         issuer=issuer,
@@ -62,15 +77,48 @@ def _server_metadata(*, issuer: str = _ISSUER, iss_parameter_supported: bool = T
 
 
 def _metadata(
-    *, issuer: str = _ISSUER, discovered_at: datetime | None = None, iss_parameter_supported: bool = True
+    *,
+    issuer: str = _ISSUER,
+    discovered_at: datetime | None = None,
+    iss_parameter_supported: bool = True,
+    token_url: str | None = None,
 ) -> DiscoveredProvider:
     return DiscoveredProvider(
         resolved_issuer=issuer,
-        document=_server_metadata(issuer=issuer, iss_parameter_supported=iss_parameter_supported).model_dump(
-            mode="json"
-        ),
+        document=_server_metadata(
+            issuer=issuer, iss_parameter_supported=iss_parameter_supported, token_url=token_url
+        ).model_dump(mode="json"),
         discovered_at=discovered_at or datetime.now(UTC),
     )
+
+
+class _StubTransport(httpx.AsyncBaseTransport):
+    """A classic transport answering every request through a caller-supplied handler."""
+
+    def __init__(self, handler: Callable[[httpx.Request], Awaitable[httpx.Response]]) -> None:
+        self._handler = handler
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        return await self._handler(request)
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _unsigned_id_token(*, nonce: str, issuer: str, client_id: str) -> str:
+    """An ID token carrying the claims apron-auth's exchange checks; its signature is never verified here."""
+    claims = {
+        "iss": issuer,
+        "aud": client_id,
+        "sub": "a-subject",
+        "nonce": nonce,
+        "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+    }
+
+    def segment(value: dict[str, Any]) -> str:
+        return urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+
+    return f"{segment({'alg': 'RS256'})}.{segment(claims)}.signature"
 
 
 def _connection(*, client_id: str = "a-client-id", client_secret: str = "a-client-secret") -> OIDCConnection:
@@ -247,6 +295,101 @@ def test_client_for_uses_the_memoized_handler() -> None:
     )
 
     assert client._identity_handler is handler
+
+
+def test_the_transport_factory_wraps_only_the_token_endpoint() -> None:
+    metadata = _metadata()
+    factory = _connection_clients._transport_factory_for(metadata, allow_private_hosts=False)
+
+    token_transport = factory(f"{_ISSUER}/token")
+    userinfo_transport = factory(f"{_ISSUER}/userinfo")
+
+    assert isinstance(token_transport, Httpx2CompatTransport)
+    assert isinstance(userinfo_transport, CheckedFederationTransport)
+    assert not isinstance(userinfo_transport, Httpx2CompatTransport)
+
+
+@pytest.mark.asyncio
+async def test_a_real_exchange_through_the_token_url_succeeds_with_the_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _connection()
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        id_token = _unsigned_id_token(nonce="n", issuer=_ISSUER, client_id=connection.client_id)
+        return httpx.Response(
+            200, json={"access_token": "a-real-access-token", "token_type": "Bearer", "id_token": id_token}
+        )
+
+    monkeypatch.setattr(
+        "gateway.services.identity._connection_clients.CheckedFederationTransport",
+        lambda *, allow_private_hosts: _StubTransport(handler),
+    )
+    metadata = _metadata()
+    config = _provider_config_for(connection, metadata, redirect_uri=_REDIRECT_URI)
+    client = OAuthClient(
+        config, transport_factory=_connection_clients._transport_factory_for(metadata, allow_private_hosts=False)
+    )
+    pending = PendingState(state="s", redirect_uri=_REDIRECT_URI, nonce="n", created_at=datetime.now(UTC).timestamp())
+    callback = AuthorizationCallback(code="a-code", state="s", iss=_ISSUER)
+
+    tokens = await client.exchange_code(callback, pending_state=pending)
+
+    assert tokens.access_token == "a-real-access-token"
+
+
+@pytest.mark.asyncio
+async def test_the_ssrf_check_still_refuses_a_private_token_url() -> None:
+    """The adapter wraps the checked transport; it must not quietly become a plain pass-through.
+
+    Asserts the refusal came from the outbound URL checks, by its cause, rather than that the
+    request merely failed: an unreachable address fails on any transport, so a refusal identified
+    by type alone would pass with the checks removed.
+    """
+    token_url = "https://127.0.0.1:9/token"
+    metadata = _metadata(token_url=token_url)
+    factory = _connection_clients._transport_factory_for(metadata, allow_private_hosts=False)
+    transport = factory(token_url)
+    assert isinstance(transport, Httpx2CompatTransport)
+
+    with pytest.raises(httpx.ConnectError) as refusal:
+        await transport.handle_async_request(httpx2.Request("POST", token_url))
+
+    assert isinstance(refusal.value.__cause__, UnsafeURLError | RetrievalTargetError)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_code", "expected"),
+    [
+        ("invalid_grant", ConnectionCredentialCheck.ACCEPTED),
+        ("invalid_client", ConnectionCredentialCheck.REFUSED),
+        ("unauthorized_client", ConnectionCredentialCheck.REFUSED),
+    ],
+)
+async def test_the_probe_reads_a_providers_own_refusal_through_a_real_exchange(
+    monkeypatch: pytest.MonkeyPatch, error_code: str, expected: ConnectionCredentialCheck
+) -> None:
+    """Drive the probe through the whole chain, stubbing only the socket.
+
+    The tests below patch ``exchange_code`` and so assert this module's mapping alone. This one
+    asserts the part the mapping rests on: that an error body on the wire reaches it as the
+    matching ``error_code``.
+    """
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": error_code})
+
+    monkeypatch.setattr(
+        "gateway.services.identity._connection_clients.CheckedFederationTransport",
+        lambda *, allow_private_hosts: _StubTransport(handler),
+    )
+
+    result = await check_connection_credentials(
+        _connection(), _metadata(), redirect_uri=_REDIRECT_URI, allow_private_hosts=False
+    )
+
+    assert result is expected
 
 
 @pytest.mark.asyncio

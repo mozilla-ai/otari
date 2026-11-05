@@ -7,9 +7,12 @@ here, the same as during discovery, goes through the checked federation transpor
 """
 
 from collections import OrderedDict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import cast
 
+import httpx
 from apron_auth import (
     INVALID_CLIENT,
     UNAUTHORIZED_CLIENT,
@@ -30,7 +33,7 @@ from gateway.models.identity import OIDCConnection, oidc_flow_provider
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.oauth_service import DatabaseStateStore, pending_flow_provider, provider_refused_the_code
 from gateway.services.secret_box import decrypt_secret
-from gateway.services.web_retrieval_network import CheckedFederationTransport
+from gateway.services.web_retrieval_network import CheckedFederationTransport, Httpx2CompatTransport
 
 # Requested beyond the ``openid`` scope every preset merges in, for the display fields apron-auth's
 # generic OIDC identity handler fills from the ID token and userinfo.
@@ -48,6 +51,29 @@ _handler_cache: OrderedDict[tuple[str, datetime], IdentityHandler] = OrderedDict
 _PROBE_STATE = "connection-credential-check"
 _PROBE_CODE = "connection-credential-check"
 _CREDENTIAL_REFUSAL_CODES = frozenset({INVALID_CLIENT, UNAUTHORIZED_CLIENT})
+
+
+def _transport_factory_for(
+    metadata: DiscoveredProvider, *, allow_private_hosts: bool
+) -> Callable[[str], httpx.AsyncBaseTransport]:
+    """The ``transport_factory`` every apron-auth call for this connection is built with.
+
+    apron-auth calls this with the URL it is about to fetch, by its own contract: the URL selects
+    the transport. Every call but one reaches a classic ``httpx.AsyncClient`` directly; the token
+    endpoint alone goes through authlib's ``AsyncOAuth2Client``, an ``httpx2.AsyncClient``
+    subclass, so that one URL alone gets its checked transport wrapped for ``httpx2``.
+    """
+    token_url = ServerMetadata.model_validate(metadata.document).token_url
+
+    def factory(url: str) -> httpx.AsyncBaseTransport:
+        transport = CheckedFederationTransport(allow_private_hosts=allow_private_hosts)
+        if url != token_url:
+            return transport
+        # apron-auth's own TransportFactory type promises classic httpx; the token URL alone is
+        # handled by authlib's httpx2-based client, which needs an httpx2 transport instead.
+        return cast("httpx.AsyncBaseTransport", Httpx2CompatTransport(transport))
+
+    return factory
 
 
 class ConnectionCredentialCheck(StrEnum):
@@ -75,7 +101,7 @@ def identity_handler_for(metadata: DiscoveredProvider, *, allow_private_hosts: b
         return cached
     handler = oidc.identity_handler(
         ServerMetadata.model_validate(metadata.document),
-        transport_factory=lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts),
+        transport_factory=_transport_factory_for(metadata, allow_private_hosts=allow_private_hosts),
     )
     _handler_cache[key] = handler
     if len(_handler_cache) > _HANDLER_CACHE_MAX:
@@ -116,11 +142,6 @@ def client_for(
     pending authorization has to survive between the authorization redirect and a separate callback
     request, which only a stored state admits. The configuration and the identity handler both come
     from ``metadata``, so the handler can never answer for a config naming another issuer.
-
-    NOTE: apron-auth sends the token request through authlib, which resolves onto ``httpx2`` rather
-    than the ``httpx`` this transport is built on whenever ``httpx2`` is importable, which it is in
-    this deployment. A real exchange then fails inside ``httpx2``'s own response handling with an
-    unrelated ``AssertionError`` rather than a classified apron-auth error.
     """
     config = _provider_config_for(connection, metadata, redirect_uri=redirect_uri)
     handler = identity_handler_for(metadata, allow_private_hosts=allow_private_hosts)
@@ -129,7 +150,7 @@ def client_for(
         config,
         state_store,
         identity_handler=handler,
-        transport_factory=lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts),
+        transport_factory=_transport_factory_for(metadata, allow_private_hosts=allow_private_hosts),
     )
 
 
@@ -146,14 +167,10 @@ async def check_connection_credentials(
 
     NOTE: This is a real token-endpoint request carrying a code nothing issued, so it can appear in
     the provider's own access or audit logs as a failed exchange.
-
-    NOTE: Also blocked by the authlib/``httpx2`` mismatch ``client_for`` documents: in this
-    deployment, the request below fails with an unrelated ``AssertionError`` rather than reaching
-    the token endpoint at all.
     """
     config = _provider_config_for(connection, metadata, redirect_uri=redirect_uri)
     client = OAuthClient(
-        config, transport_factory=lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts)
+        config, transport_factory=_transport_factory_for(metadata, allow_private_hosts=allow_private_hosts)
     )
     pending = PendingState(
         state=_PROBE_STATE,
