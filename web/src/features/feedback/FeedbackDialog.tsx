@@ -206,10 +206,9 @@ export function FeedbackDialog({
                     data-feedback-part="body"
                     className="text-muted max-w-100 text-base text-balance max-sm:max-w-80"
                   >
-                    Every message reaches the people building Otari.{" "}
                     {sentTo
-                      ? `If we have a question, we’ll write to ${sentTo}.`
-                      : "We read them all, and they shape what comes next."}
+                      ? `Our team will reply to ${sentTo}.`
+                      : "Our team has your message."}
                   </p>
                 </div>
               </div>

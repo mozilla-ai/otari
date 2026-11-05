@@ -112,7 +112,7 @@ test("an account with an email is told where replies go, and the shortcut sends 
   await page.keyboard.press("ControlOrMeta+Enter")
   const thanks = page.getByRole("dialog", { name: "Thank you!" })
   await expect(thanks).toContainText(
-    "If we have a question, we’ll write to ada.lovelace@example.com.",
+    "Our team will reply to ada.lovelace@example.com.",
   )
   // The consent line wraps, so the thanks hold the compose's height rather
   // than a fixed one, and the frame does not shrink as they swap in.
