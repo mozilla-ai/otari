@@ -107,6 +107,7 @@ from gateway.services.inference._upstream_user import (
     upstream_user_identifier,
     with_upstream_user,
 )
+from gateway.services.inference._videos import VideoJobService
 
 __all__ = [
     "CONVERSATION_CACHE_KEY_FIELD",
@@ -196,4 +197,5 @@ __all__ = [
     "upstream_exception_chain",
     "upstream_exception_shape",
     "upstream_retry_after",
+    "VideoJobService",
 ]
