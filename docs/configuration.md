@@ -1103,8 +1103,74 @@ pricing:
         output: {price: 0.4, unit: second}
 ```
 
-The `overrides` and `multipliers` a block holds are stored and not yet
-applied: the base price is read.
+The `overrides` and `multipliers` a block holds apply to each request
+([Overrides and multipliers](#overrides-and-multipliers)).
+
+### Overrides and multipliers
+
+A price in a `rates` block can change with the request. An override on an
+`input`, an `output` or the `web_search` price replaces the prices it names
+when its condition holds. A multiplier beside the modalities scales the prices
+it names when its condition holds. Otari applies them in the order models.dev
+states, to every modality and to `web_search` alike:
+
+1. Each override whose condition the request meets merges over its price, in
+   order, field by field: an override that names only a cache read price keeps
+   the base cache write price, and a later override wins over an earlier one.
+2. Then each multiplier whose condition the request meets scales the prices it
+   names. A number `factor` scales every price of the block, the cache, the
+   reasoning and the `web_search` prices included. An object scales only the
+   prices on the paths it names: `{text: 2}` scales every text price, and
+   `{text: {output: 2}}` only the text output price.
+
+```yaml
+pricing:
+  openai:gpt-5:
+    rates:
+      text:
+        input:
+          price: 1.25
+          overrides:
+            - when: {context: {gt: 272000}}
+              price: 2.5
+        output: {price: 10}
+      multipliers:
+        - when: {service_tier: {equals: flex}}
+          factor: 0.5
+```
+
+A condition holds when the request's value for each key it names meets that
+key's operator: `equals`, `in`, `gt`, `gte`, `lt`, `lte` or `min_items`, and
+`all`, `any` and `not` combine conditions. `equals` and `in` compare text
+without regard to case. `gt` and the other comparisons order text as written,
+which is how an `HH:MM` time or an ISO date compares. Otari answers these keys:
+
+| Condition | Its value |
+|---|---|
+| `context` | The request's billable input in tokens: the estimate before the call, what the provider reports after it |
+| `service_tier` | The tier the request asks for, before the call. After it, the tier the provider reports serving the call at; a response that names no tier settles at the price that names none |
+| `resolution` | An image's `size`, or a video's `resolution`, else its `size` |
+| `quality`, `style` | An image's `quality` and `style` |
+| `aspect_ratio` | A video's `aspect_ratio` |
+| `duration` | A video's length in seconds |
+| `date`, `utc_days`, `utc_hours` | When the request started, in UTC: a video job's start, a batch's creation, an imported event's own time |
+| `input_video`, `websocket` | Always false: Otari sends neither through any-llm |
+
+A rule whose condition names any other key, such as `region` or `mode`, is
+skipped, as models.dev's schema says, and the base price applies. A key Otari
+answers that the request gives no value for is a condition that does not hold,
+so `{service_tier: {equals: priority}}` does not hold for a request that names
+no tier, and `{not: {service_tier: {equals: priority}}}` does. A models.dev
+override on context with `gt` starts above its bound. A tier given in
+`pricing_tiers` is written as an override with `gte`, so it starts at its
+`min_input_tokens`.
+
+This file and the pricing API refuse a rule whose condition names a key or an
+operator models.dev does not list, or gives an operator an operand it cannot
+take, so a typo is never a rule that silently never matches. A block read back
+from a row is shown as stored. Each charge line of a usage row names, under
+`rules`, the condition of each rule that changed the price it bills at, in the
+order they applied.
 
 ### Each endpoint in its unit
 
