@@ -8,8 +8,10 @@ export function parseCount(raw: string): {
 } {
   const trimmed = raw.trim()
   if (trimmed === "") return { value: null, isValid: true }
+  // Digits first: `Number` rounds "1.0000000000000001" to a whole 1.
+  if (!/^\d+$/.test(trimmed)) return { value: null, isValid: false }
   const n = Number(trimmed)
-  if (!Number.isSafeInteger(n) || n < 0) return { value: null, isValid: false }
+  if (!Number.isSafeInteger(n)) return { value: null, isValid: false }
   return { value: n, isValid: true }
 }
 

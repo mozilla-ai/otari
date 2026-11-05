@@ -465,6 +465,11 @@ describe("BudgetsPage", () => {
     await user.clear(screen.getByLabelText("Assign to people (optional)"))
     await user.type(screen.getByLabelText("Assign to people (optional)"), "bob")
     await user.click(await screen.findByRole("option", { name: /bob/ }))
+    // A field edited meanwhile is saved onto the budget the first try created.
+    await user.click(
+      screen.getByRole("button", { name: "Token and request limits" }),
+    )
+    await user.type(screen.getByLabelText("Request limit"), "1")
     await user.click(screen.getByRole("button", { name: "Retry assignments" }))
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
@@ -472,6 +477,14 @@ describe("BudgetsPage", () => {
       .filter(([, init]) => (init?.method ?? "") === "PATCH")
       .map(([url]) => String(url))
     expect(patched.some((url) => url.includes("bob"))).toBe(true)
+    const budgetPatch = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        (init?.method ?? "") === "PATCH" &&
+        String(url).includes(`${API_ROOT}/budgets/`),
+    )
+    expect(JSON.parse(String(budgetPatch?.[1]?.body))).toMatchObject({
+      request_limit: 1,
+    })
     // And still one budget, which is what the retry exists to protect.
     expect(
       fetchMock.mock.calls.filter(([, init]) => (init?.method ?? "") === "POST")
@@ -868,7 +881,8 @@ describe("BudgetsPage", () => {
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
-    expect(await screen.findByLabelText("Token limit")).toHaveValue("5000")
+    expect(await screen.findByLabelText("Token limit")).toBeVisible()
+    expect(screen.getByLabelText("Token limit")).toHaveValue("5000")
 
     await user.clear(screen.getByLabelText("Request limit"))
     await user.type(screen.getByLabelText("Request limit"), "1")

@@ -1132,6 +1132,7 @@ function CreateBudgetDialog({
   pendingAssignments?: { budgetId: string; userIds: string[] }
 }) {
   const createBudget = useCreateBudget()
+  const updateBudget = useUpdateBudget()
 
   // Create the budget, then (optionally) attach it to the chosen users. The
   // per-user PATCH sets each user's reset clock. Failed assignments stay in the
@@ -1141,6 +1142,16 @@ function CreateBudgetDialog({
     userIds: string[],
   ) => {
     if (pendingAssignments) {
+      // The budget exists, so what the operator changed since is an update.
+      // Skipped, a retry would close the form on a budget missing those edits.
+      try {
+        await updateBudget.mutateAsync({
+          id: pendingAssignments.budgetId,
+          body,
+        })
+      } catch {
+        return
+      }
       // Against the form as it stands, not against the set that failed. The
       // retry is the operator's chance to fix the selection, and the fields
       // stay editable while it is offered: replaying the original ids would
@@ -1188,8 +1199,10 @@ function CreateBudgetDialog({
         request_limit: null,
         budget_duration_sec: null,
       }}
-      error={createBudget.error ?? assignmentError}
-      isPending={createBudget.isPending || assigningUsers}
+      error={createBudget.error ?? updateBudget.error ?? assignmentError}
+      isPending={
+        createBudget.isPending || updateBudget.isPending || assigningUsers
+      }
       returnFocusRef={returnFocusRef}
       assignUsers={users}
       onSubmit={createAndAssign}
