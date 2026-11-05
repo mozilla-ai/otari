@@ -159,6 +159,8 @@ async def check_connection_credentials(
         state=_PROBE_STATE,
         redirect_uri=redirect_uri,
         nonce=_PROBE_STATE,
+        # A connection is an OpenID request, so the exchange holds its response to the nonce rule.
+        openid_requested=True,
         created_at=datetime.now(UTC).timestamp(),
     )
     callback = AuthorizationCallback(code=_PROBE_CODE, state=_PROBE_STATE, iss=config.issuer)
