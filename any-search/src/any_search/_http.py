@@ -1,6 +1,7 @@
 """The HTTP client a provider sends through."""
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -67,3 +68,13 @@ class ProviderHttp:
         if self._own_client is not None:
             await self._own_client.aclose()
             self._own_client = None
+
+
+def is_web_url(url: str) -> bool:
+    """Whether ``url`` is an http or https URL with a host and a valid port, one a caller can fetch."""
+    try:
+        parts = urlsplit(url)
+        _ = parts.port  # raises for a port that is not a number from 0 to 65535
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
