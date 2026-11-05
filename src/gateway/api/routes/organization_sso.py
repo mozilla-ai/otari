@@ -10,6 +10,7 @@ with no overlay has exactly one organization and the caller's identity already p
 at it.
 """
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -87,3 +88,17 @@ async def delete_organization_sso(
     Refused with 404 when the organization has not saved a connection yet.
     """
     await connections.delete_for_user(user=identity)
+
+
+@router.delete("/links/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_organization_sso_link(
+    user_id: uuid.UUID,
+    identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
+) -> None:
+    """Remove a member's own sign-in link at the caller's organization's connection. Owners and admins only.
+
+    Refused with 404 for a member with no such link, including a user ID outside the caller's
+    organization.
+    """
+    await connections.unlink_member_for_user(user=identity, member_user_id=user_id)

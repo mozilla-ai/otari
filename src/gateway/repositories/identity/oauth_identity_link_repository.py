@@ -1,7 +1,7 @@
 import uuid
-from typing import Never
+from typing import Any, Never, cast
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -28,6 +28,18 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
             )
         )
         return result.scalar_one_or_none()
+
+    async def delete_for_user_and_provider(self, *, provider: str, user_id: uuid.UUID) -> bool:
+        """Stage the removal of an account's link at one provider, and report whether one existed."""
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                delete(OAuthIdentityLink).where(
+                    OAuthIdentityLink.user_id == user_id, OAuthIdentityLink.provider == provider
+                )
+            ),
+        )
+        return bool(result.rowcount)
 
     async def add(self, external: ProviderIdentity, *, user_id: uuid.UUID) -> OAuthIdentityLink:
         """Stage a link from a provider identity to an account.

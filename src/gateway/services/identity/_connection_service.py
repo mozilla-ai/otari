@@ -8,6 +8,7 @@ from apron_auth import BrowserBoundAuthorization, StoredStateClient
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    OAuthIdentityLinkNotFoundError,
     OIDCConnectionConflictError,
     OIDCConnectionNotFoundError,
     OIDCConnectionSecretRequiredError,
@@ -15,7 +16,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.identity import OIDC_PROVIDER_PREFIX, OIDCConnection
+from gateway.models.identity import OIDC_PROVIDER_PREFIX, OIDCConnection, oidc_identity_provider
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, OrganizationDomain, User
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.tenancy import OrganizationDomainRepository
@@ -88,6 +89,7 @@ class OIDCConnectionService:
     ) -> None:
         self._uow = uow
         self._connections = repositories.connections
+        self._links = repositories.links
         self._organizations = organizations
         self._domains = domains
         self._allow_private_hosts = allow_private_hosts
@@ -200,6 +202,31 @@ class OIDCConnectionService:
             if connection is None:
                 raise OIDCConnectionNotFoundError
             await self._connections.delete(connection)
+
+    async def unlink_member_for_user(self, *, user: User, member_user_id: uuid.UUID) -> None:
+        """Remove one member's sign-in link at this organization's own connection. Owners and admins only.
+
+        NOTE: A link is identified by issuer and account, not by organization, so where another
+        organization's own connection resolves to the same issuer, this also removes that
+        organization's link for the same account.
+
+        Raises:
+            OAuthIdentityLinkNotFoundError: The organization has no connection, the account is
+                not an active member here, or it holds no link at this connection.
+        """
+        organization = await self._managed_organization(user)
+
+        async with self._uow:
+            connection = await self._connections.get_for_organization(organization.id)
+            is_member = connection is not None and await self._organizations.user_has_active_membership(
+                organization_id=organization.id, user_id=member_user_id
+            )
+            if connection is None or not is_member:
+                raise OAuthIdentityLinkNotFoundError
+            provider = oidc_identity_provider(connection.resolved_issuer)
+            removed = await self._links.delete_for_user_and_provider(provider=provider, user_id=member_user_id)
+            if not removed:
+                raise OAuthIdentityLinkNotFoundError
 
     async def metadata_for_sign_in(self, connection: OIDCConnection) -> DiscoveredProvider:
         """Return this connection's provider metadata for the sign-in path.

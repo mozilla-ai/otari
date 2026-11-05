@@ -373,6 +373,19 @@ class OAuthIdentityLinkConflictError(TenancyConflictError):
         super().__init__(f"Another sign-in with that {provider} account finished first. Sign in again.")
 
 
+class OAuthIdentityLinkNotFoundError(TenancyNotFoundError):
+    """No sign-in link exists for an account at an organization's own connection.
+
+    One answer for an account that holds no such link, one that is not an active member of
+    the organization, and an organization with no connection at all: telling them apart would
+    confirm a foreign account's membership, or its existence, to a caller who manages a
+    different organization.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("No sign-in link exists for that member")
+
+
 class OIDCConnectionConflictError(TenancyConflictError):
     """Another request stored this organization's own sign-in connection first."""
 
@@ -634,6 +647,7 @@ __all__ = [
     "OAuthEmailNotVerifiedError",
     "OAuthExchangeError",
     "OAuthIdentityLinkConflictError",
+    "OAuthIdentityLinkNotFoundError",
     "OAuthIdentityUnknownError",
     "OAuthNotConfiguredError",
     "OAuthProviderUnavailableError",
