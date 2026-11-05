@@ -105,6 +105,8 @@ IN_LOOP_TIMEOUT_S = 15.0
 _SEARCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_SEARCH_TOOL_NAME)
 _FETCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_FETCH_TOOL_NAME)
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
+# How a warning names the layer a credential's options come from.
+_CREDENTIAL_LAYER = "the organization's key"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -427,7 +429,7 @@ def _search_on_credential(
         provider,
         checked=runner == "library",
         defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
-        credential=(_credential_layer(credential), credential.options),
+        credential=(_CREDENTIAL_LAYER, credential.options),
         workspace=workspace,
         request=request,
     )
@@ -522,7 +524,7 @@ def _fetch_on_credential(
         provider,
         checked=True,
         defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
-        credential=(_credential_layer(credential), credential.options),
+        credential=(_CREDENTIAL_LAYER, credential.options),
         request=request,
     )
     max_chars = _count(options, "max_chars")
@@ -546,7 +548,7 @@ def _fetch_on_credential(
 def _ignore(credential: WebToolCredential, kind: ToolKind) -> None:
     _warn_once(
         "Ignoring %s for %s, a provider this gateway cannot %s with",
-        _credential_layer(credential),
+        _CREDENTIAL_LAYER,
         credential.provider,
         kind,
     )
@@ -558,10 +560,6 @@ def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: 
         raise WebSearchCredentialRefusedError(credential.provider, "carries no API key, which the provider requires")
     if requires_base and not _base(credential.api_base):
         raise WebSearchCredentialRefusedError(credential.provider, "carries no base URL, which the provider requires")
-
-
-def _credential_layer(credential: WebToolCredential) -> str:
-    return "the organization's key"
 
 
 def _credential_billing(credential: WebToolCredential, rate_key: str) -> tuple[str | None, tuple[RateKey, ...]]:

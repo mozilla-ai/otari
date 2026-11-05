@@ -382,7 +382,6 @@ class OrgProviderModelService:
                     provider=provider,
                     models=[name],
                     defaults=defaults,
-                    user=user,
                 )
             except OfferedModelConflict as conflict:
                 # The pre-check above races the insert, and the unique index is
@@ -611,7 +610,6 @@ class OrgProviderModelService:
                     provider=provider,
                     models=added,
                     defaults=defaults,
-                    user=user,
                 )
         await self.refresh_overlay()
         return sorted(repriced)
@@ -624,7 +622,6 @@ class OrgProviderModelService:
         provider: str,
         models: Sequence[str],
         defaults: dict[str, ModelPricing],
-        user: User,
     ) -> Sequence[OrgProviderKeyModel]:
         """Record models as offered, seeding a rate where one is missing and permitted.
 
