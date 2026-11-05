@@ -656,6 +656,38 @@ def test_unsupported_parameter_maps_to_400_with_the_reason() -> None:
     assert failure_status_code(exc) == 400
 
 
+def test_unsupported_parameter_carries_its_code() -> None:
+    exc = UnsupportedParameterError("response_format", "bedrock")
+
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "unsupported_parameter"}
+    assert refusal_code(exc) == "unsupported_parameter"
+
+
+def test_attempts_that_all_refuse_a_parameter_share_one_400_naming_each() -> None:
+    """#2881: a policy whose every candidate cannot express a parameter says which one."""
+    errors = [
+        UnsupportedParameterError("reasoning_effort", "bedrock"),
+        UnsupportedParameterError("response_format", "bedrock"),
+        NotImplementedError(_CONTEXT_MANAGEMENT_MSG),
+    ]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.status_code == 400
+    assert rejection.detail == "None of the models tried accepts reasoning_effort, response_format (3 attempts)."
+    assert rejection.headers == {"Otari-Error-Code": "unsupported_parameter"}
+
+
+def test_a_parameter_refusal_beside_another_rejection_shares_the_generic_400() -> None:
+    other = _openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG))
+
+    rejection = get_shared_rejection([UnsupportedParameterError("response_format", "bedrock"), other])
+
+    assert rejection is not None
+    assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
+
+
 def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
     """A capability error that echoes the payload never returns an empty detail."""
     exc = UnsupportedParameterError(

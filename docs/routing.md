@@ -337,6 +337,8 @@ request's cost is `usage.cost_usd` in the body, as described in the
 
 Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.
 
+In a plan with more than one candidate, a chat completion's `reasoning_effort` is left off each candidate that [models.dev](https://models.dev) says does not reason, so a policy mixing reasoning and non-reasoning models is not failed by the hint. A candidate models.dev does not describe is sent it as asked. `response_format` is never left off, because a caller that asked for JSON would get prose; check each candidate's `supported_parameters` on `GET /api/v1/models` when building a policy that sends it.
+
 ## Failure behavior
 
 Failover occurs only before response bytes reach the client. A streamed
@@ -352,7 +354,7 @@ web searches or fetches in `otari_tool_calls` has sent response bytes, so it is
 committed from that report on. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
-If every candidate of a plan with more than one candidate fails, Otari returns a gateway error in its own words, never a provider's message. A plan with one candidate answers as naming that model directly would. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.
+If every candidate of a plan with more than one candidate fails, Otari returns a gateway error in its own words, never a provider's message. A plan with one candidate answers as naming that model directly would. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When every candidate's provider cannot express a parameter the request carries, such as `response_format` on a model with no JSON mode, the code is `unsupported_parameter` and `detail` names the parameters. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.
 
 ## In the dashboard
 

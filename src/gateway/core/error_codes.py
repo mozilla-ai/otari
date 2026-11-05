@@ -40,6 +40,8 @@ COUNTRY_NOT_SUPPORTED = "country_not_supported"
 CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
 # The model the request reached does not accept a kind of content the request carries, such as an image.
 UNSUPPORTED_CONTENT = "unsupported_content"
+# The provider cannot express a request parameter for the model, such as ``response_format`` on one with no JSON mode.
+UNSUPPORTED_PARAMETER = "unsupported_parameter"
 # The model is a kind the endpoint cannot serve, such as an embedding model sent a chat completion.
 WRONG_MODEL_TYPE = "wrong_model_type"
 PRICING_REQUIRED = "pricing_required"
