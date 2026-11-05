@@ -1,6 +1,7 @@
 """The pricing domain: which meter a rate prices, what an attempt costs at it, and the models.dev default prices."""
 
 from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
+from gateway.services.pricing._price_rules import AppliedRate, PriceFacts, ResolvedRates, apply_rules, resolve_rates
 from gateway.services.pricing._slot_pricing import (
     UNIT_METER,
     Quantities,
@@ -64,6 +65,7 @@ from gateway.services.pricing.models_dev_index import (
 )
 
 __all__ = [
+    "AppliedRate",
     "BUNDLED_SNAPSHOT_NAME",
     "DeploymentPricingService",
     "MAX_RATE_PER_MILLION",
@@ -72,11 +74,13 @@ __all__ = [
     "MAX_RESIDENT_GENERATIONS",
     "ModelsDevPrice",
     "ModelsDevPriceIndex",
+    "PriceFacts",
     "PriceGeneration",
     "PriceTier",
     "PriceTimeline",
     "PROVIDER_TOOL_LIST_PRICES",
     "Quantities",
+    "ResolvedRates",
     "Slot",
     "ToolCharges",
     "ToolRate",
@@ -88,6 +92,7 @@ __all__ = [
     "active_generations",
     "active_timeline",
     "add_accepted_generation",
+    "apply_rules",
     "billed_search_units",
     "bundled_catalog",
     "bundled_generation",
@@ -110,6 +115,7 @@ __all__ = [
     "request_rate",
     "reset_generations",
     "resolve_as_of",
+    "resolve_rates",
     "search_rate",
     "select_generation",
     "set_accepted_generations",
