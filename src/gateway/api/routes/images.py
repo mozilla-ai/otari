@@ -137,13 +137,13 @@ async def create_image(
 def _priced_body(outcome: PassthroughOutcome[ImagesResponse]) -> dict[str, Any]:
     """The provider's body with the settled cost on ``usage``, never failing a served image over the cost."""
     if outcome.cost is None or outcome.pricing is None:
-        return outcome.result.model_dump()
+        return InferenceService.images_response(outcome.result, pricing=None, cost=None)
     try:
         body = InferenceService.images_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
     except Exception as exc:  # noqa: BLE001 - the image is served and paid for; never fail it over the cost
         logger.warning("Failed to attach inline cost: %s", exc, exc_info=True)
         record_inline_cost_settlement("unattached")
-        return outcome.result.model_dump()
+        return InferenceService.images_response(outcome.result, pricing=None, cost=None)
     record_inline_cost_settlement("attached")
     return body
 

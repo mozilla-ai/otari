@@ -84,16 +84,20 @@ def images_response(
 ) -> dict[str, Any]:
     """The images response for ``result``: the provider's body with the inline cost on ``usage``.
 
-    ``pricing`` and ``cost`` are as for :func:`rerank_response`. The provider's
-    body is returned as it came, so a priced request with no ``usage`` from the
-    provider (OpenAI's DALL-E models send none) gets one holding only the two
-    cost fields, and one with token counts keeps them beside the fields.
+    ``pricing`` and ``cost`` are as for :func:`rerank_response`. The rest of the
+    provider's body is returned as it came, so a priced request with no ``usage``
+    from the provider (OpenAI's DALL-E models send none) gets one holding only the
+    two cost fields, and one with token counts keeps them beside the fields. A
+    ``cost_usd`` or ``pricing_source`` the provider sent itself is always dropped,
+    so a caller never reads an upstream figure as the gateway's settled cost.
     """
     body = result.model_dump()
-    cost_fields = _inline_cost(cost, pricing).model_dump()
-    if cost_fields:
-        usage = body.get("usage")
-        body["usage"] = {**(usage if isinstance(usage, dict) else {}), **cost_fields}
+    usage = body.get("usage")
+    if isinstance(usage, dict):
+        usage = {name: value for name, value in usage.items() if name not in InlineCost.model_fields}
+    if cost is not None and pricing is not None:
+        usage = {**(usage or {}), **_inline_cost(cost, pricing).model_dump()}
+    body["usage"] = usage
     return body
 
 

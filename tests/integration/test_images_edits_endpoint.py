@@ -424,3 +424,26 @@ def test_edits_without_pricing_carry_no_inline_cost(client: TestClient, api_key_
         )
     assert resp.status_code == 200, resp.text
     assert resp.json()["usage"] == usage.model_dump()
+
+
+def test_edits_drop_a_providers_own_cost_fields(client: TestClient, api_key_header: dict[str, str]) -> None:
+    """An upstream that reports its own cost is not passed off as the gateway's settled cost."""
+    upstream = Usage.model_validate(
+        {
+            "input_tokens": 12,
+            "input_tokens_details": {"image_tokens": 0, "text_tokens": 12},
+            "output_tokens": 1120,
+            "total_tokens": 1132,
+            "cost_usd": "9.000000",
+            "pricing_source": "upstream",
+        }
+    )
+    with patch(_PATCH_TARGET, new_callable=AsyncMock, return_value=_edit_response(usage=upstream)):
+        resp = client.post(
+            _EDITS_URL, data=_form(), files={"image": ("cat.png", _PNG, "image/png")}, headers=api_key_header
+        )
+    assert resp.status_code == 200, resp.text
+    usage = resp.json()["usage"]
+    assert "cost_usd" not in usage
+    assert "pricing_source" not in usage
+    assert usage["total_tokens"] == 1132

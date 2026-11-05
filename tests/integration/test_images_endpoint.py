@@ -266,7 +266,7 @@ def test_images_still_served_when_the_inline_cost_cannot_be_attached(
         patch(
             "gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=_mock_images_response()
         ),
-        patch("gateway.api.routes.images.InferenceService.images_response", side_effect=ValueError("bad cost")),
+        patch("gateway.services.inference._passthrough_responses._inline_cost", side_effect=ValueError("bad cost")),
         patch("gateway.api.routes.images.record_inline_cost_settlement") as settlement,
     ):
         resp = client.post(
