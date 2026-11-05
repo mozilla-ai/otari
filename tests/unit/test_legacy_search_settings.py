@@ -376,3 +376,12 @@ def test_without_the_stored_tools_a_configured_tool_inheriting_is_still_named(
 
     logged = [record.getMessage() for record in caplog.records]
     assert any("search_tools.local in the configuration file inherits web_search_url" in line for line in logged)
+
+
+def test_converting_beside_a_tool_that_cannot_run_moves_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    config = GatewayConfig(
+        web_search_url=_URL, web_search_default_tool="none", search_tools={"exa": {"provider": "exa"}}
+    )
+    logged = _logged_for(caplog, config)
+    assert "converts it into a stored search tool named searxng" in logged
+    assert "refuses to start" not in logged

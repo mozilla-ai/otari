@@ -118,13 +118,13 @@ def _requires_key(provider: str) -> bool:
 
 
 def unnamed_direct_search_tool(config: ToolSettings) -> str | None:
-    """The search instance a direct search that names none runs on, or ``None`` when it is refused for want of one."""
-    instances = effective_search_instances(config)
-    if not instances:
-        return None
+    """The search instance a direct search that names none runs on, or ``None`` when that search is refused.
+
+    It is refused when there is no instance to pick, or when the one picked cannot run.
+    """
     try:
-        return _default_instance(config, instances)
-    except SearchToolSelectionError:
+        return pick_direct_search_instance(config, None).name
+    except (SearchToolSelectionError, SearchToolMisconfiguredError):
         return None
 
 
