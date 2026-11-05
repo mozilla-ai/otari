@@ -35,7 +35,6 @@ from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolRepository
 from gateway.schemas.tools import SearchProviderOptionSchema
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tools import reset_search_tool_cache
 from gateway.services.tools._web_search import in_loop_default
@@ -613,16 +612,12 @@ def test_stored_tool_is_immediately_dispatchable(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
     """The whole point of issue #601: a dashboard-added tool serves /api/v1/search."""
-    assert _create(client, master_key_header).status_code == 201
-    outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="Example")])
-    mock = AsyncMock(return_value=outcome)
-    with patch("gateway.services.search_backend.run_search", mock):
-        resp = client.post(f"{API_ROOT}/search/local", json={"query": "otari"}, headers=api_key_header)
+    hits = {"hits": [{"url": "https://example.com", "title": "Example"}]}
+    assert _create(client, master_key_header, provider="fake", api_base=None, options=hits).status_code == 201
+    resp = client.post(f"{API_ROOT}/search/local", json={"query": "otari"}, headers=api_key_header)
     assert resp.status_code == 200, resp.text
     assert resp.json()["search_tool"] == "local"
-    dispatched = mock.call_args.args[0]
-    assert dispatched.provider == "searxng"
-    assert dispatched.api_base == "http://searxng:8080"
+    assert [result["url"] for result in resp.json()["results"]] == ["https://example.com"]
 
 
 @pytest.fixture

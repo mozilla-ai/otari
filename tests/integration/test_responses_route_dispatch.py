@@ -9,7 +9,7 @@ string — the Responses API doesn't use the Anthropic-style error envelope).
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -438,15 +438,16 @@ def test_code_execution_dispatches_through_sandbox_backend(
 
 
 @pytest.mark.parametrize("tool_type", ["otari_web_search", "otari_web_fetch"])
-def test_managed_web_tool_dispatches_through_web_retrieval_backend(
+def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
     tool_type: str,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    serve_search_on_fake()
 
     pool_seen: list[Any] = []
 
@@ -456,17 +457,16 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
         pool_seen.append(pool)
         return _response()
 
-    fake_backend = AsyncMock()
-    fake_backend.purpose_hints = lambda: []
+    search_backend, fetch_backend = AsyncMock(), AsyncMock()
+    search_backend.purpose_hints = fetch_backend.purpose_hints = lambda: []
 
-    fake_builder_result = AsyncMock(
-        __aenter__=AsyncMock(return_value=fake_backend),
-        __aexit__=AsyncMock(return_value=None),
-    )
+    def opened(backend: Any) -> Any:
+        return AsyncMock(__aenter__=AsyncMock(return_value=backend), __aexit__=AsyncMock(return_value=None))
 
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[opened(search_backend)]),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=opened(fetch_backend)),
     ):
         resp = client.post(
             f"{API_ROOT}/responses",
@@ -479,13 +479,15 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
         )
 
     assert resp.status_code == 200, resp.text
-    assert pool_seen == [fake_backend]
+    # The search runs on its instance's backend, and a fetch alone on the shared one.
+    served = search_backend if tool_type == "otari_web_search" else fetch_backend
+    assert pool_seen == [served]
 
 
 def test_web_search_max_uses_reaches_the_responses_tool_loop(
     client: TestClient,
     api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The cap the caller declared arrives at this format's loop, by value.
 
@@ -494,7 +496,7 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
     the adapter's ``use_budget`` plumbing is only reachable through the route,
     so the unit tests that call the loop functions directly cannot cover it.
     """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    serve_search_on_fake()
 
     budgets_seen: list[Any] = []
 
@@ -519,7 +521,7 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
 
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[fake_builder_result]),
     ):
         resp = client.post(
             f"{API_ROOT}/responses",
