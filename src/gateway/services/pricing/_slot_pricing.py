@@ -12,7 +12,15 @@ an operator's price and a catalog price read alike.
 from collections.abc import Mapping
 from decimal import Decimal
 
-from gateway.core.metered_pricing import Direction, UnitRate, charge_unit, quantize_cost, slot_price, unit_rate
+from gateway.core.metered_pricing import (
+    Direction,
+    UnitRate,
+    charge_unit,
+    quantize_cost,
+    slot_price,
+    unit_rate,
+    web_search_rate,
+)
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing._charge import UsageCharge
 from gateway.types.models_dev import parse_pricing
@@ -41,6 +49,14 @@ def slot_rate(rate: ModelPricing | None, modality: str, direction: Direction) ->
     pricing, _ = parse_pricing(rate.rates, units=PRICE_UNITS, path="rates")
     price = slot_price(pricing, modality, direction)
     return None if price is None else unit_rate(price)
+
+
+def search_rate(rate: ModelPricing | None) -> UnitRate | None:
+    """The price ``rate``'s block gives a web search, USD per thousand searches, or ``None`` when it gives none."""
+    if rate is None or not rate.rates:
+        return None
+    pricing, _ = parse_pricing(rate.rates, units=PRICE_UNITS, path="rates")
+    return web_search_rate(pricing)
 
 
 def estimate_slot_cost(

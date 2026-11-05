@@ -16,7 +16,8 @@ from decimal import Decimal
 from typing import NamedTuple
 
 from gateway.core.metered_pricing import quantize_cost
-from gateway.models.pricing import PriceSource
+from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.services.pricing._slot_pricing import search_rate
 from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     ORGANIZATION_KEY_LABEL_PREFIX,
@@ -44,6 +45,24 @@ class ToolRate(NamedTuple):
     #: True when an instance's rate is stored under its old model-kind
     #: ``<provider>:<instance>`` key, the second spelling of its own.
     old_key: bool = False
+
+
+class ModelSearchRate(NamedTuple):
+    """What a model's own rate says a search its provider runs costs, USD per search, and where the rate came from."""
+
+    unit_rate: Decimal
+    source: PriceSource
+
+
+def model_search_rate(rate: ModelPricing | None, source: PriceSource) -> ModelSearchRate | None:
+    """The per-search rate ``rate``'s block gives, or ``None`` when it prices no web search.
+
+    The catalog prices a provider's search beside the model, per thousand
+    searches, so a search the provider ran is priced from the model's own rate
+    where the operator priced no ``<provider>:web_search`` row.
+    """
+    found = search_rate(rate)
+    return None if found is None else ModelSearchRate(found.cost(1), source)
 
 
 class ToolRateLookup(NamedTuple):
