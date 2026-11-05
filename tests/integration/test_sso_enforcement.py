@@ -629,6 +629,61 @@ async def test_resetting_a_password_is_refused_for_an_account_an_enforcing_organ
 
 
 # =============================================================================
+# Listing memberships under enforcement
+# =============================================================================
+
+
+async def test_memberships_listing_hides_an_organization_that_blocks_the_caller(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    other = await create_organization(async_db, slug="other")
+    member = await _member_with_email(
+        async_db, enforcing, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=other.id, user_id=member.id, role="member"
+    )
+    member.active_organization_id = other.id
+    async_db.add(member)
+    token = await _dashboard_session(async_db, member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    response = client.get(f"{API_ROOT}/organizations/me/memberships")
+
+    assert response.status_code == 200, response.text
+    slugs = {row["organization"]["slug"] for row in response.json()["data"]}
+    assert slugs == {"other"}
+
+
+async def test_memberships_listing_includes_an_organization_the_caller_is_linked_into(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    linked_member = await _member_with_email(
+        async_db, enforcing, role="member", email="li@acme.example", full_name="Li Linked"
+    )
+    connection = await _add_connection(async_db, enforcing.id, first_sign_in_at=datetime.now(UTC))
+    await _link_member(async_db, linked_member, connection)
+    token = await _dashboard_session(async_db, linked_member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    response = client.get(f"{API_ROOT}/organizations/me/memberships")
+
+    assert response.status_code == 200, response.text
+    slugs = {row["organization"]["slug"] for row in response.json()["data"]}
+    assert slugs == {"acme"}
+
+
+# =============================================================================
 # Switching enforcement on: live sessions
 # =============================================================================
 
