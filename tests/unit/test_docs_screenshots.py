@@ -27,6 +27,15 @@ _BOLD = re.compile(r"\*\*([^*]+)\*\*")
 _SPECS = sorted(_SPECS_DIR.glob("*.spec.ts"))
 
 
+def _reaches(term: str, source: str) -> bool:
+    """Whether a spec names the term as a string or a regular expression, or starts one with it.
+
+    A placeholder such as `<workspace>` stands for whatever the spec puts there.
+    """
+    body = r"[^\"/]*".join(re.escape(part) for part in re.split(r"<[^>]+>", term))
+    return re.search(r'(?:["/]|\^)' + body + r"(?!\w)", source) is not None
+
+
 def _captured() -> set[str]:
     return {name for spec in _SPECS for name in _CAPTURE.findall(spec.read_text(encoding="utf-8"))}
 
@@ -52,7 +61,7 @@ def test_steps_name_only_what_the_spec_reaches(spec: Path) -> None:
     source = spec.read_text(encoding="utf-8")
     steps = _STEP.findall(doc.read_text(encoding="utf-8"))
     terms = {term for step in steps for term in _BOLD.findall(step)}
-    unreached = sorted(term for term in terms if not re.search(f'["/]{re.escape(term)}["/]', source))
+    unreached = sorted(term for term in terms if not _reaches(term, source))
     assert not unreached, (
         f"{doc.relative_to(_ROOT)} names {unreached} in its steps, which {spec.name} never looks for. "
         "Either the dashboard's wording changed and the page should follow, or the spec should reach them."

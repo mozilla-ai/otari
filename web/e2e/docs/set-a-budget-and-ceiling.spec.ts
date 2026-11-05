@@ -3,7 +3,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
 
 import { authHeaders, expectOk, nav } from "../helpers"
-import { docScreenshot } from "./fixtures"
+import { call, docScreenshot, listed } from "./fixtures"
 
 const ADMIN = "dana@example.com"
 const ADMIN_PASSWORD = "docs-admin-password"
@@ -11,7 +11,7 @@ const BUDGET = "Engineering monthly"
 const CEILING = "Whole organization"
 
 /**
- * Sign in as an organization admin, which is who docs/budgets.md is written
+ * Sign in as an organization admin, which is who docs/set-a-budget-and-ceiling.md is written
  * for: the master key signs in as the deployment operator, and an operator's
  * Spend & budgets is the deployment-wide page instead (`BudgetsPage`).
  */
@@ -25,30 +25,22 @@ async function signInAsAdmin(page: Page): Promise<void> {
   const token = decodeURIComponent(
     /[?&]token=([^&]+)/.exec(accept_link)?.[1] ?? "",
   )
-  const accepted = await page.request.post(`${API_ROOT}/invitations/accept`, {
+  let accepted = await page.request.post(`${API_ROOT}/invitations/accept`, {
     data: { token, password: ADMIN_PASSWORD, terms_accepted: true },
   })
+  // On a database an earlier run used, the address already has this password,
+  // and an invitation may not set one again.
+  if (accepted.status() === 400) {
+    accepted = await page.request.post(`${API_ROOT}/invitations/accept`, {
+      data: { token, terms_accepted: true },
+    })
+  }
   await expectOk(accepted, "accept the invitation")
   await page.goto("/")
   await page.getByLabel("Email").fill(ADMIN)
   await page.getByLabel("Password").fill(ADMIN_PASSWORD)
   await page.getByRole("button", { name: "Sign in" }).click()
   await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible()
-}
-
-async function listed<T>(page: Page, path: string): Promise<T[]> {
-  const response = await page.request.get(`${API_ROOT}${path}`, {
-    headers: authHeaders,
-  })
-  await expectOk(response, `list ${path}`)
-  return ((await response.json()) as { data: T[] }).data
-}
-
-async function remove(page: Page, path: string): Promise<void> {
-  const response = await page.request.delete(`${API_ROOT}${path}`, {
-    headers: authHeaders,
-  })
-  await expectOk(response, `delete ${path}`)
 }
 
 /**
@@ -63,7 +55,7 @@ async function cleanUp(page: Page): Promise<void> {
     `${base}/spend-ceilings`,
   )) {
     if (ceiling.name === CEILING) {
-      await remove(page, `${base}/spend-ceilings/${ceiling.id}`)
+      await call(page, "DELETE", `${base}/spend-ceilings/${ceiling.id}`)
     }
   }
   for (const budget of await listed<Named & { budget_id: string }>(
@@ -71,7 +63,7 @@ async function cleanUp(page: Page): Promise<void> {
     `${base}/budgets`,
   )) {
     if (budget.name === BUDGET) {
-      await remove(page, `${base}/budgets/${budget.budget_id}`)
+      await call(page, "DELETE", `${base}/budgets/${budget.budget_id}`)
     }
   }
   for (const member of await listed<{
@@ -79,13 +71,15 @@ async function cleanUp(page: Page): Promise<void> {
     organization_member_id: string
   }>(page, `${base}/members?search=${encodeURIComponent(ADMIN)}`)) {
     if (member.email === ADMIN) {
-      await remove(page, `${base}/members/${member.organization_member_id}`)
+      await call(
+        page,
+        "DELETE",
+        `${base}/members/${member.organization_member_id}`,
+      )
     }
   }
 }
 
-// docs/budgets.md, "Create a budget and a spend ceiling" and "Check a budget's
-// status".
 test("create a budget and a spend ceiling", async ({ page }) => {
   try {
     await signInAsAdmin(page)
@@ -99,6 +93,10 @@ test("create a budget and a spend ceiling", async ({ page }) => {
     await expect(
       budgetDialog.getByRole("button", { name: /Resets/ }),
     ).toBeVisible()
+    await budgetDialog
+      .getByRole("button", { name: "Token and request limits" })
+      .click()
+    await expect(budgetDialog.getByLabel("Token limit")).toBeVisible()
     await docScreenshot(budgetDialog, "budgets-add-budget")
     await budgetDialog.getByRole("button", { name: "Add budget" }).click()
     await expect(budgetDialog).toBeHidden()

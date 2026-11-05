@@ -147,7 +147,7 @@ export default defineConfig({
       // dropped from the run silently, with no warning and a green exit.
       // The screenshot suite is excluded because it has its own six projects
       // below; without this it would also run here, once, unthemed.
-      testIgnore: [/dashboard\.spec\.ts/, /screenshots\//, /docs\//],
+      testIgnore: [/dashboard\.spec\.ts/, /e2e\/screenshots\//, /e2e\/docs\//],
       dependencies: ["seed"],
       use: { ...devices["Desktop Chrome"] },
     },

@@ -29,10 +29,6 @@ also has to fit the organization's [balance](billing.md#budgets-are-a-different-
    cap one provider only, the **Budget** to use, and an optional **Name**. Click
    **Add ceiling**.
 
-![The New budget dialog, with a name and a limit of 500 USD.](assets/screenshots/budgets-add-budget.png)
-
-![The New spend ceiling dialog, capping the whole organization with that budget.](assets/screenshots/budgets-add-ceiling.png)
-
 Requests matching the ceiling count toward its budget. When the budget is used
 up, new matching requests are refused until the next reset. Requests already
 running finish normally.
@@ -47,8 +43,6 @@ duration instead of a calendar period; the fields are in
 
 **Spend & budgets** shows each budget's spend this period against its limit,
 and marks a budget once it passes 80% of it and once it is used up.
-
-![Spend & budgets, listing one budget and the spend ceiling that holds it.](assets/screenshots/budgets-spend-and-budgets.png)
 
 A refused request, and the headers it carries, are described in
 [Refusals and `Retry-After`](#refusals-and-retry-after).
