@@ -254,9 +254,6 @@ export function WebSearchPage() {
             dialog.tool.name ===
             (dialog.tool.kind === "search" ? searchDefault : fetchDefault)
           }
-          hasOldKeyPrice={
-            dialog.tool.price.state === "own" && dialog.tool.price.oldKey
-          }
           onClose={close}
         />
       ) : null}

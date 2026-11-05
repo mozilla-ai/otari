@@ -2,7 +2,7 @@ import { useState } from "react"
 
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-import { useDeletePricing } from "@/shared/api/pricing"
+import { useDeletePricing, usePricesInEffect } from "@/shared/api/pricing"
 import { useDeleteSearchTool } from "@/shared/api/tools"
 
 import { oldPriceKey, type WebToolRow } from "./webTools"
@@ -10,22 +10,24 @@ import { oldPriceKey, type WebToolRow } from "./webTools"
 // Removing a tool leaves two things keyed by its name: its price, and its place
 // in the search tool access lists of API keys and users. A later tool of the
 // same name would inherit both. The price is offered for deletion here, checked.
-// A price under the tool's old `<provider>:<name>` key is only named: for a
-// provider that also serves models, such as DeepSeek, that key can be a model's
-// price. The access lists are only named, since nothing here can edit them.
+// A price under the tool's old `<provider>:<name>` key, read when the dialog
+// opens, is only named: for a provider that also serves models, such as
+// DeepSeek, that key can be a model's price. The access lists are only named,
+// since nothing here can edit them.
 export function RemoveWebToolDialog({
   tool,
   isDefault,
-  hasOldKeyPrice,
   onClose,
 }: {
   tool: WebToolRow
   /** Whether a default setting names the tool. */
   isDefault: boolean
-  /** Whether the price in force is stored under the tool's old `<provider>:<name>` key. */
-  hasOldKeyPrice: boolean
   onClose: () => void
 }) {
+  const [oldKeyRead] = usePricesInEffect([
+    { kind: "model", modelKey: oldPriceKey(tool) },
+  ])
+  const hasOldKeyPrice = Boolean(oldKeyRead?.data)
   const remove = useDeleteSearchTool()
   const deletePrice = useDeletePricing()
   // Not checked for a tool that overrides config.yml's: the entry it gives way

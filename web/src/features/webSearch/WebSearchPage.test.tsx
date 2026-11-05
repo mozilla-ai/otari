@@ -315,6 +315,14 @@ const reads = (requests: Request[], path: string) =>
       ),
   )
 
+const listingReads = (requests: Request[]) =>
+  requests.filter(
+    (request) =>
+      request.method === "GET" &&
+      new URL(request.url, "http://localhost").pathname ===
+        `${API_ROOT}/search-tools`,
+  )
+
 const writes = (requests: Request[], method: string, path: string) =>
   requests.filter(
     (request) =>
@@ -590,26 +598,42 @@ describe("WebSearchPage", () => {
     )
   })
 
-  it("names, and keeps, the price under a removed tool's old key", async () => {
-    const user = userEvent.setup()
-    const requests = mockApi({ searchTools: withExaPrice(0.004, "old_key") })
-    await renderPage()
+  it.each([
+    ["when it is the tool's price", withExaPrice(0.004, "old_key")],
+    ["beside the tool's own price", SEARCH_TOOLS],
+  ])(
+    "names, and keeps, the price under a removed tool's old key %s",
+    async (_, searchTools) => {
+      const user = userEvent.setup()
+      const requests = mockApi({
+        searchTools,
+        rates: {
+          "model:otari:web_search": rate("otari:web_search", 0.01),
+          "model:exa:exa": rate("exa:exa", 0.004),
+        },
+      })
+      await renderPage()
 
-    await user.click(await screen.findByRole("button", { name: "Remove exa" }))
-    const confirm = await screen.findByRole("alertdialog")
-    expect(
-      await within(confirm).findByText(/The price stored under exa:exa stays/),
-    ).toBeInTheDocument()
-    await user.click(
-      within(confirm).getByRole("button", { name: "Remove permanently" }),
-    )
+      await user.click(
+        await screen.findByRole("button", { name: "Remove exa" }),
+      )
+      const confirm = await screen.findByRole("alertdialog")
+      expect(
+        await within(confirm).findByText(
+          /The price stored under exa:exa stays/,
+        ),
+      ).toBeInTheDocument()
+      await user.click(
+        within(confirm).getByRole("button", { name: "Remove permanently" }),
+      )
 
-    await waitFor(() =>
-      expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
-    )
-    // For a provider that also serves models, that key can be a model's price.
-    expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
-  })
+      await waitFor(() =>
+        expect(writes(requests, "DELETE", "/pricing/exa")).toHaveLength(1),
+      )
+      // For a provider that also serves models, that key can be a model's price.
+      expect(writes(requests, "DELETE", "/pricing/exa%3Aexa")).toHaveLength(0)
+    },
+  )
 
   it("configures a stored tool by sending only what changed", async () => {
     const user = userEvent.setup()
@@ -822,7 +846,7 @@ describe("WebSearchPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Edit the price of local" }),
     )
-    const listed = reads(requests, "/search-tools").length
+    const listed = listingReads(requests).length
     await user.type(await screen.findByLabelText(/Price per call, USD/), "0.07")
     await user.click(screen.getByRole("button", { name: "Save" }))
 
@@ -838,7 +862,7 @@ describe("WebSearchPage", () => {
     )
     // The listing carries the price, so it is read again.
     await waitFor(() =>
-      expect(reads(requests, "/search-tools").length).toBeGreaterThan(listed),
+      expect(listingReads(requests).length).toBeGreaterThan(listed),
     )
   })
 
