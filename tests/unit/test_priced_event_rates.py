@@ -1,5 +1,6 @@
 """The per-token rates a priced event carries, which a tool call's cost estimate is read with."""
 
+import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -7,7 +8,7 @@ import pytest
 
 from gateway.core.metered_pricing import billable_usage
 from gateway.models.pricing import ModelPricing
-from gateway.services.external_usage_service import _rates
+from gateway.services.external_usage_service import ExternalUsageEvent, _build_row, _rates
 
 
 @pytest.mark.parametrize(
@@ -54,3 +55,27 @@ def test_an_imported_event_is_priced_at_the_rules_of_its_own_time() -> None:
     after = _rates(pricing, usage, datetime(2027, 1, 2, tzinfo=UTC))
 
     assert (before["input"], after["input"]) == (Decimal(3), Decimal(6))
+
+
+def test_an_imported_row_names_the_rules_that_changed_each_line() -> None:
+    new_year = {"date": {"gte": "2027-01-01"}}
+    pricing = ModelPricing(
+        model_key="anthropic:claude-haiku-4-5",
+        input_price_per_million=Decimal(3),
+        output_price_per_million=Decimal(15),
+        unit="token",
+        rates={"text": {"input": {"price": 3, "overrides": [{"when": new_year, "price": 6}]}, "output": {"price": 15}}},
+    )
+    event = ExternalUsageEvent(
+        source_event_id="e1",
+        timestamp=datetime(2027, 1, 2, tzinfo=UTC),
+        provider="anthropic",
+        model="claude-haiku-4-5",
+        input_tokens=100,
+        output_tokens=10,
+    )
+
+    row = _build_row("claude-code", "user-1", event, pricing, None, uuid.uuid4())
+
+    assert row.pricing_breakdown is not None
+    assert {line["meter"]: line.get("rules") for line in row.pricing_breakdown} == {"input": [new_year], "output": None}

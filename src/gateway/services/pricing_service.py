@@ -1192,7 +1192,9 @@ def _first_tool_rate(
                 rate_key, flat_request_cost(deployment[form]), "deployment", old_key=_is_old_key(rate_key, form[0])
             )
     if model_search_rate is not None and any(is_provider_web_search_key(key) for key in lookup.rate_keys):
-        return ToolRate(lookup.rate_keys[0], model_search_rate.unit_rate, model_search_rate.source)
+        return ToolRate(
+            lookup.rate_keys[0], model_search_rate.unit_rate, model_search_rate.source, rules=model_search_rate.rules
+        )
     if default_pricing_enabled():
         for rate_key in lookup.rate_keys:
             list_price = PROVIDER_TOOL_LIST_PRICES.get(rate_key) if isinstance(rate_key, str) else None

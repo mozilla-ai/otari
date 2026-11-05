@@ -1477,12 +1477,14 @@ async def run_decision(
         )
         cost: Decimal | None = None
         if pricing is not None:
-            cost, row.billing_meters, row.pricing_breakdown = price_billable_usage(
-                apply_rules(pricing, PriceFacts(context=outcome.input_tokens, at=request_started(row))).rate,
+            applied = apply_rules(pricing, PriceFacts(context=outcome.input_tokens, at=request_started(row)))
+            cost, row.billing_meters, lines = price_billable_usage(
+                applied.rate,
                 billable_usage(
                     input_tokens=outcome.input_tokens, output_tokens=outcome.output_tokens, cache_tokens_included=True
                 ),
             )
+            row.pricing_breakdown = applied.explain(lines)
         elif outcome.charge is not None:
             cost = outcome.charge
         elif quote.charge is not None:
