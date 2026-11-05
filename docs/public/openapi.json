@@ -7181,6 +7181,12 @@
             "description": "Where this deployment's public website lives. Set, the logo on the pages a visitor reaches without an account links to it; null, it links to the public catalog where public_catalog is true, and is not a link otherwise. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Site Url"
           },
+          "star_prompt_enabled": {
+            "default": false,
+            "description": "Whether the dashboard may invite an organization's owners and admins to star Otari on GitHub (the star_prompt_enabled setting). The dashboard decides when, from usage it already reads, and contacts nothing outside this deployment to do it.",
+            "title": "Star Prompt Enabled",
+            "type": "boolean"
+          },
           "surfaces": {
             "description": "Management API groups this deployment serves, sorted, which is what its dashboard pages gate on: a fixed set plus one for each enabled feature. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis.",
             "items": {

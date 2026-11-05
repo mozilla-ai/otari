@@ -6,7 +6,10 @@ import type { RefObject } from "react"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
-import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
+import {
+  OTARI_COMMUNITY_URL,
+  OTARI_GITHUB_URL,
+} from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -67,6 +70,17 @@ export function TopBarActions({
         className={ACTION}
       >
         Community
+      </a>
+      {/* The repository every deployment runs, named plainly. A destination
+          like its neighbors, not an ask: the invitation to star it is the
+          Overview's, once, and an operator can withdraw that one. */}
+      <a
+        href={OTARI_GITHUB_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={ACTION}
+      >
+        GitHub
       </a>
       <WalletNavSlot />
     </div>

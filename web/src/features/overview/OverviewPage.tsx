@@ -35,6 +35,7 @@ import {
   errorRateHealth,
   providerHealthStatus,
 } from "@/features/overview/overview"
+import { StarPrompt } from "@/features/overview/StarPrompt"
 import { useHostedProviders } from "@/shared/api/hostedProviders"
 import { useModels } from "@/shared/api/models"
 import {
@@ -377,6 +378,20 @@ function OperatorStatus() {
     none: "No budgets configured",
     noneCapped: "No capped budgets",
   })
+  const attention: AttentionInputs = {
+    providerHealth: providerHealthStatus(health.data),
+    healthy: health.data?.healthy ?? 0,
+    degraded: health.data?.degraded ?? 0,
+    total: health.data?.total ?? 0,
+    budget,
+    errStatus: err.status,
+    errRate: err.rate,
+    errorSearch: today.search,
+  }
+  // The strip evaluates health, budgets, and error rate only after all
+  // three load successfully, avoiding transient or false alerts.
+  const isReady = health.isSuccess && summary.isSuccess && today.query.isSuccess
+  const hasFailed = health.isError || summary.isError || today.query.isError
 
   return (
     <>
@@ -391,19 +406,18 @@ function OperatorStatus() {
       {/* The query that decides whether this is a getting-started page, so its
           failure is the most load-bearing thing to tell the operator about. */}
       <ErrorBanner error={providers.error} />
-      <AttentionStrip
-        providerHealth={providerHealthStatus(health.data)}
-        healthy={health.data?.healthy ?? 0}
-        degraded={health.data?.degraded ?? 0}
-        total={health.data?.total ?? 0}
-        budget={budget}
-        errStatus={err.status}
-        errRate={err.rate}
-        errorSearch={today.search}
-        // The strip evaluates health, budgets, and error rate only after all
-        // three load successfully, avoiding transient or false alerts.
-        isReady={health.isSuccess && summary.isSuccess && today.query.isSuccess}
-        hasFailed={health.isError || summary.isError || today.query.isError}
+      <AttentionStrip {...attention} isReady={isReady} hasFailed={hasFailed} />
+      {/* Last, and only on a quiet page: the operator installed this gateway,
+          so they are who the invitation is for, and a failed provider read is
+          something to report above, not a moment to ask. */}
+      <StarPrompt
+        canAsk
+        isQuiet={
+          isReady &&
+          !hasFailed &&
+          !providers.isError &&
+          attentionProblems(attention).length === 0
+        }
       />
     </>
   )
@@ -443,6 +457,19 @@ function OrganizationStatus() {
       noneCapped: "No ceiling caps spend",
     },
   )
+  const attention: AttentionInputs = {
+    providerHealth: "neutral",
+    healthy: 0,
+    degraded: 0,
+    total: 0,
+    budget: ceilingHealth,
+    budgetNoun: "spend ceiling",
+    errStatus: err.status,
+    errRate: err.rate,
+    errorSearch: today.search,
+  }
+  const isReady = today.query.isSuccess && (!managesSpend || summary.isSuccess)
+  const hasFailed = today.query.isError || (managesSpend && summary.isError)
 
   return (
     <>
@@ -462,18 +489,15 @@ function OrganizationStatus() {
           action={managesSpend ? "organization-provider-key" : null}
         />
       ) : null}
-      <AttentionStrip
-        providerHealth="neutral"
-        healthy={0}
-        degraded={0}
-        total={0}
-        budget={ceilingHealth}
-        budgetNoun="spend ceiling"
-        errStatus={err.status}
-        errRate={err.rate}
-        errorSearch={today.search}
-        isReady={today.query.isSuccess && (!managesSpend || summary.isSuccess)}
-        hasFailed={today.query.isError || (managesSpend && summary.isError)}
+      <AttentionStrip {...attention} isReady={isReady} hasFailed={hasFailed} />
+      {/* Owners and admins only: a member or viewer did not choose this
+          gateway, and on a company's own deployment an invitation to star the
+          vendor's repository would read as an advertisement. */}
+      <StarPrompt
+        canAsk={managesSpend}
+        isQuiet={
+          isReady && !hasFailed && attentionProblems(attention).length === 0
+        }
       />
     </>
   )
@@ -539,19 +563,8 @@ function NeutralStrip({ text }: { text: string }) {
   )
 }
 
-function AttentionStrip({
-  providerHealth,
-  healthy,
-  degraded,
-  total,
-  budget,
-  budgetNoun = "budget",
-  errStatus,
-  errRate,
-  errorSearch,
-  isReady,
-  hasFailed,
-}: {
+/** What the attention strip judges, apart from whether its sources answered. */
+interface AttentionInputs {
   providerHealth: "ok" | "warn" | "alert" | "neutral"
   healthy: number
   degraded: number
@@ -563,23 +576,33 @@ function AttentionStrip({
   errRate: number | null
   /** The request log's query for the failures the rate counts. */
   errorSearch: DashboardSearch
-  isReady: boolean
-  hasFailed: boolean
-}) {
-  // A failed source deserves a visible status message; while loading, wait for
-  // actionable information instead of reserving space for a transient banner.
-  if (hasFailed) {
-    return <NeutralStrip text="Some status data could not be loaded." />
-  }
-  if (!isReady) {
-    return null
-  }
+}
 
-  const problems: {
-    text: string
-    to: LinkProps["to"]
-    search?: LinkProps["search"]
-  }[] = []
+interface AttentionProblem {
+  text: string
+  to: LinkProps["to"]
+  search?: LinkProps["search"]
+}
+
+/**
+ * Everything the strip lists, in its order.
+ *
+ * Its own function so the star invitation below the strip asks the question the
+ * strip answers, rather than a second reading of the same thresholds that could
+ * drift from it: the invitation stays away exactly when this list is not empty.
+ */
+function attentionProblems({
+  providerHealth,
+  healthy,
+  degraded,
+  total,
+  budget,
+  budgetNoun = "budget",
+  errStatus,
+  errRate,
+  errorSearch,
+}: AttentionInputs): AttentionProblem[] {
+  const problems: AttentionProblem[] = []
   if ((providerHealth === "warn" || providerHealth === "alert") && total > 0) {
     // A degraded provider answers no model listing but is not down, so it is
     // reported separately rather than folded into "unreachable" (issue #447).
@@ -616,6 +639,27 @@ function AttentionStrip({
     })
   }
 
+  return problems
+}
+
+function AttentionStrip({
+  isReady,
+  hasFailed,
+  ...inputs
+}: AttentionInputs & {
+  isReady: boolean
+  hasFailed: boolean
+}) {
+  // A failed source deserves a visible status message; while loading, wait for
+  // actionable information instead of reserving space for a transient banner.
+  if (hasFailed) {
+    return <NeutralStrip text="Some status data could not be loaded." />
+  }
+  if (!isReady) {
+    return null
+  }
+
+  const problems = attentionProblems(inputs)
   if (problems.length === 0) {
     return null
   }

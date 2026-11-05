@@ -35,6 +35,29 @@ export const Warning: Story = {
   },
 }
 
+/**
+ * `onDismiss` adds a close control at the row's end. Only for a line that is not
+ * a fact about the deployment, so putting it away hides nothing still true; the
+ * caller decides what dismissal means and remembers it.
+ */
+export const Dismissible: Story = {
+  args: {
+    onDismiss: () => undefined,
+    dismissLabel: "Dismiss the invitation to star Otari",
+    children: (
+      <>
+        Otari is open source. A star helps other developers find it.{" "}
+        <a
+          href="https://github.com/mozilla-ai/otari"
+          className="text-link underline underline-offset-2 hover:decoration-2"
+        >
+          Star Otari on GitHub
+        </a>
+      </>
+    ),
+  },
+}
+
 export const BothTones: Story = {
   render: () => (
     <div className="flex w-[36rem] flex-col gap-3">

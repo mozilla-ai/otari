@@ -73,4 +73,21 @@ export const TELEMETRY_EVENTS = {
    * existing name rather than inventing a second one.
    */
   CHECKOUT_CANCELLED: "Checkout Cancelled",
+
+  /**
+   * The Overview's one-line invitation to star Otari on GitHub, put in front of
+   * an owner or admin (`StarPrompt.tsx`).
+   *
+   * Fired by the base dashboard and recorded by nothing in this build, like
+   * every other call site here: the base tracker is a no-op, so an OSS gateway
+   * reports none of the three anywhere. They are named so a superset build that
+   * does record can measure the invitation it already shows. New to the
+   * vocabulary rather than mirrored from the platform's list, so the platform
+   * adds these three strings to its `EVENTS` as written here.
+   */
+  STAR_PROMPT_SHOWN: "Star Prompt Shown",
+  /** Its link to the repository followed. The invitation is retired with it. */
+  STAR_PROMPT_CLICKED: "Star Prompt Clicked",
+  /** Its close control pressed. Retired too, and never offered again here. */
+  STAR_PROMPT_DISMISSED: "Star Prompt Dismissed",
 } as const

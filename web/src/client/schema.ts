@@ -11145,6 +11145,12 @@ export interface components {
              */
             site_url: string | null;
             /**
+             * Star Prompt Enabled
+             * @description Whether the dashboard may invite an organization's owners and admins to star Otari on GitHub (the star_prompt_enabled setting). The dashboard decides when, from usage it already reads, and contacts nothing outside this deployment to do it.
+             * @default false
+             */
+            star_prompt_enabled: boolean;
+            /**
              * Surfaces
              * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on: a fixed set plus one for each enabled feature. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis.
              */

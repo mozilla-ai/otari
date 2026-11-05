@@ -178,6 +178,20 @@ describe("AccountMenu", () => {
     expect(link).toHaveAttribute("target", "_blank")
   })
 
+  it("keeps the repository reachable on a phone, right after Community", async () => {
+    mockCaller(OPERATOR)
+    await openMenu()
+
+    const link = await screen.findByRole("link", { name: "GitHub" })
+    expect(link).toHaveAttribute("href", "https://github.com/mozilla-ai/otari")
+    expect(link).toHaveAttribute("target", "_blank")
+    // From md up the top bar carries it, beside Community.
+    expect(link).toHaveClass("md:hidden")
+    expect(
+      screen.getByRole("link", { name: "Community" }).nextElementSibling,
+    ).toBe(link)
+  })
+
   it("names no legal page a deployment has not published", async () => {
     mockCaller(OPERATOR)
     await openMenu()

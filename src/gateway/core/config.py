@@ -797,6 +797,16 @@ class GatewayConfig(
             "otherwise. A link target an operator configured, held to the same bar as docs_url."
         ),
     )
+    star_prompt_enabled: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=True,
+        description=(
+            "Offer organization owners and admins a one-line invitation on the Overview page "
+            "to star Otari on GitHub, once the gateway has served 25 successful requests on two "
+            "or more days. Dismissed for good in that browser by either of its controls. The "
+            "dashboard makes no request to GitHub to show it. Turn it off for a deployment whose "
+            "users did not choose Otari themselves. Requires restart."
+        ),
+    )
     ui_base_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
         default=None,
         description=(

@@ -7,6 +7,10 @@ port: 8000
 master_key: "otari-demo-key"
 # Show pricing/usage without gating requests behind the pricing requirement.
 require_pricing: false
+# The README GIF is a tour of the product on the page that hosts the repository,
+# and the seed's 60 days of traffic would earn the GitHub star invitation on the
+# Overview. Off, so the tour shows the dashboard rather than an ask.
+star_prompt_enabled: false
 # Fail model discovery fast: the providers below without the mock upstream have
 # no live one, so the gateway falls back to each instance's declared `models:`
 # list and reports them healthy for the demo.

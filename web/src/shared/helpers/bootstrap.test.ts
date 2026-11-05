@@ -43,6 +43,7 @@ describe("normalizeBootstrap", () => {
       omitting(
         "mail_ready",
         "feedback_enabled",
+        "star_prompt_enabled",
         "federation_member_rules",
         "passkeys_ready",
         "maintenance_mode",
@@ -53,6 +54,7 @@ describe("normalizeBootstrap", () => {
     )
 
     expect(completed.feedback_enabled).toBe(false)
+    expect(completed.star_prompt_enabled).toBe(false)
     expect(completed.federation_member_rules).toBe(false)
     expect(completed.mail_ready).toBe(false)
     expect(completed.passkeys_ready).toBe(false)

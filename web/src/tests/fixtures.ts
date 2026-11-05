@@ -204,6 +204,9 @@ export function bootstrap(
     oauth_providers: [],
     mail_ready: false,
     feedback_enabled: true,
+    // On, the setting default. Nothing shows it unless the usage it reads has
+    // earned it, which no fixture summary does without saying so.
+    star_prompt_enabled: true,
     // Off, the setting default: the workload identity tests turn it on.
     federation_member_rules: false,
     // Off by default, matching the config default; the public-catalog tests
