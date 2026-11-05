@@ -14180,6 +14180,8 @@ export interface components {
             } | null;
             /** Guardrails */
             guardrails?: components["schemas"]["GuardrailConfig"][] | null;
+            /** Inference Geo */
+            inference_geo?: string | null;
             /** Max Tokens */
             max_tokens: number;
             /** Max Tool Iterations */
@@ -20188,6 +20190,8 @@ export interface components {
             aspect_ratio?: string | null;
             /** First Frame */
             first_frame?: string | null;
+            /** Generate Audio */
+            generate_audio?: boolean | null;
             /** Last Frame */
             last_frame?: string | null;
             /** Model */
@@ -20200,6 +20204,8 @@ export interface components {
             reference_audios?: string[] | null;
             /** Reference Images */
             reference_images?: string[] | null;
+            /** Reference Videos */
+            reference_videos?: string[] | null;
             /** Resolution */
             resolution?: string | null;
             /** Seconds */

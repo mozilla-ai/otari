@@ -52,9 +52,11 @@ class PriceFacts:
     request's billable input in tokens, ``duration`` a length in seconds, and
     ``at`` when the request started; the clock keys (``date``, ``utc_days``,
     ``utc_hours``) are read from it, in UTC, and from now when it is ``None``.
-    ``input_video`` and ``websocket`` are false for a request Otari sends,
-    since nothing it sends through any-llm carries either, and ``None`` where
-    it cannot tell, as for an imported event: a rule naming one is then skipped.
+    ``input_video`` is whether a video request takes a reference video, and
+    ``websocket`` is false, since Otari sends nothing over one. Both are
+    ``None`` where Otari cannot tell, as for an imported event, and so is
+    ``generate_audio`` where a video request leaves its sound track to the
+    provider's default: a rule naming a key that is ``None`` is skipped.
     """
 
     context: int | None = None
@@ -67,6 +69,7 @@ class PriceFacts:
     at: datetime | None = None
     input_video: bool | None = False
     websocket: bool | None = False
+    generate_audio: bool | None = None
 
     def values(self) -> dict[str, object]:
         """The value of every condition key a fact answers, ``None`` where the request gives none."""
@@ -84,7 +87,7 @@ class PriceFacts:
             "utc_days": _DAYS[at.weekday()],
             "utc_hours": at.strftime("%H:%M"),
         }
-        flags = {"input_video": self.input_video, "websocket": self.websocket}
+        flags = {"input_video": self.input_video, "websocket": self.websocket, "generate_audio": self.generate_audio}
         values.update({key: flag for key, flag in flags.items() if flag is not None})
         return values
 

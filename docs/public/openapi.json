@@ -13126,6 +13126,17 @@
             ],
             "title": "Guardrails"
           },
+          "inference_geo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inference Geo"
+          },
           "max_tokens": {
             "title": "Max Tokens",
             "type": "integer"
@@ -26713,6 +26724,7 @@
           "aspect_ratio": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -26731,6 +26743,17 @@
               }
             ],
             "title": "First Frame"
+          },
+          "generate_audio": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generate Audio"
           },
           "last_frame": {
             "anyOf": [
@@ -26790,9 +26813,24 @@
             ],
             "title": "Reference Images"
           },
+          "reference_videos": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Videos"
+          },
           "resolution": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -26828,6 +26866,7 @@
           "size": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
