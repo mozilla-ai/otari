@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Collection
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Protocol, cast
 
 import idna
 
@@ -24,11 +24,18 @@ from gateway.exceptions.identity_exceptions import (
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import BlockedEmail, EmailAssertion, MailedLinkStatus, ProviderIdentity
-from gateway.models.tenancy import User
+from gateway.models.identity import (
+    OIDC_PROVIDER_PREFIX,
+    BlockedEmail,
+    EmailAssertion,
+    MailedLinkStatus,
+    ProviderIdentity,
+)
+from gateway.models.tenancy import OrganizationDomainRole, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
+from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy import (
@@ -104,6 +111,7 @@ class IdentityService:
         repositories: IdentityRepositories,
         *,
         identity_provider: IdentityProviderPort,
+        domain_claims: VerifiedDomainClaims,
         organizations: OrganizationService,
         sign_in_listener: SignInListener,
         session_ttl_hours: int,
@@ -112,14 +120,20 @@ class IdentityService:
         open_signup: bool,
         password_reset_expiry_hours: int,
     ) -> None:
-        """``terms_url`` is the terms the deployment publishes, or ``None`` where it publishes none."""
+        """``terms_url`` is the terms the deployment publishes, or ``None`` where it publishes none.
+
+        ``domain_claims`` looks up a verified email-domain claim, so an SSO identity's organization can
+        be resolved without this service importing another domain's repository.
+        """
         self._uow = uow
         self._blocked_emails = repositories.blocked_emails
+        self._connections = repositories.connections
         self._links = repositories.links
         self._passkeys = repositories.passkeys
         self._sessions = repositories.sessions
         self._users = repositories.users
         self._identity_provider = identity_provider
+        self._domain_claims = domain_claims
         self._organizations = organizations
         self._sign_in_listener = sign_in_listener
         self._session_ttl_hours = session_ttl_hours
@@ -133,7 +147,10 @@ class IdentityService:
 
         An identity linked to an account signs in as that account, and its password and verification stay as they are,
         unless its address is only vouched for: the sign-in then proves it, as a first sign-in does.
-        An identity with no link signs in as the account the identity provider policy returns, and is linked to it.
+        An identity with no link signs in as the account the identity provider policy returns, and is linked to it,
+        except an identity from one organization's own OIDC connection, which instead signs in to the one account
+        that organization's proven domain and connection admit, provisioned fresh on a first sign-in, and never
+        reaches the identity provider policy.
         An account holds at most one link for each provider.
         Where the deployment publishes terms, a sign-in that creates the account, or is the first way in to one
         nobody had claimed, needs ``terms_accepted`` and records it, as the signup form does.
@@ -144,7 +161,8 @@ class IdentityService:
             OAuthEmailNotVerifiedError: If the provider says the address is not verified.
             OAuthAccountLinkedElsewhereError: If the account the policy returns is linked to another identity
                 at the same provider.
-            OAuthIdentityUnknownError: If the account is deactivated or gone.
+            OAuthIdentityUnknownError: If the account is deactivated or gone, or no organization both proves
+                an OIDC identity's email domain and holds a connection to the issuer that authenticated it.
             OAuthIdentityLinkConflictError: If a concurrent sign-in linked the identity to another account first.
             TermsNotAcceptedError: If the sign-in would create or first claim an account without the published
                 terms. Nothing the sign-in staged is kept, including an organization the policy provisioned.
@@ -386,6 +404,9 @@ class IdentityService:
             password_removed = await self._prove_vouched_address(account)
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
 
+        if external.provider.startswith(OIDC_PROVIDER_PREFIX):
+            return await self._account_for_sso(external, label)
+
         resolution = await self._identity_provider.resolve(external)
         account = await self._active_account(resolution.identity.id, label)
         # A concurrent first sign-in can link this identity, or this account at the provider, after that lookup.
@@ -400,6 +421,34 @@ class IdentityService:
             )
             raise OAuthAccountLinkedElsewhereError(label)
         return replace(resolution, identity=account)
+
+    async def _account_for_sso(self, external: ProviderIdentity, label: str) -> IdentityResolution:
+        """Resolve a first sign-in from one organization's own OIDC connection, bypassing the identity provider port.
+
+        What makes the claimed address usable here is the organization's DNS proof of its domain, not the
+        issuer's own assertion about it. A tenant-supplied issuer can assert any address it likes, so the
+        assertion is not read, and ``trust_email_verified`` stays off for every connection.
+
+        Raises:
+            OAuthIdentityUnknownError: If no organization both proves the identity's email domain and holds a
+                connection to the issuer that authenticated it.
+
+        """
+        connection = await organization_for_sso_identity(
+            external, connections=self._connections, domains=self._domain_claims, now=datetime.now(UTC)
+        )
+        if connection is None:
+            raise OAuthIdentityUnknownError(label)
+        account = await self._organizations.provision_sso_tenancy(
+            organization_id=connection.organization_id,
+            full_name=external.full_name,
+            # NOTE: The column is a plain string. Every writer validates it against this Literal first.
+            default_role=cast(OrganizationDomainRole, connection.default_role),
+        )
+        account.oauth_provider = external.provider
+        self._users.stage(account)
+        await self._links.add(external, user_id=account.id)
+        return IdentityResolution(identity=account, new_account=True)
 
     async def _prove_vouched_address(self, account: User) -> bool:
         """Treat a sign-in through a provider link as proof of a vouched address, and say if a password went.

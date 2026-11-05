@@ -192,6 +192,7 @@ from gateway.services.tenancy import (
     MembershipListeners,
     OrganizationDomainService,
     OrganizationService,
+    VerifiedDomainLookup,
     organization_guardrail_runner,
 )
 from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
@@ -1672,17 +1673,22 @@ OrganizationGuardrailServiceDep = Annotated[OrganizationGuardrailService, Depend
 
 
 def get_identity_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     identity_provider: IdentityProviderPortDep,
-    organizations: OrganizationServiceDep,
 ) -> IdentityService:
-    """Build the identity service on the request's Unit of Work."""
+    """Build the identity service on the request's Unit of Work.
+
+    Its own organization service is built on the same Unit of Work, not the deployment's shared
+    read-only one, because provisioning an SSO sign-in's account writes through it.
+    """
     return IdentityService(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=identity_provider,
-        organizations=organizations,
+        domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
+        organizations=OrganizationService(db, membership_listener=None, uow=uow),
         sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
         session_ttl_hours=config.dashboard_session_ttl_hours,
         terms_url=config.terms_url,
