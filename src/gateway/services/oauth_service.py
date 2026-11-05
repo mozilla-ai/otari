@@ -343,26 +343,47 @@ def browser_token_for(flow_cookie: str | None, state: str) -> str | None:
 
 
 def apply_flow_cookie(
-    response: Response, flow_cookie: str | None, authorization: BrowserAuthorization, *, secure: bool
+    response: Response,
+    flow_cookie: str | None,
+    authorization: BrowserAuthorization,
+    *,
+    secure: bool,
+    cookie_name: str = FLOW_COOKIE_NAME,
+    cookie_path: str = FLOW_COOKIE_PATH,
 ) -> None:
     """Add ``authorization`` to the flows the browser has in flight, and write the cookie back.
 
-    The oldest flow is evicted once a browser holds more than
-    ``MAX_LIVE_FLOWS``.
+    The oldest flow is evicted once a browser holds more than ``MAX_LIVE_FLOWS``. ``cookie_name``
+    and ``cookie_path`` default to this module's own flow cookie; pass a different pair to scope
+    the cookie elsewhere.
     """
     flows = _live_flows(flow_cookie)
     flows[authorization.state] = authorization.browser_token
-    _write_flow_cookie(response, dict(list(flows.items())[-MAX_LIVE_FLOWS:]), secure=secure)
+    _write_flow_cookie(
+        response,
+        dict(list(flows.items())[-MAX_LIVE_FLOWS:]),
+        secure=secure,
+        cookie_name=cookie_name,
+        cookie_path=cookie_path,
+    )
 
 
-def drop_finished_flow(response: Response, flow_cookie: str | None, state: str, *, secure: bool) -> None:
+def drop_finished_flow(
+    response: Response,
+    flow_cookie: str | None,
+    state: str,
+    *,
+    secure: bool,
+    cookie_name: str = FLOW_COOKIE_NAME,
+    cookie_path: str = FLOW_COOKIE_PATH,
+) -> None:
     """Write the cookie back without ``state``, or delete it where that was the last flow.
 
-    A redeemed flow's token can buy nothing and must not sit in the browser for
-    the rest of the cookie's life.
+    A redeemed flow's token can buy nothing and must not sit in the browser for the rest of the
+    cookie's life. ``cookie_name`` and ``cookie_path`` default to this module's own flow cookie.
     """
     kept = {flow: token for flow, token in _live_flows(flow_cookie).items() if flow != state}
-    _write_flow_cookie(response, kept, secure=secure)
+    _write_flow_cookie(response, kept, secure=secure, cookie_name=cookie_name, cookie_path=cookie_path)
 
 
 def _live_flows(flow_cookie: str | None) -> dict[str, str]:
@@ -384,30 +405,32 @@ def _live_flows(flow_cookie: str | None) -> dict[str, str]:
     return {state: token for state, token in flows.items() if isinstance(state, str) and isinstance(token, str)}
 
 
-def _write_flow_cookie(response: Response, flows: Mapping[str, str], *, secure: bool) -> None:
-    """Set the flow cookie to exactly ``flows``, with the attributes the session cookie uses, or delete it.
+def _write_flow_cookie(
+    response: Response,
+    flows: Mapping[str, str],
+    *,
+    secure: bool,
+    cookie_name: str = FLOW_COOKIE_NAME,
+    cookie_path: str = FLOW_COOKIE_PATH,
+) -> None:
+    """Set ``cookie_name`` to exactly ``flows`` at ``cookie_path``, or delete it where ``flows`` is empty.
 
-    ``Lax`` rather than ``Strict`` because the request that spends it is a
-    same-origin POST from the dashboard, which either setting carries; ``Lax``
-    just does not depend on that staying true. The path keeps it off every
-    request that is not an OAuth one.
-
-    The value is base64url of compact JSON so that braces and quotes stay out
-    of a header the browser has to hand back byte for byte. It conceals
+    The cookie is HttpOnly and SameSite=Lax. Its value is base64url of compact JSON, so braces
+    and quotes stay out of a header the browser has to hand back byte for byte. It conceals
     nothing.
     """
     if not flows:
-        response.delete_cookie(FLOW_COOKIE_NAME, path=FLOW_COOKIE_PATH, httponly=True, secure=secure, samesite="lax")
+        response.delete_cookie(cookie_name, path=cookie_path, httponly=True, secure=secure, samesite="lax")
         return
     encoded = base64.urlsafe_b64encode(json.dumps(flows, separators=(",", ":")).encode()).decode().rstrip("=")
     response.set_cookie(
-        FLOW_COOKIE_NAME,
+        cookie_name,
         encoded,
         max_age=OAUTH_STATE_TTL_SECONDS,
         httponly=True,
         secure=secure,
         samesite="lax",
-        path=FLOW_COOKIE_PATH,
+        path=cookie_path,
     )
 
 
