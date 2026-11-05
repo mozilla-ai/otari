@@ -56,6 +56,18 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
+An API key itself reaches the inference routes, `GET /api/v1/usage/requests/{request_id}`
+for its own requests, and the catalog reads that describe the deployment rather
+than act on it: `GET /api/v1/models`, `/pricing`, `/tools`, `/providers/catalog`,
+`/tool-settings/guardrails/catalog`, `/tool-settings/guardrails/profiles` and
+`/search-tools/providers`. A [service key](end-users.md) also reaches the
+end-user routes. The rest of the management API, including `/api/v1/usage`,
+`/api/v1/budgets` and everything under `/api/v1/organizations/me`, takes the
+master key or a dashboard session cookie. A request that carries an API key is
+never read as a session, so those routes answer it `401` with
+`{"detail": "Invalid master key"}`, on otari.ai too, where a tenant has no master
+key: that part is managed in the dashboard.
+
 ## Core inference APIs
 
 Otari implements three completion surfaces:
