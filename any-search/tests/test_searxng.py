@@ -297,7 +297,7 @@ async def test_unread_fields_are_ignored() -> None:
 
 @pytest.mark.asyncio
 async def test_only_the_items_within_the_count_are_read() -> None:
-    answer = _answer([_item("a"), {"url": "https://example.com/past-the-count"}])
+    answer = _answer([_item("a"), {"url": "https://example.com/past-the-count", "title": None}])
     result, _ = await _search(answer, max_results=1)
     assert [hit.url for hit in result.hits] == ["https://example.com/a"]
 
@@ -313,6 +313,7 @@ async def test_only_the_items_within_the_count_are_read() -> None:
         "https://",
         "http://[::1",
         "https://example.com:99999/a",
+        "https://exa mple.com/a",
     ],
 )
 async def test_a_url_that_is_not_a_web_url_is_dropped_and_the_count_filled_after_it(url: str) -> None:
@@ -330,6 +331,7 @@ async def test_a_url_that_is_not_a_web_url_is_dropped_and_the_count_filled_after
         ("2026-11-04T09:30:00+02:00", datetime(2026, 11, 4, 9, 30, tzinfo=timezone(timedelta(hours=2)))),
         ("2026-11-04", datetime(2026, 11, 4, tzinfo=UTC)),
         ("2 days ago", None),
+        ("27.05.2026", None),
     ],
 )
 async def test_published_date_is_read_as_iso_8601(value: str | None, published: datetime | None) -> None:
@@ -404,6 +406,7 @@ ITEM = ("results", 0)
         pytest.param(_setting(None, *ITEM, "title"), id="title-null"),
         pytest.param(_setting(None, *ITEM, "content"), id="content-null"),
         pytest.param(_setting(1730000000, *ITEM, "publishedDate"), id="date-not-a-string"),
+        pytest.param(_setting("2026-13-40T09:30:00", *ITEM, "publishedDate"), id="date-iso-shaped-and-impossible"),
     ],
 )
 async def test_a_field_missing_or_of_the_wrong_type_raises_without_the_body(change: Any) -> None:

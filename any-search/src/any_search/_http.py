@@ -71,10 +71,15 @@ class ProviderHttp:
 
 
 def is_web_url(url: str) -> bool:
-    """Whether ``url`` is an http or https URL with a host and a valid port, one a caller can fetch."""
+    """Whether ``url`` is an http or https URL with a host and a valid port, one a caller can fetch.
+
+    A host or port with whitespace in it, which ``urlsplit`` keeps, is not one.
+    """
     try:
         parts = urlsplit(url)
         _ = parts.port  # raises for a port that is not a number from 0 to 65535
     except ValueError:
+        return False
+    if any(character.isspace() for character in parts.netloc):
         return False
     return parts.scheme in ("http", "https") and bool(parts.hostname)

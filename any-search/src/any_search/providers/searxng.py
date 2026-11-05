@@ -37,8 +37,9 @@ is required, and must be a list. ``unresponsive_engines`` must be a list when
 present, and each result's ``title`` and ``content`` strings, empty when
 absent. ``publishedDate`` is optional and often ``null``; it is read as an
 ISO 8601 date, UTC when it has no zone, and one in another form stays in
-``raw``, since SearXNG passes on what each engine gives. Anything else raises
-``unexpected_response``. A result whose ``url`` is missing, or is not an http
+``raw``, since SearXNG passes on what each engine gives. A value that starts
+like an ISO 8601 date and is not one, such as ``2026-13-40``, raises
+``unexpected_response``, as does anything else the checks refuse. A result whose ``url`` is missing, or is not an http
 or https URL with a host, such as a ``magnet:`` link from a torrent engine, is
 dropped, and the search goes on. Fields the adapter does not read are ignored,
 so a field SearXNG adds breaks nothing. SearXNG reports no cost.
@@ -49,6 +50,7 @@ none; the operator runs the instance, and its engines are free to call within
 their own terms and limits.
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -64,6 +66,9 @@ MAX_RESULTS = 100
 
 # Native options sent as query parameters or form fields, beside ``q`` and ``format``.
 _FIELD_OPTIONS = ("engines", "categories", "language", "safesearch", "pageno")
+
+# How an ISO 8601 date starts, to tell a broken one from a date in another form.
+_ISO_DATE_START = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 # The values the ``method`` option takes.
 _METHODS = ("get", "post")
@@ -213,7 +218,7 @@ def _hit(item: Any, response: httpx.Response) -> SearchHit | None:
 def _published(item: dict[str, Any], response: httpx.Response) -> datetime | None:
     """``publishedDate`` as an aware datetime, UTC when it carries no zone.
 
-    ``None`` when SearXNG has none, or one that is not an ISO 8601 date, which stays in ``raw``.
+    ``None`` when SearXNG has none, or one in another form, which stays in ``raw``.
     """
     value = item.get("publishedDate")
     if value is None:
@@ -223,5 +228,7 @@ def _published(item: dict[str, Any], response: httpx.Response) -> datetime | Non
     try:
         published = datetime.fromisoformat(value)
     except ValueError:
+        if _ISO_DATE_START.match(value):
+            raise _unexpected(response) from None
         return None
     return published if published.tzinfo is not None else published.replace(tzinfo=UTC)
