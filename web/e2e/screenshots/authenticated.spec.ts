@@ -678,3 +678,25 @@ test.describe("the domain dialog", () => {
     await captureScreenshot(page, "organization-domains-claim-dialog")
   })
 })
+
+test("OAuth app consent", async ({ page }) => {
+  await login(page)
+  // The screenshot gateway has no app registration; stub only this read so
+  // the real signed-in layout and workspace query still render in every theme.
+  await page.route("**/v1/oauth/apps/clients/thunderbolt?*", async (route) => {
+    await route.fulfill({
+      json: {
+        name: "Thunderbolt",
+        redirect_uri: "http://localhost:5199/oauth/otari",
+      },
+    })
+  })
+  await page.goto(
+    "/#/oauth/authorize?client_id=thunderbolt&redirect_uri=http%3A%2F%2Flocalhost%3A5199%2Foauth%2Fotari",
+  )
+  await expect(
+    page.getByRole("heading", { name: "Connect to Thunderbolt" }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Allow access" })).toBeVisible()
+  await captureScreenshot(page, "oauth-app-consent")
+})

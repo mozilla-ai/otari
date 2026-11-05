@@ -54,6 +54,7 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
+from gateway.repositories.api_keys.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.health_checks import (
@@ -112,6 +113,7 @@ from gateway.services.api_keys import (
     FederationRefusedError,
     FederationTokenExchange,
     FederationUnavailableError,
+    OAuthAppService,
     is_access_token,
     key_refusal,
     match_federation_rules,
@@ -2823,6 +2825,30 @@ def get_direct_tool_service(
 
 DirectToolServiceDep = Annotated[DirectToolService, Depends(get_direct_tool_service)]
 
+
+def get_oauth_app_service(
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    key_format: ApiKeyFormatPortDep,
+    organizations: OrganizationServiceDep,
+    workspaces: WorkspaceServiceDep,
+) -> OAuthAppService:
+    """Build app authorization on the request's existing transaction and authority services."""
+    return OAuthAppService(
+        uow,
+        config,
+        ApiKeyRepository(uow),
+        OAuthAppGrantRepository(uow),
+        get_user_access(uow),
+        key_format,
+        organizations,
+        workspaces,
+    )
+
+
+OAuthAppServiceDep = Annotated[OAuthAppService, Depends(get_oauth_app_service)]
+
+
 __all__ = [
     "AgentModelRecommenderPortDep",
     "BillingPortDep",
@@ -2884,4 +2910,6 @@ __all__ = [
     "verify_master_key",
     "DirectToolServiceDep",
     "get_direct_tool_service",
+    "OAuthAppServiceDep",
+    "get_oauth_app_service",
 ]

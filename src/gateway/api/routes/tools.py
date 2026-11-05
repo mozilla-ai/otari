@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
+    DirectToolServiceDep,
     WorkspaceCodeExecutionPoliciesDep,
     WorkspaceWebSearchPoliciesDep,
     get_config,
@@ -32,7 +33,7 @@ from gateway.api.deps import (
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
-from gateway.models.tools import ResolvedWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WebTool
 from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.tools import (
     Tool,
@@ -68,6 +69,14 @@ class ManagedTool(BaseModel):
             "A master key or a dashboard session gets the deployment's answer alone. A "
             "request declaring an unavailable tool is refused."
         )
+    )
+    direct_available: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the default direct POST /search or /fetch call is configured and permitted for this caller. "
+            "Includes workspace restrictions and the key's or owner's tool grants. A legacy backend that only "
+            "runs inside a model request does not qualify. Null for tools without one of these direct endpoints."
+        ),
     )
     reason: ToolUnavailableReason | None = Field(
         default=None,
@@ -109,6 +118,7 @@ class _WorkspaceSwitches:
     code_execution: bool = True
     # What the web tools resolve on, with the workspace's own keys; ``None`` for the deployment's alone.
     search_policy: ResolvedWebSearchConfig | None = None
+    direct_available: frozenset[WebTool] = frozenset()
 
 
 async def _workspace_switches(
@@ -116,10 +126,11 @@ async def _workspace_switches(
     api_key: APIKey | None,
     web_policies: WorkspaceWebSearchPoliciesDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    direct_tools: DirectToolServiceDep,
 ) -> _WorkspaceSwitches:
     """The switches the request path applies to ``api_key``'s workspace, all on without a key."""
     if api_key is None:
-        return _WorkspaceSwitches()
+        return _WorkspaceSwitches(direct_available=await direct_tools.available_defaults(None, None))
     web, search_policy = await web_policies.access(api_key.workspace_id)
     return _WorkspaceSwitches(
         web=web,
@@ -127,6 +138,7 @@ async def _workspace_switches(
             api_key.workspace_id, pinnable_images=config.pinnable_sandbox_images()
         ),
         search_policy=search_policy,
+        direct_available=await direct_tools.available_defaults(api_key, search_policy),
     )
 
 
@@ -153,6 +165,7 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
             id=Tool.WEB_FETCH,
             description=web_fetch["description"],
             available=can_web_fetch and switches.web,
+            direct_available=can_web_fetch and switches.web and WebTool.FETCH in switches.direct_available,
             reason=_reason(can_web_fetch, switches.web),
             accepted_types=[str(Tool.WEB_FETCH)],
             input_schema=web_fetch["parameters"],
@@ -162,6 +175,7 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
             id=Tool.WEB_SEARCH,
             description=web_search["description"],
             available=can_web_search and switches.web,
+            direct_available=switches.web and WebTool.SEARCH in switches.direct_available,
             reason=_reason(can_web_search, switches.web),
             # Admission claims a provider's own search keywords only for a deployment that searches itself.
             accepted_types=web_search_declaration_forms(config) if deployment_searches else [str(Tool.WEB_SEARCH)],
@@ -188,13 +202,16 @@ async def list_tools(
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     web_policies: WorkspaceWebSearchPoliciesDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    direct_tools: DirectToolServiceDep,
 ) -> ToolsResponse:
     """List the tools Otari runs itself, with the declaration forms it accepts.
 
     Called with an API key, a tool its workspace does not allow is listed as
-    unavailable. Every other `tools[]` entry, including provider-native keywords
-    not listed here, is forwarded to the upstream provider untouched.
+    unavailable. `direct_available` separately describes the default search/fetch
+    endpoint, including key and inherited user permissions. Every other `tools[]`
+    entry, including provider-native keywords not listed here, is forwarded to the
+    upstream provider untouched.
     """
     api_key, _ = auth
-    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies)
+    switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies, direct_tools)
     return ToolsResponse(data=_managed_tools(config, switches))

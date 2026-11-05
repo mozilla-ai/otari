@@ -287,6 +287,30 @@ class DirectToolService:
         self._policies = policies
         self._web_client = web_client
 
+    async def available_defaults(
+        self, api_key: APIKey | None, policy: ResolvedWebSearchConfig | None
+    ) -> frozenset[WebTool]:
+        """Configured default direct tools allowed by the current key or inherited user grant.
+
+        Selection and permission checks are the same ones used by search/fetch.
+        Legacy tools available only inside a model request have no direct default.
+        """
+        available: set[WebTool] = set()
+        selectors: tuple[tuple[WebTool, ToolKind, Callable[[], ToolInstance]], ...] = (
+            (WebTool.SEARCH, "search", lambda: pick_direct_search_instance(self._config, None, policy)),
+            (WebTool.FETCH, "fetch", lambda: pick_direct_fetch_instance(self._config, None)),
+        )
+        for web_tool, kind, select in selectors:
+            try:
+                tool = select()
+            except TenancyError:
+                continue
+            if api_key is None or (
+                await self._accounts.tool_refusal(api_key, kind=kind, provider=tool.provider, tool=tool.name) is None
+            ):
+                available.add(web_tool)
+        return frozenset(available)
+
     async def search(
         self, request: SearchRequest, *, caller: DirectCaller, tool_name: str | None, endpoint: str
     ) -> DirectToolOutcome[SearchResponse]:
@@ -313,7 +337,7 @@ class DirectToolService:
             kind="search",
             caller=caller,
             tool_name=tool_name,
-            pick=lambda: pick_direct_search_instance(config, tool_name),
+            pick=lambda policy: pick_direct_search_instance(config, tool_name, policy),
             policy_tools=(WebTool.SEARCH,),
             resolve=resolve,
         )
@@ -344,7 +368,7 @@ class DirectToolService:
             kind="fetch",
             caller=caller,
             tool_name=tool_name,
-            pick=lambda: pick_direct_fetch_instance(config, tool_name),
+            pick=lambda _policy: pick_direct_fetch_instance(config, tool_name),
             policy_tools=(WebTool.FETCH,),
             resolve=resolve,
         )
@@ -356,7 +380,7 @@ class DirectToolService:
         kind: ToolKind,
         caller: DirectCaller,
         tool_name: str | None,
-        pick: Callable[[], ToolInstance],
+        pick: Callable[[ResolvedWebSearchConfig | None], ToolInstance],
         policy_tools: Sequence[WebTool],
         resolve: Callable[[ToolInstance, ResolvedWebSearchConfig | None], DirectToolCall[ResultT]],
     ) -> DirectToolOutcome[ResultT]:
@@ -434,41 +458,32 @@ class DirectToolService:
                 logger.exception("Failed to record gateway rejection for %s on %s", user_id, endpoint)
             return DirectToolCallError(answer or detail, status_code=status_code, headers=answer_headers)
 
-        # Picked before any hold is taken, so an unknown tool costs the caller
-        # nothing to be told about. The refusal is still logged: a request the
-        # gateway turned away is dropped traffic, and it belongs in Activity and in
-        # the failure count, where the operator can see it.
-        try:
-            tool = pick()
-        except TenancyError as exc:
-            # No tool was resolved, so there is no provider to attribute the row to
-            # and the name is whatever the caller asked for.
-            raise await refused(
-                exc.message,
-                exc.status_code,
-                model=tool_name or _UNRESOLVED_TOOL,
-                provider=None,
-                answer=_refusal_detail(exc),
-            ) from exc
-
-        # Resolved before the gates below, because the first of them is a question
-        # about the workspace.
         workspace_id = await self._ledger.workspace_of(api_key_id)
-
-        # The workspace's web access policy, read as the in-loop tool reads it. A
-        # workspace that has turned web access off has turned it off: leaving this
-        # endpoint open would leave the switch bypassable by any key in that
-        # workspace, which is a policy that fails open.
         try:
             policy = await self._policies.resolve(workspace_id, policy_tools)
         except WebSearchPolicyResolutionFailedError as exc:
             raise await refused(
                 exc.message,
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                model=tool.name,
-                provider=tool.provider,
+                model=tool_name or _UNRESOLVED_TOOL,
+                provider=None,
                 workspace_id=workspace_id,
             ) from exc
+
+        # An unnamed search may run on the workspace's own key without a deployment tool.
+        # Resolve that scope before choosing, and take no budget hold until both checks pass.
+        try:
+            tool = pick(policy)
+        except TenancyError as exc:
+            raise await refused(
+                exc.message,
+                exc.status_code,
+                model=tool_name or _UNRESOLVED_TOOL,
+                provider=None,
+                workspace_id=workspace_id,
+                answer=_refusal_detail(exc),
+            ) from exc
+
         if policy is not None and not policy.enabled:
             refusal = web_access_disabled_refusal(policy_tools)
             raise await refused(

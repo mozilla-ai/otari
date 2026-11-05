@@ -200,3 +200,16 @@ class APIKeyFederationRule(Base):
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )
+
+
+class OAuthAppGrant(Base):
+    """A short-lived, single-use approval to mint an app key. No credentials are stored."""
+
+    __tablename__ = "oauth_app_grants"
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(128))
+    redirect_uri: Mapped[str] = mapped_column(String(2048))
+    challenge: Mapped[str] = mapped_column(String(43))
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)

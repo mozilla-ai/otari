@@ -4996,6 +4996,163 @@
     {
       "item": [
         {
+          "name": "Authorization Redirect",
+          "request": {
+            "description": "Start authorization with standard OAuth query parameters, preserving them through dashboard sign-in.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "oauth",
+                "apps",
+                "authorize"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "client_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "redirect_uri",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "state",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "code_challenge",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "code_challenge_method",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "response_type",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/oauth/apps/authorize?client_id=&redirect_uri=&state=&code_challenge=&code_challenge_method=&response_type="
+            }
+          }
+        },
+        {
+          "name": "Authorize",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"client_id\": \"string\",\n  \"redirect_uri\": \"string\",\n  \"state\": \"string\",\n  \"code_challenge\": \"string\",\n  \"code_challenge_method\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            },
+            "description": "Approve access to the caller's selected workspace, with normal budget enforcement.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "oauth",
+                "apps",
+                "authorize"
+              ],
+              "raw": "{{baseUrl}}/api/v1/oauth/apps/authorize"
+            }
+          }
+        },
+        {
+          "name": "App Details",
+          "request": {
+            "description": "Validate the app and redirect before the dashboard offers consent.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "oauth",
+                "apps",
+                "clients",
+                ":client_id"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "redirect_uri",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/oauth/apps/clients/:client_id?redirect_uri=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "client_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Exchange",
+          "request": {
+            "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "oauth",
+                "apps",
+                "token"
+              ],
+              "raw": "{{baseUrl}}/api/v1/oauth/apps/token"
+            }
+          }
+        }
+      ],
+      "name": "oauth-apps"
+    },
+    {
+      "item": [
+        {
           "name": "Exchange Token",
           "request": {
             "body": {
@@ -11973,7 +12130,7 @@
         {
           "name": "List Tools",
           "request": {
-            "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. Every other `tools[]` entry, including provider-native keywords\nnot listed here, is forwarded to the upstream provider untouched.",
+            "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable. `direct_available` separately describes the default search/fetch\nendpoint, including key and inherited user permissions. Every other `tools[]`\nentry, including provider-native keywords not listed here, is forwarded to the\nupstream provider untouched.",
             "header": [],
             "method": "GET",
             "url": {

@@ -75,6 +75,7 @@
 * [Deployment](deployment.md)
 * [Configuration](configuration.md)
 * [Sign-in and accounts](sign-in.md)
+* [OAuth apps](oauth-apps.md)
 * [Run the dashboard](run-the-dashboard.md)
 
 ## Providers

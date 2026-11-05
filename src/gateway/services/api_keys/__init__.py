@@ -30,6 +30,7 @@ from gateway.services.api_keys._federation import (
     unverified_issuer,
 )
 from gateway.services.api_keys._membership import ApiKeyMembershipListener
+from gateway.services.api_keys._oauth_apps import OAuthAppGrantError, OAuthAppService
 from gateway.services.api_keys._secrets import declared_secret_problem, refuse_unusable_declared_secrets
 from gateway.services.api_keys._service import ApiKeyService
 from gateway.services.api_keys._service_keys import (
@@ -61,6 +62,8 @@ __all__ = [
     "FederationTokenExchange",
     "FederationUnavailableError",
     "OrganizationOfWorkspace",
+    "OAuthAppService",
+    "OAuthAppGrantError",
     "access_token_expiry",
     "admit_organization_key",
     "declared_secret_problem",

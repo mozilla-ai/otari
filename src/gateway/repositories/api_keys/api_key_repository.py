@@ -22,6 +22,35 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
     def __init__(self, db: AsyncSession | UnitOfWork) -> None:
         super().__init__(db, APIKey)
 
+    async def issue_app_key(
+        self,
+        *,
+        key_id: str,
+        key_hash: str,
+        prefix: str,
+        suffix: str,
+        name: str,
+        user_id: str,
+        workspace_id: uuid.UUID,
+        client_id: str,
+    ) -> None:
+        """Stage a budget-enforced, self-service key with inherited access restrictions."""
+        self.db.add(
+            APIKey(
+                id=key_id,
+                key_hash=key_hash,
+                key_prefix=prefix,
+                key_suffix=suffix,
+                key_name=name,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                self_service=True,
+                exclude_from_budget=False,
+                metadata_={"oauth_client_id": client_id},
+            )
+        )
+        await self.db.flush()
+
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         result = await self.db.execute(select(APIKey.workspace_id).where(APIKey.id == key_id))

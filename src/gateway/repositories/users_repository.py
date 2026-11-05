@@ -308,6 +308,14 @@ class UserAccessRepository(BaseRepository[User, Never, Never]):
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, User)
 
+    async def ensure_app_key_owner(self, user_id: str, alias: str) -> bool:
+        """Provision attribution if missing; never revive a revoked or blocked owner."""
+        existing = await self.db.get(User, user_id)
+        if existing is not None and (existing.deleted_at is not None or existing.blocked):
+            return False
+        await get_or_create_attribution_user(self.db, user_id=user_id, alias=alias)
+        return True
+
     async def access_lists(self, user_id: str) -> AccessLists | None:
         """A user's access lists, or ``None`` when there is no such user."""
         row = (

@@ -212,6 +212,7 @@ def test_a_model_wildcard_does_not_cover_a_key_naming_a_tool_the_deprecated_way(
 def test_a_tool_list_names_configured_tools_or_the_star() -> None:
     assert validate_allowed_tools(_TOOLS, None) is None
     assert validate_allowed_tools(_TOOLS, []) == []
+    assert validate_allowed_tools(_TOOLS, ["web_search"]) == ["web_search"]
     assert validate_allowed_tools(_TOOLS, [" deepseek ", "deepseek", "*"]) == ["deepseek", "*"]
     for bad in (["deepseek:deepseek"], ["nope"], [""]):
         with pytest.raises(ValueError):

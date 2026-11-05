@@ -593,7 +593,10 @@ for it works against Otari with its base URL changed. `include_raw` and
 `search_tool_name` does, else the deployment's `web_search_default_tool`, else
 the only configured tool. A call that names no tool runs on the workspace's
 [organization search key](tools.md#organization-search-keys) when it has a usable
-one; a named call runs on that tool with its own key. Either way the tool decides
+one, including when the deployment has no search tool. In that case the tool is
+named `web_search` (also its `allowed_tools` grant), uses the key's provider,
+and has a 30-second timeout. A named
+call still requires a configured tool and runs with that tool's own key. Either way the tool decides
 the access check, the `rate_limits` rules, the timeout and the usage row's model
 and provider. The access check reads the key's `allowed_tools`, else its user's,
 for the tool's name or `*`. With neither set, it follows the key's model access,

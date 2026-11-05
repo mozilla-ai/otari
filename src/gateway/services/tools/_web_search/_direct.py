@@ -46,6 +46,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
+from gateway.services.tools._web_names import WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
@@ -81,8 +82,10 @@ class DirectSearchResult:
     cost: Decimal | None
 
 
-def pick_direct_search_instance(config: ToolSettings, name: str | None) -> ToolInstance:
-    """The instance a direct search runs on: the one named, else the deployment's default.
+def pick_direct_search_instance(
+    config: ToolSettings, name: str | None, policy: ResolvedWebSearchConfig | None = None
+) -> ToolInstance:
+    """The named or default tool, or an organization-key search when no deployment tools exist.
 
     Raises :class:`SearchToolSelectionError` when no instance exists, the name
     matches none, or no name is given while several exist and
@@ -90,6 +93,16 @@ def pick_direct_search_instance(config: ToolSettings, name: str | None) -> ToolI
     :class:`SearchToolMisconfiguredError` for an instance nothing can run.
     """
     instances = effective_search_instances(config)
+    named = name is not None
+    if not instances and name is None and policy is not None and policy.credential is not None:
+        search = resolve_search(config, None, requested=None, request_options=None, direct_credential=policy.credential)
+        if search is not None:
+            return ToolInstance(
+                name=WEB_SEARCH_TOOL_NAME,
+                kind="search",
+                provider=search.provider,
+                library_backed=search.runner == "library",
+            )
     if not instances:
         # Names every way to add one, since a deployment may have no config file.
         msg = (
@@ -106,7 +119,13 @@ def pick_direct_search_instance(config: ToolSettings, name: str | None) -> ToolI
         raise SearchToolSelectionError(msg)
     # Resolved here, before any workspace check, so an instance nothing can run
     # is refused whatever the workspace's policy says.
-    resolve_search(config, None, requested=instance.name, request_options=None)
+    resolve_search(
+        config,
+        None,
+        requested=instance.name,
+        request_options=None,
+        direct_credential=policy.credential if policy is not None and not named else None,
+    )
     if instance.library_backed and not instance.api_key and _requires_key(instance.provider):
         # Only an instance built in-process, or a stored one whose key cannot be decrypted, gets here.
         raise SearchToolMisconfiguredError(instance.name)
@@ -171,7 +190,7 @@ def resolve_direct_search(
     resolved = resolve_search(
         config,
         None,
-        requested=instance.name,
+        requested=None if organization_key is not None and not effective_search_instances(config) else instance.name,
         request_options=request.provider_options,
         direct_credential=organization_key,
     )

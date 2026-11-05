@@ -10,7 +10,7 @@ never the value.
 import hashlib
 import re
 from typing import Annotated, Any, Self
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
@@ -174,8 +174,58 @@ class FederationIssuer(BaseModel):
         return value
 
 
+def parse_oauth_redirect(value: str) -> SplitResult | None:
+    """Parse a callback without browser URL normalization, accepting HTTP only on loopback hosts."""
+    if not value or len(value) > 2048 or any(ord(char) <= 32 or ord(char) == 127 for char in value):
+        return None
+    if any(char in value for char in ("\\", "?", "#")):
+        return None
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port  # urlsplit alone accepts invalid and out-of-range ports.
+    except ValueError:
+        return None
+    if (
+        not parsed.hostname
+        or "@" in parsed.netloc
+        or "%" in parsed.netloc
+        or parsed.netloc.endswith(":")
+        or port == 0
+        or (
+            parsed.scheme != "https"
+            and not (parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1"))
+        )
+    ):
+        return None
+    return parsed
+
+
+class OAuthAppConfig(BaseModel):
+    """An operator-registered public OAuth client. Only loopback ports may vary."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+    redirect_uris: list[str] = Field(min_length=1, max_length=20)
+
+    @field_validator("redirect_uris")
+    @classmethod
+    def validate_redirects(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if parse_oauth_redirect(value) is None:
+                raise ValueError(
+                    "OAuth redirects must be valid HTTPS URLs (HTTP loopback allowed), "
+                    "without credentials, query or fragment"
+                )
+        return values
+
+
 class ApiKeySettings(BaseModel):
     """API keys a deployment declares rather than mints."""
+
+    oauth_apps: Annotated[dict[Annotated[str, Field(min_length=1, max_length=128)], OAuthAppConfig], OMITTED] = Field(
+        default_factory=dict,
+        description="Registered OAuth apps, keyed by public client ID. Empty disables app authorization.",
+    )
 
     api_keys: Annotated[dict[str, ApiKeyConfig], SECRET] = Field(
         default_factory=dict,

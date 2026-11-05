@@ -455,6 +455,24 @@ class OrganizationService:
             user=user, organization_id=organization_id, workspace_id=workspace_id, membership_required=not revoking
         )
 
+    async def hold_delegated_workspace_access(self, *, user_id: uuid.UUID, workspace_id: uuid.UUID) -> User:
+        """Recheck a prior approval against today's identity and membership, independent of the active organization.
+
+        Hold the identity and workspace through key issuance so deactivation or
+        membership removal cannot race the delegated write.
+        """
+        await self.lock_identity(user_id)
+        user = await self.users.get(user_id)
+        if user is None or not user.is_active:
+            raise NotAuthorizedError("The approving identity is no longer active")
+        organization_id = await self.get_organization_id_for_workspace(workspace_id)
+        if organization_id is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        await self.hold_workspace_write_access(
+            user=user, organization_id=organization_id, workspace_id=workspace_id, revoking=False
+        )
+        return user
+
     async def require_workspace_contributor_access(
         self,
         *,

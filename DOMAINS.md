@@ -100,6 +100,8 @@ It also owns `models/users.py`, `repositories/users_repository.py` and
 ### api-keys
 
 The deployment's and the members' API keys, and which models a key may reach.
+Registered public OAuth clients, their consent schemas and single-use app
+authorization grants also belong here.
 
 It also owns `services/model_access.py` and `services/bootstrap_service.py`.
 
