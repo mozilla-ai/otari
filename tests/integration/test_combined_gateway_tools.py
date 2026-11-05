@@ -56,9 +56,9 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import SandboxFileEntry
+from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
-from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
     MAX_USES_EXCEEDED_ERROR,

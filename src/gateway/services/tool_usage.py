@@ -48,13 +48,6 @@ TOOL_BUDGET_EXCEEDED_TEXT = (
     f"{TOOL_ERROR_SENTINEL} budget_exceeded: this call would take the request past a spend limit, so it was not run"
 )
 
-# The meter namespace inside ``UsageLog.billing_meters``. Tool meters are nested
-# under one reserved key rather than sitting flat next to the token meters:
-# MCP tool names come from a caller-supplied server, and a tool named
-# ``completion_tokens`` sitting flat would be picked up by the billed-token SQL
-# in ``routes/usage.py`` and corrupt the aggregates for the whole window.
-TOOL_METER_NAMESPACE = "tools"
-
 # Bounds on what a caller-influenced name can write into the row. An MCP server
 # can advertise any number of tools with any names; the row is JSON, not a
 # schema, so the caps are enforced here.
