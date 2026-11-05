@@ -63,6 +63,7 @@ import {
   shortBudgetId,
   unnamedBudgetLabel,
 } from "./budgetLabel"
+import { CountLimitFields, countToInput, parseCount } from "./CountLimitFields"
 import { OrganizationBudgetsPage } from "./OrganizationBudgetsPage"
 import { hasNoLimit, limitLabel } from "./organizationBudget"
 
@@ -228,7 +229,6 @@ function BudgetForm({
   description,
   submitLabel,
   initial,
-  uneditedLimits,
   error,
   isPending,
   onSubmit,
@@ -247,12 +247,10 @@ function BudgetForm({
   initial: {
     name: string | null
     max_budget: number | null
+    token_limit: number | null
+    request_limit: number | null
     budget_duration_sec: number | null
   }
-  // The caps this form does not edit, so the label it offers an unnamed budget
-  // reads as the whole of what it caps rather than the dollar figure alone.
-  // Absent on create, where there are none yet.
-  uneditedLimits?: Pick<Budget, "token_limit" | "request_limit">
   error: unknown
   isPending: boolean
   onSubmit: (body: CreateBudgetRequest, userIds: string[]) => void
@@ -274,6 +272,8 @@ function BudgetForm({
   const [limit, setLimit] = useState(
     initial.max_budget === null ? "" : String(initial.max_budget),
   )
+  const [tokens, setTokens] = useState(countToInput(initial.token_limit))
+  const [requests, setRequests] = useState(countToInput(initial.request_limit))
   const [durationSec, setDurationSec] = useState<number | null>(
     initial.budget_duration_sec,
   )
@@ -281,11 +281,17 @@ function BudgetForm({
   const [userIds, setUserIds] = useState<string[]>(assignedUserIds ?? [])
 
   const parsed = parseLimit(limit)
+  const tokenLimit = parseCount(tokens)
+  const requestLimit = parseCount(requests)
   // Two readings of one rule, spelled once: the submit is shown disabled while
   // the form cannot be sent, and `submit` refuses while that OR a save is in
   // flight. Pending is not part of `blocked` because a request in flight is not
   // a reason to paint the button as refused.
-  const isBlocked = !parsed.isValid || periodInvalid
+  const isBlocked =
+    !parsed.isValid ||
+    !tokenLimit.isValid ||
+    !requestLimit.isValid ||
+    periodInvalid
   const canSubmit = !isPending && !isBlocked
   // Everything the operator can change, in one snapshot. The people are sorted
   // into it because the picker appends in click order, and a guard that read
@@ -294,6 +300,8 @@ function BudgetForm({
   const { isDirty } = useDirtySnapshot({
     name,
     limit,
+    tokens,
+    requests,
     durationSec,
     userIds: [...userIds].sort(),
   })
@@ -304,8 +312,8 @@ function BudgetForm({
   // for an example of what to type.
   const unnamedLabel = unnamedBudgetLabel({
     max_budget: parsed.isValid ? parsed.value : null,
-    token_limit: uneditedLimits?.token_limit ?? null,
-    request_limit: uneditedLimits?.request_limit ?? null,
+    token_limit: tokenLimit.value,
+    request_limit: requestLimit.value,
     reset_alignment: null,
     budget_duration_sec: durationSec,
   })
@@ -317,6 +325,8 @@ function BudgetForm({
       {
         name: name.trim() || null,
         max_budget: parsed.value,
+        token_limit: tokenLimit.value,
+        request_limit: requestLimit.value,
         budget_duration_sec: durationSec,
       },
       userIds,
@@ -367,6 +377,12 @@ function BudgetForm({
         value={durationSec}
         onChange={setDurationSec}
         onInvalidChange={setPeriodInvalid}
+      />
+      <CountLimitFields
+        tokens={tokens}
+        onTokensChange={setTokens}
+        requests={requests}
+        onRequestsChange={setRequests}
       />
       {assignUsers ? (
         <UserMultiSelect
@@ -1053,9 +1069,10 @@ function EditBudgetDialog({
       initial={{
         name: row.name,
         max_budget: row.max_budget,
+        token_limit: row.token_limit,
+        request_limit: row.request_limit,
         budget_duration_sec: row.budget_duration_sec,
       }}
-      uneditedLimits={row}
       error={updateBudget.error ?? assignmentError}
       isPending={updateBudget.isPending || assigningUsers}
       assignUsers={rosterReady && !isOrganizationOwned(row) ? users : undefined}
@@ -1164,7 +1181,13 @@ function CreateBudgetDialog({
       }}
       title="New budget"
       submitLabel={pendingAssignments ? "Retry assignments" : "Create budget"}
-      initial={{ name: null, max_budget: null, budget_duration_sec: null }}
+      initial={{
+        name: null,
+        max_budget: null,
+        token_limit: null,
+        request_limit: null,
+        budget_duration_sec: null,
+      }}
       error={createBudget.error ?? assignmentError}
       isPending={createBudget.isPending || assigningUsers}
       returnFocusRef={returnFocusRef}
