@@ -28,8 +28,8 @@ from gateway.services.log_writer import (
     BatchLogWriter,
     SignalingLogWriter,
     SingleLogWriter,
-    _recorded_usage,
     create_log_writer,
+    recorded_usage,
 )
 
 NO_SESSION = cast(AsyncSession, None)
@@ -86,7 +86,7 @@ def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCapture
 
 
 def test_a_row_maps_to_the_facts_the_port_reports() -> None:
-    usage = _recorded_usage(_usage_row(status="error", status_code=502, error_message=_SECRET_ERROR))
+    usage = recorded_usage(_usage_row(status="error", status_code=502, error_message=_SECRET_ERROR))
 
     assert usage == RecordedUsage(
         usage_id="row-1",
@@ -115,14 +115,14 @@ def test_no_error_text_tags_or_content_cross_the_seam() -> None:
     fields = {field.name for field in dataclasses.fields(RecordedUsage)}
 
     assert not fields & {"error_message", "tags", "source_label", "billing_meters", "pricing_breakdown"}
-    usage = _recorded_usage(_usage_row(error_message=_SECRET_ERROR))
+    usage = recorded_usage(_usage_row(error_message=_SECRET_ERROR))
     assert _SECRET_ERROR not in repr(usage)
     assert "secret-project" not in repr(usage)
 
 
 def test_a_float_cost_is_reported_as_an_exact_amount() -> None:
-    assert _recorded_usage(_usage_row(cost=0.25)).cost == Decimal("0.25")
-    assert _recorded_usage(_usage_row(cost=None)).cost is None
+    assert recorded_usage(_usage_row(cost=0.25)).cost == Decimal("0.25")
+    assert recorded_usage(_usage_row(cost=None)).cost is None
 
 
 @pytest.mark.parametrize(
@@ -130,7 +130,7 @@ def test_a_float_cost_is_reported_as_an_exact_amount() -> None:
 )
 def test_deployment_paid_is_reported_and_false_when_unset(overrides: dict[str, Any], paid: bool) -> None:
     """A row built without the flag reads as the column default, false."""
-    assert _recorded_usage(_usage_row(**overrides)).deployment_paid is paid
+    assert recorded_usage(_usage_row(**overrides)).deployment_paid is paid
 
 
 @pytest.mark.parametrize(
@@ -147,7 +147,7 @@ def test_integration_traffic_is_served_here_and_not_the_playground(
     overrides: dict[str, Any], integration: bool
 ) -> None:
     """A row the request path built has no source until it is flushed, which means served here."""
-    usage = _recorded_usage(_usage_row(**overrides))
+    usage = recorded_usage(_usage_row(**overrides))
 
     assert usage.integration_traffic is integration
     assert usage.source == overrides.get("source", SERVED_HERE_SLUG)
@@ -170,7 +170,7 @@ async def test_the_row_is_written_then_the_port_is_told_once() -> None:
     await SignalingLogWriter(inner, signal).put(row)
 
     inner.put.assert_awaited_once_with(row)
-    signal.usage_recorded.assert_awaited_once_with(_recorded_usage(row))
+    signal.usage_recorded.assert_awaited_once_with(recorded_usage(row))
     assert order == ["put", "signal"]
 
 
@@ -196,7 +196,7 @@ async def test_a_row_the_facts_cannot_be_built_from_is_still_written(
     def _broken(log: UsageLog) -> RecordedUsage:
         raise ValueError(_SECRET_ERROR)
 
-    monkeypatch.setattr("gateway.services.log_writer._recorded_usage", _broken)
+    monkeypatch.setattr("gateway.services.log_writer.recorded_usage", _broken)
     inner = AsyncMock()
     recorder = _Recorder()
 

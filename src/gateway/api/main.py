@@ -69,6 +69,7 @@ from gateway.api.routes import (
     tools,
     usage,
     users,
+    videos,
     web_search_keys,
     workspace_activation,
     workspace_code_execution_policy,
@@ -155,6 +156,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     fetch.router,
     code_execution.router,
     batches.router,
+    videos.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
     # otherwise sit behind the catalog router's {model_id:path} catch-all.
