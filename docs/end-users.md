@@ -1,122 +1,73 @@
 # Track spend per end user
 
 One application that calls Otari on behalf of many people can give each of them
-spend, a budget and per-minute limits of their own, without sharing the master
-key or minting a key per person. It does so with a **service key**: a key whose
-requests name an end user. How end users relate to the key's user, its
-budgets and its limits is in
+spend and a budget of their own, without minting a key per person. It does so
+with a **service key**: a key whose requests name an end user. How end users
+relate to the key's user, its budgets and its limits is in
 [How end users are billed and capped](#how-end-users-are-billed-and-capped).
 
 This guide uses a service called `mlpa` with two features, each carrying its
-own per-user limit. You need the master key (or an operator session).
+own per-user limit. You need to be an owner or admin of the organization; a
+member is refused with 403. On a deployment you run, the operator can also make
+service keys on the deployment's own budgets, or declare them in config.yml:
+see [Service keys on a deployment you run](operator-service-keys.md).
 
 ## 1. Create the end-user budgets
 
-Give each budget an id of your own with `PUT /api/v1/budgets/{budget_id}`, which
-creates the budget under that id or replaces it, so the same request can run at
-every deploy:
+Create one budget per feature in **Spend & budgets**, or with
+`POST /api/v1/organizations/me/budgets`:
 
 ```http
-PUT /api/v1/budgets/end-user-budget-ai
-{"max_budget": 0.1, "reset_alignment": "calendar_day", "rpm_limit": 40, "tpm_limit": 2000}
+POST /api/v1/organizations/me/budgets
+{"name": "end-user-budget-ai", "max_budget": 0.1, "reset_alignment": "calendar_day"}
 ```
 
-Create `end-user-budget-memories` the same way.
-
-An id is up to 128 letters, digits, `.`, `_` and `-`, and starts with a letter
-or digit. `POST /api/v1/budgets` generates an id instead, and
-`GET /api/v1/budgets` reports how many users are on each budget in
-`user_count`. Each entry a key may assign must be a deployment budget, not an
-organization's; an organization's own service key lists that organization's
-budgets instead (see
-[An organization's own service keys](#an-organizations-own-service-keys)).
+Create `end-user-budget-memories` the same way. Each answer carries the
+budget's generated `budget_id`, which the key names in the next step. An
+organization's budget limits spend, tokens (`token_limit`) and requests
+(`request_limit`) over its period; it carries no per-minute limits.
 
 ## 2. Create the service key
 
-Mark the key with `is_service_key` on `POST` or `PATCH /api/v1/keys`; only a
-deployment operator can. An organization makes its own on
-`POST /api/v1/organizations/me/keys`: see
-[An organization's own service keys](#an-organizations-own-service-keys). List
-the budgets the key may start its end users on in
-`end_user_budget_ids`, and set `end_user_budget_id` as the default for a request
-that names none:
+In **API keys**, **Create key**, open **Advanced**, tick **Service key**, pick
+the **End-user budgets** the key may start its end users on, and the
+**Default end-user budget** for a request that names none. The same key from
+the API:
 
 ```http
-POST /api/v1/keys
-{"user_id": "mlpa", "is_service_key": true,
- "end_user_budget_ids": ["end-user-budget-ai", "end-user-budget-memories"],
- "end_user_budget_id": "end-user-budget-ai"}
+POST /api/v1/organizations/me/keys
+{"key_name": "mlpa", "is_service_key": true,
+ "end_user_budget_ids": ["<ai budget id>", "<memories budget id>"],
+ "end_user_budget_id": "<ai budget id>"}
 ```
 
 - A key with a default and no list may assign the default alone.
 - When both are set, the default must be on the list.
-- Deleting a budget takes it off every list, but a budget that is some key's
-  default cannot be deleted until that key's default changes, since the key's
-  new end users would otherwise start uncapped.
-- Give each service its own user: end users belong to the key's user, so every
-  service key of one user reaches the same end users.
+- Its end users go on the organization's own budgets, and a budget of the
+  deployment or of another organization is refused with 404.
+- Deleting one of the organization's budgets is refused while a key starts its
+  end users on it by default, or while end users are on it; a key that only
+  lists it loses it from the list.
 
-To pool every end user under one cap, give the key a budget of its own (a scoped
-budget on the API key, its ceiling).
+Such a key belongs to the organization rather than to the person who made it:
 
-### Or declare it in config.yml
-
-A service whose keys and budgets should not depend on a provisioning script can
-declare both steps in `config.yml`:
-
-```yaml
-budgets:
-  end-user-budget-ai: {max_budget: 0.1, reset_alignment: calendar_day, rpm_limit: 40, tpm_limit: 2000}
-  end-user-budget-memories: {max_budget: 0.05, reset_alignment: calendar_day}
-  mlpa-global: {max_budget: 100, reset_alignment: calendar_day}
-
-api_keys:
-  mlpa:
-    secret: ${MLPA_SERVICE_KEY}
-    user_id: mlpa
-    is_service_key: true
-    end_user_budget_ids: [end-user-budget-ai, end-user-budget-memories]
-    end_user_budget_id: end-user-budget-ai
-    ceiling: mlpa-global
-```
-
-`ceiling` is the key's own ceiling, which pools every end user. The service
-reads the same `MLPA_SERVICE_KEY` and presents it as its API key, so nothing has
-to hand a freshly minted secret from one to the other, and a restart or a
-second replica does not change it. For the fields, the secret's format and what
-a start writes back, see
-[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
-
-### An organization's own service keys
-
-An organization owner or admin creates a service key for the organization's
-app on `POST /api/v1/organizations/me/keys`, or in the dashboard's Create key
-dialog under Advanced, with the same `is_service_key`, `end_user_budget_id` and
-`end_user_budget_ids` fields. A member is refused with 403. Such a key differs
-from an operator's in four ways:
-
-- Its end users go on the organization's own budgets (Spend & budgets), and a
-  budget of the deployment or of another organization is refused with 404.
-- It is owned by a user created for it alone, not by the person who made it.
-  End users belong to their key's user, and a person's own user serves every
-  organization they belong to, so this keeps the key's end users out of reach
-  of any other key or organization. That owner has no member ceiling, which is
-  why only an owner or admin, who sets those ceilings, may create one; cap the
-  key itself to pool its end users.
-- It belongs to the organization: every owner and admin lists, edits, rotates
-  and deletes it on the same routes, and removing its creator from the
-  organization leaves it working. Other members do not see it.
+- It is owned by a user created for it alone. End users belong to their key's
+  user, and a person's own user serves every organization they belong to, so
+  this keeps the key's end users out of reach of any other key or organization.
+  That owner has no member ceiling, which is why only an owner or admin, who
+  sets those ceilings, may create one.
+- Every owner and admin lists, edits, rotates and deletes it on the same
+  routes, and removing its creator from the organization leaves it working.
+  Other members do not see it.
 - It always has a `max_end_users`, 10,000 unless the request sets another, and
-  an update cannot clear it. Whether a key is a service key is fixed when it is
-  created, on the operator's route too.
+  an update cannot clear it (see
+  [Capping a key's end users](#capping-a-keys-end-users)). Whether a key is a
+  service key is fixed when it is created.
 
-The key's responses carry `is_organization_service_key: true`, which tells it
-apart from an operator's service key in the same organization.
-
-The organization's app then manages its end users with the key itself, through
-the [end-user routes](#end-user-routes). Deleting one of the organization's
-budgets is refused while a key starts its end users on it by default, or while
-end users are on it; a key that only lists it loses it from the list.
+Its responses carry `is_organization_service_key: true`, which tells it apart
+from a service key a deployment operator made in the same organization. To pool
+every end user under one cap, give the key a spend ceiling of its own (see
+[Set a budget and ceiling](set-a-budget-and-ceiling.md)).
 
 ## 3. Name the end user on each request
 
@@ -128,21 +79,21 @@ than the key's default, name it in the `Otari-End-User-Budget` header:
 ```http
 POST /v1/chat/completions
 Authorization: Bearer <service key>
-Otari-End-User-Budget: end-user-budget-memories
+Otari-End-User-Budget: <memories budget id>
 
 {"model": "...", "user": "fxa123:memories", "messages": [...]}
 ```
 
 - Send a stable id per end user, not a per-session or per-request value: each
   distinct id creates an end user, whether or not the request is then admitted,
-  and nothing else caps how many a key can create. Set a
-  [rate limit](configuration.md#rate-limit-rules) on a deployment that issues
-  service keys.
+  and only the key's
+  [`max_end_users`](#capping-a-keys-end-users) caps how many it can create.
 - An id is at most 256 characters and may otherwise be any string, `/`
   included, such as a base64 key id.
 - The header applies only when the request creates the end user. An existing
   end user keeps its budget, whatever a later request names, so a request
-  cannot undo a move an operator made.
+  cannot undo a move made on the
+  [end-user routes](#end-user-routes).
 - A budget not on the key's list is refused with `403` and the code
   `end_user_budget_not_allowed`, even for an end user that already exists.
 - The response carries `Otari-End-User-Budget` with the budget the end user is
@@ -154,14 +105,15 @@ would on any other key.
 ## 4. Manage end users
 
 The service manages its own end users with its service key, addressing each one
-by the id it names it by. It needs neither the master key nor its key's id. For
+by the id it names it by. It needs the key alone: no dashboard session, and not
+the key's id. For
 example, to move an end user to another budget:
 
 ```http
 PATCH /api/v1/end-users?external_id=fxa123:memories
 Authorization: Bearer <service key>
 
-{"budget_id": "end-user-budget-ai"}
+{"budget_id": "<ai budget id>"}
 ```
 
 URL-encode the id as any query value is (`/` as `%2F`, `+` as `%2B`). To clean
@@ -184,11 +136,12 @@ Otari, on a request that names an end user on a service key:
   `end_user_budget_id`. Each end user gets the full limit and its own reset
   period. Changing the key's setting affects end users created afterwards.
 - Applies the per-minute limits of the end user's budget (`rpm_limit`,
-  `tpm_limit`), and any `per: user` rate limit rule, each counting every end
-  user on its own. Since the limits live on the budget, two service keys with
+  `tpm_limit`) where it has them (a deployment's budget can; an organization's
+  has none), and any `per: user` rate limit rule the deployment sets, each
+  counting every end user on its own. Since the limits live on the budget, two service keys with
   different end-user budgets give their end users different limits, and moving
   an end user to another budget moves its limits too.
-- Checks the key's own ceiling as well, so a scoped budget on the API key pools
+- Checks the key's own ceiling as well, so a spend ceiling on the API key pools
   every end user behind it. The key's user's per-user budget is not checked for
   an end user's request; use the key's ceiling as the pool.
 - Keeps the key's user's rate limit and model allow-list, and any member
@@ -199,7 +152,7 @@ Blocking the key's user stops its end users too.
 
 Moving an end user (to a budget on the key's list) restarts its period on the
 new budget and applies that budget's per-minute limits, but keeps its spend,
-tokens and requests so far, as moving a user through `/api/v1/users` does: an
+tokens and requests so far, as moving any user between budgets does: an
 end user that used up one budget can be over the next one's limits until that
 period resets.
 
@@ -212,16 +165,17 @@ its budget. Its usage history stays too. When erasure fails the call answers
 
 ### Capping a key's end users
 
-Nothing caps how many end users a service key creates unless the key sets
-`max_end_users` (in `POST` or `PATCH /api/v1/keys`, or in config.yml). Set a
-rate limit on a deployment that issues service keys, and send a stable id per
-end user rather than a per-session or per-request value.
+An organization's service key always has a `max_end_users`, 10,000 unless its
+create or update request sets another. A key a deployment operator makes has
+none unless the operator sets one (see
+[Service keys on a deployment you run](operator-service-keys.md)). Either way,
+send a stable id per end user rather than a per-session or per-request value.
 
 With `max_end_users` set, a request that would create one more end user, or
 revive one that was deleted, is refused with 403 and the code
 `end_user_limit_reached`, and nothing is created; the end users the key already
 has keep working. Deleting end users makes room again. `null`, the default, is
-no cap, and `0` admits no new end user at all.
+no cap on an operator's key, and `0` admits no new end user at all.
 
 The cap counts the end users of the key's user that are on a budget the key may
 assign (its `end_user_budget_ids`, or its default alone), or every end user of
@@ -273,20 +227,8 @@ live end users never take that lock.
   id with a `.` or `..` segment is refused there with 400. The query parameter
   carries any id intact.
 
-### Operator routes
-
-A deployment operator reaches any service key's end users through the same
-routes under the key, with the master key: `GET`, `PUT` and
-`PATCH /api/v1/keys/{key_id}/end-users?external_id=...`, with `GET` taking the
-list's other parameters too, and the path form
-`/api/v1/keys/{key_id}/end-users/{external_id}`. These still reach the end users
-of a key whose user is blocked or deleted. A budget set there must be on that
-key's list too.
-
-The users API lists end users across keys, where each one carries
-`parent_user_id` (the key's user) and `external_id`:
-`GET /api/v1/users?parent_user_id=...&external_id=...` filters on them, and it
-can put an end user on any deployment budget, not only one on a key's list.
+A deployment operator also reaches any service key's end users with the master
+key: see [Operator routes](operator-service-keys.md#operator-routes).
 
 ## Where end users apply
 

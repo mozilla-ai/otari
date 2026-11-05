@@ -9,7 +9,7 @@ from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import Depends, HTTPException, Query, Request, status
-from sqlalchemy import ColumnElement, Select, select, update
+from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
@@ -211,8 +211,7 @@ from gateway.services.tools import (
     web_search_configured,
 )
 from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
-from gateway.services.usage_admin_service import usage_in
-from gateway.services.usage_and_telemetry import UsageService
+from gateway.services.usage_and_telemetry import UsageScope, UsageService
 from gateway.services.workspace_scope import (
     default_workspace_id,
     organization_for_key_id,
@@ -2334,13 +2333,17 @@ def get_automatic_router(request: Request) -> AutomaticRouter:
     return router
 
 
+def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
+    """Build the usage service on the request's Unit of Work; its labels come from the key and user domains."""
+    return UsageService(uow, UsageLogRepository(uow), keys=get_api_key_service(uow), users=get_user_access(uow))
+
+
+UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
+
+
 def get_routing_service(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> RoutingService:
     """Build the routing service, and the usage and key services it reads through, on the request's Unit of Work."""
-    return RoutingService(
-        config,
-        UsageService(uow, UsageLogRepository(uow)),
-        get_api_key_service(uow),
-    )
+    return RoutingService(config, get_usage_service(uow), get_api_key_service(uow))
 
 
 RoutingServiceDep = Annotated[RoutingService, Depends(get_routing_service)]
@@ -2498,12 +2501,12 @@ def _caller_workspace_query(organization_id: CallerOrganization) -> Select[uuid.
 CallerWorkspaceQuery = Annotated[Select[uuid.UUID], Depends(_caller_workspace_query)]
 
 
-def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> ColumnElement[bool]:
+def _caller_usage_scope(workspaces: CallerWorkspaceQuery) -> UsageScope:
     """The usage rows an operator's usage reads cover: those of the caller's organization."""
-    return usage_in(workspaces)
+    return UsageScope(workspaces=workspaces)
 
 
-CallerUsageScope = Annotated[ColumnElement[bool], Depends(_caller_usage_scope)]
+CallerUsageScope = Annotated[UsageScope, Depends(_caller_usage_scope)]
 
 
 async def get_deployment_trace_scope(
@@ -2740,6 +2743,7 @@ __all__ = [
     "OptionalFileServiceDep",
     "OverviewServiceDep",
     "RoutingServiceDep",
+    "UsageServiceDep",
     "VisibleWorkspaces",
     "VisibleWorkspacesDep",
     "GrowthSignalPortDep",

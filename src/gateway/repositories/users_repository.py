@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, Never
 
@@ -287,7 +287,7 @@ class AccessLists(NamedTuple):
 
 
 class UserAccessRepository(BaseRepository[User, Never, Never]):
-    """Read users' model and search tool access lists."""
+    """Read users' model and search tool access lists, and their display names."""
 
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, User)
@@ -307,3 +307,10 @@ class UserAccessRepository(BaseRepository[User, Never, Never]):
             )
         ).all()
         return {user_id: AccessLists(models, tools) for user_id, models, tools in rows}
+
+    async def aliases(self, user_ids: Collection[str]) -> dict[str, str | None]:
+        """Each of these users that has a row, deleted or not, to its alias."""
+        if not user_ids:
+            return {}
+        rows = (await self.db.execute(select(User.user_id, User.alias).where(User.user_id.in_(sorted(user_ids))))).all()
+        return {user_id: alias for user_id, alias in rows}

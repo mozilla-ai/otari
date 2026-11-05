@@ -33,8 +33,9 @@ from gateway.core.usage import GatewayUsage
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 from gateway.services.pricing_service import configure_default_pricing
-from gateway.services.tool_usage import TOOL_METER_NAMESPACE, ToolUsageTally
+from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 

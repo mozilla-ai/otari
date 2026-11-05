@@ -341,9 +341,16 @@ API key where the agent runs turns it on, for every repository the agent works
 in:
 
 ```bash
-export OTARI_URL="http://localhost:8000"     # or your Otari deployment
+export OTARI_URL="http://localhost:8000"     # your gateway's URL
 export OTARI_API_KEY="tk-your-import-key"    # budget-exempt, as for an OTLP export
 ```
+
+The key must be budget-exempt, and only a deployment's operator creates one
+(see [Importing external usage](external-usage.md#enforcement-boundary)), so
+reporting works on a gateway you run and not on otari.ai today: a key from
+otari.ai's **API keys** page is always budget-enforced, and its reports are not
+kept. The checks themselves need no server, so the hook blocks and allows the
+same on any machine whether it reports or not.
 
 The server receives each gate's definition, its `message` included, and that
 covers your own gates in `~/.otari/`, so set `OTARI_URL` only for a server you

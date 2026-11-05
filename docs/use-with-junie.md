@@ -9,7 +9,7 @@ Otari exposes an OpenAI-compatible endpoint (`POST /api/v1/chat/completions`), s
 
 ## Junie CLI
 
-Junie CLI reaches an OpenAI-compatible backend through a custom model profile. Write one to `~/.junie/models/otari.json`:
+Junie CLI reaches an OpenAI-compatible backend through a custom model profile. Create an API key on the **API keys** page of the otari.ai dashboard (read [Junie sends a `user` field](#junie-sends-a-user-field) first: the key has to accept the `user` field Junie sends), then write a profile to `~/.junie/models/otari.json`:
 
 ```json
 {
@@ -26,7 +26,7 @@ Junie CLI reaches an OpenAI-compatible backend through a custom model profile. W
 
 Two details differ from most clients:
 
-- `baseUrl` is the full chat completions URL, not the API root. Most clients take `/api/v1` and append the path themselves. Junie does not, so give it your Otari base URL plus `/api/v1/chat/completions`: `http://localhost:8000/api/v1/chat/completions` for local development, or your own deployment's URL. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1/chat/completions`.
+- `baseUrl` is the full chat completions URL, not the API root. Most clients take `/api/v1` and append the path themselves. Junie does not, so give it the whole path, as above for otari.ai. Accounts in otari.ai's EU region use `https://eu.api.otari.ai/api/v1/chat/completions`: `api.otari.ai` answers an EU key with `421 Misdirected Request`. On a gateway you run yourself, use its URL plus `/api/v1/chat/completions`, such as `http://localhost:8000/api/v1/chat/completions`.
 - `apiKey` accepts a `${VAR}` reference, so the key stays out of the file.
 
 Export the key, then select the profile by its **file name** without the extension, which is why `otari.json` is reached as `custom:otari`. The `providerName` inside the file is a label and is not the selector:
@@ -52,7 +52,7 @@ There are two ways to accept the field, and they differ in what you get back.
 
 **Make the key a [service key](end-users.md).** This is the better option and it needs no setting relaxed, so leave `reject_user_mismatch` on the deployment default. On a service key, a name other than the key's own user names one of that key's end users, so Otari creates an end user for the value Junie sends and records its spend on its own. That gives you spend per client rather than one combined total, and the service key can then put that end user on a budget itself with `PUT /api/v1/end-users?external_id=...`.
 
-**Or set [`reject_user_mismatch=false`](api-keys.md#accept-or-reject-mismatched-user-fields) on the key.** Simpler, and a per-key override, so the deployment-wide default stays as it is. Spend binds to the key's own user, so the whole of Junie's usage lands in one place.
+**Or [accept mismatched `user` fields](api-keys.md#accept-or-reject-mismatched-user-fields) on the key**: **Always accept** under **Advanced** in the dashboard's key form, or `reject_user_mismatch=false` through the API. Simpler, and a per-key override, so the deployment-wide default stays as it is. Spend binds to the key's own user, so the whole of Junie's usage lands in one place.
 
 Either way the spend stays inside the key owner's account, so accepting the field never lets a key draw on another account's budget.
 

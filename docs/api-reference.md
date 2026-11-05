@@ -1047,3 +1047,31 @@ result. Never retry `POST /api/v1/mcp/execute` automatically, including from a
 reverse proxy or service mesh: an `outcome_unknown` response means the tool may
 already have run. The request shapes, the error and execution-state contract,
 and the limits are in [Caller-orchestrated MCP](mcp.md#caller-orchestrated-mcp).
+
+## Agent traces
+
+The sessions [Agent traces](traces.md) describes are read on these routes.
+
+| Endpoint | Who |
+| --- | --- |
+| `GET /api/v1/organizations/me/traces`, `/count`, `/series`, `/{trace_id}`, `/requests/{request_id}` | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to; also the master key in the `Otari-Key` header, as the deployment operator in their active organization |
+| `GET /api/v1/traces`, and the same four | the deployment operator, every workspace of their active organization |
+
+`/series` counts the sessions active in each bucket of a window: a session is
+active from its start to its last activity, so a long one counts in every bucket
+it ran through. `bucket` is `1m`, `5m`, `30m`, `hour`, `6h` or `day`.
+The list, count and series reads take the window the same way: `start` and
+`end` keep the sessions active between them (last active at or after `start`,
+started before `end`), so a session still running past `end` is listed in the
+window it was counted in.
+
+The list, count and series reads narrow to one workspace with `workspace_id`,
+inside the caller's scope and never beyond it. `q` matches any part of a session's trace id, name,
+agent or user, in any case, inside the same scope. A trace is keyed by its
+workspace and its id, so a detail read takes the `workspace_id` its list entry
+names; without it, an id in more than one of the caller's workspaces answers 409
+rather than a guess.
+`/requests/{request_id}` answers the session a gateway request was traced into,
+by the `Otari-Request-ID` it was sent (a usage row's `request_group_id`), and 404
+where the scope holds no trace of it. A trace outside the caller's scope answers
+404.
