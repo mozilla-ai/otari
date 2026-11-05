@@ -695,6 +695,39 @@ async def test_switching_enforcement_on_leaves_a_linked_members_session_alive(as
     assert await _live_session_count(async_db, linked_member.id) == 1
 
 
+async def test_saving_enforcement_again_revokes_a_member_whose_link_is_now_gone(async_db: AsyncSession) -> None:
+    """Enforcement was already on when the member's link disappeared; saving it again must still catch them."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await _link_member(async_db, member, connection)
+    await async_db.commit()
+    signed_in = await _identity_service(async_db).sign_in(member)
+    assert signed_in.session_token
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=None, break_glass_waived=True
+    )
+    assert await _live_session_count(async_db, member.id) == 1
+
+    uow = UnitOfWork(async_db)
+    async with uow:
+        await IdentityRepositories.on(uow).links.delete_for_user_and_provider(
+            provider=oidc_identity_provider(connection.resolved_issuer), user_id=member.id
+        )
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=None, break_glass_waived=True
+    )
+
+    assert await _live_session_count(async_db, member.id) == 0
+
+
 # =============================================================================
 # Switching into an enforcing organization
 # =============================================================================
