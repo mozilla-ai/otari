@@ -28,7 +28,7 @@ from .tenancy_helpers import budget_service, create_budget, create_member, creat
 
 def _key(client: TestClient, master_key_header: dict[str, str], *, user_id: str, **fields: Any) -> dict[str, Any]:
     response = client.post(
-        f"{API_ROOT}/keys", json={"key_name": f"key-{user_id}", "user_id": user_id, **fields}, headers=master_key_header
+        f"{API_ROOT}/keys", json={"key_name": f"key-{user_id}", "user_id": user_id} | fields, headers=master_key_header
     )
     assert response.status_code == 200, response.text
     created: dict[str, Any] = response.json()
@@ -120,6 +120,46 @@ def test_an_ended_period_reads_as_the_fresh_one(
     assert datetime.fromisoformat(limit["resets_at"]) > datetime.now(UTC)
 
 
+def test_a_hold_in_flight_counts_as_used(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """The gate refuses on spend plus holds, so the read counts both, and keeps the difference exact."""
+    _user_on_budget(client, master_key_header, "holding", max_budget=0.3, budget_duration_sec=86400)
+    key = _key(client, master_key_header, user_id="holding")
+    with db_session_factory() as db:
+        db.execute(
+            update(User).where(User.user_id == "holding").values(spend=Decimal("0.05"), reserved=Decimal("0.05"))
+        )
+        db.commit()
+
+    [limit] = client.get(f"{API_ROOT}/key/budget", headers=_auth(key)).json()["limits"]
+
+    assert (limit["used_usd"], limit["remaining_usd"]) == (0.1, 0.2)
+
+
+def test_an_ended_period_keeps_the_holds_still_in_flight(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Rolling a window zeroes recorded spend and leaves holds, so the fresh window starts with them."""
+    _user_on_budget(client, master_key_header, "rolled-holding", max_budget=1.0, budget_duration_sec=86400)
+    key = _key(client, master_key_header, user_id="rolled-holding")
+    with db_session_factory() as db:
+        db.execute(
+            update(User)
+            .where(User.user_id == "rolled-holding")
+            .values(
+                spend=Decimal("0.9"),
+                reserved=Decimal("0.1"),
+                next_budget_reset_at=datetime.now(UTC) - timedelta(hours=1),
+            )
+        )
+        db.commit()
+
+    [limit] = client.get(f"{API_ROOT}/key/budget", headers=_auth(key)).json()["limits"]
+
+    assert (limit["used_usd"], limit["remaining_usd"]) == (0.1, 0.9)
+
+
 def test_a_shared_ceiling_reports_only_what_it_leaves(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
@@ -127,9 +167,13 @@ def test_a_shared_ceiling_reports_only_what_it_leaves(
     key = _key(client, master_key_header, user_id="member")
     with db_session_factory() as db:
         workspace_id = str(seed_workspace_id(db))
-    own = client.post(f"{API_ROOT}/budgets", json={"max_budget": 2.0}, headers=master_key_header).json()["budget_id"]
-    team = client.post(f"{API_ROOT}/budgets", json={"max_budget": 10.0}, headers=master_key_header).json()["budget_id"]
-    for scope_type, scope_id, budget_id in (("api_token", key["id"], own), ("workspace", workspace_id, team)):
+    caps = {"token_limit": 1000, "request_limit": 10}
+    own = client.post(f"{API_ROOT}/budgets", json={"max_budget": 2.0, **caps}, headers=master_key_header)
+    team = client.post(f"{API_ROOT}/budgets", json={"max_budget": 10.0, **caps}, headers=master_key_header)
+    for scope_type, scope_id, budget_id in (
+        ("api_token", key["id"], own.json()["budget_id"]),
+        ("workspace", workspace_id, team.json()["budget_id"]),
+    ):
         response = client.post(
             f"{API_ROOT}/scoped-budgets",
             json={"scope_type": scope_type, "scope_id": scope_id, "budget_id": budget_id},
@@ -142,9 +186,15 @@ def test_a_shared_ceiling_reports_only_what_it_leaves(
     by_scope = {limit["scope"]: limit for limit in body["limits"]}
     assert [limit["scope"] for limit in body["limits"]] == ["api_token", "workspace"]
     assert (by_scope["api_token"]["limit_usd"], by_scope["api_token"]["remaining_usd"]) == (2.0, 2.0)
-    assert by_scope["workspace"]["limit_usd"] is None
-    assert by_scope["workspace"]["used_usd"] is None
+    for axis in ("tokens", "requests"):
+        assert by_scope["api_token"][f"limit_{axis}"] == caps[f"{axis[:-1]}_limit"]
+        assert by_scope["api_token"][f"used_{axis}"] == 0
+        assert by_scope["api_token"][f"remaining_{axis}"] == caps[f"{axis[:-1]}_limit"]
+    for field in ("limit_usd", "used_usd", "limit_tokens", "used_tokens", "limit_requests", "used_requests"):
+        assert by_scope["workspace"][field] is None, field
     assert by_scope["workspace"]["remaining_usd"] == 10.0
+    assert by_scope["workspace"]["remaining_tokens"] == 1000
+    assert by_scope["workspace"]["remaining_requests"] == 10
     assert body["remaining_usd"] == 2.0
 
 
@@ -164,7 +214,7 @@ def test_only_an_api_key_may_ask(client: TestClient, master_key_header: dict[str
     assert client.get(f"{API_ROOT}/key/usage/summary", headers=master_key_header).status_code == 401
 
 
-def _row(workspace_id: Any, api_key_id: str, cost: str, role: str) -> UsageLog:
+def _row(workspace_id: Any, api_key_id: str, cost: str, role: str, app: str = "claim-check") -> UsageLog:
     return UsageLog(
         id=str(uuid.uuid4()),
         workspace_id=workspace_id,
@@ -178,7 +228,7 @@ def _row(workspace_id: Any, api_key_id: str, cost: str, role: str) -> UsageLog:
         prompt_tokens=10,
         completion_tokens=5,
         total_tokens=15,
-        tags={"app": "claim-check", "role": role},
+        tags={"app": app, "role": role},
         request_group_id=str(uuid.uuid4()),
     )
 
@@ -195,6 +245,7 @@ def test_a_key_summarizes_its_own_usage_by_tag(
                 _row(workspace_id, mine["id"], "0.10", "research"),
                 _row(workspace_id, mine["id"], "0.20", "jury"),
                 _row(workspace_id, mine["id"], "0.05", "jury"),
+                _row(workspace_id, mine["id"], "0.50", "jury", app="other"),
                 _row(workspace_id, theirs["id"], "1.00", "jury"),
             ]
         )
@@ -212,15 +263,18 @@ def test_a_key_summarizes_its_own_usage_by_tag(
     assert round(body["totals"]["cost"], 6) == 0.35
     assert {row["key"]: round(row["cost"], 6) for row in body["by_tag"]} == {"jury": 0.25, "research": 0.1}
 
+    unfiltered = client.get(f"{API_ROOT}/key/usage/summary", params={"dimensions": "none"}, headers=_auth(mine))
+    assert unfiltered.json()["totals"]["request_count"] == 4
     other = client.get(f"{API_ROOT}/key/usage/summary", params={"dimensions": "none"}, headers=_auth(theirs))
     assert other.json()["totals"]["request_count"] == 1
 
 
-def test_a_key_reads_its_own_series(
+def test_a_key_does_not_read_a_sibling_keys_series(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    mine = _key(client, master_key_header, user_id="series-one")
-    theirs = _key(client, master_key_header, user_id="series-two")
+    """Two keys of one user: the scope is the key, not the user it bills."""
+    mine = _key(client, master_key_header, user_id="series-owner")
+    theirs = _key(client, master_key_header, user_id="series-owner", key_name="sibling")
     with db_session_factory() as db:
         workspace_id = seed_workspace_id(db)
         db.add_all([_row(workspace_id, mine["id"], "0.10", "jury"), _row(workspace_id, theirs["id"], "1.00", "jury")])

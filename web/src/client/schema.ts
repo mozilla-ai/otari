@@ -13360,7 +13360,7 @@ export interface components {
         KeyBudgetPublic: {
             /**
              * Budgets Enforced
-             * @description False when no budget gates this key: it is budget-exempt, or the deployment turned budgets off
+             * @description False when budgets are off for this key: it is budget-exempt, or the deployment runs with budget_strategy disabled. True otherwise, even when no cap applies
              */
             budgets_enforced: boolean;
             /**
@@ -13370,7 +13370,7 @@ export interface components {
             limits: components["schemas"]["KeyLimitPublic"][];
             /**
              * Remaining Usd
-             * @description The fewest dollars any cap on every provider leaves; null when none caps dollars
+             * @description The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, request or provider-narrowed cap in limits can refuse a request sooner
              */
             remaining_usd: number | null;
         };

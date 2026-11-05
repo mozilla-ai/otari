@@ -14,7 +14,7 @@ def _service(found: tuple[str, int | None, int | None] | None) -> tuple[BudgetSe
     uow = MagicMock()
     uow.__aenter__ = AsyncMock(return_value=uow)
     uow.__aexit__ = AsyncMock(return_value=None)
-    service = BudgetService(uow, repositories, MagicMock(), MagicMock(), MagicMock())
+    service = BudgetService(uow, repositories, MagicMock(), MagicMock(), MagicMock(), users=MagicMock())
     return service, repositories.budgets.minute_limits_for_user
 
 

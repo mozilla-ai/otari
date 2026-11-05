@@ -11817,7 +11817,7 @@
         "description": "What the calling key may still spend, and every cap that decides it.",
         "properties": {
           "budgets_enforced": {
-            "description": "False when no budget gates this key: it is budget-exempt, or the deployment turned budgets off",
+            "description": "False when budgets are off for this key: it is budget-exempt, or the deployment runs with budget_strategy disabled. True otherwise, even when no cap applies",
             "title": "Budgets Enforced",
             "type": "boolean"
           },
@@ -11838,7 +11838,7 @@
                 "type": "null"
               }
             ],
-            "description": "The fewest dollars any cap on every provider leaves; null when none caps dollars",
+            "description": "The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, request or provider-narrowed cap in limits can refuse a request sooner",
             "title": "Remaining Usd"
           }
         },

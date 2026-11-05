@@ -406,11 +406,11 @@ session get `401`: neither has a key of its own.
 
 | Field | Meaning |
 |---|---|
-| `limits` | The budget the key's user is on (`scope: user`), then each spend ceiling on a scope the key bills to: `workspace_member`, `org_member`, `api_token`, `workspace`, `organization`, the most specific first. A request has to pass all of them. |
+| `limits` | The budget the key's user is on (`scope: user`), then each spend ceiling on a scope the key bills to: `workspace_member`, `org_member`, `api_token`, `workspace`, `organization`, the most specific first. A request the key bills to its own user has to pass all of them. A [service key](end-users.md) request that names an end user checks that end user's budget in place of the `scope: user` entry, and that budget is not in this report; the key and member ceilings still apply. |
 | `used_*` | What the budget gate counts: recorded use plus the holds of requests still in flight. A period that has ended reads as the fresh one the next request starts. |
 | `workspace` and `organization` caps | Shared with the rest of the workspace or organization, so `limit_*` and `used_*` are `null` and only `remaining_*` is reported. |
-| `remaining_usd` (top level) | The fewest dollars any cap on every provider leaves: what the key can spend before a request is refused with `403 budget_exceeded`. `null` when no cap limits dollars. |
-| `budgets_enforced` | `false`, with no limits, when the key is budget-exempt or the deployment runs with `budget_strategy: disabled`. |
+| `remaining_usd` (top level) | The fewest dollars any dollar cap on every provider leaves: how much the key can spend before one of those refuses a request with `403 budget_exceeded`. A token cap, a request cap or a cap narrowed to one provider (each listed in `limits`) can refuse sooner. `null` when no dollar cap on every provider applies. |
+| `budgets_enforced` | `false`, with no limits, when the key is budget-exempt or the deployment runs with `budget_strategy: disabled`; `true` otherwise, even when no cap applies. |
 
 To read what each kind of request cost, tag requests with
 [`metadata`](#request-tags) and group the summary by that tag:

@@ -7,10 +7,12 @@ from decimal import Decimal
 
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_ORGANIZATION, SCOPE_WORKSPACE
-from gateway.repositories.budgets import BudgetRepositories, LimitUsage, ScopeIdSets
+from gateway.models.money import as_float
+from gateway.repositories.budgets import BudgetRepositories, CeilingUsage, LimitUsage, ScopeIdSets
 from gateway.schemas.budgets import KeyBudgetPublic, KeyLimitPublic
 from gateway.services.budgets._periods import period_window
 from gateway.services.budgets._scoped_enforcement import SCOPE_PRECEDENCE
+from gateway.services.organizations import UserAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # Ceilings a key shares with everyone else in its workspace or organization. A key
@@ -23,10 +25,11 @@ _USER_SCOPE = "user"
 class _KeyLimits:
     """The caps a request made with a key has to pass, as the gate sees them now."""
 
-    def __init__(self, repositories: BudgetRepositories, organizations: OrganizationService) -> None:
+    def __init__(self, repositories: BudgetRepositories, organizations: OrganizationService, users: UserAccess) -> None:
         self._budgets = repositories.budgets
         self._ceilings = repositories.ceilings
         self._organizations = organizations
+        self._users = users
 
     async def read(self, api_key: APIKey) -> KeyBudgetPublic:
         """Every cap on the key: its user's budget, then each ceiling on a scope it bills to, most specific first.
@@ -38,7 +41,7 @@ class _KeyLimits:
         """
         limits: list[LimitUsage] = []
         if api_key.user_id is not None:
-            user_limit = await self._budgets.user_limit_usage(api_key.user_id)
+            user_limit = await self._user_limit(api_key.user_id)
             if user_limit is not None:
                 limits.append(user_limit)
         ceilings = await self._ceilings.usage_in_scopes(await self._scopes(api_key))
@@ -54,6 +57,33 @@ class _KeyLimits:
         now = datetime.now(UTC)
         public = [_public(limit, now) for limit in limits]
         return KeyBudgetPublic(budgets_enforced=True, remaining_usd=_least_remaining(public), limits=public)
+
+    async def _user_limit(self, user_id: str) -> LimitUsage | None:
+        """The budget a user is on with the user's use of it, or None when it is on none."""
+        use = await self._users.budget_use(user_id)
+        if use is None:
+            return None
+        budget = (await self._budgets.get_many([use.budget_id])).get(use.budget_id)
+        if budget is None:
+            return None
+        return LimitUsage(
+            scope=_USER_SCOPE,
+            provider_key_id=None,
+            budget_duration_sec=budget.budget_duration_sec,
+            reset_alignment=budget.reset_alignment,
+            usage=CeilingUsage(
+                max_budget=budget.max_budget,
+                current_spend=use.spend,
+                reserved_spend=use.reserved,
+                token_limit=budget.token_limit,
+                current_tokens=use.current_tokens,
+                reserved_tokens=use.reserved_tokens,
+                request_limit=budget.request_limit,
+                current_requests=use.current_requests,
+                reserved_requests=use.reserved_requests,
+                period_end=use.next_budget_reset_at,
+            ),
+        )
 
     async def _scopes(self, api_key: APIKey) -> ScopeIdSets:
         """The scopes a request with this key bills to, resolved as the budget gate resolves them."""
@@ -107,18 +137,20 @@ def _public(limit: LimitUsage, now: datetime) -> KeyLimitPublic:
     spent = Decimal(0) if ended else usage.current_spend
     tokens = 0 if ended else usage.current_tokens
     requests = 0 if ended else usage.current_requests
-    used_usd = float(spent + usage.reserved_spend)
+    # Kept exact until the response: the gate compares decimals, and a float
+    # difference would report a few units in the last place less than it admits.
+    used_usd = spent + usage.reserved_spend
     used_tokens = tokens + usage.reserved_tokens
     used_requests = requests + usage.reserved_requests
-    limit_usd = None if usage.max_budget is None else float(usage.max_budget)
+    max_budget = usage.max_budget
     shared = limit.scope in _SHARED_SCOPES
     return KeyLimitPublic(
         scope=limit.scope,
         provider=limit.provider_key_id,
         resets_at=resets_at,
-        limit_usd=None if shared else limit_usd,
-        used_usd=None if shared or limit_usd is None else used_usd,
-        remaining_usd=None if limit_usd is None else max(0.0, limit_usd - used_usd),
+        limit_usd=None if shared else as_float(max_budget),
+        used_usd=None if shared or max_budget is None else as_float(used_usd),
+        remaining_usd=None if max_budget is None else as_float(max(Decimal(0), max_budget - used_usd)),
         limit_tokens=None if shared else usage.token_limit,
         used_tokens=None if shared or usage.token_limit is None else used_tokens,
         remaining_tokens=None if usage.token_limit is None else max(0, usage.token_limit - used_tokens),

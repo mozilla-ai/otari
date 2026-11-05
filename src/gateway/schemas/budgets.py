@@ -683,10 +683,12 @@ class KeyBudgetPublic(BaseModel):
     """What the calling key may still spend, and every cap that decides it."""
 
     budgets_enforced: bool = Field(
-        description="False when no budget gates this key: it is budget-exempt, or the deployment turned budgets off"
+        description="False when budgets are off for this key: it is budget-exempt, or the deployment runs with "
+        "budget_strategy disabled. True otherwise, even when no cap applies"
     )
     remaining_usd: float | None = Field(
-        description="The fewest dollars any cap on every provider leaves; null when none caps dollars"
+        description="The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, "
+        "request or provider-narrowed cap in limits can refuse a request sooner"
     )
     limits: list[KeyLimitPublic] = Field(
         description="The key's user's budget first, then each spend ceiling, the most specific first"

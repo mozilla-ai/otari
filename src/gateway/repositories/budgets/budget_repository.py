@@ -11,7 +11,6 @@ from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
 from gateway.models.budgets import BUDGET_ORIGIN_CONFIG, Budget, BudgetResetLog
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
-from gateway.repositories.budgets.scoped_budget_repository import CeilingUsage, LimitUsage
 
 
 def _in_reach_of(organization_id: uuid.UUID) -> ColumnElement[bool]:
@@ -86,49 +85,6 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         if row is None:
             return None
         return row.budget_id, row.rpm_limit, row.tpm_limit
-
-    async def user_limit_usage(self, user_id: str) -> LimitUsage | None:
-        """The budget a live user is on, with the user's use of it on every axis, or None when it is on none."""
-        row = (
-            await self.db.execute(
-                select(
-                    Budget.budget_duration_sec,
-                    Budget.reset_alignment,
-                    Budget.max_budget,
-                    User.spend,
-                    User.reserved,
-                    Budget.token_limit,
-                    User.current_tokens,
-                    User.reserved_tokens,
-                    Budget.request_limit,
-                    User.current_requests,
-                    User.reserved_requests,
-                    User.next_budget_reset_at,
-                )
-                .join(User, User.budget_id == Budget.budget_id)
-                .where(User.user_id == user_id, User.deleted_at.is_(None))
-            )
-        ).first()
-        if row is None:
-            return None
-        return LimitUsage(
-            scope="user",
-            provider_key_id=None,
-            budget_duration_sec=row.budget_duration_sec,
-            reset_alignment=row.reset_alignment,
-            usage=CeilingUsage(
-                max_budget=row.max_budget,
-                current_spend=row.spend,
-                reserved_spend=row.reserved,
-                token_limit=row.token_limit,
-                current_tokens=row.current_tokens,
-                reserved_tokens=row.reserved_tokens,
-                request_limit=row.request_limit,
-                current_requests=row.current_requests,
-                reserved_requests=row.reserved_requests,
-                period_end=row.next_budget_reset_at,
-            ),
-        )
 
     async def get_by_id_and_organization(self, budget_id: str, organization_id: uuid.UUID) -> Budget | None:
         """Return the budget with this ID when this organization owns it, otherwise None."""
