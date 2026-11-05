@@ -135,6 +135,7 @@ async def admit_mcp_servers(
     for inline in mcp_servers or []:
         inline.caller_tool_patterns = None
         inline.caller_access_source = None
+        inline.stored_server_id = None
     # Each source is checked on its own, because a stored server's refusal carries a fixed detail.
     # A duplicate name collapses two servers into one client session, so each source refuses one.
     inline_names: set[str] = set()

@@ -52,6 +52,8 @@ class McpServerConfig(BaseModel):
     caller_tool_patterns: SkipJsonSchema[list[str] | None] = Field(default=None, exclude=True)
     # Admission's too: the rule that set ``caller_tool_patterns``, as a trace's decision source (``mcp_user``).
     caller_access_source: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
+    # Admission's too: the stored server's id, so a trace's tool span links to its page.
+    stored_server_id: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
 
 
 class ResolvedMcpServer(BaseModel):

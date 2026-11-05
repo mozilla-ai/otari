@@ -1322,3 +1322,4 @@ def test_the_loop_refuses_a_withheld_tool_and_tells_the_model_what_it_holds(
     assert (span.tool_name, span.outcome) == ("delete_issue", "blocked")
     assert span.attributes is not None
     assert span.attributes["otari.tool.decision_source"] == "mcp_everyone"
+    assert span.attributes["otari.mcp.server_id"] == str(row.id)

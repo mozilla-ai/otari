@@ -448,6 +448,7 @@ class ToolSpans:
         result: str | None = None,
         tool_name: str | None = None,
         mcp_server: str | None = None,
+        mcp_server_id: str | None = None,
     ) -> None:
         """One call: ``arguments`` as the model sent them, ``result`` as the model reads it, None where it failed."""
         name = tool_name or self.tool_name
@@ -460,4 +461,5 @@ class ToolSpans:
                 arguments=arguments,
                 result=result,
                 mcp_server=mcp_server,
+                mcp_server_id=mcp_server_id,
             )

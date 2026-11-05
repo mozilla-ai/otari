@@ -117,6 +117,7 @@ class _ConnectedServer:
     session: ClientSession
     tools: list[dict[str, Any]] = field(default_factory=list)
     purpose_hint: str | None = None
+    stored_server_id: str | None = None
     # Tools the server lists that the caller's rule does not grant, named in the model's access note.
     not_granted: list[str] = field(default_factory=list)
 
@@ -125,6 +126,7 @@ class _ConnectedServer:
 class _DeniedTool:
     server: str
     decided_by: str
+    server_id: str | None = None
 
 
 class MCPClientPool:
@@ -258,10 +260,10 @@ class MCPClientPool:
         not_granted: list[str] = []
         for tool in listed.tools:
             if allowed is not None and tool.name not in allowed:
-                self._deny(tool.name, cfg.name, "mcp_server")
+                self._deny(tool.name, cfg.name, "mcp_server", cfg.stored_server_id)
                 continue
             if cfg.caller_tool_patterns is not None and not is_mcp_tool_allowed(cfg.caller_tool_patterns, tool.name):
-                self._deny(tool.name, cfg.name, cfg.caller_access_source or "mcp_everyone")
+                self._deny(tool.name, cfg.name, cfg.caller_access_source or "mcp_everyone", cfg.stored_server_id)
                 not_granted.append(tool.name)
                 continue
             if tool.name in self._tool_owner:
@@ -282,12 +284,17 @@ class MCPClientPool:
             self._tool_owner[tool.name] = cfg.name
 
         return _ConnectedServer(
-            name=cfg.name, session=session, tools=openai_tools, purpose_hint=cfg.purpose_hint, not_granted=not_granted
+            name=cfg.name,
+            session=session,
+            tools=openai_tools,
+            purpose_hint=cfg.purpose_hint,
+            stored_server_id=cfg.stored_server_id,
+            not_granted=not_granted,
         )
 
-    def _deny(self, name: str, server: str, decided_by: str) -> None:
+    def _deny(self, name: str, server: str, decided_by: str, server_id: str | None) -> None:
         if name not in self._ceded and name not in self._denied:
-            self._denied[name] = _DeniedTool(server=server, decided_by=decided_by)
+            self._denied[name] = _DeniedTool(server=server, decided_by=decided_by, server_id=server_id)
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
@@ -338,6 +345,7 @@ class MCPClientPool:
                 ok=False,
                 arguments=arguments,
                 mcp_server=denied.server,
+                mcp_server_id=denied.server_id,
                 decided_by=denied.decided_by,
                 refused=True,
             )
@@ -355,7 +363,14 @@ class MCPClientPool:
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
-            self._spans.record(started, ok=False, arguments=arguments, tool_name=name, mcp_server=owner)
+            self._spans.record(
+                started,
+                ok=False,
+                arguments=arguments,
+                tool_name=name,
+                mcp_server=owner,
+                mcp_server_id=self._servers[owner].stored_server_id,
+            )
             raise
         self._spans.record(
             started,
@@ -364,6 +379,7 @@ class MCPClientPool:
             result=_result_text(result),
             tool_name=name,
             mcp_server=owner,
+            mcp_server_id=self._servers[owner].stored_server_id,
         )
         return result
 
