@@ -138,11 +138,7 @@ class SearchToolService:
         self.read_rate = read_rate
 
     async def list_tools(self, kind: ToolKind) -> SearchToolsResponse:
-        """Every stored instance of ``kind`` beside every config-file one, ``builtin_fetch`` first among fetch ones.
-
-        Each with what one of its calls costs on the deployment's own account,
-        read in the block that reads the rows.
-        """
+        """Every stored instance of ``kind`` beside every config-file one, ``builtin_fetch`` first among fetch ones."""
         from_config = config_file_tools(self.config, kind)
         async with self.uow:
             stored = await self.tools.list_by_kind(kind)
