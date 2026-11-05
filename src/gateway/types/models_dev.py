@@ -82,6 +82,40 @@ RATE_FIELDS = ("input", "output", "cache_read", "cache_write")
 # ``packages/core/src/schema-v2.ts``). A price that names none is per ``token``.
 MODELS_DEV_UNITS = ("token", "character", "image", "megapixel", "second", "minute")
 
+# The keys a v2 price rule's condition can name (``CostConditionKeyV2Values`` in
+# the same file), the operators one condition takes, and the keys that combine
+# conditions.
+MODELS_DEV_CONDITION_KEYS = (
+    "context",
+    "duration",
+    "megapixels",
+    "input_images",
+    "service_tier",
+    "region",
+    "date",
+    "utc_days",
+    "utc_hours",
+    "holiday",
+    "thinking",
+    "resolution",
+    "quality",
+    "aspect_ratio",
+    "generate_audio",
+    "mode",
+    "input_video",
+    "fps",
+    "steps",
+    "search_context_size",
+    "speaker_labels",
+    "keyterms_prompt",
+    "domain",
+    "websocket",
+    "style",
+    "voice_control",
+)
+CONDITION_OPERATORS = ("equals", "in", "gt", "gte", "lt", "lte", "min_items")
+CONDITION_COMBINATORS = ("all", "any", "not")
+
 # A price as a document gives it: a JSON number, read as ``float`` from models.dev and
 # as ``Decimal`` from a stored rate, so money a row holds never rounds through a float.
 type Number = float | Decimal
@@ -310,7 +344,10 @@ class ModelsDevIssues:
     read with a field missing. ``unknown_units`` names each v2 price unit the
     document uses that ``MODELS_DEV_UNITS`` does not, once, in document order.
     Such a price keeps its unit and prices nothing here, so it is not damage,
-    and a unit added upstream never refuses the document.
+    and a unit added upstream never refuses the document. ``unknown_conditions``
+    names each condition key a price rule names that
+    ``MODELS_DEV_CONDITION_KEYS`` does not, the same way: the rule is kept, and
+    skipped when a price is read, as a rule on any key no fact answers is.
     """
 
     count: int = 0
@@ -318,13 +355,17 @@ class ModelsDevIssues:
     models: int = 0
     damaged_models: int = 0
     unknown_units: tuple[str, ...] = ()
+    unknown_conditions: tuple[str, ...] = ()
 
     def describe(self) -> str:
-        """The issues for a log line: how many, in how many models, the first few paths, and the units not known."""
+        """The issues for a log line: how many, in how many models, the first few paths, and the names not known."""
         parts = [f"{self.count} unreadable values in {self.damaged_models} of {self.models} models", *self.examples]
         if self.unknown_units:
             # Fetched text, bounded and quoted the way a path segment is.
             parts.append(f"price units not known here: {', '.join(_segment(unit) for unit in self.unknown_units)}")
+        if self.unknown_conditions:
+            names = ", ".join(_segment(key) for key in self.unknown_conditions)
+            parts.append(f"price rule conditions not known here: {names}")
         return "; ".join(parts)
 
 
@@ -393,6 +434,7 @@ class _Reader:
         self.examples: list[str] = []
         self.known_units = known_units
         self.unknown_units: list[str] = []
+        self.unknown_conditions: list[str] = []
 
     def note(self, path: str, expected: str) -> None:
         self.count += 1
@@ -558,6 +600,9 @@ class _Reader:
     def condition(self, raw: dict[str, Any], path: str) -> Mapping[str, object] | None:
         value = raw.get("when")
         if isinstance(value, dict):
+            for key in condition_keys(value):
+                if key not in MODELS_DEV_CONDITION_KEYS and key not in self.unknown_conditions:
+                    self.unknown_conditions.append(key)
             return _frozen_mapping(value)
         self.note(f"{path}.when", "an object")
         return None
@@ -723,6 +768,79 @@ def _v1_modality(media_type: str) -> str | None:
     return base if base in ("text", "image", "audio", "video") else None
 
 
+def condition_keys(when: Mapping[str, object]) -> list[str]:
+    """Every key a condition names, at any depth under ``all``, ``any`` and ``not``, once, in document order."""
+    found: list[str] = []
+
+    def visit(node: object) -> None:
+        if isinstance(node, Mapping):
+            for key, value in node.items():
+                if key in CONDITION_COMBINATORS:
+                    for item in value if isinstance(value, (list, tuple)) else [value]:
+                        visit(item)
+                elif str(key) not in found:
+                    found.append(str(key))
+
+    visit(when)
+    return found
+
+
+def condition_problem(when: object, path: str = "when") -> str | None:
+    """Why ``when`` is not a condition models.dev's schema allows, or ``None`` when it is.
+
+    Each key is one of ``MODELS_DEV_CONDITION_KEYS``, holding exactly one of
+    ``CONDITION_OPERATORS`` and an operand it takes, or ``all`` and ``any``
+    holding a list of conditions, or ``not`` holding one.
+    """
+    if not isinstance(when, Mapping):
+        return f"{path} is not an object"
+    for key, condition in when.items():
+        at = f"{path}.{_segment(key)}"
+        if key in ("all", "any"):
+            if not isinstance(condition, (list, tuple)):
+                return f"{at} is not a list of conditions"
+            for n, item in enumerate(condition):
+                if (problem := condition_problem(item, f"{at}[{n}]")) is not None:
+                    return problem
+        elif key == "not":
+            if (problem := condition_problem(condition, at)) is not None:
+                return problem
+        elif key not in MODELS_DEV_CONDITION_KEYS:
+            return f"{at} is not a condition models.dev lists"
+        elif (problem := _operator_problem(condition)) is not None:
+            return f"{at} {problem}"
+    return None
+
+
+def _operator_problem(condition: object) -> str | None:
+    if not isinstance(condition, Mapping) or len(condition) != 1:
+        return "is not one operator and its operand"
+    ((operator, operand),) = condition.items()
+    if operator == "equals":
+        takes = _comparable(operand) or isinstance(operand, bool)
+    elif operator == "in":
+        takes = isinstance(operand, (list, tuple)) and all(
+            _comparable(item) or isinstance(item, bool) for item in operand
+        )
+    elif operator in ("gt", "gte", "lt", "lte"):
+        takes = _comparable(operand)
+    elif operator == "min_items":
+        takes = isinstance(operand, int) and not isinstance(operand, bool) and operand >= 0
+    else:
+        return f"uses {_segment(operator)}, which is not an operator models.dev lists"
+    return None if takes else f"gives {operator} an operand it cannot take"
+
+
+def _comparable(value: object) -> bool:
+    """A text or a finite number, which every operator but ``min_items`` compares."""
+    if isinstance(value, str):
+        return True
+    number = _number(value)
+    if number is None or isinstance(number, int):
+        return number is not None
+    return number.is_finite() if isinstance(number, Decimal) else math.isfinite(number)
+
+
 def _context_size(when: Mapping[str, object]) -> int | None:
     """Where a v1 tier starts, for a condition on context alone; ``gt`` and ``gte`` both give its size."""
     context = when.get("context")
@@ -838,6 +956,7 @@ def parse_pricing(
         models=1,
         damaged_models=int(reader.count > 0),
         unknown_units=tuple(reader.unknown_units),
+        unknown_conditions=tuple(reader.unknown_conditions),
     )
     return pricing, issues
 
@@ -965,6 +1084,7 @@ def _parse(raw: object, read_model: Callable[[_Reader, str, dict[str, Any], str]
         models=seen,
         damaged_models=damaged,
         unknown_units=tuple(reader.unknown_units),
+        unknown_conditions=tuple(reader.unknown_conditions),
     )
     return ModelsDevCatalog(providers=MappingProxyType(providers), issues=issues)
 
