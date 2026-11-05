@@ -148,6 +148,7 @@ from gateway.services.inference import (
 )
 from gateway.services.log_writer import LogWriter, recorded_usage
 from gateway.services.mail import Mailer
+from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label
@@ -1098,6 +1099,14 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 
 
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
+
+
+async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> bool:
+    """Return whether new dashboard sign-ins are frozen right now."""
+    return await is_maintenance_mode(db)
+
+
+MaintenanceModeDep = Annotated[bool, Depends(get_maintenance_mode)]
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
@@ -2893,6 +2902,7 @@ __all__ = [
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",
+    "MaintenanceModeDep",
     "OIDCConnectionServiceDep",
     "ModelProviderPortDep",
     "AgentRecommenderServiceDep",
