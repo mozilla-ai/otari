@@ -11,7 +11,9 @@ from gateway.exceptions.identity_exceptions import (
     OIDCConnectionConflictError,
     OIDCConnectionNotFoundError,
     OIDCConnectionSecretRequiredError,
+    OIDCConnectionUnprovenError,
     OIDCDiscoveryError,
+    SsoBreakGlassRequiredError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
@@ -338,6 +340,49 @@ class OIDCConnectionService:
                 return
             current.first_sign_in_at = datetime.now(UTC)
             self._connections.stage(current)
+
+    async def set_sso_enforcement_for_user(
+        self,
+        *,
+        user: User,
+        required: bool,
+        break_glass_user_id: uuid.UUID | None,
+        break_glass_waived: bool,
+    ) -> None:
+        """Set whether the caller's organization requires sign-in through its own connection. Owners and admins only.
+
+        Raises:
+            OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+            OIDCConnectionUnprovenError: ``required`` is set before anybody has signed in through
+                the connection.
+            SsoBreakGlassRequiredError: ``required`` is set without naming one of the
+                organization's own owners to keep a non-SSO route, or waiving that exception.
+        """
+        organization = await self._managed_organization(user)
+
+        async with self._uow:
+            connection = await self._connections.get_for_organization(organization.id)
+            if connection is None:
+                raise OIDCConnectionNotFoundError
+            if required:
+                if connection.first_sign_in_at is None:
+                    raise OIDCConnectionUnprovenError
+                if break_glass_user_id is None and not break_glass_waived:
+                    raise SsoBreakGlassRequiredError
+                if break_glass_user_id is not None:
+                    owner = await self._organizations.members.get_active_by_organization_and_user(
+                        organization.id, break_glass_user_id
+                    )
+                    if owner is None or owner.role != "owner":
+                        raise SsoBreakGlassRequiredError
+            await self._organizations.organizations.update_organization(
+                organization,
+                {
+                    "sso_required": required,
+                    "sso_break_glass_user_id": break_glass_user_id,
+                    "sso_break_glass_waived": break_glass_waived,
+                },
+            )
 
     async def _store_first(
         self,
