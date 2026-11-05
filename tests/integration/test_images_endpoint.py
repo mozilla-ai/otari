@@ -325,22 +325,19 @@ def test_images_billing_meters_tracked_with_pricing(
     ]
 
 
-def test_images_ignores_models_dev_defaults(
+def test_a_catalog_token_rate_prices_nothing_an_image_without_usage_reports(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """Default (models.dev) rates never price image generation.
+    """A catalog token rate reads as tokens, so an image response that reports none is unpriced, never $5 an image.
 
-    Those rates are USD per million tokens, but images bill per image at a raw
-    per-image rate, so honoring one would charge dollars per image for a rate
-    quoted per million tokens: gpt-image-2 is in the dataset at 5.0 per million, which would
-    bill $5.00 for one image (and reserve it before the call).
+    gpt-image-2 is in the dataset at 5.0 per million tokens.
     """
     configure_default_pricing(True)
     try:
-        # Pin the premise: without a dataset entry to ignore, the assertions below
-        # would pass for the wrong reason and stop guarding anything.
+        # Pin the premise: without a dataset entry, the assertions below would
+        # pass for the wrong reason and stop guarding anything.
         assert default_model_pricing("openai", "gpt-image-2", datetime.now(UTC)) is not None
         with patch(
             "gateway.api.routes.images.aimage_generation",

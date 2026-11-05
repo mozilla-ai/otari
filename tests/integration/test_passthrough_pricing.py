@@ -40,6 +40,11 @@ def _price(client: TestClient, headers: dict[str, str], model: str, *, unit: str
     assert response.status_code == 200, response.text
 
 
+def _price_rates(client: TestClient, headers: dict[str, str], model: str, rates: dict[str, Any]) -> None:
+    response = client.post(f"{API_ROOT}/pricing", json={"model_key": model, "rates": rates}, headers=headers)
+    assert response.status_code == 200, response.text
+
+
 def _user_key(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
     budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 100.0}, headers=headers)
     assert budget.status_code == 200, budget.text
@@ -76,13 +81,85 @@ def _images(n: int, usage: ImageUsage | None = None) -> ImagesResponse:
     return ImagesResponse(created=0, data=[Image(url=f"https://example.com/{i}.png") for i in range(n)], usage=usage)
 
 
-def _generate(client: TestClient, headers: dict[str, str], result: ImagesResponse, *, n: int) -> Any:
+def _generate(
+    client: TestClient, headers: dict[str, str], result: ImagesResponse, *, n: int, size: str | None = None
+) -> Any:
+    body: dict[str, Any] = {"model": "openai:dall-e-3", "prompt": "a cat", "n": n}
+    if size is not None:
+        body["size"] = size
     with patch("gateway.api.routes.images.aimage_generation", new=AsyncMock(return_value=result)):
+        return client.post(f"{API_ROOT}/images/generations", json=body, headers=headers)
+
+
+def test_a_megapixel_rate_holds_and_settles_the_pixels_of_the_size_asked_for(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Three 1024x1024 images held, two settled, each 1.048576 megapixels at $0.05."""
+    _price_rates(
+        client, master_key_header, "openai:dall-e-3", {"image": {"output": {"price": 0.05, "unit": "megapixel"}}}
+    )
+    headers = _user_key(client, master_key_header)
+
+    with held_reservations() as held:
+        response = _generate(client, headers, _images(2), n=3, size="1024x1024")
+
+    assert response.status_code == 200, response.text
+    assert held == [Decimal("0.157286")]
+    row = _row(db_session_factory)
+    assert row.cost == Decimal("0.104858")
+    assert row.billing_meters == {"megapixels": 2.097152}
+    assert row.pricing_breakdown == [
+        {"meter": "megapixels", "units": 2.097152, "unit": "megapixel", "unit_rate": 0.05, "cost": 0.1048576}
+    ]
+    _settled(client, master_key_header, 0.104858)
+
+
+def test_a_megapixel_rate_prices_nothing_an_image_of_no_stated_size(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """A size the request does not name measures no pixels, so the row keeps no cost rather than a guess."""
+    _price_rates(
+        client, master_key_header, "openai:dall-e-3", {"image": {"output": {"price": 0.05, "unit": "megapixel"}}}
+    )
+    headers = _user_key(client, master_key_header)
+
+    with held_reservations() as held:
+        response = _generate(client, headers, _images(1), n=1, size="auto")
+
+    assert response.status_code == 200, response.text
+    assert held == [Decimal(0)]
+    assert _row(db_session_factory).cost is None
+    _settled(client, master_key_header, 0.0)
+
+
+def _speak(client: TestClient, headers: dict[str, str], text: str) -> Any:
+    with patch("gateway.api.routes.audio.aspeech", new=AsyncMock(return_value=b"audio")):
         return client.post(
-            f"{API_ROOT}/images/generations",
-            json={"model": "openai:dall-e-3", "prompt": "a cat", "n": n},
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": text, "voice": "alloy"},
             headers=headers,
         )
+
+
+def test_a_character_rate_holds_and_settles_the_characters_spoken(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Eleven characters at $15 per million, held before the call and settled after it."""
+    _price_rates(client, master_key_header, "openai:tts-1", {"text": {"input": {"price": 15, "unit": "character"}}})
+    headers = _user_key(client, master_key_header)
+
+    with held_reservations() as held:
+        response = _speak(client, headers, "Hello world")
+
+    assert response.status_code == 200, response.text
+    assert held == [Decimal("0.000165")]
+    row = _row(db_session_factory)
+    assert row.cost == Decimal("0.000165")
+    assert row.billing_meters == {"characters": 11}
+    assert row.pricing_breakdown == [
+        {"meter": "characters", "units": 11, "unit": "character", "rate_per_million": 15.0, "cost": 0.000165}
+    ]
+    _settled(client, master_key_header, 0.000165)
 
 
 def test_an_images_rate_holds_the_requested_images_and_settles_the_returned_ones(
@@ -290,6 +367,27 @@ def test_require_pricing_refuses_a_rate_the_endpoint_cannot_settle(strict_client
     assert response.status_code == 402, response.text
     provider.assert_not_called()
     _settled(strict_client, master, 0.0)
+
+
+def test_require_pricing_refuses_a_measured_unit_the_request_cannot_measure(strict_client: TestClient) -> None:
+    """A per-megapixel rate cannot price an image of no stated size, so the request is refused before the call."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price_rates(strict_client, master, "openai:dall-e-3", {"image": {"output": {"price": 0.05, "unit": "megapixel"}}})
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock()
+
+    with patch("gateway.api.routes.images.aimage_generation", new=provider):
+        refused = strict_client.post(
+            f"{API_ROOT}/images/generations",
+            json={"model": "openai:dall-e-3", "prompt": "a cat", "size": "auto"},
+            headers=headers,
+        )
+    assert refused.status_code == 402, refused.text
+    provider.assert_not_called()
+
+    response = _generate(strict_client, headers, _images(1), n=1, size="1024x1024")
+    assert response.status_code == 200, response.text
+    _settled(strict_client, master, 0.052429)
 
 
 def test_require_pricing_admits_a_rate_the_endpoint_can_settle(strict_client: TestClient) -> None:

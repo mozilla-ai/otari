@@ -20,7 +20,6 @@ from gateway.services.inference import (
     image_megapixels,
     image_usage,
     moderation_usage,
-    one_request_usage,
     rerank_usage,
     speech_billing,
     speech_usage,
@@ -179,10 +178,7 @@ def test_speech_reports_the_characters_spoken_and_one_request() -> None:
     assert speech_billing(12).slot == ("text", "input")
 
 
-def test_a_bare_result_and_a_moderation_report_one_request() -> None:
-    assert one_request_usage(b"audio") == ReportedUsage(
-        input_tokens=0, output_tokens=0, total_tokens=0, units={"requests": 1}
-    )
+def test_a_moderation_reports_one_request() -> None:
     assert moderation_usage(object()) == ReportedUsage(output_tokens=0, units={"requests": 1})
 
 

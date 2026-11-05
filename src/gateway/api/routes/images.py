@@ -29,8 +29,8 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.schemas.inference import ImageEditForm
-from gateway.services.budgets import count_estimate
-from gateway.services.inference import IMAGES_BILLING, InferenceService
+from gateway.services.budgets import report_estimate
+from gateway.services.inference import InferenceService, image_billing, image_quantities
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
 
@@ -85,12 +85,19 @@ async def create_image(
     sends no `usage` gets one holding just those two fields. An unpriced
     response carries neither.
     """
-    # Reserve for the requested image count; reconciled to the actual count below.
-    # `is None` (not `or`) so an explicit n=0 isn't silently treated as 1.
+    # Reserve for the requested image count at the size asked for; reconciled to
+    # the images returned below. `is None` (not `or`) so an explicit n=0 isn't
+    # silently treated as 1.
     requested_images = request.n if request.n is not None else 1
+    billing = image_billing(request.size)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
-        return count_estimate(pricing, meter="images", count=requested_images)
+        return report_estimate(
+            pricing,
+            slot=billing.slot,
+            quantities=image_quantities(request.size, requested_images),
+            units={"images": requested_images},
+        )
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
         # Forward every field the schema accepts (it is derived from
@@ -107,12 +114,6 @@ async def create_image(
         }
         return await aimage_generation(**image_kwargs)
 
-    # Only an explicitly configured rate counts (pricing_use_defaults=False), for
-    # the same unit mismatch audio, moderations, and search avoid: a token rate is
-    # still read per image here for now (see ``price_usage``'s legacy reading)
-    # while models.dev quotes USD per million tokens. gpt-image-1 is in that
-    # dataset at 5.0, which would bill $5.00 for one image and, because this route
-    # reserves its estimate, hold that $5.00 against the budget before the call.
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
@@ -125,10 +126,9 @@ async def create_image(
         user=request.user,
         call_provider=call_provider,
         request_params=request.model_fields_set,
-        pricing_use_defaults=False,
         estimate=estimate,
         enforce_require_pricing=True,
-        billing=IMAGES_BILLING,
+        billing=billing,
         relabel=False,
     )
     return _priced_body(outcome)
@@ -289,9 +289,15 @@ async def _run_edit(
     forward = _strip_gateway_fields(dict(set_fields))
     request_params = {*set_fields, *(("mask",) if mask is not None else ())}
     requested_images = fields.n if fields.n is not None else 1
+    billing = image_billing(fields.size)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
-        return count_estimate(pricing, meter="images", count=requested_images)
+        return report_estimate(
+            pricing,
+            slot=billing.slot,
+            quantities=image_quantities(fields.size, requested_images),
+            units={"images": requested_images},
+        )
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
         # Read here, after the rate limit, budget and pricing gates, so a refused
@@ -310,8 +316,7 @@ async def _run_edit(
         }
         return await aimage_edit(**edit_kwargs)
 
-    # Billed exactly as generation is, per image returned; see create_image for
-    # why only an explicitly configured rate counts.
+    # Billed exactly as generation is.
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT_EDITS,
         raw_request=raw_request,
@@ -324,10 +329,9 @@ async def _run_edit(
         user=fields.user,
         call_provider=call_provider,
         request_params=request_params,
-        pricing_use_defaults=False,
         estimate=estimate,
         enforce_require_pricing=True,
-        billing=IMAGES_BILLING,
+        billing=billing,
         relabel=False,
     )
     return _priced_body(outcome)
