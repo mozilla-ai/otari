@@ -3,6 +3,17 @@
 * [What is Otari?](index.md)
 * [Quickstart](quickstart.md)
 
+## Use otari.ai
+
+* [Manage workspaces](manage-workspaces.md)
+* [Invite and manage members](invite-and-manage-organization-members.md)
+* [Manage provider keys](manage-provider-keys.md)
+* [Rotate a provider key](rotate-a-provider-key.md)
+* [Set a budget and ceiling](set-a-budget-and-ceiling.md)
+* [Create a multi-provider routing](create-a-multi-provider-routing.md)
+* [Manage guardrails](manage-guardrails.md)
+* [Configure a workspace's tools](workspace-tools.md)
+
 # Guides
 
 ## Organizations and access
@@ -20,10 +31,6 @@
 
 * [Admin dashboard](dashboard.md)
 * [Playground](playground.md)
-
-## Tools
-
-* [Configure a workspace's tools](workspace-tools.md)
 
 ## Agents and frameworks
 
@@ -51,6 +58,7 @@
 * [Deployment](deployment.md)
 * [Configuration](configuration.md)
 * [Sign-in and accounts](sign-in.md)
+* [Run the dashboard](run-the-dashboard.md)
 
 ## Providers
 
@@ -65,6 +73,9 @@
 
 * [Workload identity](workload-identity.md)
 * [Health checks](health-checks.md)
+* [Run the guardrails service](guardrails-service.md)
+* [Store agent traces](trace-storage.md)
+* [Service keys on a deployment you run](operator-service-keys.md)
 
 # Reference
 
@@ -77,6 +88,7 @@
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
+* [Inference Guardrails reference](guardrails-reference.md)
 
 ## Agent Guardrails
 

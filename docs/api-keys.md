@@ -22,8 +22,8 @@ base URL to send it to, and the form each SDK expects, are in
 
 ## Cap a key's spend
 
-An operator, or an organization owner or admin, can give a key a budget of its
-own: in the key's create or edit form, pick an existing budget under
+An organization owner or admin, or a deployment operator, can give a key a
+budget of its own: in the key's create or edit form, pick an existing budget under
 **Budget (optional)**, or set a **Limit (USD)** and how often it **Resets**. The
 key's owner's budget still applies beside it. The page's Budget column shows
 each key's spend this period against its limit. For budgets in general, see
@@ -37,10 +37,10 @@ use the deployment setting, always reject, or always accept. What each choice
 does is in [Mismatched `user` fields](#mismatched-user-fields).
 
 Set the value in the dashboard's key form (under **Advanced** when creating a
-key, and on the edit form), as `reject_user_mismatch` on `POST` or `PATCH`
-`/api/v1/keys` and `/api/v1/organizations/me/keys`, or on a key declared in
-config.yml. The deployment-wide default is a runtime setting, changed on the
-Settings page or with `PATCH /api/v1/settings`.
+key, and on the edit form), or as `reject_user_mismatch` on `POST` or `PATCH`
+`/api/v1/organizations/me/keys`. Self-hosted deployments can also set it on a key
+declared in config.yml, and change the deployment-wide default; see
+[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
 
 ## Regenerate or delete a key
 
@@ -49,11 +49,8 @@ Settings page or with `PATCH /api/v1/settings`.
   plaintext is shown once, as on creation.
 - **Delete** on a key's row removes the key permanently.
 
-A key can also be declared in config.yml with a secret you choose, in which
-case config.yml owns it and writes it back whenever its entry changes; see
-[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
-Regenerating a declared key lasts until config.yml changes the key's entry or
-its secret, which restores the secret config.yml declares.
+On a self-hosted deployment, a key declared in config.yml behaves differently;
+see [What config.yml owns](configuration.md#what-configyml-owns).
 
 ## How it works
 
@@ -84,22 +81,24 @@ their own key one instead; see [Workload identity](workload-identity.md).
 
 ### Who manages which keys
 
-`/api/v1/keys` manages every key in the caller's organization and requires the
-deployment operator's standing; an operator also chooses each key's owner. A
-signed-in member without it manages their own keys at
-`/api/v1/organizations/me/keys`, which derives the owner rather than accepting
-one, so a member's keys are always their own and billed to them. That route
-mints only into a workspace the caller may see, and never issues a
-budget-exempt key. It refuses a field it does not take, such as `user_id` or
-`exclude_from_budget`, with `422` rather than ignoring it.
+Organization owners, admins and members manage their own keys on the
+workspace's **API keys** page, or at `/api/v1/organizations/me/keys`. That route
+derives the owner rather than accepting one, so a member's keys are always their
+own and billed to them. It mints only into a workspace the caller may see, and
+never issues a budget-exempt key. It refuses a field it does not take, such as
+`user_id` or `exclude_from_budget`, with `422` rather than ignoring it. An
+organization owner or admin also makes the organization's own service keys on
+this route; see
+[An organization's own service keys](end-users.md#2-create-the-service-key).
 
 A viewer may list their keys there and is refused (`403`) every write:
 creating, editing, rotating or deleting a key takes organization owner or
 admin, or a caller who is a viewer neither of the organization nor of the key's
-workspace. To give a viewer a key, an operator issues it on `/api/v1/keys` and
-owns its changes. An organization owner or admin also makes the organization's
-own service keys on this route; see
-[An organization's own service keys](end-users.md#an-organizations-own-service-keys).
+workspace. To give a viewer a key, an operator issues it and owns its changes.
+
+A deployment operator manages every key in the organization at `/api/v1/keys`
+and chooses each key's owner; on a self-hosted deployment, see
+[Deployment-wide account administration](sign-in.md#deployment-wide-account-administration).
 
 A key records whether its owner minted it on the member surface or an operator
 issued it. Membership changes act on that:
@@ -135,9 +134,10 @@ With no `allowed_tools` on the key or its user, the search tools are read off th
 model list: a key unrestricted for models may run any search or fetch tool, and a
 key restricted for models may run only the search tools its `allowed_models`
 names whole as `<provider>:<tool>`, such as `exa:exa-search`, and that its user's
-model list grants too; no model list grants a fetch tool. That form is deprecated: startup counts the keys and users that still
-rely on it, names the tools some reached only through a wildcard, which no longer
-grants them, and a later release removes it. A model list no longer takes a
+model list grants too; no model list grants a fetch tool. That form is
+deprecated, and a later release removes it; give the key or user an
+`allowed_tools` list instead. A wildcard no longer grants a search tool. A model
+list no longer takes a
 wildcard or another name under a provider that serves only search tools, such as
 `exa:*`; it takes that provider's exact `<provider>:<tool>` keys alone.
 
