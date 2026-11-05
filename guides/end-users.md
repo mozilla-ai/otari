@@ -67,7 +67,7 @@ Such a key belongs to the organization rather than to the person who made it:
 Its responses carry `is_organization_service_key: true`, which tells it apart
 from a service key a deployment operator made in the same organization. To pool
 every end user under one cap, give the key a spend ceiling of its own (see
-[Set a budget and ceiling](https://docs.otari.ai/use-otari-ai/set-a-budget-and-ceiling)).
+[Set a budget and ceiling](https://docs.otari.ai/use-otari.ai/set-a-budget-and-ceiling)).
 
 ## 3. Name the end user on each request
 
