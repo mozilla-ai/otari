@@ -8,7 +8,6 @@ tests in ``tests/integration/test_guardrails_route.py``.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 from collections.abc import Callable
@@ -166,6 +165,7 @@ _ECHO = "my-private-prompt"
 
 
 def _protocol_error() -> httpx.Response:
+    """Fail the way httpx does on a malformed reply, quoting the bytes it read."""
     raise httpx.RemoteProtocolError(f"illegal header line: bytearray(b'{_ECHO}')")
 
 
@@ -204,7 +204,15 @@ async def test_a_malformed_answer_is_logged_without_what_the_service_sent(
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.WARNING, logger="gateway")
     try:
-        with contextlib.suppress(HTTPException):
+        if mode == "block":
+            with pytest.raises(HTTPException) as exc:
+                await apply_input_guardrails(
+                    [GuardrailConfig(profile="prompt-injection", mode=mode, on_unavailable="block")],
+                    _ECHO,
+                    response=Response(),
+                )
+            assert exc.value.status_code == 502
+        else:
             await apply_input_guardrails(
                 [GuardrailConfig(profile="prompt-injection", mode=mode)], _ECHO, response=Response()
             )
