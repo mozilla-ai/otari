@@ -341,6 +341,20 @@ class OIDCConnectionService:
                 allow_private_hosts=allow_private_hosts,
             )
 
+    async def record_first_sign_in(self, connection: OIDCConnection) -> None:
+        """Record that a sign-in through ``connection`` succeeded.
+
+        No authority check runs, because a person signing in has no authority over the
+        organization they sign in to. A connection that already carries a record keeps its
+        first one.
+        """
+        async with self._uow:
+            current = await self._connections.get_by_id(connection.id)
+            if current is None or current.first_sign_in_at is not None:
+                return
+            current.first_sign_in_at = datetime.now(UTC)
+            self._connections.stage(current)
+
     async def _store_first(
         self,
         *,

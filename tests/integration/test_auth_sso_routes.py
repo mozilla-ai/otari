@@ -353,3 +353,61 @@ def test_a_valid_flow_cookie_reaches_the_provider_rather_than_a_state_refusal(
     )
 
     assert response.status_code == 502, response.text
+
+
+# ---------- first sign-in ----------
+
+
+def test_a_successful_callback_records_the_connections_first_sign_in(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = _add_organization(db_session, slug="acme")
+    connection = _add_connection(db_session, organization.id)
+    _add_claim(db_session, organization.id, domain="acme.example")
+    stub_exchange(monkeypatch)
+    bound = _authorize(client, organization.slug)
+
+    response = client.post(f"{API_ROOT}/auth/sso/callback", json={"code": "the-code", "state": bound["state"]})
+
+    assert response.status_code == 200, response.text
+    db_session.refresh(connection)
+    assert connection.first_sign_in_at is not None
+
+
+def test_a_second_sign_in_leaves_the_first_sign_in_record_unchanged(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = _add_organization(db_session, slug="acme")
+    connection = _add_connection(db_session, organization.id)
+    _add_claim(db_session, organization.id, domain="acme.example")
+    stub_exchange(monkeypatch)
+
+    first_bound = _authorize(client, organization.slug)
+    first = client.post(f"{API_ROOT}/auth/sso/callback", json={"code": "code-one", "state": first_bound["state"]})
+    assert first.status_code == 200, first.text
+    db_session.refresh(connection)
+    first_sign_in_at = connection.first_sign_in_at
+    assert first_sign_in_at is not None
+
+    second_bound = _authorize(client, organization.slug)
+    second = client.post(f"{API_ROOT}/auth/sso/callback", json={"code": "code-two", "state": second_bound["state"]})
+
+    assert second.status_code == 200, second.text
+    db_session.refresh(connection)
+    assert connection.first_sign_in_at == first_sign_in_at
+
+
+def test_a_refused_sign_in_leaves_the_first_sign_in_record_unset(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = _add_organization(db_session, slug="acme")
+    connection = _add_connection(db_session, organization.id)
+    # No domain claim: nothing proves the identity's email domain, so the connection admits nobody.
+    stub_exchange(monkeypatch)
+    bound = _authorize(client, organization.slug)
+
+    response = client.post(f"{API_ROOT}/auth/sso/callback", json={"code": "a-code", "state": bound["state"]})
+
+    assert response.status_code == 401, response.text
+    db_session.refresh(connection)
+    assert connection.first_sign_in_at is None

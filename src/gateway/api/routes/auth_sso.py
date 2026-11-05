@@ -245,6 +245,7 @@ async def callback_sso(
             connection=connection,
         )
         signed_in = await identities.sign_in_with_oauth(external, terms_accepted=body.terms_accepted)
+        await connections.record_first_sign_in(connection)
     except (OAuthIdentityLinkConflictError, SignInBlockedError, TermsNotAcceptedError):
         # A concurrent sign-in finished first, the address is blocked, or the terms are still to accept, so
         # nobody failed to authenticate.
