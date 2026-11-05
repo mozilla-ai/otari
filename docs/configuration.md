@@ -1091,8 +1091,20 @@ pricing:
 That row stores `unit: image` and `input_price_per_million: 40000`, as the
 per-image section below says. Every row reads back with both: one set through
 the per-million fields shows them in `rates` too, in the slot its unit
-chooses. Billing reads the per-million fields in this release. The other
-prices a block holds are stored for the meters a later release gives them.
+chooses. Billing reads the per-million fields in this release, and the
+videos endpoint reads a `video` output price per second
+([Videos](api-reference.md#videos)):
+
+```yaml
+pricing:
+  gemini:veo-3.0-generate-001:
+    rates:
+      video:
+        output: {price: 0.4, unit: second}
+```
+
+The other prices a block holds are stored for the meters a later release
+gives them.
 
 ### Per-request pricing (audio, moderations, rerank, and completion models)
 
