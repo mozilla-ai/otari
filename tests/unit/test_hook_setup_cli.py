@@ -374,6 +374,47 @@ def test_a_narrowed_matcher_leaves_a_shared_entrys_sibling_command_alone(repo: P
     ]
 
 
+def test_splitting_a_shared_entry_keeps_the_hook_items_other_fields(repo: Path) -> None:
+    """Only the command is setup's to rewrite, so a field a person added to the item survives the move."""
+    settings = repo / ".claude" / "settings.local.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Edit|Write|NotebookEdit|Read",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code",
+                                    "timeout": 30,
+                                },
+                                {"type": "command", "command": "sibling-hook"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    assert _invoke("--repo-only").exit_code == 0
+
+    entries = _read_settings(repo)["hooks"]["PreToolUse"]
+    ours = next(entry for entry in entries if any("otari" in h["command"] for h in entry["hooks"]))
+    assert ours["hooks"] == [
+        {
+            "type": "command",
+            "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only",
+            "timeout": 30,
+        }
+    ]
+
+
 def test_rerunning_still_updates_a_solo_entry_in_place(repo: Path) -> None:
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     assert _invoke().exit_code == 0
