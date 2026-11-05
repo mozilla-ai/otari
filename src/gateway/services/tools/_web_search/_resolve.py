@@ -52,7 +52,6 @@ from gateway.core.settings.tools import (
     BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
     PROVIDER_DEFAULT_OPTIONS,
-    SEARCH_PROVIDERS_REQUIRING_API_BASE,
     WEB_SEARCH_PROVIDERS,
     SynthesizedSearchInstance,
     ToolInstance,
@@ -62,6 +61,7 @@ from gateway.core.settings.tools import (
     default_api_base,
     effective_fetch_instances,
     effective_search_instances,
+    inherits_web_search_engines,
     option_problems,
     validate_search_tool_transport,
 )
@@ -326,7 +326,7 @@ def _search_on_instance(
     runner: Runner = "library" if instance.library_backed else "old"
     own = dict(instance.options)
     # Contract C8: a searxng instance that names no engines searches the deployment's.
-    if instance.provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and "engines" not in own and config.web_search_engines:
+    if inherits_web_search_engines(instance.provider, own) and config.web_search_engines:
         own["engines"] = config.web_search_engines
     options = _layered(
         "search",

@@ -1,5 +1,6 @@
 """Endpoint tests for /api/v1/tool-settings (sqlite-backed TestClient)."""
 
+import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -149,6 +150,27 @@ def test_patch_clear_falls_back_and_survives_restart(tmp_path: Path, monkeypatch
     with TestClient(create_app(GatewayConfig(database_url=db, master_key="sk-test-master"))) as client2:
         fields2 = _fields(client2.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
         assert fields2["web_search_url"]["value"] == "http://env-default:8080"
+
+
+def test_a_stored_web_search_url_is_announced_at_the_next_start_without_its_value(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = f"sqlite:///{tmp_path / 'legacy-test.db'}"
+    with TestClient(create_app(GatewayConfig(database_url=db, master_key="sk-test-master"))) as client:
+        stored = client.patch(
+            f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_url": "http://user:hunter2@searxng:8080"}
+        )
+        assert stored.status_code == 200
+
+    caplog.set_level(logging.WARNING, logger="gateway")
+    with TestClient(create_app(GatewayConfig(database_url=db, master_key="sk-test-master"))):
+        pass
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "web_search_url is stored through the dashboard" in logged
+    assert "converts it into a stored search tool named searxng" in logged
+    assert "configuration file or the environment" not in logged
+    assert "hunter2" not in logged
 
 
 def test_test_endpoint_reports_reachable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
