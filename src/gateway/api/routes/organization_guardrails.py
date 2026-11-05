@@ -20,12 +20,19 @@ changes nothing about how a request is checked.
 import uuid
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from gateway.api.deps import CurrentIdentity, OrganizationGuardrailServiceDep, get_config, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    GrowthSignalPortDep,
+    OrganizationGuardrailServiceDep,
+    get_config,
+    verify_master_key,
+)
 from gateway.api.routes.organizations import Message
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
+from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.services.tenancy.organization_guardrail_service import (
     OrganizationGuardrailCreate,
     OrganizationGuardrailPublic,
@@ -76,6 +83,8 @@ async def create_organization_guardrail(
     service: OrganizationGuardrailServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationGuardrailCreate,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> OrganizationGuardrailPublic:
     """Mandate a guardrail across the organization. Organization owners and admins only.
 
@@ -86,7 +95,17 @@ async def create_organization_guardrail(
     otherwise a new workspace inherits nothing and the entry runs only in the
     workspaces ``workspace_ids`` lists.
     """
-    return await service.create_guardrail(user=current_identity, request=body)
+    # Read before the create, under the same role gate, for the first-key derivation's reason in organization_keys.
+    first = (await service.list_guardrails(user=current_identity, skip=0, limit=1)).count == 0
+    created = await service.create_guardrail(user=current_identity, request=body)
+    if first and current_identity.email is not None:
+        await growth.record_activation(
+            background_tasks=background_tasks,
+            event=GrowthActivationEvent.FIRST_GUARDRAIL_CONFIGURED,
+            user_id=current_identity.id,
+            email=current_identity.email,
+        )
+    return created
 
 
 @router.patch("/{guardrail_id}")

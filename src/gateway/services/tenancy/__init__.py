@@ -23,6 +23,7 @@ from gateway.services.tenancy.user_service import (
     describe_caller,
     forget_unproven_access,
     report_new_account,
+    report_sign_in,
     unverified_identity_is_claimable,
     update_full_name,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "hash_token",
     "render_password_reset_email",
     "report_new_account",
+    "report_sign_in",
     "unverified_identity_is_claimable",
     "update_full_name",
 ]
