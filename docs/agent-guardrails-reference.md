@@ -842,8 +842,10 @@ repository has no guardrail, it offers to write a starter
 | `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. |
 
 Re-running `setup` rewrites the registered command in place, matching an
-existing entry on the binary and `hook` alone. So a flag added to the settings
-file by hand does not survive a re-run: pass `--repo-only` to `setup` instead.
+existing entry by the executable's name and `hook` alone, so an entry naming
+otari on `PATH` and one naming an install path are the same registration. A
+flag added to the settings file by hand does not survive a re-run: pass
+`--repo-only` to `setup` instead.
 
 On claude-code, `setup --repo-only` also warns when `~/.claude/settings.json`
 registers the hook for every repository without the flag, since that entry

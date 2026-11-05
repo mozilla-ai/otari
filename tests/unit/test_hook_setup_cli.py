@@ -182,11 +182,12 @@ def test_repo_only_keeps_a_user_level_read_gate_out_of_the_matcher(repo: Path, i
     assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit"
 
 
-def _write_global_registration(isolated_home: Path, *, repo_only: bool = False) -> Path:
+def _write_global_registration(isolated_home: Path, *, repo_only: bool = False, command: str | None = None) -> Path:
     """A claude-code hook entry in `~/.claude/settings.json`, as if registered for every repository."""
     path = isolated_home / ".claude" / "settings.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    command = f"{_FAKE_OTARI_PATH} hook --harness claude-code" + (" --repo-only" if repo_only else "")
+    if command is None:
+        command = f"{_FAKE_OTARI_PATH} hook --harness claude-code" + (" --repo-only" if repo_only else "")
     path.write_text(
         json.dumps(
             {
@@ -225,6 +226,23 @@ def test_without_repo_only_a_global_registration_draws_no_warning(repo: Path, is
     global_settings = _write_global_registration(isolated_home)
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) not in result.output
+
+
+def test_repo_only_warns_of_a_global_registration_that_names_otari_on_the_path(repo: Path, isolated_home: Path) -> None:
+    """The entry runs the same hook whether or not it spells otari as an absolute path."""
+    global_settings = _write_global_registration(isolated_home, command="otari hook --harness claude-code")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) in result.output
+
+
+def test_repo_only_ignores_a_global_entry_that_does_not_run_otari_hook(repo: Path, isolated_home: Path) -> None:
+    global_settings = _write_global_registration(isolated_home, command="otari guardrails check")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
     assert result.exit_code == 0, result.output
     assert str(global_settings) not in result.output
 

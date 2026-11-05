@@ -2897,6 +2897,21 @@ def _starter_gates_yaml(repo_name: str) -> str:
     )
 
 
+def _otari_hook_argv(command: str) -> list[str] | None:
+    """A registered hook command's argv when it runs `otari hook`, else None.
+
+    The executable is matched by name, so an entry naming otari on `PATH` and one naming an
+    install path are both recognized as the same registration.
+    """
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if len(argv) >= 2 and Path(argv[0]).stem == "otari" and argv[1] == "hook":
+        return argv
+    return None
+
+
 def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher: str | None = None) -> bool:
     """Add or update an `event` hook entry (e.g. "PreToolUse", "Stop") pointing at otari hook.
 
@@ -2904,12 +2919,11 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     is not tool-scoped, `Stop` being the one this integration registers:
     Claude Code's own Stop hooks carry no `matcher`, unlike `PreToolUse`'s.
 
-    Returns True if a new entry was appended, False if an existing one was
-    found (by its command already starting with this same otari binary
-    invoked as "hook", whatever flags it had) and updated in place instead of
-    duplicated. Every other key in the file, including other hooks and
-    permissions, other events, and any sibling hook command under the same
-    matcher, is preserved untouched.
+    Returns True if a new entry was appended, False if otari hook was already
+    registered here, whatever flags or executable path that entry named, and
+    its entry was updated in place instead of duplicated. Every other key in
+    the file, including other hooks and permissions, other events, and any
+    sibling hook command under the same matcher, is preserved untouched.
     """
     if settings_path.is_file():
         try:
@@ -2927,15 +2941,13 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     entries = hooks_section.setdefault(event, [])
     if not isinstance(entries, list):
         raise click.ClickException(f'{settings_path}\'s "hooks.{event}" must be a JSON array.')
-    otari_hook_prefix = command.split(" --", 1)[0]  # "<path> hook", before any flags
-
     updated = False
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
             continue
         for hook_item in entry["hooks"]:
             existing_command = hook_item.get("command") if isinstance(hook_item, dict) else None
-            if isinstance(existing_command, str) and existing_command.startswith(otari_hook_prefix):
+            if isinstance(existing_command, str) and _otari_hook_argv(existing_command) is not None:
                 if matcher is not None:
                     entry["matcher"] = matcher
                 hook_item["command"] = command
@@ -2980,7 +2992,7 @@ _HOOK_SETUP_BY_HARNESS = {
 }
 
 
-def _hook_global_registration_without_repo_only(otari_hook_prefix: str) -> Path | None:
+def _hook_global_registration_without_repo_only() -> Path | None:
     """`~/.claude/settings.json`, if it registers otari hook there without `--repo-only`.
 
     That registration runs in every repository on this machine, so it would still enforce the
@@ -3004,7 +3016,8 @@ def _hook_global_registration_without_repo_only(otari_hook_prefix: str) -> Path 
                 continue
             for hook_item in entry["hooks"]:
                 command = hook_item.get("command") if isinstance(hook_item, dict) else None
-                if isinstance(command, str) and command.startswith(otari_hook_prefix) and "--repo-only" not in command:
+                argv = _otari_hook_argv(command) if isinstance(command, str) else None
+                if argv is not None and "--repo-only" not in argv:
                     return settings_path
     return None
 
@@ -3114,7 +3127,7 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     click.echo(f"{'Added' if stop_created else 'Updated'} the Stop hook in {settings_path}.")
 
     if repo_only and harness == "claude-code":
-        global_settings_path = _hook_global_registration_without_repo_only(command.split(" --", 1)[0])
+        global_settings_path = _hook_global_registration_without_repo_only()
         if global_settings_path is not None:
             click.echo(
                 f"{global_settings_path} also registers otari hook without --repo-only. It runs in "
