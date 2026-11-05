@@ -2921,9 +2921,11 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
 
     Returns True if a new entry was appended, False if otari hook was already
     registered here, whatever flags or executable path that entry named, and
-    its entry was updated in place instead of duplicated. Every other key in
-    the file, including other hooks and permissions, other events, and any
-    sibling hook command under the same matcher, is preserved untouched.
+    its registration was reused. An entry holding sibling hook commands keeps
+    its own matcher and otari's command moves to an entry of its own, because
+    a matcher covers every command in its entry and narrowing one here would
+    narrow it for the siblings too. Every other key in the file, including
+    other hooks and permissions and other events, is preserved untouched.
     """
     if settings_path.is_file():
         try:
@@ -2942,21 +2944,27 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     if not isinstance(entries, list):
         raise click.ClickException(f'{settings_path}\'s "hooks.{event}" must be a JSON array.')
     updated = False
+    split_out = False
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
             continue
-        for hook_item in entry["hooks"]:
+        for index, hook_item in enumerate(entry["hooks"]):
             existing_command = hook_item.get("command") if isinstance(hook_item, dict) else None
-            if isinstance(existing_command, str) and _otari_hook_argv(existing_command) is not None:
+            if not isinstance(existing_command, str) or _otari_hook_argv(existing_command) is None:
+                continue
+            if matcher is not None and len(entry["hooks"]) > 1:
+                del entry["hooks"][index]
+                split_out = True
+            else:
                 if matcher is not None:
                     entry["matcher"] = matcher
                 hook_item["command"] = command
-                updated = True
-                break
+            updated = True
+            break
         if updated:
             break
 
-    if not updated:
+    if not updated or split_out:
         new_entry: dict[str, object] = {"hooks": [{"type": "command", "command": command}]}
         if matcher is not None:
             new_entry = {"matcher": matcher, **new_entry}

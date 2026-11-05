@@ -324,6 +324,55 @@ def test_rerunning_updates_the_existing_entry_instead_of_duplicating_it(repo: Pa
     assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code"
 
 
+def test_a_narrowed_matcher_leaves_a_shared_entrys_sibling_command_alone(repo: Path) -> None:
+    """A matcher belongs to its entry, so narrowing ours must not narrow a sibling command's."""
+    settings = repo / ".claude" / "settings.local.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Edit|Write|NotebookEdit|Read",
+                            "hooks": [
+                                {"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"},
+                                {"type": "command", "command": "sibling-hook"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+
+    entries = _read_settings(repo)["hooks"]["PreToolUse"]
+    shared = next(entry for entry in entries if any(h["command"] == "sibling-hook" for h in entry["hooks"]))
+    assert shared["matcher"] == "Edit|Write|NotebookEdit|Read"
+    assert [h["command"] for h in shared["hooks"]] == ["sibling-hook"]
+
+    ours = next(entry for entry in entries if any("otari" in h["command"] for h in entry["hooks"]))
+    assert ours is not shared
+    assert ours["matcher"] == "Edit|Write|NotebookEdit"
+    assert ours["hooks"] == [
+        {"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only"}
+    ]
+
+
+def test_rerunning_still_updates_a_solo_entry_in_place(repo: Path) -> None:
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    assert _invoke().exit_code == 0
+    assert _invoke("--repo-only").exit_code == 0
+    entries = _read_settings(repo)["hooks"]["PreToolUse"]
+    assert len(entries) == 1
+    assert entries[0]["hooks"][0]["command"].endswith("--repo-only")
+
+
 def test_rerunning_preserves_unrelated_hooks_and_permissions(repo: Path) -> None:
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"

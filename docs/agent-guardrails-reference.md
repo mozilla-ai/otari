@@ -847,6 +847,11 @@ otari on `PATH` and one naming an install path are the same registration. A
 flag added to the settings file by hand does not survive a re-run: pass
 `--repo-only` to `setup` instead.
 
+A `PreToolUse` matcher covers every command in its entry. Where an entry holds
+otari's command beside another hook's, `setup` leaves that entry's matcher
+alone and moves otari's command to an entry of its own, so narrowing the
+matcher cannot stop the other hook from seeing a tool call.
+
 On claude-code, `setup --repo-only` also warns when `~/.claude/settings.json`
 registers the hook for every repository without the flag, since that entry
 still enforces the user's gates here.
