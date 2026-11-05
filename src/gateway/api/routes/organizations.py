@@ -36,6 +36,7 @@ from gateway.api.deps import (
     IdentityServiceDep,
     InvitationMailLimitDep,
     MembershipOrganizationServiceDep,
+    OIDCConnectionServiceDep,
     OrganizationDomainServiceDep,
     get_config,
     verify_master_key,
@@ -55,6 +56,7 @@ from gateway.models.tenancy import (
     CallerOrganizationMembershipsPublic,
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
+    Organization,
     OrganizationCreateRequest,
     OrganizationDomainCreateRequest,
     OrganizationDomainPublic,
@@ -190,6 +192,7 @@ async def delete_active_organization(
 @router.get("/me/memberships")
 async def list_caller_organization_memberships(
     service: MembershipOrganizationServiceDep,
+    connections: OIDCConnectionServiceDep,
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
@@ -200,12 +203,17 @@ async def list_caller_organization_memberships(
     organizations: this is what an organization switcher renders, and one row
     carries ``is_active_organization`` so it can mark the current one. Not to be
     confused with ``GET /me/members``, which is the active organization's
-    roster.
+    roster. An organization whose own SSO enforcement refuses the caller is left off.
     """
+
+    async def blocked(organization: Organization) -> bool:
+        return await connections.blocks_membership(user=current_identity, organization=organization)
+
     return await service.list_organization_memberships_for_user(
         user=current_identity,
         skip=skip,
         limit=limit,
+        blocked=blocked,
     )
 
 

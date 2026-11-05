@@ -3814,7 +3814,7 @@ export interface paths {
          *     organizations: this is what an organization switcher renders, and one row
          *     carries ``is_active_organization`` so it can mark the current one. Not to be
          *     confused with ``GET /me/members``, which is the active organization's
-         *     roster.
+         *     roster. An organization whose own SSO enforcement refuses the caller is left off.
          */
         get: operations["organizations-list_caller_organization_memberships"];
         put?: never;

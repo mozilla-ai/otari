@@ -15,6 +15,7 @@ import re
 import secrets
 import unicodedata
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -379,33 +380,40 @@ class OrganizationService:
             raise NotAuthorizedError(f"Identity {user.id} has no active membership in this organization")
         return organization
 
-    async def _live_active_organization(self, user: User, *, repair: bool = False) -> Organization | None:
+    async def _live_active_organization(
+        self,
+        user: User,
+        *,
+        repair: bool = False,
+        blocked: Callable[[Organization], Awaitable[bool]] | None = None,
+    ) -> Organization | None:
         """The organization the caller can act in, or ``None`` if there is none.
 
-        The pointer while its membership is live, and otherwise the caller's
-        oldest live membership. ``repair`` stages the pointer onto that fallback.
+        The pointer while its membership is live and ``blocked`` admits it, and otherwise the
+        caller's oldest live membership that ``blocked`` admits. ``repair`` stages the pointer
+        onto whichever organization is returned.
         """
         organization = await self.organizations.get(user.active_organization_id)
         if organization is not None:
             membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
-            if membership is not None:
+            if membership is not None and (blocked is None or not await blocked(organization)):
                 return organization
-        fallback = await self.members.get_first_active_for_user(user.id)
-        if fallback is None:
-            return None
-        recovered = await self.organizations.get(fallback.organization_id)
-        if recovered is None:
-            return None
-        if repair:
-            await self.users.set_active_organization(user, recovered.id)
-        return recovered
+        for _membership, candidate in await self.members.get_active_by_user_with_organizations(user.id):
+            if blocked is not None and await blocked(candidate):
+                continue
+            if repair:
+                await self.users.set_active_organization(user, candidate.id)
+            return candidate
+        return None
 
-    async def active_organization_id_for_sign_in(self, user: User) -> uuid.UUID | None:
-        """The organization a fresh session acts in, or ``None`` for an identity with no live membership.
+    async def active_organization_id_for_sign_in(
+        self, user: User, *, blocked: Callable[[Organization], Awaitable[bool]] | None = None
+    ) -> uuid.UUID | None:
+        """The organization a fresh session acts in, or ``None`` where ``blocked`` admits no live membership.
 
         Stages the repaired pointer for the caller to commit with the session.
         """
-        organization = await self._live_active_organization(user, repair=True)
+        organization = await self._live_active_organization(user, repair=True, blocked=blocked)
         return organization.id if organization is not None else None
 
     async def _require_active_membership(self, user: User, organization: Organization) -> OrganizationMember:
@@ -913,13 +921,15 @@ class OrganizationService:
         user: User,
         skip: int = 0,
         limit: int = 100,
+        blocked: Callable[[Organization], Awaitable[bool]] | None = None,
     ) -> CallerOrganizationMembershipsPublic:
         """List the organizations the caller belongs to, for a switcher to render.
 
         Active memberships only. An ``invited`` one is not somewhere the caller
         may act yet (``switch_active_organization_for_user`` would refuse it),
         and a ``suspended`` one is somewhere they no longer may, so offering
-        either as a destination would be offering a refusal.
+        either as a destination would be offering a refusal. ``blocked`` additionally
+        hides an organization whose own SSO enforcement refuses the caller.
         """
         rows, count = await self.members.get_by_user_with_organizations(
             user.id,
@@ -927,6 +937,10 @@ class OrganizationService:
             skip=skip,
             limit=limit,
         )
+        if blocked is not None:
+            admitted = [row for row in rows if not await blocked(row[1])]
+            count -= len(rows) - len(admitted)
+            rows = admitted
         return CallerOrganizationMembershipsPublic(
             data=[
                 CallerOrganizationMembershipPublic(
@@ -1846,6 +1860,8 @@ class OrganizationService:
         if password is not None:
             if not await self._invitation_may_set_password(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
+            if sso_blocks_membership(organization=organization, user=invitee, linked_providers=frozenset()):
+                raise InvitationPasswordNotAcceptedError("sign in through this organization's own connection")
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
                 "email_verified_at": now,
