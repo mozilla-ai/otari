@@ -1700,7 +1700,7 @@ def get_org_provider_model_service(
         uow,
         config=config,
         organizations=OrganizationService(db, membership_listener=None),
-        provider_keys=OrgProviderKeyService(db),
+        provider_keys=OrgProviderKeyService(db, config),
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),

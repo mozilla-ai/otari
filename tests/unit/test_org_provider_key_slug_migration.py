@@ -117,7 +117,7 @@ def test_a_key_with_a_custom_endpoint_gets_a_slug_and_its_rates(before: tuple[Co
     config, engine = before
     organization = _organization(engine)
     _key(engine, organization, "Synthetic", api_base="https://api.synthetic.new/v1", default=True, offers=("hf:a",))
-    _key(engine, organization, "OpenAI", default=False)
+    _key(engine, organization, "OpenAI", default=False, offers=("gpt-4o",))
     _rate(engine, organization, "openai:hf:a")
 
     command.upgrade(config, _REVISION)
@@ -146,7 +146,61 @@ def test_a_name_that_names_a_provider_or_repeats_gets_a_free_slug(before: tuple[
 
     command.upgrade(config, _REVISION)
 
-    assert sorted(slug for slug, _ in _slugs(engine).values()) == ["openai-custom", "openai-custom-2"]
+    assert sorted(slug for slug, _ in _slugs(engine).values() if slug is not None) == [
+        "openai-custom",
+        "openai-custom-2",
+    ]
+
+
+def test_every_key_offering_the_model_gets_the_rate(before: tuple[Config, Engine]) -> None:
+    config, engine = before
+    organization = _organization(engine)
+    _key(engine, organization, "Synthetic", api_base="https://api.synthetic.new/v1", offers=("hf:a",))
+    _key(engine, organization, "Backup", api_base="https://backup.example/v1", offers=("hf:a",))
+    _rate(engine, organization, "openai:hf:a")
+
+    command.upgrade(config, _REVISION)
+
+    assert _rate_keys(engine, organization) == ["backup:hf:a", "synthetic:hf:a"]
+
+
+def test_a_bare_key_offering_nothing_keeps_the_rate(before: tuple[Config, Engine]) -> None:
+    """A key with no offered models serves every model of its provider."""
+    config, engine = before
+    organization = _organization(engine)
+    _key(engine, organization, "Synthetic", api_base="https://api.synthetic.new/v1", offers=("hf:a",))
+    _key(engine, organization, "OpenAI")
+    _rate(engine, organization, "openai:hf:a")
+
+    command.upgrade(config, _REVISION)
+
+    assert _rate_keys(engine, organization) == ["openai:hf:a", "synthetic:hf:a"]
+
+
+def test_a_rate_under_the_legacy_spelling_moves_too(before: tuple[Config, Engine]) -> None:
+    config, engine = before
+    organization = _organization(engine)
+    _key(engine, organization, "Synthetic", api_base="https://api.synthetic.new/v1", offers=("hf:a",))
+    _rate(engine, organization, "openai/hf:a")
+
+    command.upgrade(config, _REVISION)
+
+    assert _rate_keys(engine, organization) == ["synthetic:hf:a"]
+
+
+def test_a_slug_steps_around_an_instance_the_deployment_stored(before: tuple[Config, Engine]) -> None:
+    config, engine = before
+    organization = _organization(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO configured_provider_imports (name, imported_at) VALUES ('synthetic', :at)"),
+            {"at": _AT},
+        )
+    _key(engine, organization, "Synthetic", api_base="https://api.synthetic.new/v1")
+
+    command.upgrade(config, _REVISION)
+
+    assert _slugs(engine)["Synthetic"][0] == "synthetic-custom"
 
 
 def test_downgrade_returns_the_rates_to_the_provider(before: tuple[Config, Engine]) -> None:

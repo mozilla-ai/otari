@@ -370,7 +370,7 @@ class OrgProviderModelService:
             prefix = key.selector_prefix
             organization_id = key.organization_id
 
-        defaults = await self._defaults_for(provider, [name])
+        defaults = await self._defaults_for(prefix, [name])
 
         async with self.uow:
             key = await self._key_for_user(user, key_id)
@@ -550,7 +550,6 @@ class OrgProviderModelService:
         """
         async with self.uow:
             key = await self._key_for_user(user, key_id)
-            provider = key.provider
             prefix = key.selector_prefix
             organization_id = key.organization_id
             offered_rows = list(await self.models.list_all_for_key(key_id))
@@ -564,7 +563,7 @@ class OrgProviderModelService:
         # two it may not touch are the deployment's own list and a rate an admin
         # chose.
         candidates = [row.model for row in offered_rows if _repriceable(priced.get(keys_by_model[row.model]))]
-        defaults = await self._defaults_for(provider, [*candidates, *added])
+        defaults = await self._defaults_for(prefix, [*candidates, *added])
 
         async with self.uow:
             # Re-authorized and re-read rather than carried across: the block
@@ -705,20 +704,23 @@ class OrgProviderModelService:
             if (rate := effective.get(model_key)) is not None
         }
 
-    async def _defaults_for(self, provider: str, models: Sequence[str]) -> dict[str, ModelPricing]:
+    async def _defaults_for(self, prefix: str, models: Sequence[str]) -> dict[str, ModelPricing]:
         """Today's community rate for each model, keyed by the bare model name.
 
         The dataset walk and its thread hop belong to the pricing service; this
         only re-keys the answer, because every caller here holds model names
-        while the ladder speaks in ``provider:model``.
+        while the ladder speaks in ``prefix:model``. Asked under the key's
+        selector prefix, as settlement asks, so a seeded rate and the rate it
+        falls back to once deleted agree: a key with its own endpoint is not
+        priced at the list of the provider it speaks the protocol of.
         """
         wanted = sorted(set(models))
         if not wanted:
             return {}
         by_key = await self.org_pricing.community_defaults(
-            [f"{provider}:{model}" for model in wanted], datetime.now(tz=UTC)
+            [f"{prefix}:{model}" for model in wanted], datetime.now(tz=UTC)
         )
-        return {model: rate for model in wanted if (rate := by_key.get(f"{provider}:{model}")) is not None}
+        return {model: rate for model in wanted if (rate := by_key.get(f"{prefix}:{model}")) is not None}
 
     @staticmethod
     def _credential(key: OrgProviderKey) -> dict[str, object] | None:

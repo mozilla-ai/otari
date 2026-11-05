@@ -196,7 +196,8 @@ function KeyForm({
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
-    (editing !== null || draft.provider !== "")
+    (editing !== null || draft.provider !== "") &&
+    !(editing?.slug && draft.apiBase.trim() === "")
 
   const submit = () => {
     if (!parsedClientArgs.ok) return
@@ -216,7 +217,6 @@ function KeyForm({
         client_args: clientArgs,
         zero_data_retention: draft.zeroDataRetention,
       }
-      if (!editing.slug && apiBase !== "" && slug !== "") body.slug = slug
       // Omitted rather than sent as null when it was left blank: an explicit
       // null clears the stored credential, and "I did not retype the secret" is
       // not a request to delete it.
@@ -302,17 +302,22 @@ function KeyForm({
           .join(" ")}
       />
 
-      <Field
-        label="API base URL"
-        value={draft.apiBase}
-        onChange={(apiBase) => setDraft({ ...draft, apiBase })}
-        placeholder="https://api.example.com/v1"
-        description={
-          editing
-            ? "Optional. Point this key at a compatible endpoint of your own instead of the provider's default. A new URL needs the API key, and any hidden credential below, entered again, because the key will be sent there."
-            : "Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
-        }
-      />
+      {/* The endpoint is chosen at creation: a key for the provider's own one
+          cannot move to another, and one with its own prefix keeps a URL. */}
+      {editing && !editing.slug && !editing.api_base ? null : (
+        <Field
+          label="API base URL"
+          value={draft.apiBase}
+          onChange={(apiBase) => setDraft({ ...draft, apiBase })}
+          isRequired={Boolean(editing?.slug)}
+          placeholder="https://api.example.com/v1"
+          description={
+            editing
+              ? "A new URL needs the API key, and any hidden credential below, entered again, because the key will be sent there."
+              : "Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+          }
+        />
+      )}
 
       {/* A key with its own endpoint is a different service, so requests name
           it by a prefix of its own rather than by the provider it speaks. Fixed

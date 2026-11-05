@@ -380,7 +380,7 @@ export function InferenceAccessSection({
           workspaceId={workspaceId}
           keyId={openKey.org_provider_key_id}
           keyName={keyLabel(openKeyRecord, openKey.org_provider_key_id)}
-          provider={openKeyRecord?.provider ?? ""}
+          provider={openKeyRecord ? keyPrefix(openKeyRecord) : ""}
           allowed={openKey.allowed_models}
           validateEntry={(name) =>
             keyModelProblem(

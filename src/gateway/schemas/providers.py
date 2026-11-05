@@ -62,11 +62,6 @@ class OrgProviderKeyUpdateRequest(SQLModel):
     """A partial update. Every field is optional; only what is set is applied."""
 
     name: str | None = Field(default=None, max_length=255)
-    slug: str | None = Field(
-        default=None,
-        max_length=64,
-        description="Taken only by a key gaining a custom base URL; an existing slug never changes.",
-    )
     api_key: str | None = None
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None

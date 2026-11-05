@@ -49,7 +49,12 @@ renaming the key leaves it as it was.
 of provider OpenAI: it reaches the organization's OpenAI keys without one, or
 the deployment's OpenAI. The key's models, its rates (**Set your rate**) and its
 usage are all listed under its prefix, and the key is never a provider's
-default (it is the only key its prefix names).
+default (it is the only key its prefix names). A spending ceiling narrowed to the
+provider does not cover it either: narrow one to the prefix.
+
+The base URL is set when the key is added. You can change it later, but not
+remove it, and a key added without one cannot gain one: add a new key for the
+endpoint instead.
 
 ## Set a default key per provider
 
@@ -115,6 +120,10 @@ time, so your applications' API keys need no change.
 
 If you suspect the old key was exposed, assign the replacement immediately and
 revoke the exposed key with the provider.
+
+A key with its own [request prefix](#add-a-key-for-your-own-endpoint) is
+rotated in place instead, since no other key can take its prefix: click **Edit**
+on the key, paste the new API key, and save.
 
 Removing a provider key from Otari does not revoke it with the provider. Revoke
 it in the provider's dashboard as well.
