@@ -520,6 +520,29 @@ def test_granting_again_replaces_the_tools_and_grants_can_be_changed_and_removed
     assert client.delete(f"{base}/{grant_id}", headers=master_key_header).status_code == 404
 
 
+def test_a_grant_that_loses_an_insert_race_updates_the_winner_s_row(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a lock on the server (SQLite), another add can insert the grant after this one read none."""
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=[])
+    first = _grant(client, master_key_header, row, ["get_issue"], keys=[key])
+    existing = WorkspaceMcpServerGrantRepository._existing
+    reads: list[int] = []
+
+    async def stale_once(
+        self: WorkspaceMcpServerGrantRepository, *args: Any
+    ) -> dict[tuple[str | None, str | None], WorkspaceMcpServerGrant]:
+        reads.append(1)
+        return {} if len(reads) == 1 else await existing(self, *args)
+
+    monkeypatch.setattr(WorkspaceMcpServerGrantRepository, "_existing", stale_once)
+    again = _grant(client, master_key_header, row, ["list_*"], keys=[key])
+
+    assert len(reads) == 2, "the write ran again after the unique constraint refused it"
+    assert [(grant["id"], grant["tools"]) for grant in again["grants"]] == [(first["grants"][0]["id"], ["list_*"])]
+
+
 def test_a_grant_must_name_keys_and_people_of_the_servers_workspace(
     client: TestClient, master_key_header: dict[str, str], test_db: Session
 ) -> None:
