@@ -62,7 +62,8 @@ _ACRONYMS = {"mcp": "MCP", "otel": "OTel"}
 # Reads come before writes, which is the order an endpoint page lists them in.
 _HTTP_METHODS = ("get", "head", "options", "post", "put", "patch", "delete", "trace")
 _RELEASE_TAG = re.compile(r"^v(\d+\.\d+\.\d+)$")
-_NOT_A_SLUG = re.compile(r"[^a-z0-9]+")
+# NOTE: GitBook keeps a dot in a slug, so "Use otari.ai" is served at use-otari.ai.
+_NOT_A_SLUG = re.compile(r"[^a-z0-9.]+")
 
 
 def summary_pages(summary: str) -> list[str]:

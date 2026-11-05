@@ -132,6 +132,11 @@ def test_page_paths_follow_the_group_the_parent_and_the_file_name() -> None:
     }
 
 
+def test_page_paths_keep_a_dot_as_gitbook_does() -> None:
+    space = gitbook.Space("Home", "home", "* [Start](start.md)\n\n## Use otari.ai\n\n* [Keys](keys.md)\n")
+    assert space.page_paths()["keys.md"] == "use-otari.ai/keys"
+
+
 def test_site_url_option_moves_links_between_spaces(repo: Path) -> None:
     site = gitbook.Site.from_summary(repo / "docs", "main", "https://preview.example/token/")
     assert site.rewrite_links("[API](api-reference.md)", "index.md") == (
