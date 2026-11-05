@@ -17,19 +17,22 @@ provider account.
 
 1. Create a new API key in your provider's dashboard. Do not revoke the old key
    yet.
-2. In Otari, open **Organization**, then **Providers**.
-3. Click **Add provider key**, select the same provider, enter a distinct **Key
-   Name**, and paste the new key.
-4. Make the new key the provider's default with its **star icon**.
-5. For each workspace that pins the old key, click **Edit** and select **Always
-   use this key** for the new key. A workspace keeps using a pinned key after
+2. In Otari, open **Organization**, then **Providers**, then **Inference**.
+3. Click **Add provider key**, select the same provider, enter a distinct
+   **Name**, and paste the new key.
+4. Make the new key the provider's default with **Make default provider** (its
+   star icon).
+5. For each workspace that pins the old key, open it on **Workspaces**, select
+   its **Providers** tab, and choose **Always use this key** from the new key's
+   **More** menu. A workspace keeps using a pinned key after
    the organization's default changes.
 6. Send a test request from each affected workspace, and confirm it in the
    workspace's **Overview**, on its **Requests** tab.
 
 ## Retire the old key
 
-1. Back in **Organization**, then **Providers**, **Archive** the old key. An
+1. Back in **Organization**, then **Providers**, then **Inference**, **Archive**
+   the old key. An
    archived key can then be deleted.
 2. Revoke the old key in the provider's dashboard. Removing a key from Otari
    does not revoke it with the provider.

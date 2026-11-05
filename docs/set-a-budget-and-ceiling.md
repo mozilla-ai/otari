@@ -19,6 +19,8 @@ nothing: a **spend ceiling** applies it to the organization or a workspace.
    number of requests per period. Blank caps nothing.
 5. Click **Add budget**.
 
+![The New budget dialog, with a name, a limit of 500 USD and its token and request limits open.](assets/screenshots/budgets-add-budget.png)
+
 ## Apply a spend ceiling
 
 1. In **Spend & budgets**, click **Add ceiling**.
@@ -27,6 +29,8 @@ nothing: a **spend ceiling** applies it to the organization or a workspace.
    Leave it blank to cap spend across every provider.
 4. Choose the **Budget** the ceiling uses, and optionally a **Name**.
 5. Click **Add ceiling**.
+
+![The New spend ceiling dialog, capping the whole organization with that budget.](assets/screenshots/budgets-add-ceiling.png)
 
 Requests the ceiling matches count toward its budget. When the budget is used
 up, new matching requests are refused until the next reset; requests already
@@ -43,6 +47,8 @@ it.
 
 **Spend & budgets** shows each budget's spend this period against its limit,
 and marks a budget once it passes 80% of it and again once it is used up.
+
+![Spend & budgets, listing one budget and the spend ceiling that holds it.](assets/screenshots/budgets-spend-and-budgets.png)
 
 How budgets are enforced, and what a refused request looks like, is in
 [Budgets](budgets.md).

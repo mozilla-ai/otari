@@ -16,15 +16,17 @@ To run Otari on your own machine instead, follow the
 ## 1. Open your workspace
 
 Log in to [otari.ai](https://otari.ai) and open your default workspace from the
-top-left corner. This quickstart uses its **API Keys**, **Models** and **Overview**
+top-left corner. This quickstart uses its **API keys**, **Models** and **Overview**
 pages.
 
 ## 2. Create an API key
 
-1. Open the **API Keys** tab and click **Create Key**.
+1. Open the **API keys** page and click **Create key**.
 2. Give the key a name. It can use every model your workspace can, unless you
    limit it under **Advanced**.
 3. Copy the key, which starts with `otk_`. It is shown only once.
+
+![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
 
 Keep the key in your shell for the next steps:
 
@@ -37,8 +39,8 @@ source control.
 
 ## 3. Pick a model
 
-Open the **Models** tab, find a model with the filters (modality, provider,
-vendor, capabilities), and click **Use this model** to copy its name. This
+Open the **Models** page, find a model with the filters (modality, provider,
+vendor, capabilities), open it, and click **Use this model** to copy its name. This
 quickstart uses `deepseek/deepseek-v4-pro-0813`.
 
 ## 4. Send a request
@@ -84,6 +86,8 @@ It prints the model's reply.
 
 Open the **Overview** and its **Requests** tab: your request is listed with its
 model, its tokens and its cost.
+
+![The Overview's Requests tab, listing requests with their user, model, tokens, cost and status.](assets/screenshots/quickstart-requests.png)
 
 You now have a key your applications can call otari.ai with, and every request
 they send is recorded against your workspace.
