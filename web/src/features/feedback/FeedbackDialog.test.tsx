@@ -68,9 +68,7 @@ describe("FeedbackDialog", () => {
     })
     const dialog = screen.getByRole("dialog", { name: "Thank you!" })
     await waitFor(() => expect(dialog).toHaveFocus())
-    expect(dialog).toHaveAccessibleDescription(
-      "Every message reaches the people building Otari. We read them all, and they shape what comes next.",
-    )
+    expect(dialog).toHaveAccessibleDescription("Our team has your message.")
     // The phone sheet's close control is the frame's only button.
     expect(
       [...dialog.querySelectorAll("button")].map((b) =>
@@ -231,9 +229,7 @@ describe("FeedbackDialog", () => {
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
-    ).toHaveAccessibleDescription(
-      "Every message reaches the people building Otari. If we have a question, we’ll write to ada@example.com.",
-    )
+    ).toHaveAccessibleDescription("Our team will reply to ada@example.com.")
   })
 
   it("names and sends the address showing when Send is pressed", async () => {
@@ -269,9 +265,7 @@ describe("FeedbackDialog", () => {
     })
     expect(
       screen.getByRole("dialog", { name: "Thank you!" }),
-    ).toHaveAccessibleDescription(
-      "Every message reaches the people building Otari. If we have a question, we’ll write to ada@example.com.",
-    )
+    ).toHaveAccessibleDescription("Our team will reply to ada@example.com.")
   })
 
   it("sends on Cmd+Enter from the field, as the button promises", async () => {
