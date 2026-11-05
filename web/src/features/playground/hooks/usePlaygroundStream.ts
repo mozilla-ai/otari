@@ -66,8 +66,9 @@ export interface PlaygroundStream {
 export function usePlaygroundStream(params: {
   workspaceId: string
   tools: ToolSelection
+  capturePrompts: boolean
 }): PlaygroundStream {
-  const { workspaceId, tools } = params
+  const { workspaceId, tools, capturePrompts } = params
   const inFlightRef = useRef(new Set<AbortController>())
 
   useEffect(() => {
@@ -138,6 +139,7 @@ export function usePlaygroundStream(params: {
           model,
           messages: wireMessages(turns),
           tools,
+          capturePrompts,
           signal: controller.signal,
           onDelta: (delta) => {
             // A tool call is not a token: time to first token stays the time to
@@ -175,7 +177,7 @@ export function usePlaygroundStream(params: {
         inFlightRef.current.delete(controller)
       }
     },
-    [workspaceId, tools],
+    [workspaceId, tools, capturePrompts],
   )
 
   return { streamReply, stop }

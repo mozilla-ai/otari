@@ -157,6 +157,8 @@ interface ApiState {
   upload?: (file: File) => PlaygroundFile
   /** One listing, or one per request so a test can page by `after`. */
   files?: PlaygroundFiles | ((path: string) => PlaygroundFiles)
+  /** Whether the deployment can keep trace content, which offers prompt capture. */
+  contentAvailable?: boolean
 }
 
 /**
@@ -231,6 +233,15 @@ function mockApi(state: ApiState = {}) {
       }
       if (path.startsWith("/playground/favorite-models")) {
         return (state.favorites ?? { model_keys: [] }) as never
+      }
+      if (path.startsWith("/trace-content/policy")) {
+        return {
+          content_available: state.contentAvailable ?? false,
+          tool_output: false,
+          platform_break_glass: false,
+          retention_days: 30,
+          session_max_age_days: 90,
+        } as never
       }
       throw new Error(`unexpected read: ${path}`)
     })
@@ -525,6 +536,46 @@ describe("sending a question", () => {
       stream: true,
       messages: [{ role: "user", content: "hi" }],
     })
+  })
+
+  it("asks to keep the prompt only once capture is switched on", async () => {
+    mockApi({ contentAvailable: true })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+    expect(
+      new Headers(stream.mock.calls[0]?.[1]?.headers).get(
+        "Otari-Trace-Content",
+      ),
+    ).toBeNull()
+
+    stream.mockImplementationOnce(async (_path, init) =>
+      sseResponse([delta("again"), "[DONE]"], init?.signal),
+    )
+    await user.click(screen.getByRole("switch", { name: "Capture prompts" }))
+    await user.type(screen.getByLabelText("Message"), "hi again")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("again")
+    expect(
+      new Headers(stream.mock.calls[1]?.[1]?.headers).get(
+        "Otari-Trace-Content",
+      ),
+    ).toBe("keep")
+  })
+
+  it("offers no prompt capture where the deployment keeps no content", async () => {
+    mockApi()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    expect(
+      screen.queryByRole("switch", { name: "Capture prompts" }),
+    ).not.toBeInTheDocument()
   })
 
   it("shows the per-turn stats the final frame reported", async () => {

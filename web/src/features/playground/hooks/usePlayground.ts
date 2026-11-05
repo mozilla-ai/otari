@@ -22,6 +22,7 @@ import {
   useUpdatePlaygroundConsent,
   useUploadPlaygroundFile,
 } from "@/shared/api/playground"
+import { useTraceContentPolicy } from "@/shared/api/traces"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import {
@@ -104,6 +105,10 @@ export function usePlayground() {
   const uploadFile = useUploadPlaygroundFile(workspaceId)
   const deleteFile = useDeletePlaygroundFile(workspaceId)
   const [isFilesOpen, setIsFilesOpen] = useState(false)
+  // Off until the reader turns it on: the prompt is kept on their session's
+  // trace only when they ask, and only where the deployment can keep content.
+  const canCapturePrompts = useTraceContentPolicy().policy.content_available
+  const [capturePrompts, setCapturePrompts] = useState(false)
   // Read only while the dialog is open: nothing else on the page lists them.
   const files = usePlaygroundFiles(workspaceId, {
     enabled: isFilesOpen && canAttachFiles,
@@ -190,6 +195,7 @@ export function usePlayground() {
   const { streamReply, stop } = usePlaygroundStream({
     workspaceId: workspaceId ?? "",
     tools: toolSelection.selection,
+    capturePrompts: canCapturePrompts && capturePrompts,
   })
 
   /** Anything that makes the on-screen exchange different from the saved one. */
@@ -669,6 +675,9 @@ export function usePlayground() {
     uploadError,
 
     // Uploaded files
+    canCapturePrompts,
+    capturePrompts,
+    setCapturePrompts,
     isFilesOpen,
     setIsFilesOpen,
     files: files.data?.pages.flatMap((page) => page.data) ?? [],

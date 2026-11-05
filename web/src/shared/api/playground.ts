@@ -451,6 +451,12 @@ export interface StreamChatParams {
   model: string
   messages: PlaygroundWireMessage[]
   tools: ToolSelection
+  /**
+   * Ask the gateway to keep this request's prompt (and its tool calls) on the
+   * session's trace, with `Otari-Trace-Content: keep`. The workspace still has
+   * to keep content for anything to be stored.
+   */
+  capturePrompts?: boolean
   onDelta: (delta: StreamDelta) => void
   onUsage?: (usage: StreamUsage) => void
   /** Aborts the request; the Stop control and unmounting both use it. */
@@ -475,6 +481,7 @@ export async function streamPlaygroundChat({
   model,
   messages,
   tools,
+  capturePrompts = false,
   onDelta,
   onUsage,
   signal,
@@ -493,7 +500,12 @@ export async function streamPlaygroundChat({
 
   const response = await apiStream(
     `${ROOT}/chat/completions${scope(workspaceId)}`,
-    { method: "POST", body: JSON.stringify(body), signal },
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: capturePrompts ? { "Otari-Trace-Content": "keep" } : undefined,
+      signal,
+    },
   )
 
   const reader = (response.body as ReadableStream<Uint8Array>).getReader()
