@@ -132,6 +132,11 @@ def test_page_paths_follow_the_group_the_parent_and_the_file_name() -> None:
     }
 
 
+def test_page_paths_keep_a_dot_as_gitbook_does() -> None:
+    space = gitbook.Space("Home", "home", "* [Start](start.md)\n\n## Use otari.ai\n\n* [Keys](keys.md)\n")
+    assert space.page_paths()["keys.md"] == "use-otari.ai/keys"
+
+
 def test_site_url_option_moves_links_between_spaces(repo: Path) -> None:
     site = gitbook.Site.from_summary(repo / "docs", "main", "https://preview.example/token/")
     assert site.rewrite_links("[API](api-reference.md)", "index.md") == (
@@ -246,6 +251,17 @@ def test_endpoint_page_names_each_operation_by_path_then_method(repo: Path, site
     assert (repo / "site" / "guides" / "api-endpoints" / "chat.md").read_text(encoding="utf-8") == (
         f"# Chat\n\n{block.format(method='get')}\n{block.format(method='post')}"
     )
+
+
+def test_endpoint_pages_name_the_spec_a_build_is_given(repo: Path) -> None:
+    spec_url = "https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs-preview/api/openapi.json"
+    site = gitbook.Site.from_summary(repo / "docs", "main", spec_name="otari-openapi-spec-preview", spec_url=spec_url)
+    site.build(repo / "site")
+
+    page = (repo / "site" / "guides" / "api-endpoints" / "chat.md").read_text(encoding="utf-8")
+    assert 'spec="otari-openapi-spec-preview"' in page
+    assert f"[OpenAPI otari-openapi-spec-preview]({spec_url})" in page
+    assert 'spec="otari-openapi-spec"' not in page
 
 
 @pytest.mark.parametrize(("ref", "version"), [("v1.2.3", "1.2.3"), ("main", "0.0.0-dev")])

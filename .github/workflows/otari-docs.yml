@@ -11,10 +11,25 @@ name: Otari Docs
 # only, so a release with a lower version, such as a patch to an older minor
 # version, fails to publish. To publish the highest version again, dispatch
 # this workflow.
+#
+# A push to main that changes the docs publishes main to the gitbook-docs-preview
+# branch instead, which the preview site syncs from, so the next layout can be
+# read before a release ships it. Links between its spaces go to the repository
+# variable GITBOOK_PREVIEW_SITE_URL, or to the production site when it is unset.
+# This repository is public, so that variable must not hold a share link. Its
+# endpoint pages read the otari-openapi-spec-preview specification, which GitBook
+# reads from the preview branch, so they show main's API rather than the release's.
 
 on:
   release:
     types: [published]
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'scripts/prepare_gitbook_site.py'
+      - '.gitbook-branch-readme.md'
+      - '.github/workflows/otari-docs.yml'
   pull_request:
     branches: [main]
     paths:
@@ -27,8 +42,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: otari-docs-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: otari-docs-${{ github.event_name == 'pull_request' && github.ref || github.event_name == 'push' && 'preview' || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -59,8 +74,9 @@ jobs:
         run: python3 scripts/prepare_gitbook_site.py
 
   publish:
-    name: Publish to gitbook-docs
+    name: Publish to ${{ github.event_name == 'push' && 'gitbook-docs-preview' || 'gitbook-docs' }}
     if: >-
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v'))
     runs-on: ubuntu-latest
@@ -69,12 +85,24 @@ jobs:
       contents: write
     steps:
       # NOTE: GitHub's latest flag can name a lower version, so the highest version comes from the tags.
-      - name: Resolve the release tag
+      - name: Resolve what to publish
         id: tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PREVIEW_SITE_URL: ${{ vars.GITBOOK_PREVIEW_SITE_URL }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            {
+              echo "tag=$GITHUB_SHA"
+              echo "label=main"
+              echo "branch=gitbook-docs-preview"
+              echo "site_url=${PREVIEW_SITE_URL:-https://docs.otari.ai}"
+              echo "spec_name=otari-openapi-spec-preview"
+              echo "spec_url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gitbook-docs-preview/api/openapi.json"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -n "$RELEASE_TAG" ] && [[ ! $RELEASE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::'$RELEASE_TAG' is not a release tag (vX.Y.Z)"
             exit 1
@@ -91,7 +119,12 @@ jobs:
             echo "::error::$TAG is lower than the highest release version ($HIGHEST), so its docs do not publish. This is expected for a patch to an older version."
             exit 1
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "label=$TAG"
+            echo "branch=gitbook-docs"
+            echo "site_url=https://docs.otari.ai"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,29 +132,41 @@ jobs:
           ref: ${{ steps.tag.outputs.tag }}
 
       # Standard library only, so the runner's Python needs no project install.
+      # NOTE: A release build runs that tag's own script, which may predate the
+      # spec options, so only a preview build passes them; a release keeps the
+      # script's production defaults.
       - name: Build the site
         env:
           DOCS_REF: ${{ steps.tag.outputs.tag }}
-        run: python3 scripts/prepare_gitbook_site.py --ref "$DOCS_REF"
+          SITE_URL: ${{ steps.tag.outputs.site_url }}
+          SPEC_NAME: ${{ steps.tag.outputs.spec_name }}
+          SPEC_URL: ${{ steps.tag.outputs.spec_url }}
+        run: |
+          args=(--ref "$DOCS_REF" --site-url "$SITE_URL")
+          if [ -n "$SPEC_NAME" ]; then
+            args+=(--spec-name "$SPEC_NAME" --spec-url "$SPEC_URL")
+          fi
+          python3 scripts/prepare_gitbook_site.py "${args[@]}"
 
-      - name: Deploy to gitbook-docs
+      - name: Deploy
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCS_TAG: ${{ steps.tag.outputs.tag }}
+          DOCS_LABEL: ${{ steps.tag.outputs.label }}
+          BRANCH: ${{ steps.tag.outputs.branch }}
         run: |
           REPO="${GITHUB_REPOSITORY}"
           SOURCE_SHA=$(git rev-parse HEAD)
-          COMMIT_MSG="docs: publish GitBook site from ${DOCS_TAG} (${SOURCE_SHA})"
+          COMMIT_MSG="docs: publish GitBook site from ${DOCS_LABEL} (${SOURCE_SHA})"
 
           PARENT_SHA=""
           PARENT_TREE=""
           REF_ERR=$(mktemp)
-          if REF_DATA=$(gh api "repos/${REPO}/git/ref/heads/gitbook-docs" 2>"$REF_ERR"); then
+          if REF_DATA=$(gh api "repos/${REPO}/git/ref/heads/${BRANCH}" 2>"$REF_ERR"); then
             PARENT_SHA=$(echo "$REF_DATA" | jq -r '.object.sha')
             PARENT_TREE=$(gh api "repos/${REPO}/git/commits/${PARENT_SHA}" --jq '.tree.sha')
           elif ! grep -q 'HTTP 404' "$REF_ERR"; then
             cat "$REF_ERR" >&2
-            echo "::error::Failed to read the gitbook-docs ref"
+            echo "::error::Failed to read the ${BRANCH} ref"
             exit 1
           fi
           rm -f "$REF_ERR"
@@ -160,11 +205,11 @@ jobs:
             gh api "repos/${REPO}/git/commits" --input - --jq '.sha')
 
           if [ -n "$PARENT_SHA" ]; then
-            gh api "repos/${REPO}/git/refs/heads/gitbook-docs" \
+            gh api "repos/${REPO}/git/refs/heads/${BRANCH}" \
               -X PATCH -f sha="$DEPLOY_SHA" > /dev/null
           else
             gh api "repos/${REPO}/git/refs" \
-              -f ref="refs/heads/gitbook-docs" \
+              -f ref="refs/heads/${BRANCH}" \
               -f sha="$DEPLOY_SHA" > /dev/null
           fi
 
