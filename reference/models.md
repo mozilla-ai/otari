@@ -394,6 +394,7 @@ Each offering also lists the Otari routes its models.dev protocols map to, in
 | `transcriptions` | `/audio/transcriptions` |
 | `rerank` | `/rerank` |
 | `moderations` | `/moderations` |
+| `videos` | `/videos` |
 | `decisions` | `/decisions` |
 | `systemone` | `/systemone` |
 
@@ -409,7 +410,7 @@ route with that offering's selector is refused.
 Other protocols name no route. A vendor's native protocol, such as `converse`
 or `generate-content`, is what any-llm calls behind the routes above, so a
 client never calls it directly. A live, two-way session (`realtime`, `live`),
-`videos`, `fim` and `ocr` have no Otari route. An empty list means not known:
+`fim` and `ocr` have no Otari route. An empty list means not known:
 models.dev has no entry for the offering, its download is v1, which has no
 `api` block, or none of its protocols has a route. Otari does not guess routes
 from the model's `type`. The list repeats what models.dev says, so a model it
@@ -427,9 +428,19 @@ selects models whose vendor is unknown, and `type` never matches a model of
 unknown kind. A model's `type` is the kind most of its offerings give (see
 `type` above); a tie goes to the vendor's own provider. Repeat `input_modality`,
 `output_modality`, or `capability` to require every selected value. The endpoint
-also accepts `search`, `min_context`, `max_input`, `pricing`, `source`, and
-`released_within_days`. Release windows end today in UTC and exclude unknown
-and future dates. A price ceiling excludes models with no known input rate.
+also accepts `search`, `min_context`, `max_input`, `pricing`, `source`,
+`zero_data_retention`, and `released_within_days`. Release windows end today in
+UTC and exclude unknown and future dates. A price ceiling excludes models with
+no known input rate. `zero_data_retention=true` keeps the models at least one
+offering declared zero data retention serves.
+
+Each offering carries `zero_data_retention`, and each model lists the providers
+whose offering of it is declared in `zero_data_retention_providers`. A
+declaration is the operator's or the organization's statement about the
+provider account, which Otari does not check; whose declaration applies is in
+[Zero data retention](https://docs.otari.ai/self-hosting/providers/hosted-providers#zero-data-retention). The Models
+page marks these models and their offerings, and its **Data retention** filter
+sets the parameter.
 
 `sort` accepts `name`, `released`, `input`, `output`, `context`, or `providers`,
 with `direction=asc` or `desc`. Unknown values sort last in either direction;

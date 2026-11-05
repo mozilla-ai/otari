@@ -4,15 +4,23 @@ Otari can record usage that it did not proxy, such as subscription-backed coding
 agents or another instrumented application. Imported events appear in the
 dashboard's Overview with their source and an API-equivalent cost estimate.
 
+Importing works on a gateway you run, not on otari.ai today: it needs a
+budget-exempt API key (or the master key), and only a deployment's operator has
+either. A key created on otari.ai's **API keys** page is always budget-enforced,
+so the endpoints on this page refuse it. To record a client's usage on
+otari.ai, route its requests through Otari instead.
+
 ## Enforcement boundary
 
 Imported usage is retrospective. It is never reserved against a budget, never
 updates the enforcement ledger, and never blocks live traffic.
 
-An API key used for import must therefore have
-`exclude_from_budget: true`. Keep importer keys separate from inference keys:
-the same flag also exempts live traffic through that key from budget and pricing
-enforcement.
+An API key used for import must therefore be budget-exempt. The deployment's
+operator creates one: with **Exempt from budget** in the deployment view's key
+form, or `exclude_from_budget: true` on `POST /api/v1/keys`. A member's own key
+form has no such option, so that a member cannot exempt their own spend. Keep
+importer keys separate from inference keys: the same flag also exempts live
+traffic through that key from budget and pricing enforcement.
 
 If a session already routes through Otari, do not also export its telemetry to
 Otari. The proxied and imported events cannot be correlated reliably, so cost
@@ -95,13 +103,16 @@ POST /otlp/v1/metrics   content-free coding-agent outcome metrics
 
 Protobuf and JSON are accepted, with optional gzip. gRPC is not. Authenticate
 with a budget-exempt API key in the Authorization header; the master key is
-refused because OTLP records do not carry trustworthy user attribution.
+refused because OTLP records do not carry trustworthy user attribution. Any
+other key is refused for an export that carries usage, and the spans of one
+that carries none are not kept, so spans alone need the budget-exempt key too.
 
-For a standard OTLP exporter:
+For a standard OTLP exporter, with your gateway's URL in place of
+`http://localhost:8000`:
 
 ```bash
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:8000/otlp"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer $OTARI_IMPORT_KEY"
 ```
 
@@ -125,7 +136,7 @@ Otari can be that destination:
 | Console field | Value |
 | --- | --- |
 | Provider | Custom |
-| OTLP endpoint URL | `https://otari.example.com/otlp` |
+| OTLP endpoint URL | Your gateway's public HTTPS URL plus `/otlp` |
 | Request headers | `Authorization`: `Bearer <budget-exempt Otari API key>` |
 | Content mode | Metadata only |
 

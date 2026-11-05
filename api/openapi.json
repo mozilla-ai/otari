@@ -2534,124 +2534,6 @@
         "title": "BlockedEmailsPublic",
         "type": "object"
       },
-      "Body_audio-create_transcription": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          },
-          "language": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Language"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt"
-          },
-          "response_format": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Response Format"
-          },
-          "temperature": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Temperature"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User"
-          }
-        },
-        "required": [
-          "file",
-          "model"
-        ],
-        "title": "Body_audio-create_transcription",
-        "type": "object"
-      },
-      "Body_files-create_file": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          },
-          "purpose": {
-            "default": "user_data",
-            "title": "Purpose",
-            "type": "string"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User"
-          }
-        },
-        "required": [
-          "file"
-        ],
-        "title": "Body_files-create_file",
-        "type": "object"
-      },
-      "Body_playground-upload_playground_file": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          }
-        },
-        "required": [
-          "file"
-        ],
-        "title": "Body_playground-upload_playground_file",
-        "type": "object"
-      },
       "BreakGlassCreate": {
         "description": "Why you are opening a session's content without its owner's share. Recorded with the opening.",
         "properties": {
@@ -3242,6 +3124,132 @@
           "failed"
         ],
         "title": "BulkInviteOrganizationMembersResultPublic",
+        "type": "object"
+      },
+      "CacheRates-Input": {
+        "additionalProperties": false,
+        "description": "The cache prices of a price, in its unit.",
+        "properties": {
+          "explicit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The prices of explicit caching, where apart."
+          },
+          "read": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of a cached read.",
+            "title": "Read"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of cache storage.",
+            "title": "Storage"
+          },
+          "write": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of a cache write: one price, or one per TTL with the default TTL first.",
+            "title": "Write"
+          }
+        },
+        "title": "CacheRates",
+        "type": "object"
+      },
+      "CacheRates-Output": {
+        "additionalProperties": false,
+        "description": "The cache prices of a price, in its unit.",
+        "properties": {
+          "explicit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Output"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The prices of explicit caching, where apart."
+          },
+          "read": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of a cached read.",
+            "title": "Read"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of cache storage.",
+            "title": "Storage"
+          },
+          "write": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of a cache write: one price, or one per TTL with the default TTL first.",
+            "title": "Write"
+          }
+        },
+        "title": "CacheRates",
         "type": "object"
       },
       "CallToolResult": {
@@ -3860,6 +3868,14 @@
               }
             ],
             "title": "Vendor"
+          },
+          "zero_data_retention_providers": {
+            "description": "The provider instances offering it that are declared to keep no prompt or completion data, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Zero Data Retention Providers",
+            "type": "array"
           }
         },
         "required": [
@@ -4121,6 +4137,14 @@
               }
             ],
             "title": "Vendor"
+          },
+          "zero_data_retention_providers": {
+            "description": "The provider instances offering it that are declared to keep no prompt or completion data, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Zero Data Retention Providers",
+            "type": "array"
           }
         },
         "required": [
@@ -4179,7 +4203,8 @@
                 "/systemone",
                 "/rerank",
                 "/decisions",
-                "/moderations"
+                "/moderations",
+                "/videos"
               ],
               "type": "string"
             },
@@ -4307,6 +4332,12 @@
                 "type": "null"
               }
             ]
+          },
+          "zero_data_retention": {
+            "default": false,
+            "description": "Whether whoever holds the serving key declared that the provider keeps no prompt or completion data: the operator for a `hosted` offering, the organization for one on its own keys, where every usable key of the provider must declare it. A declaration, not something the gateway can verify.",
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5235,6 +5266,29 @@
             "title": "Name",
             "type": "string"
           },
+          "price_per_call": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for one call on the deployment's own account when the provider reports no cost of its own, from the deployment's price list. An override the operator set for one organization prices that organization's calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused.",
+            "title": "Price Per Call"
+          },
+          "price_source": {
+            "description": "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.",
+            "enum": [
+              "own",
+              "config",
+              "old_key",
+              "none"
+            ],
+            "title": "Price Source",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -5249,7 +5303,9 @@
         "required": [
           "name",
           "provider",
-          "has_api_key"
+          "has_api_key",
+          "price_per_call",
+          "price_source"
         ],
         "title": "ConfigSearchToolSchema",
         "type": "object"
@@ -5815,7 +5871,7 @@
                 "type": "null"
               }
             ],
-            "description": "Search tool allow-list for POST /api/v1/search: null = inherit the user's, [] = no tool, or search tool names ('*' for every search tool). A model wildcard never grants a tool.",
+            "description": "Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, [] = no tool, or search and fetch tool names ('*' for every tool). A model wildcard never grants a tool.",
             "title": "Allowed Tools"
           },
           "capture_agent_telemetry": {
@@ -6182,7 +6238,7 @@
                 "type": "null"
               }
             ],
-            "description": "Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, or search tool names ('*' for every search tool). A key can only narrow your own tool access.",
+            "description": "Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, [] = no tool, or search and fetch tool names ('*' for every tool). A key can only narrow your own tool access.",
             "title": "Allowed Tools"
           },
           "capture_agent_telemetry": {
@@ -6562,7 +6618,7 @@
                 "type": "null"
               }
             ],
-            "description": "Default search tool access-list this user's keys inherit: null = the tools allowed_models grants, [] = no tool, or search tool names ('*' for every search tool).",
+            "description": "Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: null = the search tools allowed_models grants, [] = no tool, or search and fetch tool names ('*' for every tool).",
             "title": "Allowed Tools"
           },
           "blocked": {
@@ -8857,6 +8913,165 @@
         "title": "FederationTokenResponse",
         "type": "object"
       },
+      "FetchRequest": {
+        "description": "A direct fetch request: one page, read through the deployment's fetch tool or the one named.",
+        "example": {
+          "max_chars": 20000,
+          "url": "https://example.com/article"
+        },
+        "properties": {
+          "fetch_tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Configured fetch tool to run on, builtin_fetch included. Optional: the deployment's web_fetch_default_tool serves, else builtin_fetch. Ignored on POST /api/v1/fetch/{fetch_tool_name}.",
+            "title": "Fetch Tool Name"
+          },
+          "include_raw": {
+            "default": false,
+            "description": "Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw holds only content_kind and redirect_count.",
+            "title": "Include Raw",
+            "type": "boolean"
+          },
+          "max_chars": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cut the page text to this many characters. Unset, the tool's own max_chars option applies, else the provider's own limits.",
+            "title": "Max Chars"
+          },
+          "provider_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Native options for the provider that serves the call, under the provider's own names, as GET /api/v1/search-tools/providers?kind=fetch lists them. An option the provider does not take from a request is refused with a 400. On a call that names no tool they go to whichever provider serves it, so name the tool when they are meant for one provider.",
+            "title": "Provider Options"
+          },
+          "url": {
+            "description": "The page to fetch: one public http or https URL.",
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID for usage attribution",
+            "title": "User"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "FetchRequest",
+        "type": "object"
+      },
+      "FetchResponse": {
+        "description": "A completed direct fetch: one page's text and where it came from.",
+        "properties": {
+          "content_type": {
+            "default": "",
+            "description": "The page's content type; empty when the provider does not report one.",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "fetch_tool": {
+            "description": "The configured fetch tool that served the request",
+            "title": "Fetch Tool",
+            "type": "string"
+          },
+          "final_url": {
+            "description": "Where the page was found after redirects. The URL asked for when the provider does not report where a redirect led (reports_final_url in the provider catalog).",
+            "title": "Final Url",
+            "type": "string"
+          },
+          "object": {
+            "const": "fetch",
+            "default": "fetch",
+            "title": "Object",
+            "type": "string"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the page was published, where the provider reports it.",
+            "title": "Published"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's whole response, untouched; only when the request set include_raw.",
+            "title": "Raw"
+          },
+          "text": {
+            "description": "The page's text, as the provider extracted it.",
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "description": "The page's title; empty when the provider gave none.",
+            "title": "Title",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "Whether text is less than the whole page: the body or the extracted text hit a limit of the provider's, or max_chars cut it.",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "url": {
+            "description": "The URL fetched, as asked, in canonical form.",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fetch_tool",
+          "url",
+          "final_url",
+          "text",
+          "truncated"
+        ],
+        "title": "FetchResponse",
+        "type": "object"
+      },
       "GateDefinitionRequest": {
         "additionalProperties": false,
         "description": "One gate of a guardrail version: what it is, when it runs, and what it says when it fails.",
@@ -10581,7 +10796,7 @@
         "type": "object"
       },
       "HostedProviderCreateRequest": {
-        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.",
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.\n``zero_data_retention`` declares that the upstream keeps no prompt or\ncompletion data; the catalog shows it and nothing enforces it.",
         "example": {
           "api_key": "<your OpenAI API key>",
           "provider": "openai"
@@ -10679,6 +10894,11 @@
               }
             ],
             "title": "Supported Countries"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10688,7 +10908,7 @@
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry.",
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry. ``zero_data_retention`` is the operator's declaration that the\nupstream keeps no prompt or completion data.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -10826,6 +11046,11 @@
               }
             ],
             "title": "Updated At"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -11032,6 +11257,17 @@
               }
             ],
             "title": "Supported Countries"
+          },
+          "zero_data_retention": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zero Data Retention"
           }
         },
         "title": "HostedProviderUpdateRequest",
@@ -11877,6 +12113,143 @@
           "name"
         ],
         "title": "KnownProviderSummarySchema",
+        "type": "object"
+      },
+      "ListedSearchToolSchema": {
+        "description": "A stored instance as the listing shows it: with what one of its calls costs.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
+          "fetch_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A search instance's enrichment fetch instance. Null means the fetch default enriches it.",
+            "title": "Fetch Tool"
+          },
+          "kind": {
+            "default": "search",
+            "description": "Whether this is a search or a fetch instance.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "price_per_call": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD for one call on the deployment's own account when the provider reports no cost of its own, from the deployment's price list. An override the operator set for one organization prices that organization's calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused.",
+            "title": "Price Per Call"
+          },
+          "price_source": {
+            "description": "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old <provider>:<name> row, which prices it while it has no row of its own; 'none', no row.",
+            "enum": [
+              "own",
+              "config",
+              "old_key",
+              "none"
+            ],
+            "title": "Price Source",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "shadows_config": {
+            "default": false,
+            "description": "True when a config-file search tool of the same name exists; the stored one is in effect.",
+            "title": "Shadows Config",
+            "type": "boolean"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "price_per_call",
+          "price_source"
+        ],
+        "title": "ListedSearchToolSchema",
         "type": "object"
       },
       "MailSettings": {
@@ -13835,6 +14208,12 @@
             "maxLength": 255,
             "title": "Provider",
             "type": "string"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "description": "The organization's declaration that the provider account behind this key keeps no prompt or completion data. The catalog shows it and filters on it; nothing is enforced on it.",
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -14133,6 +14512,11 @@
             "description": "False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.",
             "title": "Usable",
             "type": "boolean"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -14198,6 +14582,17 @@
               }
             ],
             "title": "Name"
+          },
+          "zero_data_retention": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zero Data Retention"
           }
         },
         "title": "OrgProviderKeyUpdateRequest",
@@ -15880,6 +16275,17 @@
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
           },
+          "rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RatesDocument-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
+          },
           "unit": {
             "default": "token",
             "description": "What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.",
@@ -15986,6 +16392,10 @@
             "title": "Pricing Tiers",
             "type": "array"
           },
+          "rates": {
+            "$ref": "#/components/schemas/RatesDocument-Output",
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
+          },
           "unit": {
             "title": "Unit",
             "type": "string"
@@ -16007,6 +16417,7 @@
           "cache_write_price_per_million",
           "pricing_tiers",
           "unit",
+          "rates",
           "effective_from",
           "effective_to",
           "created_at",
@@ -16089,6 +16500,17 @@
             ],
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
+          },
+          "rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RatesDocument-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
           },
           "unit": {
             "default": "token",
@@ -17884,6 +18306,10 @@
             "title": "Pricing Tiers",
             "type": "array"
           },
+          "rates": {
+            "$ref": "#/components/schemas/RatesDocument-Output",
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
+          },
           "unit": {
             "description": "What the rates are per: token for a model, request or image for a non-token endpoint.",
             "title": "Unit",
@@ -17904,6 +18330,7 @@
           "cache_write_price_per_million",
           "pricing_tiers",
           "unit",
+          "rates",
           "origin",
           "created_at",
           "updated_at"
@@ -19022,6 +19449,168 @@
           "rules"
         ],
         "title": "RateLimitRulesPublic",
+        "type": "object"
+      },
+      "RateMultiplier": {
+        "additionalProperties": false,
+        "description": "A factor applied to every price, or to the prices it names, when a condition holds.",
+        "properties": {
+          "factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "description": "One factor for every price, or an object naming the prices.",
+            "title": "Factor"
+          },
+          "when": {
+            "additionalProperties": true,
+            "description": "The condition, as models.dev writes it.",
+            "title": "When",
+            "type": "object"
+          }
+        },
+        "required": [
+          "when",
+          "factor"
+        ],
+        "title": "RateMultiplier",
+        "type": "object"
+      },
+      "RateOverride-Input": {
+        "additionalProperties": false,
+        "description": "The prices that replace a price's own when a condition holds.",
+        "properties": {
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "when": {
+            "additionalProperties": true,
+            "description": "The condition, as models.dev writes it.",
+            "title": "When",
+            "type": "object"
+          }
+        },
+        "required": [
+          "when"
+        ],
+        "title": "RateOverride",
+        "type": "object"
+      },
+      "RateOverride-Output": {
+        "additionalProperties": false,
+        "description": "The prices that replace a price's own when a condition holds.",
+        "properties": {
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "when": {
+            "additionalProperties": true,
+            "description": "The condition, as models.dev writes it.",
+            "title": "When",
+            "type": "object"
+          }
+        },
+        "required": [
+          "when"
+        ],
+        "title": "RateOverride",
+        "type": "object"
+      },
+      "RatesDocument-Input": {
+        "additionalProperties": true,
+        "description": "A ``cost`` block on the wire: each other key is a modality (``text``, ``image``, ``audio``, ``video``).",
+        "properties": {
+          "multipliers": {
+            "items": {
+              "$ref": "#/components/schemas/RateMultiplier"
+            },
+            "title": "Multipliers",
+            "type": "array"
+          },
+          "web_search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRate-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RatesDocument",
+        "type": "object"
+      },
+      "RatesDocument-Output": {
+        "additionalProperties": true,
         "type": "object"
       },
       "RecommendationRefusal": {
@@ -21005,7 +21594,7 @@
           },
           "stored": {
             "items": {
-              "$ref": "#/components/schemas/StoredSearchToolSchema"
+              "$ref": "#/components/schemas/ListedSearchToolSchema"
             },
             "title": "Stored",
             "type": "array"
@@ -21279,6 +21868,17 @@
             ],
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
+          },
+          "rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RatesDocument-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every price of the row as a models.dev cost block: each modality's input and output price with its unit, cache and overrides, web_search beside the modalities, and multipliers. A price is per its unit as published (one image, one million tokens, one thousand searches). Given instead of the per-million fields, which are then read out of it; a row always reads back with both."
           },
           "unit": {
             "default": "token",
@@ -22839,6 +23439,152 @@
           "cost"
         ],
         "title": "UnitChargeLine",
+        "type": "object"
+      },
+      "UnitRate-Input": {
+        "additionalProperties": false,
+        "description": "One price: of a modality's input or output, or of web search.",
+        "properties": {
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/RateOverride-Input"
+            },
+            "title": "Overrides",
+            "type": "array"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD per the unit's published quantity.",
+            "title": "Price"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of reasoning tokens, where apart.",
+            "title": "Reasoning"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the price is per; token when omitted.",
+            "title": "Unit"
+          }
+        },
+        "title": "UnitRate",
+        "type": "object"
+      },
+      "UnitRate-Output": {
+        "additionalProperties": false,
+        "description": "One price: of a modality's input or output, or of web search.",
+        "properties": {
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheRates-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/RateOverride-Output"
+            },
+            "title": "Overrides",
+            "type": "array"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD per the unit's published quantity.",
+            "title": "Price"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price of reasoning tokens, where apart.",
+            "title": "Reasoning"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the price is per; token when omitted.",
+            "title": "Unit"
+          }
+        },
+        "title": "UnitRate",
         "type": "object"
       },
       "UpdateBudgetRequest": {
@@ -25678,6 +26424,363 @@
         "title": "VerifyEmailResponse",
         "type": "object"
       },
+      "VideoError": {
+        "description": "Why a video job failed, in the provider's words.",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "VideoError",
+        "type": "object"
+      },
+      "VideoGenerationRequest": {
+        "description": "Start a video generation job.\n\nThe fields are any-llm's ``VideoGenerationParams``, its ``model_id`` as\n``model``; a field any-llm adds fails a test until the route accepts it.\n``seconds`` is the length asked for, which the provider may round.",
+        "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio"
+          },
+          "first_frame": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame"
+          },
+          "last_frame": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Frame"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Prompt"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "reference_audios": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Audios"
+          },
+          "reference_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Images"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "maximum": 3600.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "title": "VideoGenerationRequest",
+        "type": "object"
+      },
+      "VideoJobList": {
+        "description": "The caller's video jobs, newest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/VideoJobSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "VideoJobList",
+        "type": "object"
+      },
+      "VideoJobResponse": {
+        "description": "A video generation job as the provider reports it, in the shape of OpenAI's video object.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "object": {
+            "const": "video",
+            "default": "video",
+            "title": "Object",
+            "type": "string"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "provider",
+          "status"
+        ],
+        "title": "VideoJobResponse",
+        "type": "object"
+      },
+      "VideoJobSummary": {
+        "description": "One job the gateway started, from its own records: what it knows without asking the provider.",
+        "properties": {
+          "billed": {
+            "description": "Whether a retrieval has found the job completed and billed it.",
+            "title": "Billed",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "object": {
+            "const": "video",
+            "default": "video",
+            "title": "Object",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The length the request asked for, in seconds, when it named one.",
+            "title": "Seconds"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "provider",
+          "created_at",
+          "seconds",
+          "billed"
+        ],
+        "title": "VideoJobSummary",
+        "type": "object"
+      },
       "WebAuthnCredentialPublic": {
         "description": "A passkey as the settings page lists it.\n\nCarries no key material. ``credential_id`` is here because the browser needs\nit to tell the passkey it just used from the others in the list, and it is\na public identifier the authenticator hands to any site that asks: it is\nwhat ``allowCredentials`` publishes to an unauthenticated caller during a\nceremony.",
         "properties": {
@@ -26130,6 +27233,123 @@
           "name"
         ],
         "title": "WorkspaceCreate",
+        "type": "object"
+      },
+      "WorkspaceHostedProviderAccessRequest": {
+        "description": "What one workspace may do with one hosted provider. Replaces whatever it stored before.",
+        "properties": {
+          "enabled": {
+            "description": "False switches the provider off for this workspace.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The models this workspace may call on the provider. Null for every model the deployment serves on it, including ones added later. A list must name at least one model.",
+            "title": "Models"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "WorkspaceHostedProviderAccessRequest",
+        "type": "object"
+      },
+      "WorkspaceHostedProviderPublic": {
+        "description": "One hosted provider as one workspace sees it.",
+        "properties": {
+          "customized": {
+            "description": "Whether this workspace stores a departure from full inheritance.",
+            "title": "Customized",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This workspace's model list, or null for every served model.",
+            "title": "Models"
+          },
+          "provider": {
+            "description": "The hosted provider's name, as a request's selector prefix spells it.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "served_by_own_key": {
+            "description": "Whether the workspace calls this provider on the organization's own key, so this row is not used.",
+            "title": "Served By Own Key",
+            "type": "boolean"
+          },
+          "served_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The models the deployment serves on the provider for this organization, or null for any priced one.",
+            "title": "Served Models"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "description": "Whether the deployment declares this provider keeps no prompt or completion data.",
+            "title": "Zero Data Retention",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider",
+          "enabled",
+          "models",
+          "customized",
+          "served_models",
+          "served_by_own_key"
+        ],
+        "title": "WorkspaceHostedProviderPublic",
+        "type": "object"
+      },
+      "WorkspaceHostedProvidersPublic": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceHostedProviderPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceHostedProvidersPublic",
         "type": "object"
       },
       "WorkspaceMcpServerCheckRequest": {
@@ -26818,6 +28038,11 @@
             "format": "uuid",
             "title": "Workspace Id",
             "type": "string"
+          },
+          "zero_data_retention": {
+            "default": false,
+            "title": "Zero Data Retention",
+            "type": "boolean"
           }
         },
         "required": [
@@ -26906,6 +28131,34 @@
           "models"
         ],
         "title": "WorkspaceProviderModelRestrictionsPublic",
+        "type": "object"
+      },
+      "WorkspaceProviderPolicyPublic": {
+        "properties": {
+          "require_zero_data_retention": {
+            "title": "Require Zero Data Retention",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "require_zero_data_retention"
+        ],
+        "title": "WorkspaceProviderPolicyPublic",
+        "type": "object"
+      },
+      "WorkspaceProviderPolicyRequest": {
+        "description": "What one workspace requires of every provider serving it.",
+        "properties": {
+          "require_zero_data_retention": {
+            "description": "Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns.",
+            "title": "Require Zero Data Retention",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "require_zero_data_retention"
+        ],
+        "title": "WorkspaceProviderPolicyRequest",
         "type": "object"
       },
       "WorkspacePublic": {
@@ -27582,7 +28835,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.38.0"
+    "version": "0.39.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -28789,7 +30042,78 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_audio-create_transcription"
+                "properties": {
+                  "file": {
+                    "contentMediaType": "application/octet-stream",
+                    "title": "File",
+                    "type": "string"
+                  },
+                  "language": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Language"
+                  },
+                  "model": {
+                    "title": "Model",
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Prompt"
+                  },
+                  "response_format": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Response Format"
+                  },
+                  "temperature": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Temperature"
+                  },
+                  "user": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "User"
+                  }
+                },
+                "required": [
+                  "file",
+                  "model"
+                ],
+                "title": "Body_audio-create_transcription",
+                "type": "object"
               }
             }
           },
@@ -28803,6 +30127,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "413": {
+            "description": "The audio upload exceeds the maximum request size."
           },
           "422": {
             "content": {
@@ -30488,6 +31815,25 @@
             }
           },
           {
+            "description": "For a signed-in caller, list only what a request billed to this workspace may call, with its own disabled keys and model lists applied. A workspace the caller cannot see answers 404. Ignored for an API key, which already names its workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a signed-in caller, list only what a request billed to this workspace may call, with its own disabled keys and model lists applied. A workspace the caller cannot see answers 404. Ignored for an API key, which already names its workspace.",
+              "title": "Workspace Id"
+            }
+          },
+          {
             "description": "Number of matching models to skip.",
             "in": "query",
             "name": "skip",
@@ -30682,6 +32028,18 @@
             }
           },
           {
+            "description": "Only models at least one provider declared to keep no prompt or completion data offers.",
+            "in": "query",
+            "name": "zero_data_retention",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only models at least one provider declared to keep no prompt or completion data offers.",
+              "title": "Zero Data Retention",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "Release window ending today (UTC); zero disables it. Unknown and future releases do not match.",
             "in": "query",
             "name": "released_within_days",
@@ -30788,6 +32146,25 @@
             "schema": {
               "title": "Model Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "For a signed-in caller, only the offerings a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a signed-in caller, only the offerings a request billed to this workspace may call.",
+              "title": "Workspace Id"
             }
           }
         ],
@@ -31792,6 +33169,119 @@
         ]
       }
     },
+    "/api/v1/fetch": {
+      "post": {
+        "description": "Fetch one page through a configured fetch tool.\n\nThe tool is taken from ``fetch_tool_name``, which may be omitted: the\ndeployment's ``web_fetch_default_tool`` then serves, else ``builtin_fetch``,\nthe gateway's own fetcher. Such a call runs on the workspace's organization\nfetch key when it has one. While the deployment's ``web_fetch_enabled`` is\noff, the call is refused, as ``otari_web_fetch`` is. The URL must pass the\nworkspace's domain lists and the gateway's own checks: a public http or\nhttps URL that names no private address. The built-in fetcher also checks\nwhere each host resolves.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
+        "operationId": "fetch-create_fetch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FetchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FetchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Fetch",
+        "tags": [
+          "fetch"
+        ]
+      }
+    },
+    "/api/v1/fetch/{fetch_tool_name}": {
+      "post": {
+        "description": "Fetch one page through the fetch tool named in the path.\n\nIdentical to ``POST /api/v1/fetch`` except that the path names the tool,\nwhich then runs on its own key. Any ``fetch_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
+        "operationId": "fetch-create_fetch_for_tool",
+        "parameters": [
+          {
+            "description": "Configured fetch tool to run on, builtin_fetch included",
+            "in": "path",
+            "name": "fetch_tool_name",
+            "required": true,
+            "schema": {
+              "description": "Configured fetch tool to run on, builtin_fetch included",
+              "title": "Fetch Tool Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FetchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FetchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Fetch For Tool",
+        "tags": [
+          "fetch"
+        ]
+      }
+    },
     "/api/v1/files": {
       "get": {
         "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nEach flavor pages with its own cursor.\nOpenAI's ``after`` names the last file of the previous page, and ``has_more`` says whether to ask again.\nAnthropic's ``next_page`` is passed back as ``page``, and ``ids[]`` reads up to 100 named files in one page.\nA cursor whose file has since been deleted or has expired is still a position.\nAn ``after`` the caller never owned is a 404, and a ``page`` token this gateway did not issue is a 400.",
@@ -31974,7 +33464,34 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_files-create_file"
+                "properties": {
+                  "file": {
+                    "contentMediaType": "application/octet-stream",
+                    "title": "File",
+                    "type": "string"
+                  },
+                  "purpose": {
+                    "default": "user_data",
+                    "title": "Purpose",
+                    "type": "string"
+                  },
+                  "user": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "User"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "title": "Body_files-create_file",
+                "type": "object"
               }
             }
           },
@@ -31998,6 +33515,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "413": {
+            "description": "The upload exceeds the configured maximum size."
           },
           "422": {
             "content": {
@@ -33490,7 +35010,7 @@
     },
     "/api/v1/images/edits": {
       "post": {
-        "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names an existing user.\n- API key: usage and spend go to the key's own user. A ``user`` naming a\n  different user is refused with 403, or ignored when mismatch rejection is off.",
+        "description": "OpenAI-compatible image edit endpoint, taking ``multipart/form-data``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names an existing user.\n- API key: usage and spend go to the key's own user. A ``user`` naming a\n  different user is refused with 403, or ignored when mismatch rejection is off.\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; a provider that\nsends no `usage` gets one holding just those two fields. An unpriced\nresponse carries neither.",
         "operationId": "images-edit_image",
         "requestBody": {
           "content": {
@@ -33625,7 +35145,7 @@
     },
     "/api/v1/images/generations": {
       "post": {
-        "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; a provider that\nsends no `usage` gets one holding just those two fields. An unpriced\nresponse carries neither.",
         "operationId": "images-create_image",
         "requestBody": {
           "content": {
@@ -38302,7 +39822,7 @@
         ]
       },
       "post": {
-        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it. Refused with a\n403 when the deployment, not the caller's organization, holds the credential\nthat serves the model, whether through one of its own provider instances or a\nhosted credential the bound port supplies because no usable BYO credential of\nthe organization's own covers every one of its workspaces: either way the\ndeployment settles the upstream bill, so its rate is the deployment price\nlist's rather than a tenant's.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
+        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it. Refused with a\n403 when the deployment, not the caller's organization, holds the credential\nthat serves the model, whether through one of its own provider instances or a\nhosted credential the bound port supplies because no usable BYO credential of\nthe organization's own covers every one of its workspaces: either way the\ndeployment settles the upstream bill, so its rate is the deployment price\nlist's rather than a tenant's.\n\nA rate on a tool the deployment's own account runs, a search or fetch tool's\nor ``otari:code_execution``, is refused with a 403 for the same reason.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
         "operationId": "organization-pricing-create_organization_pricing",
         "requestBody": {
           "content": {
@@ -38326,7 +39846,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "The deployment holds the credential that serves the model."
+            "description": "The deployment holds the credential that serves the model, or runs the tool on its own account."
           },
           "409": {
             "description": "The period overlaps one already stored for the model."
@@ -38404,7 +39924,7 @@
         ]
       },
       "put": {
-        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied-model rule the create path\ncarries, so a row stored before that rule existed cannot be edited into a rate\nnobody could create today, and with a 403 for a rate the deployment operator\nset, which only the operator may change.",
+        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.\n\nRefused with a 403 on the same deployment-supplied rules the create path\ncarries, so an edit cannot store a rate a create would refuse, and with a\n403 for a rate the deployment operator\nset, which only the operator may change.",
         "operationId": "organization-pricing-replace_organization_pricing",
         "parameters": [
           {
@@ -38440,7 +39960,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "The deployment serves the model, or the deployment operator set the rate."
+            "description": "The deployment serves the model or runs the tool, or the deployment operator set the rate."
           },
           "422": {
             "content": {
@@ -44100,7 +45620,18 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_playground-upload_playground_file"
+                "properties": {
+                  "file": {
+                    "contentMediaType": "application/octet-stream",
+                    "title": "File",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "title": "Body_playground-upload_playground_file",
+                "type": "object"
               }
             }
           },
@@ -44116,6 +45647,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "413": {
+            "description": "The upload exceeds the configured maximum size."
           },
           "422": {
             "content": {
@@ -51096,6 +52630,214 @@
         ]
       }
     },
+    "/api/v1/videos": {
+      "get": {
+        "description": "The caller's video jobs, newest first, from the gateway's own records.\n\nA key sees the jobs its user started in its workspace; the master key sees\nevery job. The records say what the gateway knows without asking a\nprovider; a job's status is ``GET /api/v1/videos/{video_id}``'s.",
+        "operationId": "videos-list_videos",
+        "parameters": [
+          {
+            "description": "How many of the newest jobs to list",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "How many of the newest jobs to list",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Videos",
+        "tags": [
+          "videos"
+        ]
+      },
+      "post": {
+        "description": "Start a video generation job.\n\nThe job is returned at once. Poll ``GET /api/v1/videos/{video_id}`` until\nits status is ``completed``, then fetch the video from\n``GET /api/v1/videos/{video_id}/content``. The model must have a per-second\nvideo price, from the catalog or set through the pricing API; one with none\nis refused with 402. The length asked for is reserved against the budget at\nthat price while the job starts, and the job is billed when a retrieval\nfinds it completed. A provider that renders inside this call returns the\njob already completed, billed, and ready for its content.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "operationId": "videos-create_video",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoGenerationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/api/v1/videos/{video_id}": {
+      "get": {
+        "description": "The job's status, from its record once it completed, else from the provider that runs it.\n\nThe first retrieval that finds the job completed bills its length at the\nmodel's per-second video price. A key reads only the jobs its user started\nin its workspace; the master key reads any job.",
+        "operationId": "videos-retrieve_video",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Retrieve Video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/api/v1/videos/{video_id}/content": {
+      "get": {
+        "description": "The finished video's bytes, in the provider's media type.\n\nReads the job first, so a completed job is billed here as it would be on\n``GET /api/v1/videos/{video_id}``. A job still running, or one that failed,\nis a 409 naming its status.",
+        "operationId": "videos-retrieve_video_content",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "title": "Video Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "video/*": {}
+            },
+            "description": "The video, in the provider's media type"
+          },
+          "409": {
+            "description": "The job has not completed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "description": "LLM provider error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Retrieve Video Content",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
     "/api/v1/workspaces": {
       "get": {
         "description": "List the workspaces the caller can see in their organization.",
@@ -51690,6 +53432,188 @@
         "summary": "Set Workspace Code Execution Policy",
         "tags": [
           "workspace-code-execution-policy"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/hosted-providers": {
+      "get": {
+        "description": "Every hosted provider this workspace's organization may use, with what this workspace keeps of it.\n\nAny member of the workspace may read it.",
+        "operationId": "workspace-hosted-providers-list_workspace_hosted_providers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceHostedProvidersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Workspace Hosted Providers",
+        "tags": [
+          "workspace-hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/hosted-providers/{provider}": {
+      "delete": {
+        "description": "Drop this workspace's rule for a hosted provider, so it inherits the provider whole. Idempotent.",
+        "operationId": "workspace-hosted-providers-reset_workspace_hosted_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceHostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reset Workspace Hosted Provider",
+        "tags": [
+          "workspace-hosted-providers"
+        ]
+      },
+      "put": {
+        "description": "Switch a hosted provider off for this workspace, or narrow it to some of its models.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. It can only narrow what the organization may use: a model the\ndeployment does not serve on the provider is refused with 400. Sending the\ninherited state (enabled, every model) is a reset.",
+        "operationId": "workspace-hosted-providers-set_workspace_hosted_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceHostedProviderAccessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceHostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Hosted Provider",
+        "tags": [
+          "workspace-hosted-providers"
         ]
       }
     },
@@ -53066,6 +54990,118 @@
         "summary": "Remove Workspace Provider Key Model Restriction",
         "tags": [
           "provider-keys"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/provider-policy": {
+      "get": {
+        "description": "What this workspace requires of every provider serving it. Any member of the workspace may read it.",
+        "operationId": "workspace-hosted-providers-get_workspace_provider_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProviderPolicyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Provider Policy",
+        "tags": [
+          "workspace-hosted-providers"
+        ]
+      },
+      "put": {
+        "description": "Require zero data retention of every provider serving this workspace, or stop requiring it.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. Required, a request is refused with 403 on an organization key or a\nhosted provider not declared zero data retention, and on any provider\nconfigured in config.yml or endpoint the workspace or its users own,\nneither of which can be declared.",
+        "operationId": "workspace-hosted-providers-set_workspace_provider_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceProviderPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProviderPolicyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Provider Policy",
+        "tags": [
+          "workspace-hosted-providers"
         ]
       }
     },

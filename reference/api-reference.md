@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.38.0/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.38.0/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.39.0/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.39.0/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 ## Base URL
@@ -56,6 +56,18 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
+An API key itself reaches the inference routes, `GET /api/v1/usage/requests/{request_id}`
+for its own requests, and the catalog reads that describe the deployment rather
+than act on it: `GET /api/v1/models`, `/pricing`, `/tools`, `/providers/catalog`,
+`/tool-settings/guardrails/catalog`, `/tool-settings/guardrails/profiles` and
+`/search-tools/providers`. A [service key](https://docs.otari.ai/guides/organizations-and-access/end-users) also reaches the
+end-user routes. The rest of the management API, including `/api/v1/usage`,
+`/api/v1/budgets` and everything under `/api/v1/organizations/me`, takes the
+master key or a dashboard session cookie. A request that carries an API key is
+never read as a session, so those routes answer it `401` with
+`{"detail": "Invalid master key"}`, on otari.ai too, where a tenant has no master
+key: that part is managed in the dashboard.
+
 ## Core inference APIs
 
 Otari implements three completion surfaces:
@@ -64,8 +76,8 @@ Otari implements three completion surfaces:
 - `POST /api/v1/messages` and `/api/v1/messages/count_tokens`, Anthropic Messages
 - `POST /api/v1/responses`, OpenAI Responses
 
-Otari also serves embeddings, images, audio, files, batches,
-moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
+Otari also serves embeddings, images, audio, files, batches, videos,
+moderations, rerank, search, fetch, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
 ### Embedding input type
@@ -130,8 +142,11 @@ its own time and the provider's in `Server-Timing`; see
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
-[rerank](#rerank) and embeddings endpoints carry the same two fields
-on their `usage`. On a stream the fields ride the terminal usage event: for Chat
+[rerank](#rerank), embeddings and images (`/images/generations` and
+`/images/edits`) endpoints carry the same two fields on their `usage`; an image
+model whose provider sends no `usage` (OpenAI's DALL-E models) gets one holding
+just the two fields, and one that sends token counts keeps them beside the
+fields. On a stream the fields ride the terminal usage event: for Chat
 Completions, the last chunk that reports usage and either has no choices (OpenAI's
 `stream_options.include_usage` chunk) or finishes a choice (providers such as Cohere
 and Gemini report usage on the chunk carrying `finish_reason`); `message_delta` for
@@ -323,7 +338,11 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   before the stream ended (an Anthropic stream reports its input tokens in
   `message_start`). The request is not treated as free.
 - A stream the client abandoned before the provider reported any usage, and
-  that ran no gateway tools, has nothing to bill and writes no usage row.
+  that ran no gateway tools, writes no usage row under the `fail` and
+  `allow_free` policies. Under `estimate` (the default of
+  `stream_missing_usage_policy`) it writes an `incomplete` row billed on an
+  estimate from the request and the text streamed so far: tokens only, with
+  no per-request charge.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:
@@ -426,6 +445,85 @@ in `usage` what the gateway metered and what it charged:
 
 How a rerank model is priced, per search unit or per input token, is described in
 [Per-request pricing](https://docs.otari.ai/self-hosting/configuration#per-request-pricing-audio-moderations-rerank-and-completion-models).
+
+## Videos
+
+A video takes minutes to render, so the Videos API is asynchronous, in the
+shape of OpenAI's. `POST /api/v1/videos` starts a job and returns it at once,
+`GET /api/v1/videos/{video_id}` reads its status from the provider that runs
+it, `GET /api/v1/videos/{video_id}/content` serves the finished video's bytes
+in the provider's media type, and `GET /api/v1/videos` lists the caller's own
+jobs from Otari's records, newest first. There is no delete and no remix.
+
+```json
+{"model": "gemini:veo-3.0-generate-001", "prompt": "a cat on a skateboard", "seconds": 8}
+```
+
+The request takes `model`, `prompt` and the optional `seconds`, `size`,
+`resolution`, `aspect_ratio`, `seed`, `negative_prompt`, `reference_images`,
+`reference_audios`, `first_frame` and `last_frame`, which reach the provider
+as any-llm names them. `user` is Otari's own and is never forwarded: it names
+the billed user under the rules of [The `user` field](#the-user-field). The
+job comes back as:
+
+```json
+{
+  "id": "…",
+  "object": "video",
+  "model": "veo-3.0-generate-001",
+  "provider": "gemini",
+  "status": "queued",
+  "created_at": 1700000000,
+  "completed_at": null,
+  "progress": null,
+  "seconds": null,
+  "size": null,
+  "error": null
+}
+```
+
+- `status` is `queued`, `in_progress`, `completed` or `failed`. `error` carries
+  the provider's message and code when the job failed.
+- `seconds` is the length the provider reports, once it does.
+- `provider` is the instance that runs the job, which every later call on the
+  job uses.
+
+How a video is billed:
+
+- The model must have a per-second video price, from the catalog or a `rates`
+  block set through the pricing API
+  ([Every price in its unit](https://docs.otari.ai/self-hosting/configuration#every-price-in-its-unit-rates)).
+  A model with none is refused with 402 and the `pricing_required` error code,
+  whatever `require_pricing` says: a video is never started without a
+  per-second price.
+- Starting a job reserves the length asked for at that price, or 8 seconds
+  when the request names none, so a caller over budget is refused before the
+  job starts. The hold is released once the provider accepts the job, and the
+  start writes a usage row with no cost under the `/v1/videos` label.
+- A provider that renders inside the start call, as DeepInfra does, returns
+  the job already `completed`: it is billed then, and what it reported is
+  kept on Otari's record, so a later read of the job or its content answers
+  from the record without asking the provider.
+- The first `GET` that finds the job `completed`, on the job or on its content,
+  prices the seconds the provider reports, else the seconds asked for, and
+  writes one usage row under the `/v1/videos/completed` label with the cost,
+  its `seconds` meter and the charge line. The cost folds into the owner's
+  spend in dollars, except for a job started on a key exempt from budgets,
+  whose row carries the cost and whose spend stays as it was. A job whose
+  length neither the provider nor the request gives is recorded once with no
+  cost. A completed job whose model has lost its per-second price stays
+  unbilled, and the first read after the price is back bills it. Later reads
+  bill nothing, a failed job is never billed, and a job nobody reads is never
+  billed.
+- A job the gateway could not record after the provider accepted it answers
+  500, and the server log names the provider's job id.
+- A key reads only the jobs its user started in its workspace. Another user's
+  job, and an unknown id, are 404. The master key reads any job, and is the
+  only key that reads a job whose workspace was deleted since.
+
+Which providers serve video is any-llm's to say: Gemini, Together and DeepInfra
+in the release Otari pins. A provider without it is refused with 422 before it
+is called.
 
 ## Search
 
@@ -548,6 +646,119 @@ see [Provider failures](#provider-failures).
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
+
+## Fetch
+
+`POST /api/v1/fetch` and `POST /api/v1/fetch/{fetch_tool_name}` read one page
+through a configured fetch tool, as [Search](#search) runs a search tool. This is
+separate from `otari_web_fetch`, which lets a model fetch pages during a
+completion; both are described in [Built-in tools](tools.md#direct-fetch). A
+client that runs its own agent loop reads pages this way, with the gateway's URL
+checks, prices and budgets, without a completion for each page.
+
+`web_fetch_enabled` governs this endpoint as it governs the `otari_web_fetch`
+tool, read on every request: while it is off, a call is refused with `400`.
+Search result enrichment follows `web_search_extract` instead.
+
+**Which tool.** The path names the tool. On `POST /api/v1/fetch`, the body's
+`fetch_tool_name` does, else the deployment's `web_fetch_default_tool`, else
+`builtin_fetch`, the gateway's own fetcher, which always exists. A call that
+names no tool runs on the workspace's
+[organization fetch key](tools.md#organization-search-keys) when it has a usable
+one; a named call runs on that tool with its own key. Either way the tool decides
+the access check, the `rate_limits` rules, the timeout and the usage row's model
+and provider. The access check reads the key's `allowed_tools`, else its user's,
+for the tool's name or `*`, as a search does
+([Model and search tool access](https://docs.otari.ai/guides/organizations-and-access/api-keys#model-and-search-tool-access)).
+
+**Which URLs.** The workspace's web-access policy applies in full: its switch, and
+its allowed and blocked domain lists, which bind the URL asked for and, on the
+built-in fetcher, every redirect. A provider tool is held to the URL it reports
+finding the page at; DeepSeek, Exa and Tabstack report none, so a redirect they
+follow escapes the lists (see [Fetch providers](tools.md#fetch-providers)).
+Whatever the lists say, a URL that names a private, loopback or link-local
+address is refused. The built-in fetcher also refuses a host that resolves to
+one, redirects included; a provider tool resolves hosts on its own network,
+where the gateway checks only the URL it reports finding the page at.
+
+**Request.**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `url` | string, required | The page: one public `http` or `https` URL. |
+| `fetch_tool_name` | string | The tool, when the path does not name one; `builtin_fetch` is a valid name. |
+| `max_chars` | integer, at least 1 | Cut the page text to this many characters. Unset, the tool's own `max_chars` option applies, else the provider's own limits. |
+| `include_raw` | boolean | Also return `raw`, the provider's whole response. `builtin_fetch` calls no provider, so its `raw` holds only `content_kind`, how the page's body was read, and `redirect_count`. Default `false`. |
+| `provider_options` | object | Native options of the provider serving the call, under its own names, as `GET /api/v1/search-tools/providers?kind=fetch` lists them. They win over the tool's own options. An option the provider does not take, or takes only from the deployment, is a 400 naming it. A call that names no tool may be served by an organization key on another provider, so name the tool when the options are meant for one provider. |
+| `user` | string | Who the fetch is billed to; see [Search](#search). |
+
+**Response.**
+
+```json
+{
+  "object": "fetch",
+  "fetch_tool": "builtin_fetch",
+  "url": "https://blog.python.org/2025/10/python-3140-final-is-here.html",
+  "final_url": "https://blog.python.org/2025/10/python-3140-final-is-here.html",
+  "title": "Python 3.14.0 (final) is here!",
+  "content_type": "text/html",
+  "text": "# Python 3.14.0 (final) is here! ...",
+  "published": null,
+  "truncated": false
+}
+```
+
+`url` is the URL asked for, in canonical form, and `final_url` where the page was
+found after redirects, the same as `url` when the provider does not report where
+a redirect led. `title` and `content_type` are empty strings when the provider
+gives none. `text` is the page's text as the provider extracted it: the built-in
+fetcher keeps an HTML page's content as light Markdown, without its navigation,
+banners, footers and sidebars. `published` is when the page was published, where
+the provider reports it, else `null`. `truncated` is `true` when `text` is less
+than the whole page: the body or the extracted text hit a limit of the
+provider's, or `max_chars` cut it. `raw` appears only when the request set
+`include_raw`.
+
+**Price.** A fetch is billed at the provider's reported cost when it reports one
+(Exa does), else at the tool's own per-call rate: its `price_per_call`, or a
+price row of kind `fetch` keyed by the tool's name, `builtin_fetch` included.
+A fetch the workspace's organization fetch key served is priced under
+`otari:web_fetch` instead. See
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
+
+**Errors.** Where a refusal carries a stable code, it is in the
+`Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
+
+| Situation | Status | `Otari-Error-Code` |
+|---|---|---|
+| No credentials, or a key that is not valid | 401 | |
+| `web_fetch_enabled` is off | 400 | |
+| The tool named is not configured, or cannot run as configured | 400 | |
+| The URL is not a valid public `http` or `https` URL or names a private address, asked for or reported by a provider after a redirect | 400 | |
+| A `provider_options` key the provider does not take from a request | 400 | |
+| The master key without a `user` | 400 | |
+| The body fails schema validation, such as a `max_chars` below 1 | 422 | `invalid_request` |
+| The workspace turned web access off | 403 | |
+| The workspace's domain lists disallow the URL, asked for or found after a redirect | 403 | |
+| The key's `allowed_tools`, or the deprecated `<provider>:<tool>` entry in `allowed_models`, does not grant the tool | 403 | |
+| A `user` naming another user, where the key rejects a mismatch | 403 | |
+| A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
+| A budget refuses the fetch | 403 | `budget_exceeded` |
+| `require_pricing` is on and the fetch has no price (a row of kind `fetch` keyed by the tool's name, or its `price_per_call`; `otari:web_fetch` for a fetch the workspace's organization key serves); the detail names it | 402 | `pricing_required` |
+| The tool runs on the deployment's account and the organization has no funds paid in | 402 | `insufficient_funds` |
+| A rate limit is full | 429 | `rate_limited` |
+| The workspace's organization fetch key cannot be used as it is | 502 | |
+| The provider, or the built-in fetcher, failed the fetch: the page answered an error status, timed out, could not be reached, has a content type the fetcher does not read, or could not be extracted; on the built-in fetcher, a host that cannot be resolved or resolves to a private address (`url_invalid`) | 502 | |
+| The workspace's stored web-access policy cannot be read | 503 | |
+
+A failed fetch is a 502 whose `detail` names no upstream detail; the failure's
+safe fields ride as the same headers a [search](#search)'s 502 carries:
+`Otari-Error-Provider` (`builtin` for the gateway's own fetcher),
+`Otari-Error-Status` (the page's own HTTP status, when the fetcher reports one),
+`Otari-Error-Tag` (the provider's own tag, or the built-in fetcher's: `timeout`,
+`network`, `http_status`, `redirect`, `url_invalid`, `content_type`,
+`extraction`, `content_decoding`) and `Otari-Error-Retryable`. The body never
+carries the URL.
 
 ## Code execution
 
@@ -915,3 +1126,31 @@ result. Never retry `POST /api/v1/mcp/execute` automatically, including from a
 reverse proxy or service mesh: an `outcome_unknown` response means the tool may
 already have run. The request shapes, the error and execution-state contract,
 and the limits are in [Caller-orchestrated MCP](mcp.md#caller-orchestrated-mcp).
+
+## Agent traces
+
+The sessions [Agent traces](https://docs.otari.ai/guides/observability/traces) describes are read on these routes.
+
+| Endpoint | Who |
+| --- | --- |
+| `GET /api/v1/organizations/me/traces`, `/count`, `/series`, `/{trace_id}`, `/requests/{request_id}` | a signed-in member: an owner or admin reads every workspace of their active organization, anyone else the workspaces they belong to; also the master key in the `Otari-Key` header, as the deployment operator in their active organization |
+| `GET /api/v1/traces`, and the same four | the deployment operator, every workspace of their active organization |
+
+`/series` counts the sessions active in each bucket of a window: a session is
+active from its start to its last activity, so a long one counts in every bucket
+it ran through. `bucket` is `1m`, `5m`, `30m`, `hour`, `6h` or `day`.
+The list, count and series reads take the window the same way: `start` and
+`end` keep the sessions active between them (last active at or after `start`,
+started before `end`), so a session still running past `end` is listed in the
+window it was counted in.
+
+The list, count and series reads narrow to one workspace with `workspace_id`,
+inside the caller's scope and never beyond it. `q` matches any part of a session's trace id, name,
+agent or user, in any case, inside the same scope. A trace is keyed by its
+workspace and its id, so a detail read takes the `workspace_id` its list entry
+names; without it, an id in more than one of the caller's workspaces answers 409
+rather than a guess.
+`/requests/{request_id}` answers the session a gateway request was traced into,
+by the `Otari-Request-ID` it was sent (a usage row's `request_group_id`), and 404
+where the scope holds no trace of it. A trace outside the caller's scope answers
+404.

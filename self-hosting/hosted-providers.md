@@ -38,6 +38,27 @@ The models a key serves, its serving switches and what a refusal on that path
 returns are described in
 [Who is shown which models](https://docs.otari.ai/reference/gateway/models#who-is-shown-which-models).
 
+### Zero data retention
+
+A hosted provider and an organization's provider key can each be declared
+zero data retention (`zero_data_retention`): the account the key belongs to
+keeps no prompts or completions. Otari cannot check this. It records what the
+operator or the organization says about their agreement with the provider,
+and the Models page shows it beside each offering and filters on it (see
+[Browsing the grouped catalog](https://docs.otari.ai/reference/gateway/models#browsing-the-grouped-catalog)). A
+workspace can require it, which refuses every undeclared source at the API;
+see [Control workspace access](https://docs.otari.ai/guides/organizations-and-access/provider-keys#control-workspace-access).
+
+Whose declaration counts depends on whose key serves the offering:
+
+- A `hosted` offering takes the hosted provider's declaration.
+- An offering on the organization's own key counts as zero data retention
+  only while every usable key the organization holds for that provider is
+  declared. Which key a workspace calls on depends on its defaults and
+  overrides, so one undeclared key means a request may reach an account that
+  keeps data.
+- A `providers:` instance from `config.yml` is never declared.
+
 ### Hosted provider names
 
 A hosted provider is named after its provider by default. A name of its own,
@@ -126,6 +147,25 @@ model the operator switched off. A model switched on without a price on purpose
 stays on through a refresh: one a moved or copied provider lists, one an
 operator switched on while nothing priced it, and every model of a provider
 that serves models not on its list.
+
+### Workspace access
+
+An organization that may use a hosted provider may still keep it from one of
+its workspaces. On the workspace's **Providers** tab (**Organization**, then
+**Workspaces**), an organization owner or admin, or an owner or admin of the
+workspace, can switch a hosted provider off for that workspace or narrow it to
+some of the models it serves. Members of the workspace can read what is set.
+
+A workspace can only take away: it never reaches a hosted provider its
+organization may not use, nor a model the roster does not serve. A request
+the workspace's rule refuses gets `403` with the same detail as a model an API
+key may not use, and the workspace's catalog leaves out what it refuses. Where
+the workspace calls the provider on the organization's own key, the hosted
+provider is never asked, so its row there has no effect.
+
+A change takes effect at once on the server that saved it and within 30
+seconds on every other one. The rows are served under
+`/api/v1/workspaces/{workspace_id}/hosted-providers`.
 
 ## Pricing
 
@@ -224,6 +264,7 @@ hosted_providers:
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
 | `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](configuration.md#supported-countries). |
+| `zero_data_retention` | `true` declares that the provider keeps no prompts or completions. Defaults to `false`. See [Zero data retention](#zero-data-retention). |
 
 A key may be left out for the self-hosted backends `vllm`, `ollama`,
 `llamacpp`, `llamafile`, `lmstudio`, `cascadia` and `otari`; for `vertexai` and
@@ -324,6 +365,10 @@ menu, and is listed only for a deployment operator.
   stores.
 - **Serve models not on its list**, in both dialogs, sets
   `serves_unlisted_models`.
+- **Zero data retention**, in both dialogs, sets `zero_data_retention`, and a
+  provider declared so carries a badge saying it. The same box is on each
+  key's dialog on the organization's Providers page. See
+  [Zero data retention](#zero-data-retention).
 - **Models** carry a serving switch and a price, set per million tokens or per
   1,000 requests or images; a model nothing prices arrives switched off.
 - **Refresh models** asks one provider again. **Update catalog** fetches the

@@ -1,4 +1,12 @@
+---
+description: Otari is an open-source AI gateway by Mozilla AI (Apache-2.0). Run it yourself for free, or use the hosted version at otari.ai, see pricing.
+---
+
 # What is Otari?
+
+Otari is an open-source AI gateway by Mozilla AI (Apache-2.0). Run it yourself
+for free, or use the hosted version at [otari.ai](https://otari.ai/),
+[see pricing](https://otari.ai/#pricing).
 
 Otari is an AI gateway: one endpoint between your applications and the model
 providers they call.
@@ -38,7 +46,13 @@ Missing an option? Don't hesitate to [open an issue on github](https://github.co
 ## Where to go next
 
 - **Home**: the [Quickstart](quickstart.md) sends a first request through
-  otari.ai, from curl and from your code, in a few minutes.
+  otari.ai, from curl and from your code, in a few minutes. Then, in the
+  dashboard: [manage workspaces](manage-workspaces.md),
+  [invite members](invite-and-manage-organization-members.md), add
+  [provider keys](manage-provider-keys.md),
+  [set a budget](set-a-budget-and-ceiling.md),
+  [route across providers](create-a-multi-provider-routing.md) and
+  [add guardrails](manage-guardrails.md).
 - **Guides**: how to do one thing with Otari, such as give each end user their
   own budget, add guardrails, or read agent traces.
 - **Self-Hosting**: running your own gateway, starting with the

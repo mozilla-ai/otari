@@ -31,9 +31,9 @@ you have more than a handful.
 3. Enter a **Name** and, optionally, a **Description**, and click
    **Create workspace**.
 
-A new workspace can use every provider key its organization holds. To choose
-which key a workspace uses for a provider, click **Edit** (the pencil icon) on
-the workspace; see [Control workspace access](provider-keys.md#control-workspace-access).
+A new workspace can use every provider key and hosted provider its organization
+can. To narrow that, select the workspace and open its **Providers** tab; see
+[Control workspace access](provider-keys.md#control-workspace-access).
 
 The API, an SDK or automation addresses a workspace by its id, which
 `GET /api/v1/workspaces` lists.
@@ -45,8 +45,10 @@ The API, an SDK or automation addresses a workspace by its id, which
    **Delete workspace**.
 
 The workspace goes with its memberships. The gateway refuses to delete one that
-still holds API keys, usage, aliases or routing policies, so a workspace's spend
-history outlives it: move or delete those first. It also refuses to delete an
+still holds API keys, aliases, routing policies or usage. Keys, aliases and
+policies can be removed first, but the usage of requests the gateway served is
+never deleted (only imported usage is), so a workspace that has served requests
+cannot be deleted. It also refuses to delete an
 organization's last workspace; create another before deleting it.
 
 ## Delete an organization
@@ -68,6 +70,11 @@ A workspace groups the resources used by a team or application. API keys, usage,
 aliases, routing policies, MCP servers, and tool policy are resolved in a
 workspace.
 
+Each workspace has its own page under **Organization**, then **Workspaces**:
+**General** for its name and defaults, and **Providers** for the providers and
+models it may use
+([Control workspace access](provider-keys.md#control-workspace-access)).
+
 ### Roles
 
 Organization and workspace memberships use four roles:
@@ -84,9 +91,7 @@ Organization and workspace memberships use four roles:
 A request's usage lands in the workspace of the API key that authenticated it
 (see [How a request is attributed](access-control.md#how-a-request-is-attributed)).
 Organization and workspace usage views then apply the signed-in identity's
-membership. Deployment operators can read the operator usage API, which covers
-every workspace of the operator's active organization (the default organization
-for the master key).
+membership.
 
 Routing fallback and built-in tools can create several internal attempts, but a
 successful request remains one caller-visible request. The activity log records

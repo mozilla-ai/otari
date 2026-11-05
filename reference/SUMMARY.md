@@ -17,6 +17,7 @@
   * [Embeddings](api-endpoints/embeddings.md)
   * [End users](api-endpoints/end-users.md)
   * [Feedback](api-endpoints/feedback.md)
+  * [Fetch](api-endpoints/fetch.md)
   * [Files](api-endpoints/files.md)
   * [Health](api-endpoints/health.md)
   * [Health checks](api-endpoints/health-checks.md)
@@ -59,9 +60,11 @@
   * [Traces](api-endpoints/traces.md)
   * [Usage](api-endpoints/usage.md)
   * [Users](api-endpoints/users.md)
+  * [Videos](api-endpoints/videos.md)
   * [Web search keys](api-endpoints/web-search-keys.md)
   * [Workspace activation](api-endpoints/workspace-activation.md)
   * [Workspace code execution policy](api-endpoints/workspace-code-execution-policy.md)
+  * [Workspace hosted providers](api-endpoints/workspace-hosted-providers.md)
   * [Workspace member budget policies](api-endpoints/workspace-member-budget-policies.md)
   * [Workspace web search](api-endpoints/workspace-web-search.md)
   * [Workspaces](api-endpoints/workspaces.md)
@@ -73,6 +76,7 @@
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
+* [Inference Guardrails reference](guardrails-reference.md)
 
 ## Agent Guardrails
 

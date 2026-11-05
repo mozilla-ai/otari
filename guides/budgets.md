@@ -79,8 +79,8 @@ nothing has been spent yet, and the refusal says so with both amounts:
 `User 'alice' has $0.0015 of budget remaining, less than this request's
 estimated cost of $0.01025`. On chat completions, messages and responses the
 estimate prices the request's output token limit (`max_tokens`, or
-`max_output_tokens` on responses; `budget_estimate_default_output_tokens` when it
-sets none), and where the model charges for output the refusal names that
+`max_output_tokens` on responses; a deployment default, 1024 tokens unless
+changed, when it sets none), and where the model charges for output the refusal names that
 figure, so a lower limit may let the request fit. A
 budget already at its cap is refused as `has exceeded budget limit`.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
@@ -90,18 +90,19 @@ already in flight when it runs out.
 
 ### Per-minute limits
 
-The per-minute limits, `rpm_limit` and `tpm_limit`, are counted in `rate_limit_store`, so with Redis they
-hold across replicas, and tokens are counted on what each request used, as
-LiteLLM counts them: a request is admitted while the user's minute is under the
+The per-minute limits, `rpm_limit` and `tpm_limit`, count tokens on what each
+request used, as LiteLLM counts them: a request is admitted while the user's minute is under the
 limit. They apply to a user's own budget on chat completions, messages,
 responses and search, not to a scoped ceiling, and a refusal is a 429 naming the
-rule `budget`.
+rule `budget`. A self-hosted deployment chooses where they are counted; see
+[Budget enforcement](https://docs.otari.ai/self-hosting/configuration#budget-enforcement).
 
 ### Periods and exemptions
 
 Scoped budgets can use a rolling duration or a UTC calendar boundary. A key with
-`exclude_from_budget`, or a deployment with `budget_strategy: disabled`,
-bypasses enforcement.
+`exclude_from_budget` bypasses enforcement; a self-hosted deployment can also turn
+enforcement off as a whole
+([Budget enforcement](https://docs.otari.ai/self-hosting/configuration#budget-enforcement)).
 
 ### Imported usage and batches
 
@@ -111,8 +112,11 @@ hard real-time cap. Batch settles dollars alone: its results arrive outside the
 reservation that gated the submission, so a batch counts as the one request that
 created it and contributes no tokens to a token cap, however many prompts it
 carried. The same holds for the vision side-call a request makes to describe an
-attachment. Cap batch-heavy workloads in dollars rather than in tokens. See
-[Importing external usage](external-usage.md).
+attachment, and for a video job: its length is reserved at the model's
+per-second price while the job starts, and its cost is settled, in dollars
+alone, by the start call when the provider returns the job completed, else by
+the first read that finds it so. Cap batch-heavy workloads in dollars rather
+than in tokens. See [Importing external usage](external-usage.md).
 
 ### Reservations are taken up front
 
@@ -135,7 +139,8 @@ only while recorded spend, every hold still in flight and its own hold together
 fit under the cap, checked in one conditional update so two requests cannot both
 take the last of it. Ten parallel requests near the cap are therefore admitted
 only as far as their combined worst case fits, and the rest are refused. A hold a crashed request leaves behind is returned after
-`budget_reservation_ttl_sec` (15 minutes by default). Scoped ceilings hold the
+`budget_reservation_ttl_sec`, 15 minutes by default (see
+[Budget enforcement](https://docs.otari.ai/self-hosting/configuration#budget-enforcement)). Scoped ceilings hold the
 same way, so a key's ceiling bounds all of its end users' in-flight requests
 together.
 

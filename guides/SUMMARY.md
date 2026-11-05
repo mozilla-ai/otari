@@ -16,10 +16,6 @@
 * [Admin dashboard](dashboard.md)
 * [Playground](playground.md)
 
-## Tools
-
-* [Configure a workspace's tools](workspace-tools.md)
-
 ## Agents and frameworks
 
 * [Use with Claude Code](use-with-claude-code.md)

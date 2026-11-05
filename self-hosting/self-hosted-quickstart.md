@@ -2,7 +2,7 @@
 
 In this tutorial you run Otari on your own machine with Docker Compose, connect
 it to OpenAI, and send your first request through it. For a throwaway container
-with no clone, see the [README quickstart](https://github.com/mozilla-ai/otari/blob/v0.38.0/README.md#quickstart) instead.
+with no clone, see the [README quickstart](https://github.com/mozilla-ai/otari/blob/v0.39.0/README.md#quickstart) instead.
 
 You need:
 
@@ -22,18 +22,19 @@ Run every command that follows from this directory.
 ## 2. Create the settings
 
 Otari runs here on environment variables alone, which Compose reads from
-`.env`. Generate the file:
+`.env`. Generate the file, unless it already exists: a second `OTARI_SECRET_KEY`
+would make the provider keys Otari has stored undecryptable.
 
 ```bash
-export OTARI_MASTER_KEY=$(openssl rand -hex 32)
-cat > .env <<EOF
+test -e .env || cat > .env <<EOF
 OTARI_CONFIG_PATH=/dev/null
 OTARI_DATABASE_URL=postgresql://otari:otari@postgres:5432/otari
 OTARI_DEFAULT_PRICING=true
-OTARI_MASTER_KEY=$OTARI_MASTER_KEY
+OTARI_MASTER_KEY=$(openssl rand -hex 32)
 OTARI_SECRET_KEY=$(docker run --rm docker.io/mzdotai/otari:latest otari gen-secret-key)
 OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)
 EOF
+export OTARI_MASTER_KEY=$(grep '^OTARI_MASTER_KEY=' .env | cut -d= -f2-)
 ```
 
 - `OTARI_CONFIG_PATH=/dev/null` tells Compose to start Otari with no
@@ -46,8 +47,10 @@ EOF
 - `OTARI_PROVIDER_ACCOUNT_PEPPER` names the provider accounts that hold copies
   of attached files. Compose requires it.
 
-The first command also keeps the master key in your shell for steps 4 and 5. Git
-ignores `.env`.
+The last command keeps the master key in your shell for steps 4 and 5, and is
+safe to run again in a new shell. An `.env` that already existed is left alone,
+so check it sets all six variables: Compose refuses to start without
+`OTARI_PROVIDER_ACCOUNT_PEPPER`. Git ignores `.env`.
 
 ## 3. Start Otari
 
@@ -122,6 +125,7 @@ credential for them, and records every request.
 
 ## Next steps
 
+- [Run the dashboard](run-the-dashboard.md): sign in as the operator and set up the dashboard.
 - [Admin dashboard](https://docs.otari.ai/guides/dashboard/dashboard): manage keys, users and providers in the browser.
 - [Access control](https://docs.otari.ai/guides): give each application its own key and budget.
 - [Models](https://docs.otari.ai/reference/gateway/models): connect more providers and choose model names.

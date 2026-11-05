@@ -356,7 +356,7 @@ curl -X POST "https://otari.example.com/api/v1/organizations/me/keys/$KEY_ID/fed
 `GET` on the same path lists the key's rules and `DELETE .../{rule_id}`
 removes one. The key must be the caller's own, as on the rest of
 `/api/v1/organizations/me/keys`, or, for an organization owner or admin, one of
-the organization's [service keys](https://docs.otari.ai/guides/organizations-and-access/end-users#an-organizations-own-service-keys).
+the organization's [service keys](https://docs.otari.ai/guides/organizations-and-access/end-users#2-create-the-service-key).
 Anyone else's answers 404, except for the deployment operator. Adding a rule as
 a plain member answers 403.
 

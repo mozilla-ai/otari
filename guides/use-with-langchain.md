@@ -14,7 +14,8 @@ Install the package:
 pip install langchain-otari
 ```
 
-Create an API key at [otari.ai](https://otari.ai) and export it:
+Create an API key on the **API keys** page of the [otari.ai](https://otari.ai)
+dashboard and export it:
 
 ```bash
 export OTARI_API_KEY=<your-otari-key>

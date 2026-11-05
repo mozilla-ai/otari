@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.38.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.39.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -110,7 +110,7 @@ the corresponding startup value after the database is available.
 | `trace_content_enabled` | Keep what an agent session's spans were about: prompts, commands, file paths, tool call arguments. Defaults to `false`. See [Keeping what a span was about](https://docs.otari.ai/guides/observability/traces#keeping-what-a-span-was-about). |
 | `trace_content_tool_output` | Also keep what each tool returned, on a request routed through Otari that keeps content. A workspace can still turn it off for itself. Defaults to `false`. |
 | `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](https://docs.otari.ai/guides/observability/traces#who-reads-content). |
-| `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](https://docs.otari.ai/guides/observability/traces#sealing-content-with-aws-kms). |
+| `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -305,7 +305,7 @@ api_keys:
 ```
 
 A service key with end-user budgets is declared the same way; see
-[Or declare it in config.yml](https://docs.otari.ai/guides/organizations-and-access/end-users#or-declare-it-in-configyml).
+[Or declare it in config.yml](operator-service-keys.md#or-declare-it-in-configyml).
 
 A budget is keyed by its id and takes the fields `PUT /api/v1/budgets/{budget_id}`
 takes: `name`, `max_budget`, `token_limit`, `request_limit`, `rpm_limit`,
@@ -364,7 +364,9 @@ entry back whenever the entry changed:
   key does not declare (expiry, allowed models, metadata) are left as they are.
 - Changing a key's secret in config, including through the environment
   variable it reads, changes its secret at the next start, and the old one
-  stops working.
+  stops working. Regenerating a declared key from the dashboard or the API
+  lasts until config.yml changes the key's entry or its secret, which restores
+  the secret config.yml declares.
 - `end_user_budget_ids`, `end_user_budget_id` and `ceiling` are part of the
   key's entry and are reconciled with it. End users already created keep the budget they started on, as they
   do when the key is changed through the API. A ceiling moved to another budget
@@ -394,6 +396,39 @@ exist, stops the start and nothing is written.
 
 Declarations are applied before the first-run bootstrap key, so a fresh
 deployment that declares a key does not mint and print one.
+
+### Mismatched `user` fields
+
+`reject_user_mismatch` (default `true`) is the deployment-wide answer to a request
+whose `user` field names someone other than an ordinary key's user (service
+keys and the master key name users by design); a key's own value
+overrides it, as [Mismatched `user` fields](https://docs.otari.ai/guides/organizations-and-access/api-keys#mismatched-user-fields)
+describes. It is a runtime setting, changed on the Settings page or with
+`PATCH /api/v1/settings`.
+
+### Search tools on a key's model list
+
+When neither a key nor its user has an `allowed_tools` list, the key still
+reaches search tools through its `allowed_models`; when either has one, even an
+empty one, that list decides. The model-list route is a deprecated form, described in
+[Model and search tool access](https://docs.otari.ai/guides/organizations-and-access/api-keys#model-and-search-tool-access). Startup
+counts the keys and users that still rely on it, and names the tools some reached
+only through a wildcard, which no longer grants them. Give those keys and users an
+`allowed_tools` list before a later release removes the form.
+
+## Budget enforcement
+
+These settings govern how [budgets](https://docs.otari.ai/guides/organizations-and-access/budgets) are enforced:
+
+| Setting | Purpose |
+| --- | --- |
+| `budget_strategy` | `for_update` (the default), `cas` (lock-free), or `disabled`, which bypasses budget enforcement for the whole deployment. |
+| `budget_reservation_ttl_sec` | How long a request's budget hold may stay in flight before it is treated as leaked and returned, as for a crashed request. Defaults to 900 (15 minutes); it must comfortably exceed the slowest request the deployment serves. |
+| `budget_estimate_default_output_tokens` | The output tokens a hold assumes for a request that sets no output limit. Defaults to 1024. |
+
+A budget's per-minute limits, `rpm_limit` and `tpm_limit`, are counted in
+`rate_limit_store`, so with Redis they hold across replicas; see
+[Rate limits across replicas](#rate-limits-across-replicas).
 
 ## Provider configuration
 
@@ -761,7 +796,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.38.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.39.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1030,6 +1065,47 @@ Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
 accepted shape.
 
+### Every price in its unit: `rates`
+
+A price row also holds `rates`: every price of the model, as the models.dev
+`cost` block, in the document's own shape. Each modality (`text`, `image`,
+`audio`, `video`) has an `input` and an `output` price, each with its `unit`,
+`cache` prices and `overrides`. `web_search` sits beside the modalities, and
+so do `multipliers`. A price there is per its unit as published: one image,
+one million tokens, one thousand searches.
+
+Give `rates` instead of the per-million fields, in this file or on the
+pricing API, and the per-million fields are read out of it: the text prices
+first, else the one other price the block holds, scaled to per million. A
+block that gives both is refused, and so is one with a key the shape does not
+have.
+
+```yaml
+pricing:
+  openai:gpt-image-1:
+    rates:
+      image:
+        output: {price: 0.04, unit: image}
+```
+
+That row stores `unit: image` and `input_price_per_million: 40000`, as the
+per-image section below says. Every row reads back with both: one set through
+the per-million fields shows them in `rates` too, in the slot its unit
+chooses. Billing reads the per-million fields in this release, and the
+videos endpoint reads a `video` output price per second
+([Videos](https://docs.otari.ai/reference#videos)):
+
+```yaml
+pricing:
+  gemini:veo-3.0-generate-001:
+    rates:
+      video:
+        output: {price: 0.4, unit: second}
+```
+
+The other prices a block holds are stored for the meters a later release
+gives them.
+
 ### Per-request pricing (audio, moderations, rerank, and completion models)
 
 A rate's `unit` decides what it bills. A rate in `token` bills the tokens the
@@ -1188,8 +1264,10 @@ in-loop `otari_web_search` tool uses the default one. `fetch_tools` names fetch 
 and for enriching search results. Both can also be stored at runtime through
 `/api/v1/search-tools`, a fetch instance with `kind: fetch` and listed with
 `?kind=fetch`, or from the dashboard's deployment Web search page, which also
-sets each one's price and the defaults. A stored instance wins over
-a configuration file entry of the same name and kind.
+sets each one's price and the defaults. The listing gives each instance's price
+per call and the row it comes from (see
+[Pricing a gateway-run tool](https://docs.otari.ai/reference/gateway/tools#pricing-a-gateway-run-tool)). A stored
+instance wins over a configuration file entry of the same name and kind.
 
 ```yaml
 search_tools:
@@ -1366,20 +1444,36 @@ smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
 
-Invitation email is limited over any 24 hours. Both limits are counted in
-`rate_limit_store`, and `null` turns one off; see
-[Invitations](https://docs.otari.ai/guides/organizations-and-access/members#invitations) for why and what an invitation over
-a limit does:
+`mail_transport: console` writes complete messages to logs for local testing.
+Those messages can contain invitation or password-reset tokens, so never use it
+where logs are shared. Test delivery from Settings or
+`POST /api/v1/settings/mail/test`.
+
+### Invitations
+
+An invitation link expires after `invitation_expiry_hours` (default `168`, seven
+days). What an inviter and an invitee see is in
+[Invitations](https://docs.otari.ai/guides/organizations-and-access/members#invitations).
+
+Invitation email is limited over any 24 hours, because it carries text an
+organization chose (its name, the inviter's name) from the deployment's own
+sender, and on a deployment where anyone can create an organization that would
+otherwise make it an open relay. Both limits are counted in `rate_limit_store`,
+so with Redis they hold across replicas, and `null` turns one off:
 
 | Setting | Limits | Default |
 | --- | --- | --- |
 | `invitation_mail_limit_per_organization` | Invitation emails one organization sends | 250 |
 | `invitation_mail_limit_per_address` | Invitation emails one address receives, from every organization together | 5 |
 
-`mail_transport: console` writes complete messages to logs for local testing.
-Those messages can contain invitation or password-reset tokens, so never use it
-where logs are shared. Test delivery from Settings or
-`POST /api/v1/settings/mail/test`.
+An invitation over a limit is still created, and its link is returned to share
+by hand, as when mail is off: the link costs the deployment nothing, and
+refusing would stop a legitimate admin partway through a bulk invite.
+
+A member added directly through `POST /api/v1/organizations/me/members` gets
+no invitation link, so on a deployment with no mail and no provider sign-in a
+new address waits for an operator's password link. Invite it instead, since the
+invitation link can set its first password.
 
 ## Signup
 
@@ -1505,7 +1599,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.38.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.39.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

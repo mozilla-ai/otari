@@ -178,7 +178,18 @@ otari:web_fetch
 search and Code execution pricing pages, in the deployment view, set these
 rates, and Web search each search or fetch tool's own, in dollars per call. The
 pricing API stores the value in `input_price_per_million`, so one cent per call
-is `10000`.
+is `10000`. `GET /api/v1/search-tools` (`?kind=fetch` for the fetch tools) gives
+each tool's `price_per_call`, the dollars a call settles at on the deployment's
+own account when its provider reports no cost, and `price_source`, the row it
+comes from: `own`, the tool's own row; `config`, that row while the tool's
+`config.yml` entry sets `price_per_call`, which each start writes to it again;
+`old_key`, its old `<provider>:<instance>` row; or `none`, with a null
+`price_per_call`. An override the operator set for one
+organization prices that organization's calls instead. An organization's owner
+or admin may override `otari:web_search` and `otari:web_fetch` on
+`/api/v1/organizations/me/pricing`, for the calls on the organization's own
+keys, but not `otari:code_execution` or a price of kind `search` or `fetch`:
+those calls run on the deployment's account, so the write is refused with `403`.
 
 With `require_pricing: true`, a gateway-run tool whose calls no row would price
 is refused before the model call, with a `402` and the code `pricing_required`.
@@ -652,9 +663,11 @@ field read the same setting.
 Fetch is disabled by default because it permits model-directed outbound requests.
 Enable it at deployment time with `web_fetch_enabled: true` in `config.yml` or
 `OTARI_WEB_FETCH_ENABLED=true` in the environment. When disabled,
-`otari_web_fetch` remains discoverable with `"available": false`, and requests
+`otari_web_fetch` remains discoverable with `"available": false`, requests
 declaring it are rejected without affecting other tools or ordinary completion
-requests.
+requests, and [`POST /api/v1/fetch`](#direct-fetch) answers `400`. The switch
+covers the managed fetch tool and direct fetch only; search result enrichment
+follows `web_search_extract`.
 
 Declare Fetch on any completion API with `{"type": "otari_web_fetch"}`. The
 model-facing function accepts exactly one field:
@@ -714,7 +727,8 @@ is unacceptable.
 ### Fetch providers
 
 A fetch instance, under `fetch_tools` (see [Search tools](https://docs.otari.ai/self-hosting/configuration#search-tools)),
-names a provider for `otari_web_fetch` and for enriching search results.
+names a provider for `otari_web_fetch`, for [`POST /api/v1/fetch`](#direct-fetch)
+and for enriching search results.
 `web_fetch_default_tool` names the instance the fetch tool runs on, and the one
 that enriches search results, so setting it moves enrichment too. A workspace
 whose organization has a [fetch key](#organization-search-keys) runs both on
@@ -1063,9 +1077,55 @@ the in-loop tool, labeled `<provider>:<search-tool-name>` on both and priced as
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate.
 
+## Direct fetch
+
+`POST /api/v1/fetch` reads one page the caller names, as `POST /api/v1/search`
+runs a query, so a client that runs its own agent loop reads pages through the
+gateway without a completion for each. It runs on the deployment's fetch tool,
+`web_fetch_default_tool` else `builtin_fetch`, or on the tool named in the path
+or in `fetch_tool_name`, `builtin_fetch` included. While
+[`web_fetch_enabled`](#web-fetch) is off, a call is refused with `400`, as
+`otari_web_fetch` is.
+
+A direct fetch that names no tool runs on the workspace's usable
+[organization fetch key](#organization-search-keys), if it has one, in place of
+the deployment's tool, and is priced under `otari:web_fetch`; a fetch that names
+a tool runs on that tool with its own key. Either way the request is checked
+against the key's `allowed_tools`, rate-limited and timed out as that tool and
+logged under its name, and priced as
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool) says: the provider's
+reported cost, else the tool's own `fetch` price, `builtin_fetch`'s included.
+
+The workspace's web access policy applies in full: its switch, and its allowed
+and blocked domain lists, which bind the URL asked for and, on `builtin_fetch`,
+every redirect. (Direct search reads the switch and the results ceiling only.)
+A provider tool is held to the URL it reports finding the page at, as
+[Fetch providers](#fetch-providers) says. A URL that names a private address is
+refused; whether a host resolves to one is checked by the built-in fetcher, and
+not for a provider tool, which resolves it on its own network. A
+URL the lists disallow is a `403`, and one that is not a public `http` or
+`https` URL a `400`, before anything is held for the call; a host the built-in
+fetcher cannot resolve, or that resolves to a private address, fails the fetch
+with a `502`.
+
+The request, the response and the errors are in the
+[API reference](api-reference.md#fetch).
+
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.38: only the operator prices code execution
+
+An organization owner's or admin's override of `otari:code_execution` on
+`/api/v1/organizations/me/pricing` is refused with `403`, as a price of kind
+`search` or `fetch` already is. Such an override has priced no sandbox run since
+0.33, because code execution runs on the deployment's account. It does price an
+MCP tool named `code_execution`, which is priced under the same key: an
+override already stored keeps pricing such a tool's calls until it is deleted,
+and without one they take the deployment's price. An override already stored
+stays: the organization can delete it, not change it, and the operator can
+replace or delete it. The operator sets the price with the master key.
 
 ### From 0.37: the pages a search reads are billed as fetches
 
@@ -1113,7 +1173,7 @@ makes the default) cannot be decrypted here, a workspace that used the next key
 now uses the deployment's instance. Check the keys' `usable` field before
 upgrading.
 
-### From 0.31: tool prices follow whose account runs the call
+### From 0.32: tool prices follow whose account runs the call
 
 An organization's own override of `otari:code_execution` or `otari:web_search`
 no longer prices code execution or a search on the legacy settings, since both
