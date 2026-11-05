@@ -11,11 +11,10 @@ import { pricingResponse } from "@/tests/fixtures"
 import {
   buildOptions,
   isNoSearch,
+  listedPrice,
   listWebTools,
   nameProblem,
   oldPriceKey,
-  perCallText,
-  priceOf,
   rateOnly,
   sameOptions,
   servesTheModel,
@@ -38,6 +37,7 @@ const read = (perMillion?: number, origin = "operator"): RateRead => ({
 })
 const pending: RateRead = { isPending: true, isError: false }
 const failed: RateRead = { isPending: false, isError: true }
+const unpriced = { price_per_call: null, price_source: "none" } as const
 
 const option = (
   name: string,
@@ -100,8 +100,7 @@ describe("listWebTools", () => {
         provider: "mojeek",
         has_api_key: true,
         shadowed: false,
-        price_per_call: null,
-        price_source: "none",
+        ...unpriced,
       },
     ],
   }
@@ -117,7 +116,9 @@ describe("listWebTools", () => {
       hasKey: true,
       overridesConfig: true,
       options: { type: "fast" },
+      price: { state: "own", perCall: 0.004 },
     })
+    expect(rows[0].price).toEqual({ state: "unpriced" })
   })
 
   it("marks the built-in fetcher apart from the config.yml tools", () => {
@@ -143,59 +144,50 @@ describe("listWebTools", () => {
   })
 })
 
-describe("priceOf", () => {
-  const stored = { source: "stored" } as const
-
-  it("takes the tool's own rate", () => {
-    expect(priceOf(stored, read(5000), read(4000))).toEqual({
-      state: "own",
-      perMillion: 5000,
-      fromConfig: false,
-      oldKey: false,
-    })
+describe("listedPrice", () => {
+  it("takes the rate the listing gives, from the tool's own row", () => {
+    expect(listedPrice({ price_per_call: 0.005, price_source: "own" })).toEqual(
+      { state: "own", perCall: 0.005, fromConfig: false, oldKey: false },
+    )
   })
 
-  it("marks a config.yml tool's rate written from its price_per_call", () => {
-    const configured = { source: "config" } as const
-    expect(priceOf(configured, read(3000, "config"), read())).toEqual({
-      state: "own",
-      perMillion: 3000,
-      fromConfig: true,
-      oldKey: false,
-    })
-    // A stored tool's rate is never config.yml's to change.
-    expect(priceOf(stored, read(3000, "config"), read())).toMatchObject({
-      fromConfig: false,
-    })
+  it("marks a rate config.yml's price_per_call wrote", () => {
+    expect(
+      listedPrice({ price_per_call: 0.003, price_source: "config" }),
+    ).toEqual({ state: "own", perCall: 0.003, fromConfig: true, oldKey: false })
   })
 
-  it("takes the rate under the tool's old key when it has none of its own", () => {
-    expect(priceOf(stored, read(), read(4000))).toEqual({
-      state: "own",
-      perMillion: 4000,
-      fromConfig: false,
-      oldKey: true,
-    })
+  it("marks a rate under the tool's old key", () => {
+    expect(
+      listedPrice({ price_per_call: 0.004, price_source: "old_key" }),
+    ).toEqual({ state: "own", perCall: 0.004, fromConfig: false, oldKey: true })
     expect(oldPriceKey({ provider: "exa", name: "exa-search" })).toBe(
       "exa:exa-search",
     )
   })
 
-  it("leaves a tool with neither rate unpriced, once both are read", () => {
-    expect(priceOf(stored, read(), read())).toEqual({ state: "unpriced" })
-    expect(priceOf(stored, read(), pending)).toEqual({ state: "pending" })
-  })
-
-  it("calls a tool unreadable when its old key could not be read", () => {
-    expect(priceOf(stored, read(), failed)).toEqual({ state: "error" })
-  })
-
-  it("never marks an otari: rate as config.yml's", () => {
-    expect(rateOnly(read(10000, "config"))).toMatchObject({
+  it("prices a free tool at 0, and leaves a tool with no row unpriced", () => {
+    expect(listedPrice({ price_per_call: 0, price_source: "own" })).toEqual({
       state: "own",
+      perCall: 0,
       fromConfig: false,
+      oldKey: false,
+    })
+    expect(listedPrice(unpriced)).toEqual({ state: "unpriced" })
+  })
+})
+
+describe("rateOnly", () => {
+  it("reads an otari: row in dollars per call, never as config.yml's", () => {
+    expect(rateOnly(read(10000, "config"))).toEqual({
+      state: "own",
+      perCall: 0.01,
+      fromConfig: false,
+      oldKey: false,
     })
     expect(rateOnly(read())).toEqual({ state: "unpriced" })
+    expect(rateOnly(pending)).toEqual({ state: "pending" })
+    expect(rateOnly(failed)).toEqual({ state: "error" })
   })
 })
 
@@ -286,15 +278,6 @@ describe("sameOptions", () => {
     expect(sameOptions({ a: 1, c: null }, { a: 1 })).toBe(true)
     expect(sameOptions({ a: [1, 2] }, { a: [2, 1] })).toBe(false)
     expect(sameOptions({ a: 1 }, { a: 2 })).toBe(false)
-  })
-})
-
-describe("perCallText", () => {
-  it("writes a rate out in full, never in exponent form", () => {
-    expect(perCallText(0.5)).toBe("0.0000005")
-    expect(perCallText(5000)).toBe("0.005")
-    expect(perCallText(1_000_000)).toBe("1")
-    expect(perCallText(0)).toBe("0")
   })
 })
 

@@ -6,11 +6,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { ToolRateForm } from "@/features/toolPricing/ToolRateForm"
-import {
-  type PriceKind,
-  type ToolRateRow,
-  toRowId,
-} from "@/features/toolPricing/toolRates"
+import { type ToolRateRow, toRowId } from "@/features/toolPricing/toolRates"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { usePricesInEffect } from "@/shared/api/pricing"
 import { useSettings } from "@/shared/api/settings"
@@ -29,15 +25,13 @@ import { WebToolsTable, type WebToolTableRow } from "./WebToolsTable"
 import {
   BUILTIN_FETCH,
   isNoSearch,
+  type ListedWebTool,
   listWebTools,
   ORGANIZATION_KEY_RATE,
   ORGANIZATION_KEY_ROW,
-  oldPriceKey,
-  priceOf,
   rateOnly,
   type ToolPrice,
   type WebToolKind,
-  type WebToolRow,
 } from "./webTools"
 
 // The search and fetch tools this deployment runs for every workspace, what
@@ -51,9 +45,9 @@ import {
 type Dialog =
   | { type: "none" }
   | { type: "add"; kind: WebToolKind }
-  | { type: "edit"; tool: WebToolRow }
+  | { type: "edit"; tool: ListedWebTool }
   | { type: "price"; row: ToolRateRow; current: number | undefined }
-  | { type: "remove"; tool: WebToolRow }
+  | { type: "remove"; tool: ListedWebTool }
 
 export function WebSearchPage() {
   const { isOperator, isSettled } = useDeploymentOperator()
@@ -71,13 +65,11 @@ export function WebSearchPage() {
   // whatever another page left in the cache.
   const searchTools = isOperator ? listWebTools("search", searchList.data) : []
   const fetchTools = isOperator ? listWebTools("fetch", fetchList.data) : []
-  const priceKeys: { kind: PriceKind; modelKey: string }[] = [
-    { kind: "model", modelKey: ORGANIZATION_KEY_RATE.search },
-    { kind: "model", modelKey: ORGANIZATION_KEY_RATE.fetch },
-    ...[...searchTools, ...fetchTools].flatMap((tool) => [
-      { kind: tool.kind, modelKey: tool.name },
-      { kind: "model" as const, modelKey: oldPriceKey(tool) },
-    ]),
+  // A tool's price comes with the listing; the organization keys' rows are
+  // read as rows.
+  const priceKeys = [
+    { kind: "model" as const, modelKey: ORGANIZATION_KEY_RATE.search },
+    { kind: "model" as const, modelKey: ORGANIZATION_KEY_RATE.fetch },
   ]
   const reads = usePricesInEffect(priceKeys, isOperator)
 
@@ -99,24 +91,16 @@ export function WebSearchPage() {
   )
   const modelRead = (modelKey: string) =>
     readOf.get(toRowId({ kind: "model", modelKey }))
-  const toolPrice = (tool: WebToolRow): ToolPrice =>
-    priceOf(
-      tool,
-      readOf.get(toRowId({ kind: tool.kind, modelKey: tool.name })),
-      modelRead(oldPriceKey(tool)),
-    )
-  const hasOldKeyPrice = (tool: WebToolRow) =>
-    Boolean(modelRead(oldPriceKey(tool))?.data)
   const organizationKeyPrice = (kind: WebToolKind): ToolPrice =>
     rateOnly(modelRead(ORGANIZATION_KEY_RATE[kind]))
   const rowsFor = (
     kind: WebToolKind,
-    tools: readonly WebToolRow[],
+    tools: readonly ListedWebTool[],
   ): WebToolTableRow[] => [
     ...tools.map((tool) => ({
       type: "tool" as const,
       tool,
-      price: toolPrice(tool),
+      price: tool.price,
     })),
     { type: "organization" as const, price: organizationKeyPrice(kind) },
   ]
@@ -149,7 +133,7 @@ export function WebSearchPage() {
     label: string,
   ): ToolRateRow => ({ kind, modelKey, label, role: "" })
   const currentOf = (price: ToolPrice) =>
-    price.state === "own" ? price.perMillion : undefined
+    price.state === "own" ? price.perCall : undefined
 
   const tableProps = (kind: WebToolKind) => ({
     kind,
@@ -157,12 +141,12 @@ export function WebSearchPage() {
       (kind === "search" ? searchCatalog.data : fetchCatalog.data) ?? [],
     fetchDefault,
     onAdd: () => openAdd(kind),
-    onEdit: (tool: WebToolRow) => setDialog({ type: "edit", tool }),
-    onEditPrice: (tool: WebToolRow) =>
+    onEdit: (tool: ListedWebTool) => setDialog({ type: "edit", tool }),
+    onEditPrice: (tool: ListedWebTool) =>
       setDialog({
         type: "price",
         row: priceRow(kind, tool.name, tool.name),
-        current: currentOf(toolPrice(tool)),
+        current: currentOf(tool.price),
       }),
     onEditOrganizationKeyPrice: () =>
       setDialog({
@@ -174,7 +158,7 @@ export function WebSearchPage() {
         ),
         current: currentOf(organizationKeyPrice(kind)),
       }),
-    onRemove: (tool: WebToolRow) => setDialog({ type: "remove", tool }),
+    onRemove: (tool: ListedWebTool) => setDialog({ type: "remove", tool }),
     onSetDefault: (name: string | null) =>
       setDefault.mutate(
         kind === "search"
@@ -248,9 +232,7 @@ export function WebSearchPage() {
           fetchProviders={fetchCatalog.data ?? []}
           fetchDefault={fetchDefault}
           currentPrice={
-            dialog.type === "edit"
-              ? currentOf(toolPrice(dialog.tool))
-              : undefined
+            dialog.type === "edit" ? currentOf(dialog.tool.price) : undefined
           }
           onClose={close}
           onAddAnother={() => openAdd(dialogKind)}
@@ -272,7 +254,9 @@ export function WebSearchPage() {
             dialog.tool.name ===
             (dialog.tool.kind === "search" ? searchDefault : fetchDefault)
           }
-          hasOldKeyPrice={hasOldKeyPrice(dialog.tool)}
+          hasOldKeyPrice={
+            dialog.tool.price.state === "own" && dialog.tool.price.oldKey
+          }
           onClose={close}
         />
       ) : null}

@@ -12,7 +12,7 @@ import type {
   SearchToolTestResponse,
   StoredSearchTool,
 } from "@/client"
-import type { RateRead } from "@/features/toolPricing/toolRates"
+import { type RateRead, toPerCall } from "@/features/toolPricing/toolRates"
 
 export type WebToolKind = "search" | "fetch"
 
@@ -51,6 +51,9 @@ export interface WebToolRow {
   stored: StoredSearchTool | undefined
 }
 
+/** A tool as the listing gives it, with what one of its calls costs. */
+export type ListedWebTool = WebToolRow & { price: ToolPrice }
+
 /**
  * Every tool a call can be served by, in the order the table lists them.
  *
@@ -61,12 +64,12 @@ export interface WebToolRow {
 export function listWebTools(
   kind: WebToolKind,
   tools: SearchToolsResponse | undefined,
-): WebToolRow[] {
+): ListedWebTool[] {
   if (!tools) return []
   const configured = tools.config
     .filter((tool) => !tool.shadowed)
     .map(
-      (tool): WebToolRow => ({
+      (tool): ListedWebTool => ({
         kind,
         name: tool.name,
         provider: tool.provider,
@@ -80,9 +83,15 @@ export function listWebTools(
         timeout: undefined,
         options: {},
         stored: undefined,
+        price: listedPrice(tool),
       }),
     )
-  const stored = tools.stored.map((tool) => storedToolRow(kind, tool))
+  const stored = tools.stored.map(
+    (tool): ListedWebTool => ({
+      ...storedToolRow(kind, tool),
+      price: listedPrice(tool),
+    }),
+  )
   return [...configured, ...stored]
 }
 
@@ -134,11 +143,6 @@ export function testOutcome(
   return `Worked: ${result.characters ?? 0} characters of page text.`
 }
 
-/** A per-million rate as the dollars per call a price field holds, never in exponent form. */
-export function perCallText(perMillion: number): string {
-  return (perMillion / 1_000_000).toFixed(12).replace(/\.?0+$/, "")
-}
-
 /** The `otari:` price of each kind, which prices a call on an organization's own key. */
 export const ORGANIZATION_KEY_RATE: Readonly<Record<WebToolKind, string>> = {
   search: "otari:web_search",
@@ -159,23 +163,38 @@ export const ORGANIZATION_KEY_ROW: Readonly<
   },
 }
 
-/** What a tool's calls are billed at, once its rate read answered. */
+/** What a tool's calls are billed at, once its rate is known. */
 export type ToolPrice =
   /**
-   * Its own rate, the one that prices its calls. `fromConfig` when the rate in
-   * force came from `price_per_call` in config.yml, which the next start writes
-   * back; `oldKey` when it is stored under the tool's old `<provider>:<name>`
-   * model key, which prices it until its own row is set.
+   * The rate that prices its calls, in dollars per call. `fromConfig` when
+   * `price_per_call` in config.yml wrote it, which the next start writes back;
+   * `oldKey` when it is stored under the tool's old `<provider>:<name>` model
+   * key, which prices it until its own row is set.
    */
-  | { state: "own"; perMillion: number; fromConfig: boolean; oldKey: boolean }
+  | { state: "own"; perCall: number; fromConfig: boolean; oldKey: boolean }
   | { state: "unpriced" }
   | { state: "pending" }
   | { state: "error" }
 
+/** A listed tool's price, as the gateway resolves it for the deployment's own calls. */
+export function listedPrice(
+  tool: Pick<
+    SearchToolsResponse["config"][number],
+    "price_per_call" | "price_source"
+  >,
+): ToolPrice {
+  if (tool.price_per_call === null) return { state: "unpriced" }
+  return {
+    state: "own",
+    perCall: tool.price_per_call,
+    fromConfig: tool.price_source === "config",
+    oldKey: tool.price_source === "old_key",
+  }
+}
+
 /**
- * A rate read as a price: an `otari:` row's, or a tool's old key's. Never
- * marked as config.yml's: a `pricing:` entry is written once, so the page may
- * change it.
+ * An `otari:` row's rate read as a price. Never marked as config.yml's: a
+ * `pricing:` entry is written once, so the page may change it.
  */
 export function rateOnly(read: RateRead | undefined): ToolPrice {
   if (!read || read.isPending) return { state: "pending" }
@@ -183,7 +202,7 @@ export function rateOnly(read: RateRead | undefined): ToolPrice {
   if (!read.data) return { state: "unpriced" }
   return {
     state: "own",
-    perMillion: read.data.input_price_per_million,
+    perCall: toPerCall(read.data.input_price_per_million),
     fromConfig: false,
     oldKey: false,
   }
@@ -194,31 +213,6 @@ export function oldPriceKey(
   tool: Pick<WebToolRow, "provider" | "name">,
 ): string {
   return `${tool.provider}:${tool.name}`
-}
-
-/**
- * A tool's price, from its own rate read, else its old key's. Only a
- * config.yml tool's rate can be its `price_per_call`, which every start
- * writes back.
- */
-export function priceOf(
-  tool: Pick<WebToolRow, "source">,
-  own: RateRead | undefined,
-  old: RateRead | undefined,
-): ToolPrice {
-  if (!own || own.isPending) return { state: "pending" }
-  if (own.isError) return { state: "error" }
-  if (own.data) {
-    return {
-      state: "own",
-      perMillion: own.data.input_price_per_million,
-      fromConfig: tool.source === "config" && own.data.origin === "config",
-      oldKey: false,
-    }
-  }
-  // Not unpriced until the old key is known to hold no rate either.
-  const price = rateOnly(old)
-  return price.state === "own" ? { ...price, oldKey: true } : price
 }
 
 /**

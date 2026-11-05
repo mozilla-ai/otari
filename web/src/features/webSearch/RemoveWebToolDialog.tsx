@@ -22,7 +22,7 @@ export function RemoveWebToolDialog({
   tool: WebToolRow
   /** Whether a default setting names the tool. */
   isDefault: boolean
-  /** Whether a price is stored under the tool's old `<provider>:<name>` key. */
+  /** Whether the price in force is stored under the tool's old `<provider>:<name>` key. */
   hasOldKeyPrice: boolean
   onClose: () => void
 }) {
