@@ -1,3 +1,8 @@
+---
+description: Create a spending budget, then apply it with a ceiling.
+icon: square-dollar
+---
+
 # Set a budget and ceiling
 
 A budget says how much can be spent and over what period. On its own it limits

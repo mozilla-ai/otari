@@ -1,5 +1,6 @@
 ---
 description: Otari is an open-source AI gateway by Mozilla AI (Apache-2.0). Run it yourself for free, or use the hosted version at otari.ai, see pricing.
+icon: circle-info
 ---
 
 # What is Otari?

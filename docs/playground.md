@@ -1,3 +1,7 @@
+---
+icon: basketball
+---
+
 # Playground
 
 The Playground lets you try models directly in Otari, experiment with prompts,
