@@ -17,8 +17,12 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
 })
 
 function renderPage(
-  path: PublicAuthPath,
-  { hash = `#${path}`, mailReady = true, oauthProviders = [] as string[] } = {},
+  path: PublicAuthPath | null,
+  {
+    hash = path === null ? "#/" : `#${path}`,
+    mailReady = true,
+    oauthProviders = [] as string[],
+  } = {},
 ) {
   window.location.hash = hash
   const client = new QueryClient({
@@ -147,6 +151,21 @@ describe("PublicAuthPage: the organization-connection callback", () => {
     ).toBeNull()
     expect(
       screen.getByRole("heading", { name: "That sign-in did not complete" }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe("PublicAuthPage: a direct link to an organization's own connection", () => {
+  it("renders its own page for a slug the fixed table holds no entry for", () => {
+    // `path` is null here: this covers the dispatch for an unmatched hash,
+    // not just the page rendered on its own.
+    renderPage(null, { hash: "#/sso/acme" })
+
+    expect(
+      screen.getByRole("heading", { name: "Sign in with your company" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Continue with acme" }),
     ).toBeInTheDocument()
   })
 })
