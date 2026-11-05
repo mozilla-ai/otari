@@ -2675,7 +2675,6 @@ async def _admit_idempotent(
 
 
 async def _budget_minute_limits(
-    adapter: FormatAdapter[Any, Any],
     uow: UnitOfWork,
     db: AsyncSession,
     user_id: str,
@@ -3133,9 +3132,7 @@ async def resolve_request_context(
         key_id=api_key.id if api_key is not None else None,
         user_id=user_id,
         estimated_tokens=estimated_tokens,
-        budget_limits=None
-        if budget_exempt
-        else await _budget_minute_limits(adapter, uow, db, user_id, config.budget_strategy),
+        budget_limits=None if budget_exempt else await _budget_minute_limits(uow, db, user_id, config.budget_strategy),
     )
     # Reserve first so user/blocked/budget rejections (404/403) take
     # precedence over the missing-pricing rejection (402); refund if we
@@ -4500,7 +4497,7 @@ async def _declare_code_execution(
             container_id=declared.container_id,
             code_execution_header=declared.code_execution_header,
             config=ctx.config,
-            resolve_policy=lambda: _resolve_code_execution_policy(adapter, ctx, backends.ports.code_execution_policy),
+            resolve_policy=lambda: _resolve_code_execution_policy(ctx, backends.ports.code_execution_policy),
             container_registry=backends.sandbox_containers,
         )
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError) as exc:
@@ -4582,7 +4579,6 @@ def _candidates(ctx: RequestContext) -> list[tuple[str | None, str | None]]:
 
 
 async def _resolve_code_execution_policy(
-    adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     policies: WorkspaceCodeExecutionPolicies,
 ) -> ResolvedCodeExecutionPolicy | None:
@@ -6392,10 +6388,10 @@ async def run_single_attempt_stream(
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
                 nonlocal sent
                 sent += 1
-                await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
+                await _write_absorbed_row(absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
             async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
-                await _write_absorbed_row(ctx, absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, refusal))
+                await _write_absorbed_row(absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, refusal))
 
             # The walk reports which candidate it stopped on, so the failure row
             # names the provider that actually failed rather than the end of the plan.
@@ -6673,9 +6669,7 @@ async def _absorbed_rows_written(pending: list[asyncio.Task[None]]) -> None:
         await asyncio.wait(pending)
 
 
-async def _write_absorbed_row(
-    ctx: RequestContext, pending: list[asyncio.Task[None]], write: Coroutine[Any, Any, None]
-) -> None:
+async def _write_absorbed_row(pending: list[asyncio.Task[None]], write: Coroutine[Any, Any, None]) -> None:
     """Write an absorbed row beside the next attempt rather than before it.
 
     The row carries the request's workspace, so its write needs none of the
@@ -6796,10 +6790,10 @@ async def run_non_stream(
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
                 nonlocal sent
                 sent += 1
-                await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
+                await _write_absorbed_row(absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
             async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
-                await _write_absorbed_row(ctx, absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, refusal))
+                await _write_absorbed_row(absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, refusal))
 
             # The walk reports which candidate it stopped on, so the failure row
             # names the provider that actually failed rather than the end of the plan.
