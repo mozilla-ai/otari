@@ -2,6 +2,7 @@
 
 import io
 import mimetypes
+from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import aspeech, atranscription
@@ -25,7 +26,9 @@ from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
-from gateway.services.inference import ONE_REQUEST_BILLING, TRANSCRIPTION_BILLING
+from gateway.models.pricing import ModelPricing
+from gateway.services.budgets import report_estimate
+from gateway.services.inference import TRANSCRIPTION_BILLING, speech_billing
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
 
@@ -154,14 +157,11 @@ async def create_transcription(
 
             return await atranscription(**transcription_kwargs)
 
-        # Audio is exempt from require_pricing and has no measurable cost unit yet
-        # (tokens, seconds, etc.), so the reservation estimate is 0; the reservation
-        # still enforces existing per-user state (user exists, not blocked, not
-        # already over budget). When pricing is configured, the cost is recorded
-        # as an auditable per-request charge line. Only an explicitly configured
-        # rate counts (pricing_use_defaults=False): models.dev quotes audio models
-        # such as gpt-4o-transcribe per million tokens, which this per-request
-        # convention would misread as a per-million-request rate.
+        # Transcription is exempt from require_pricing. The reservation estimate
+        # is 0, because the audio's length is not read here: the reservation still
+        # enforces per-user state (user exists, not blocked, not already over
+        # budget), and settlement bills the length or the tokens the provider
+        # reports, or one request, as the rate prices them.
         outcome = await run_passthrough(
             endpoint=USAGE_ENDPOINT_TRANSCRIPTIONS,
             raw_request=raw_request,
@@ -184,7 +184,6 @@ async def create_transcription(
                 if value is not None
             ],
             lookup_pricing=True,
-            pricing_use_defaults=False,
             reserve_before_resolve=True,
             relabel=False,
             billing=TRANSCRIPTION_BILLING,
@@ -256,14 +255,15 @@ async def create_speech(
         }
         return await aspeech(**speech_kwargs)
 
-    # Audio is exempt from require_pricing and has no measurable cost unit yet
-    # (tokens, seconds, characters, etc.), so the reservation estimate is 0; the
-    # reservation still enforces existing per-user state. When pricing is
-    # configured, the cost is recorded as an auditable per-request charge line.
-    # Only an explicitly configured rate counts (pricing_use_defaults=False):
-    # models.dev quotes speech models such as gpt-4o-mini-tts per million
-    # tokens, which this per-request convention would misread as a
-    # per-million-request rate.
+    # Speech is exempt from require_pricing. The characters spoken are known
+    # before the call, so they are held at a per-character rate, or one request
+    # at a per-request one; a speech result reports nothing more to settle on.
+    characters = len(request.input)
+    billing = speech_billing(characters)
+
+    def estimate(pricing: ModelPricing | None) -> Decimal:
+        return report_estimate(pricing, slot=billing.slot, quantities={"character": characters}, units={"requests": 1})
+
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT_SPEECH,
         raw_request=raw_request,
@@ -277,10 +277,9 @@ async def create_speech(
         call_provider=call_provider,
         request_params=request.model_fields_set,
         lookup_pricing=True,
-        pricing_use_defaults=False,
-        reserve_before_resolve=True,
+        estimate=estimate,
         relabel=False,
-        billing=ONE_REQUEST_BILLING,
+        billing=billing,
     )
 
     content_type = _SPEECH_CONTENT_TYPES.get(request.response_format, "audio/mpeg")

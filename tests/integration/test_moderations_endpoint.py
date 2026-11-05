@@ -452,17 +452,15 @@ def test_moderations_no_warning_when_pricing_missing(
     assert offending == []
 
 
-def test_moderations_ignores_models_dev_defaults(
+def test_a_catalog_token_rate_prices_nothing_a_moderation_reports(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """Default (models.dev) rates never price moderations, even with default_pricing on.
+    """A catalog token rate reads as tokens, and a moderation reports none, so the row keeps no cost.
 
-    Those rates are USD per million tokens, but moderation bills per request, so
-    honoring one would charge a token rate as a request rate. The dataset has no
-    moderation models, so the case that regresses is an operator pointing this
-    endpoint at a model name the dataset does carry.
+    The case is an operator pointing this endpoint at a chat model the dataset
+    carries: its token rate is never charged as a request rate.
     """
     resp_obj = ModerationResponse(
         id="modr-test",
@@ -492,6 +490,40 @@ def test_moderations_ignores_models_dev_defaults(
     assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
+
+
+def test_a_free_catalog_model_settles_a_moderation_free(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """omni-moderation-latest is in the dataset at $0, and nothing times zero is nothing."""
+    resp_obj = ModerationResponse(
+        id="modr-test",
+        model="omni-moderation-latest",
+        results=[ModerationResult(flagged=False, categories={}, category_scores={})],
+    )
+    configure_default_pricing(True)
+    try:
+        pricing = default_model_pricing("openai", "omni-moderation-latest", datetime.now(UTC))
+        assert pricing is not None and pricing.input_price_per_million == 0
+        with patch("gateway.api.routes.moderations.amoderation", new_callable=AsyncMock, return_value=resp_obj):
+            resp = client.post(
+                f"{API_ROOT}/moderations",
+                json={"model": "openai:omni-moderation-latest", "input": "hello"},
+                headers=api_key_header,
+            )
+        assert resp.status_code == 200, resp.text
+    finally:
+        configure_default_pricing(False)
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+    )
+    latest = usage_resp.json()[0]
+    assert latest["model"] == "omni-moderation-latest"
+    assert latest["cost"] == 0.0
+    assert latest["billing_meters"] is None
 
 
 def test_moderations_priced_row_records_its_rate_provenance(

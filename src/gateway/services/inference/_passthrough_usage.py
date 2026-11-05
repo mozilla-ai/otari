@@ -60,6 +60,15 @@ def image_megapixels(size: str | None) -> Decimal | None:
     return Decimal(width * height) / _PIXELS_PER_MEGAPIXEL if width and height else None
 
 
+def image_quantities(size: str | None, count: int) -> Quantities:
+    """What ``count`` images of ``size`` measure: the count, and their megapixels where the size names them."""
+    quantities: dict[PriceUnit, int | Decimal] = {"image": count}
+    megapixels = image_megapixels(size)
+    if megapixels is not None:
+        quantities["megapixel"] = megapixels * count
+    return quantities
+
+
 def image_usage(result: ImagesResponse, *, size: str | None = None) -> ReportedUsage:
     """The images returned, their megapixels where a size is known, and the tokens a token-billed model reports.
 
@@ -67,10 +76,7 @@ def image_usage(result: ImagesResponse, *, size: str | None = None) -> ReportedU
     asked for.
     """
     count = len(result.data or [])
-    quantities: dict[PriceUnit, int | Decimal] = {"image": count}
-    megapixels = image_megapixels(result.size or size)
-    if megapixels is not None:
-        quantities["megapixel"] = megapixels * count
+    quantities = image_quantities(result.size or size, count)
     units = {"images": count}
     usage = result.usage
     if usage is None:
@@ -111,11 +117,6 @@ def speech_usage(characters: int) -> Callable[[Any], ReportedUsage]:
         )
 
     return report
-
-
-def one_request_usage(_result: object) -> ReportedUsage:
-    """One request and no tokens, for a result that reports nothing."""
-    return ReportedUsage(input_tokens=0, output_tokens=0, total_tokens=0, units={"requests": 1})
 
 
 def moderation_usage(_result: object) -> ReportedUsage:
@@ -183,7 +184,6 @@ TRANSCRIPTION_BILLING = PassthroughBilling(
     slot=("audio", "input"),
     measures=frozenset({"second", "minute"}),
 )
-ONE_REQUEST_BILLING = PassthroughBilling(report=one_request_usage, meter="requests", reports_tokens=False)
 MODERATION_BILLING = PassthroughBilling(
     report=moderation_usage, meter="requests", reports_tokens=False, slot=("text", "input")
 )

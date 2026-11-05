@@ -8,6 +8,7 @@ import pytest
 from any_llm.types.audio import Transcription
 from fastapi import Request
 from fastapi.testclient import TestClient
+from openai.types.audio.transcription import UsageDuration
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
@@ -619,21 +620,18 @@ def test_speech_unpriced_records_no_charge_lines(
     assert latest["pricing_breakdown"] is None
 
 
-def test_transcription_ignores_models_dev_defaults(
+def test_a_catalog_token_rate_prices_nothing_a_transcription_without_usage_reports(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """Default (models.dev) rates never price audio, even with default_pricing on.
+    """A catalog token rate reads as tokens, so a transcription that reports none is unpriced, never one request.
 
-    Those rates are USD per million tokens, but audio bills per request, so
-    honoring one would write a charge line at the wrong unit for a rate the
-    operator never configured. gpt-4o-transcribe is in the dataset, so it is the
-    case that would regress.
+    gpt-4o-transcribe is in the dataset per million tokens.
     """
     configure_default_pricing(True)
     try:
-        # Pin the premise: without a dataset entry to ignore, the assertions below
+        # Pin the premise: without a dataset entry, the assertions below
         # would pass for the wrong reason and stop guarding anything.
         assert default_model_pricing("openai", "gpt-4o-transcribe", datetime.now(UTC)) is not None
         with patch(
@@ -661,6 +659,43 @@ def test_transcription_ignores_models_dev_defaults(
     assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
+
+
+def test_a_transcription_is_priced_per_minute_from_the_catalog(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """whisper-1 has no text price in the catalog, only audio input per minute, and that prices the length reported."""
+    configure_default_pricing(True)
+    try:
+        pricing = default_model_pricing("openai", "whisper-1", datetime.now(UTC))
+        assert pricing is not None and pricing.unit == "minute"
+        result = Transcription(text="Hello", usage=UsageDuration(seconds=90, type="duration"))
+        with patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=result):
+            resp = client.post(
+                f"{API_ROOT}/audio/transcriptions",
+                files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+                data={"model": "openai:whisper-1"},
+                headers=api_key_header,
+            )
+        assert resp.status_code == 200, resp.text
+    finally:
+        configure_default_pricing(False)
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage",
+        params={"endpoint": "/v1/audio/transcriptions", "status": "success"},
+        headers=master_key_header,
+    )
+    latest = usage_resp.json()[0]
+    assert latest["model"] == "whisper-1"
+    # A minute and a half at $0.006 a minute.
+    assert latest["cost"] == pytest.approx(0.009)
+    assert latest["billing_meters"] == {"minutes": 1.5}
+    assert latest["pricing_breakdown"] == [
+        {"meter": "minutes", "units": 1.5, "unit": "minute", "unit_rate": 0.006, "cost": pytest.approx(0.009)}
+    ]
 
 
 @pytest.mark.parametrize(("form", "expected_status"), [({"language": "en"}, 400), ({}, 502)])
