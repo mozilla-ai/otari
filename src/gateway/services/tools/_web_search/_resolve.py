@@ -412,7 +412,7 @@ def _search_on_credential(
         requires_key, default_base = metadata.requires_api_key, metadata.default_api_base
         requires_base = metadata.requires_api_base and not default_base
     elif provider in WEB_SEARCH_PROVIDERS:
-        # Tavily and Brave until their adapters exist.
+        # Tavily and Brave, which any-search has no adapter for.
         runner = "old"
         requires_key, default_base, requires_base = True, None, False
     else:
