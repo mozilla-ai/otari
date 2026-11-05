@@ -4,29 +4,48 @@
 ``tests/unit`` so the whole layer this task adds reads as one file.
 """
 
+import functools
 import uuid
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
+from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionNotFoundError,
     OIDCConnectionUnprovenError,
+    PasswordLinkUnavailableError,
     SsoBreakGlassRequiredError,
 )
-from gateway.exceptions.organizations_exceptions import NotAuthorizedError
-from gateway.models.identity import OIDCConnection
-from gateway.models.tenancy import Organization, User
+from gateway.exceptions.organizations_exceptions import InvitationPasswordNotAcceptedError, NotAuthorizedError
+from gateway.models.identity import EmailAssertion, OAuthIdentityLink, OIDCConnection, oidc_identity_provider
+from gateway.models.tenancy import DashboardSession, InviteOrganizationMemberRequest, Organization, User
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
-from gateway.services.identity import OIDCConnectionService
+from gateway.services.identity import IdentityService, OIDCConnectionService
+from gateway.services.mail import Mailer
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
-from gateway.services.tenancy.organization_service import OrganizationService, sso_blocks_membership
+from gateway.services.tenancy import (
+    DomainAutoJoinListener,
+    OrganizationService,
+    VerifiedDomainLookup,
+    forget_unproven_access,
+    sso_blocks_membership,
+)
 
-from .tenancy_helpers import create_member, create_organization
+from .tenancy_helpers import (
+    NO_BLOCKED_ADDRESSES,
+    NO_MAIL_LIMIT,
+    NO_TERMS,
+    create_member,
+    create_organization,
+    membership_writes,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -93,6 +112,53 @@ async def _reloaded(db: AsyncSession, organization: Organization) -> Organizatio
     """
     await db.refresh(organization)
     return organization
+
+
+async def _link_member(db: AsyncSession, member: User, connection: OIDCConnection) -> None:
+    """Give ``member`` a sign-in link to ``connection``, as a completed SSO sign-in would."""
+    db.add(
+        OAuthIdentityLink(
+            provider=oidc_identity_provider(connection.resolved_issuer),
+            subject=f"subject-{member.id}",
+            user_id=member.id,
+            email_at_link=member.email,
+            email_assertion_at_link=EmailAssertion.VERIFIED,
+        )
+    )
+    await db.flush()
+
+
+def _identity_service(db: AsyncSession) -> IdentityService:
+    """Build the identity service as a request builds it.
+
+    Every sign-in this file exercises resolves through an account already created, so the
+    identity-provider policy it is built with is never consulted.
+    """
+    uow = UnitOfWork(db)
+    organizations = OrganizationService(db, membership_listener=None, uow=uow)
+    policy = DeploymentIdentityProviderAdapter(
+        UserRepository(db), organizations, functools.partial(forget_unproven_access, db), open_signup=False
+    )
+    return IdentityService(
+        uow,
+        IdentityRepositories.on(uow),
+        identity_provider=policy,
+        domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
+        organizations=organizations,
+        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        session_ttl_hours=1,
+        terms_url=None,
+        mailer=Mailer(GatewayConfig(mail_transport="none")),
+        open_signup=False,
+        password_reset_expiry_hours=2,
+    )
+
+
+async def _live_session_count(db: AsyncSession, user_id: uuid.UUID) -> int:
+    result = await db.execute(
+        select(func.count()).select_from(DashboardSession).where(DashboardSession.user_id == user_id)
+    )
+    return result.scalar_one()
 
 
 # =============================================================================
@@ -305,3 +371,230 @@ async def test_enforcement_cannot_be_set_by_a_caller_who_cannot_manage_the_organ
             user=caller, required=True, break_glass_user_id=None, break_glass_waived=True
         )
     assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+# =============================================================================
+# Signing in
+# =============================================================================
+
+
+async def test_a_blocked_member_signs_in_and_sees_only_their_other_organization(async_db: AsyncSession) -> None:
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    other = await create_organization(async_db, slug="other")
+    member = await _member_with_email(
+        async_db, enforcing, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=other.id, user_id=member.id, role="member"
+    )
+    await async_db.commit()
+
+    signed_in = await _identity_service(async_db).sign_in(member)
+
+    assert signed_in.active_organization_id == other.id
+
+
+async def test_a_password_sign_in_reaches_no_enforcing_organization(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await async_db.commit()
+
+    signed_in = await _identity_service(async_db).sign_in(member)
+
+    assert signed_in.active_organization_id is None
+    assert signed_in.session_token
+
+
+async def test_a_passkey_sign_in_reaches_no_enforcing_organization(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    member = await _member_with_email(
+        async_db, organization, role="member", email="passkey@acme.example", full_name="Pat Passkey"
+    )
+    await async_db.commit()
+
+    signed_in = await _identity_service(async_db).sign_in(member)
+
+    assert signed_in.active_organization_id is None
+    assert signed_in.session_token
+
+
+async def test_a_member_linked_through_the_connection_reaches_the_enforcing_organization(
+    async_db: AsyncSession,
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    linked_member = await _member_with_email(
+        async_db, organization, role="member", email="li@acme.example", full_name="Li Linked"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await _link_member(async_db, linked_member, connection)
+    await async_db.commit()
+
+    signed_in = await _identity_service(async_db).sign_in(linked_member)
+
+    assert signed_in.active_organization_id == organization.id
+
+
+async def test_the_deployment_operator_reaches_an_enforcing_organization(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    operator = await create_member(async_db, organization, role="member", full_name="The Operator")
+    await async_db.commit()
+
+    signed_in = await _identity_service(async_db).sign_in(operator)
+
+    assert signed_in.active_organization_id == organization.id
+
+
+async def test_one_tenant_enforcement_does_not_lock_a_person_out_of_another(async_db: AsyncSession) -> None:
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    await _member_with_email(async_db, enforcing, role="member", email="mo@acme.example", full_name="Mo Member")
+    elsewhere = await create_organization(async_db, slug="other")
+    bystander = await _member_with_email(
+        async_db, elsewhere, role="member", email="by@other.example", full_name="By Stander"
+    )
+    bystander.hashed_password = "not-a-real-hash"
+    bystander.email_verified_at = datetime.now(UTC)
+    async_db.add(bystander)
+    await async_db.commit()
+
+    signed_in = await _identity_service(async_db).sign_in(bystander)
+    assert signed_in.active_organization_id == elsewhere.id
+
+    link = await _identity_service(async_db).issue_password_link(bystander.id)
+    assert link.link is not None
+
+
+# =============================================================================
+# Minting a credential outside the connection
+# =============================================================================
+
+
+async def test_accept_invitation_with_a_password_is_refused_for_an_enforcing_organization(
+    async_db: AsyncSession,
+) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    service = OrganizationService(async_db, **membership_writes(async_db))
+    invitation = await service.invite_active_organization_member_for_user(
+        user=owner,
+        request=InviteOrganizationMemberRequest(email="newcomer@acme.example"),
+        config=GatewayConfig(),
+        mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
+    )
+    assert invitation.accept_link is not None
+    token = invitation.accept_link.split("token=")[1]
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    await async_db.commit()
+
+    with pytest.raises(InvitationPasswordNotAcceptedError):
+        await service.accept_invitation(
+            token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES, password="correct-horse-battery-staple"
+        )
+
+
+async def test_a_password_link_is_refused_for_a_member_of_an_enforcing_organization(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    member.hashed_password = "not-a-real-hash"
+    member.email_verified_at = datetime.now(UTC)
+    async_db.add(member)
+    await async_db.commit()
+
+    with pytest.raises(PasswordLinkUnavailableError):
+        await _identity_service(async_db).issue_password_link(member.id)
+
+
+# =============================================================================
+# Switching enforcement on: live sessions
+# =============================================================================
+
+
+async def test_switching_enforcement_on_revokes_the_affected_live_sessions(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+    signed_in = await _identity_service(async_db).sign_in(member)
+    assert signed_in.session_token
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=None, break_glass_waived=True
+    )
+
+    assert await _live_session_count(async_db, member.id) == 0
+
+
+async def test_switching_enforcement_on_leaves_an_unaffected_session_alone(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    elsewhere = await create_organization(async_db, slug="other")
+    bystander = await _member_with_email(
+        async_db, elsewhere, role="member", email="by@other.example", full_name="By Stander"
+    )
+    await async_db.commit()
+    signed_in = await _identity_service(async_db).sign_in(bystander)
+    assert signed_in.session_token
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=None, break_glass_waived=True
+    )
+
+    assert await _live_session_count(async_db, bystander.id) == 1
+
+
+async def test_switching_enforcement_on_leaves_a_linked_members_session_alive(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    linked_member = await _member_with_email(
+        async_db, organization, role="member", email="li@acme.example", full_name="Li Linked"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await _link_member(async_db, linked_member, connection)
+    await async_db.commit()
+    signed_in = await _identity_service(async_db).sign_in(linked_member)
+    assert signed_in.session_token
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=None, break_glass_waived=True
+    )
+
+    assert await _live_session_count(async_db, linked_member.id) == 1

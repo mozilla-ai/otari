@@ -24,9 +24,10 @@ from gateway.repositories.tenancy import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionDomain, OIDCConnectionPublic, OIDCConnectionRequest
 from gateway.services.identity._connection_clients import client_for, pending_flow_provider
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
+from gateway.services.identity._enforcement import linked_providers_for_organization
 from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import OrganizationService, sso_blocks_membership
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,8 @@ class OIDCConnectionService:
     ) -> None:
         self._uow = uow
         self._connections = repositories.connections
+        self._links = repositories.links
+        self._sessions = repositories.sessions
         self._organizations = organizations
         self._domains = domains
         self._allow_private_hosts = allow_private_hosts
@@ -344,6 +347,8 @@ class OIDCConnectionService:
     ) -> None:
         """Set whether the caller's organization requires sign-in through its own connection. Owners and admins only.
 
+        Switching it on revokes the live session of every active member it newly refuses.
+
         Raises:
             OIDCConnectionNotFoundError: The organization has not configured a connection yet.
             OIDCConnectionUnprovenError: ``required`` is set before anybody has signed in through
@@ -352,6 +357,7 @@ class OIDCConnectionService:
                 organization's own owners to keep a non-SSO route, or waiving that exception.
         """
         organization = await self._managed_organization(user)
+        was_required = organization.sso_required
 
         async with self._uow:
             connection = await self._connections.get_for_organization(organization.id)
@@ -376,6 +382,35 @@ class OIDCConnectionService:
                     "sso_break_glass_waived": break_glass_waived,
                 },
             )
+            if required and not was_required:
+                await self._revoke_newly_blocked_sessions(organization, connection)
+
+    async def _revoke_newly_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
+        """End the live session of every active member this organization's enforcement now refuses."""
+        provider = oidc_identity_provider(connection.resolved_issuer)
+        roster = await self._organizations.members.get_active_by_organization_with_users(organization.id)
+        linked_ids = await self._links.linked_user_ids(
+            provider=provider, user_ids=[identity.id for _, identity in roster]
+        )
+        blocked_ids = {
+            identity.id
+            for _, identity in roster
+            if sso_blocks_membership(
+                organization=organization,
+                user=identity,
+                linked_providers=frozenset({provider}) if identity.id in linked_ids else frozenset(),
+            )
+        }
+        if blocked_ids:
+            await self._sessions.delete_for_users(blocked_ids)
+
+    async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
+        """Whether ``organization``'s own SSO enforcement refuses ``user`` from acting in it."""
+        async with self._uow:
+            linked = await linked_providers_for_organization(
+                organization, user.id, connections=self._connections, links=self._links
+            )
+        return sso_blocks_membership(organization=organization, user=user, linked_providers=linked)
 
     async def _store_first(
         self,

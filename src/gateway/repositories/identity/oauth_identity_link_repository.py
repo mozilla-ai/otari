@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Collection
 from typing import Never
 
 from sqlalchemy import select
@@ -28,6 +29,17 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
             )
         )
         return result.scalar_one_or_none()
+
+    async def linked_user_ids(self, *, provider: str, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """Return which of ``user_ids`` already hold a link at ``provider``."""
+        if not user_ids:
+            return set()
+        result = await self.db.execute(
+            select(OAuthIdentityLink.user_id).where(
+                OAuthIdentityLink.user_id.in_(user_ids), OAuthIdentityLink.provider == provider
+            )
+        )
+        return set(result.scalars().all())
 
     async def add(self, external: ProviderIdentity, *, user_id: uuid.UUID) -> OAuthIdentityLink:
         """Stage a link from a provider identity to an account.
