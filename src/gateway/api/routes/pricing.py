@@ -58,7 +58,7 @@ from gateway.services.pricing_service import (
     rates_in_force,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
-from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument
+from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument, stored_rates
 from gateway.types.price_unit import AcceptedPriceUnit
 
 # Two routers under one prefix, one per authorization rule, so that adding a
@@ -209,7 +209,7 @@ class PricingResponse(BaseModel):
             price_per_request=(
                 float(Decimal(str(pricing.input_price_per_million)) / 1_000_000) if pricing.unit == "request" else None
             ),
-            rates=RatesDocument.model_validate(rates_of(pricing)),
+            rates=stored_rates(rates_of(pricing)),
             origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),

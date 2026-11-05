@@ -46,7 +46,7 @@ from gateway.services.organization_pricing_service import (
     PricingOverrideInput,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument
+from gateway.types.price_rates import RATES_DESCRIPTION, RatesDocument, stored_rates
 from gateway.types.price_unit import AcceptedPriceUnit
 
 # Master key on the router, as every management router declares it.
@@ -209,7 +209,7 @@ class OrganizationModelPricingPublic(BaseModel):
             cache_write_price_per_million=as_float(override.cache_write_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
             unit=override.unit or "token",
-            rates=RatesDocument.model_validate(rates_of(override)),
+            rates=stored_rates(rates_of(override)),
             effective_from=override.effective_from,
             effective_to=override.effective_to,
             created_at=override.created_at,
