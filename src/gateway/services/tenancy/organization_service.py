@@ -334,7 +334,11 @@ _READ_ONLY_DETAIL = "Viewers have read-only access to this workspace"
 
 
 async def _never_blocks(_organization: Organization) -> bool:
-    """A ``blocked`` predicate that refuses no organization, for a caller that enforces no such rule here."""
+    """A ``blocked`` predicate that refuses no organization, for a caller that enforces no such rule here.
+
+    NOTE: A caller passing this leaves a live session to be ended by revocation rather than refused
+    on each read, so any new way for a member to become blocked must revoke their sessions too.
+    """
     return False
 
 

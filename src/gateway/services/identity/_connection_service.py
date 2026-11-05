@@ -392,9 +392,9 @@ class OIDCConnectionService:
                 },
             )
             if required:
-                await self._revoke_newly_blocked_sessions(organization, connection)
+                await self._revoke_blocked_sessions(organization, connection)
 
-    async def _revoke_newly_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
+    async def _revoke_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
         """End the live session of every active member this organization's enforcement now refuses."""
         provider = oidc_identity_provider(connection.resolved_issuer)
         roster = await self._organizations.members.get_active_by_organization_with_users(organization.id)
