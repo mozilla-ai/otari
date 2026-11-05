@@ -104,7 +104,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 ## Managed deployment templates
 
-- [Railway](https://github.com/mozilla-ai/otari/blob/bd7bd7922e2e4f8b4025dc59e1bcd249624ac432/deploy/railway/README.md)
+- [Railway](https://github.com/mozilla-ai/otari/blob/dde0ae110fd194dfcfba0c263cb2c548bc92268f/deploy/railway/README.md)
 
 That page owns its current image tag, variables, platform limits, and
 maintenance instructions.

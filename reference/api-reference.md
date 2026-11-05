@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/bd7bd7922e2e4f8b4025dc59e1bcd249624ac432/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/bd7bd7922e2e4f8b4025dc59e1bcd249624ac432/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/dde0ae110fd194dfcfba0c263cb2c548bc92268f/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/dde0ae110fd194dfcfba0c263cb2c548bc92268f/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 ## Base URL
