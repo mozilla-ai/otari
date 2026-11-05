@@ -5,8 +5,10 @@ icon: laptop-code
 # Framework integrations
 
 Point the AI tools and frameworks you already use at Otari, and their requests
-get usage tracking, budgets, fallback routing and guardrails with few changes to
-how you work. Each guide shows the settings for otari.ai first and for a gateway
+are tracked and can use budgets, fallback routing and guardrails, with few
+changes to how you work. Budgets and guardrails apply once you set them up; see
+[Set a budget and ceiling](set-a-budget-and-ceiling.md) and
+[Manage guardrails](manage-guardrails.md). Each guide shows the settings for otari.ai first and for a gateway
 you run second.
 
 - [Claude Code](use-with-claude-code.md)

@@ -1,4 +1,4 @@
-# Home
+# Otari
 
 ## Getting Started
 
