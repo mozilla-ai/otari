@@ -46,7 +46,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.pricing import MODEL_KIND, ModelPricing
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
-from gateway.services.pricing import PriceFacts, apply_rules
+from gateway.services.pricing import AppliedRate, PriceFacts, apply_rules
 from gateway.services.pricing_service import (
     OverridePeriod,
     default_model_pricing,
@@ -375,16 +375,21 @@ class PricedEvent:
     rates: Mapping[str, Decimal]
 
 
-def _priced_at(pricing: ModelPricing, usage: BillableUsage, at: datetime) -> ModelPricing:
-    """``pricing`` at the rules an imported event meets: its context and its own time."""
-    return apply_rules(pricing, PriceFacts(context=usage.total_input_tokens, at=at)).rate
+def _priced_at(pricing: ModelPricing, usage: BillableUsage, at: datetime) -> AppliedRate:
+    """``pricing`` at the rules an imported event meets: its context and its own time.
+
+    An event does not say whether it carried a video or ran over a websocket,
+    so a rule on either is skipped.
+    """
+    facts = PriceFacts(context=usage.total_input_tokens, at=at, input_video=None, websocket=None)
+    return apply_rules(pricing, facts)
 
 
 def _rates(pricing: ModelPricing, usage: BillableUsage, at: datetime) -> dict[str, Decimal]:
     if priced_per_request(pricing):
         return {}
     try:
-        rates = effective_rates(_priced_at(pricing, usage, at), usage.total_input_tokens)
+        rates = effective_rates(_priced_at(pricing, usage, at).rate, usage.total_input_tokens)
     except ValueError:
         return {}
     cache_read, cache_write = rates.cache_read_price_per_million, rates.cache_write_price_per_million
@@ -592,7 +597,9 @@ def _build_row(
     breakdown: list[ChargeLine] | None = None
     if pricing is not None:
         usage = _build_usage(event)
-        cost, meters, breakdown = price_billable_usage(_priced_at(pricing, usage, event.timestamp), usage)
+        applied = _priced_at(pricing, usage, event.timestamp)
+        cost, meters, lines = price_billable_usage(applied.rate, usage)
+        breakdown = applied.explain(lines)
     return UsageLog(
         workspace_id=workspace_id,
         api_key_id=api_key_id,

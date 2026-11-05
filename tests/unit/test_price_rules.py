@@ -290,6 +290,25 @@ def test_the_rules_that_changed_each_price_are_named_by_its_path() -> None:
     }
 
 
+def test_a_cache_price_names_only_the_rules_that_changed_it() -> None:
+    long = {"context": {"gt": 100}}
+    tier = {"service_tier": {"equals": "priority"}}
+    document = {
+        "text": {
+            "input": _text(
+                1,
+                cache={"read": 0.1, "write": 1.25},
+                overrides=[{"when": long, "price": 2}, {"when": long, "cache": {"write_ttls": [["1h", 2]]}}],
+            )
+        },
+        "multipliers": [{"when": tier, "factor": {"text": {"input": {"cache": {"read": 2}}}}}],
+    }
+
+    rules = resolve_rates(document, PriceFacts(context=101, service_tier="priority")).rules
+
+    assert rules == {"text.input": (long,), "text.input.cache.write": (long,), "text.input.cache.read": (tier,)}
+
+
 def test_resolving_leaves_the_block_it_read_unchanged() -> None:
     document = {
         "text": {"input": _text(1, overrides=[{"when": {"context": {"gt": 1}}, "price": 2}], cache={"read": 0.1})},

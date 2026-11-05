@@ -16,6 +16,7 @@ from gateway.core.metered_pricing import billable_usage, price_billable_usage, p
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing import (
     MEASURED_UNITS,
+    PriceFacts,
     Quantities,
     Slot,
     UsageCharge,
@@ -42,6 +43,7 @@ def _rate(spec: dict[str, Any] | None) -> ModelPricing | None:
         input_price_per_million=Decimal(spec["input"]),
         output_price_per_million=Decimal(spec.get("output", "0")),
         unit=spec["unit"],
+        rates=spec.get("rates"),
     )
 
 
@@ -53,6 +55,7 @@ def _price(case: dict[str, Any]) -> UsageCharge | None:
         if tokens is None or not (tokens["input"] or tokens["output"])
         else billable_usage(input_tokens=tokens["input"], output_tokens=tokens["output"], cache_tokens_included=True),
         units=case["units"],
+        facts=PriceFacts(**case.get("facts", {})),
     )
 
 

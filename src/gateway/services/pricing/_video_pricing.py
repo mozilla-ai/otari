@@ -7,6 +7,7 @@ through, so an operator's price and a catalog price read alike. A model whose
 block prices video in another unit, or not at all, has no video rate.
 """
 
+from dataclasses import replace
 from decimal import Decimal
 
 from gateway.core.metered_pricing import UnitRate
@@ -32,7 +33,11 @@ def estimate_video_cost(rate: ModelPricing | None, seconds: int, *, facts: Price
 
 def price_video(rate: ModelPricing | None, seconds: int, *, facts: PriceFacts = NO_FACTS) -> UsageCharge | None:
     """What a completed video of ``seconds`` costs at ``rate``, or ``None`` when it gives no video rate."""
-    return price_slot(_applied(rate, facts), "video", "output", {"second": seconds})
+    if rate is None:
+        return None
+    applied = apply_rules(rate, facts)
+    charge = price_slot(applied.rate, "video", "output", {"second": seconds})
+    return None if charge is None else replace(charge, lines=applied.explain(charge.lines, path="video.output"))
 
 
 def _applied(rate: ModelPricing | None, facts: PriceFacts) -> ModelPricing | None:
