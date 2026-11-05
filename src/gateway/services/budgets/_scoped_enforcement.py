@@ -45,7 +45,7 @@ ZERO = Decimal(0)
 # refuses when several are exhausted at once and the reported error is the
 # actionable one. It is also the reservation order, which is why it must be
 # total: see the module docstring.
-_SCOPE_PRECEDENCE: dict[str, int] = {
+SCOPE_PRECEDENCE: dict[str, int] = {
     SCOPE_WORKSPACE_MEMBER: 0,
     SCOPE_ORG_MEMBER: 1,
     SCOPE_API_TOKEN: 2,
@@ -240,7 +240,7 @@ def get_provider_ceilings(
     ]
     bound.sort(
         key=lambda ceiling: (
-            _SCOPE_PRECEDENCE.get(ceiling.scope_type, len(_SCOPE_PRECEDENCE)),
+            SCOPE_PRECEDENCE.get(ceiling.scope_type, len(SCOPE_PRECEDENCE)),
             0 if ceiling.provider_key_id is not None else 1,
             ceiling.scoped_budget_id,
         )

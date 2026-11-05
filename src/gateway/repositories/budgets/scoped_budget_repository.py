@@ -68,6 +68,20 @@ class CeilingUsage:
 
 
 @dataclass(frozen=True)
+class LimitUsage:
+    """A cap that gates a key, where it sits, how often its window starts again, and its use on each axis.
+
+    ``scope`` is a ceiling's scope type, or ``user`` for the budget a billed user is on.
+    """
+
+    scope: str
+    provider_key_id: str | None
+    budget_duration_sec: int | None
+    reset_alignment: str | None
+    usage: CeilingUsage
+
+
+@dataclass(frozen=True)
 class ScopeIdSets:
     """The IDs of the scopes of each kind that a query is about, as the strings a ceiling stores."""
 
@@ -369,6 +383,50 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 current_spend,
                 reserved_spend,
             ) in result.all()
+        ]
+
+    async def usage_in_scopes(self, scopes: ScopeIdSets) -> list[LimitUsage]:
+        """Return each ceiling on these scopes with its cadence and its use on every axis."""
+        result = await self.db.execute(
+            select(
+                ScopedBudget.scope_type,
+                ScopedBudget.provider_key_id,
+                Budget.budget_duration_sec,
+                Budget.reset_alignment,
+                Budget.max_budget,
+                ScopedBudget.current_spend,
+                ScopedBudget.reserved_spend,
+                Budget.token_limit,
+                ScopedBudget.current_tokens,
+                ScopedBudget.reserved_tokens,
+                Budget.request_limit,
+                ScopedBudget.current_requests,
+                ScopedBudget.reserved_requests,
+                ScopedBudget.period_end,
+            )
+            .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
+            .where(_in_scopes(scopes))
+        )
+        return [
+            LimitUsage(
+                scope=row.scope_type,
+                provider_key_id=row.provider_key_id,
+                budget_duration_sec=row.budget_duration_sec,
+                reset_alignment=row.reset_alignment,
+                usage=CeilingUsage(
+                    max_budget=row.max_budget,
+                    current_spend=row.current_spend,
+                    reserved_spend=row.reserved_spend,
+                    token_limit=row.token_limit,
+                    current_tokens=row.current_tokens,
+                    reserved_tokens=row.reserved_tokens,
+                    request_limit=row.request_limit,
+                    current_requests=row.current_requests,
+                    reserved_requests=row.reserved_requests,
+                    period_end=row.period_end,
+                ),
+            )
+            for row in result.all()
         ]
 
     async def list_in_scopes(

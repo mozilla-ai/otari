@@ -11813,6 +11813,43 @@
         "title": "JudgeVerdictRequest",
         "type": "object"
       },
+      "KeyBudgetPublic": {
+        "description": "What the calling key may still spend, and every cap that decides it.",
+        "properties": {
+          "budgets_enforced": {
+            "description": "False when no budget gates this key: it is budget-exempt, or the deployment turned budgets off",
+            "title": "Budgets Enforced",
+            "type": "boolean"
+          },
+          "limits": {
+            "description": "The key's user's budget first, then each spend ceiling, the most specific first",
+            "items": {
+              "$ref": "#/components/schemas/KeyLimitPublic"
+            },
+            "title": "Limits",
+            "type": "array"
+          },
+          "remaining_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fewest dollars any cap on every provider leaves; null when none caps dollars",
+            "title": "Remaining Usd"
+          }
+        },
+        "required": [
+          "budgets_enforced",
+          "remaining_usd",
+          "limits"
+        ],
+        "title": "KeyBudgetPublic",
+        "type": "object"
+      },
       "KeyInfo": {
         "description": "Response model for key information.",
         "properties": {
@@ -12035,6 +12072,153 @@
           "metadata"
         ],
         "title": "KeyInfo",
+        "type": "object"
+      },
+      "KeyLimitPublic": {
+        "description": "One cap a request made with the calling key has to pass.\n\n``used_*`` counts what the budget gate counts: recorded use plus the holds of\nrequests still in flight. On a cap the key shares with the rest of its\nworkspace or organization the limit and the use are left out, so a key holder\nreads how much room is left without reading what everyone else has spent.",
+        "properties": {
+          "limit_requests": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Requests"
+          },
+          "limit_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Tokens"
+          },
+          "limit_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dollars allowed per period; null when uncapped or shared",
+            "title": "Limit Usd"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider this cap is narrowed to, or null when it caps every one",
+            "title": "Provider"
+          },
+          "remaining_requests": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Requests"
+          },
+          "remaining_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Tokens"
+          },
+          "remaining_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dollars left this period; null when dollars are uncapped",
+            "title": "Remaining Usd"
+          },
+          "resets_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the period ends and use starts again from zero; null for a cap that never resets",
+            "title": "Resets At"
+          },
+          "scope": {
+            "description": "Where the cap sits: 'user' for the budget the key's user is on, or the scope of a spend ceiling: 'api_token', 'workspace_member', 'org_member', 'workspace' or 'organization'",
+            "title": "Scope",
+            "type": "string"
+          },
+          "used_requests": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used Requests"
+          },
+          "used_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used Tokens"
+          },
+          "used_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dollars spent and held this period; null when uncapped or shared",
+            "title": "Used Usd"
+          }
+        },
+        "required": [
+          "scope",
+          "provider",
+          "resets_at",
+          "limit_usd",
+          "used_usd",
+          "remaining_usd"
+        ],
+        "title": "KeyLimitPublic",
         "type": "object"
       },
       "KnownProviderSchema": {
@@ -35272,6 +35456,722 @@
         "summary": "Validate Invitation",
         "tags": [
           "invitations"
+        ]
+      }
+    },
+    "/api/v1/key/budget": {
+      "get": {
+        "description": "What the calling key may still spend, and every cap that decides it.\n\nLists the budget the key's user is on and each spend ceiling on a scope the\nkey bills to (the key itself, its user's memberships, its workspace and its\norganization), as the budget gate counts them: recorded use plus the holds of\nrequests in flight. A period that has ended reads as the fresh one the next\nrequest starts. ``remaining_usd`` is the least any cap on every provider\nleaves, which is what a request can still spend before a 403. Caps shared with\nthe rest of the workspace or organization report only what they leave.",
+        "operationId": "key-get_key_budget",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyBudgetPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Key Budget",
+        "tags": [
+          "key"
+        ]
+      }
+    },
+    "/api/v1/key/usage/series": {
+      "get": {
+        "description": "The calling key's own requests over time, split by one dimension.\n\nThe same series as ``GET /api/v1/usage/series``, over the rows this key wrote\nalone, kept in lockstep with the summary above.",
+        "operationId": "key-get_key_usage_series",
+        "parameters": [
+          {
+            "description": "Dimension to split the series by",
+            "in": "query",
+            "name": "group_by",
+            "required": true,
+            "schema": {
+              "description": "Dimension to split the series by",
+              "enum": [
+                "model",
+                "user_id",
+                "api_key_id",
+                "source"
+              ],
+              "title": "Group By",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+              "title": "Status Code"
+            }
+          },
+          {
+            "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+              "title": "Endpoint"
+            }
+          },
+          {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
+            "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+              "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
+              "title": "Source Label"
+            }
+          },
+          {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
+            "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
+            "in": "query",
+            "name": "priced",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
+              "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "any",
+                    "web_search",
+                    "web_fetch",
+                    "code_execution"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
+              "title": "Tool"
+            }
+          },
+          {
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
+            "in": "query",
+            "name": "counts_toward_budget",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
+              "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Time-series granularity: 'hour' or 'day'",
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "description": "Time-series granularity: 'hour' or 'day'",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageGroupedSeries"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Key Usage Series",
+        "tags": [
+          "key"
+        ]
+      }
+    },
+    "/api/v1/key/usage/summary": {
+      "get": {
+        "description": "Spend, tokens and request volume of the calling key's own requests.\n\nThe same summary as ``GET /api/v1/usage/summary``, over the rows this key\nwrote alone: the same bounded window (default last 30 days), breakdowns, tag\nfilters and ``group_by_tag``. Tag a request with ``metadata`` and pass\n``group_by_tag`` to read what each kind of request cost.",
+        "operationId": "key-get_key_usage_summary",
+        "parameters": [
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+              "title": "Status Code"
+            }
+          },
+          {
+            "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+              "title": "Endpoint"
+            }
+          },
+          {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
+            "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+              "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
+              "title": "Source Label"
+            }
+          },
+          {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
+            "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
+            "in": "query",
+            "name": "priced",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
+              "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "any",
+                    "web_search",
+                    "web_fetch",
+                    "code_execution"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
+              "title": "Tool"
+            }
+          },
+          {
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
+            "in": "query",
+            "name": "counts_toward_budget",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
+              "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Time-series granularity: 'hour' or 'day'",
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "description": "Time-series granularity: 'hour' or 'day'",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+            "in": "query",
+            "name": "dimensions",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "model",
+                      "user",
+                      "api_key",
+                      "source",
+                      "source_label",
+                      "endpoint",
+                      "provider",
+                      "status_code",
+                      "tool",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+              "title": "Dimensions"
+            }
+          },
+          {
+            "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+            "in": "query",
+            "name": "group_by_tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+              "title": "Group By Tag"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Key Usage Summary",
+        "tags": [
+          "key"
         ]
       }
     },

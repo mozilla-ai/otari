@@ -3846,6 +3846,263 @@
     {
       "item": [
         {
+          "name": "Get Key Budget",
+          "request": {
+            "description": "What the calling key may still spend, and every cap that decides it.\n\nLists the budget the key's user is on and each spend ceiling on a scope the\nkey bills to (the key itself, its user's memberships, its workspace and its\norganization), as the budget gate counts them: recorded use plus the holds of\nrequests in flight. A period that has ended reads as the fresh one the next\nrequest starts. ``remaining_usd`` is the least any cap on every provider\nleaves, which is what a request can still spend before a 403. Caps shared with\nthe rest of the workspace or organization report only what they leave.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "key",
+                "budget"
+              ],
+              "raw": "{{baseUrl}}/api/v1/key/budget"
+            }
+          }
+        },
+        {
+          "name": "Get Key Usage Series",
+          "request": {
+            "description": "The calling key's own requests over time, split by one dimension.\n\nThe same series as ``GET /api/v1/usage/series``, over the rows this key wrote\nalone, kept in lockstep with the summary above.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "key",
+                "usage",
+                "series"
+              ],
+              "query": [
+                {
+                  "description": "Dimension to split the series by",
+                  "disabled": false,
+                  "key": "group_by",
+                  "value": "model"
+                },
+                {
+                  "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
+                  "disabled": true,
+                  "key": "status",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+                  "disabled": true,
+                  "key": "status_code",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+                  "disabled": true,
+                  "key": "endpoint",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
+                  "disabled": true,
+                  "key": "source_label",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
+                  "disabled": true,
+                  "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
+                  "disabled": true,
+                  "key": "tool",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
+                  "disabled": true,
+                  "key": "counts_toward_budget",
+                  "value": ""
+                },
+                {
+                  "description": "Time-series granularity: 'hour' or 'day'",
+                  "disabled": true,
+                  "key": "bucket",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/key/usage/series?group_by=model&start_date=&end_date=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&priced=&tool=&counts_toward_budget=&bucket="
+            }
+          }
+        },
+        {
+          "name": "Get Key Usage Summary",
+          "request": {
+            "description": "Spend, tokens and request volume of the calling key's own requests.\n\nThe same summary as ``GET /api/v1/usage/summary``, over the rows this key\nwrote alone: the same bounded window (default last 30 days), breakdowns, tag\nfilters and ``group_by_tag``. Tag a request with ``metadata`` and pass\n``group_by_tag`` to read what each kind of request cost.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "key",
+                "usage",
+                "summary"
+              ],
+              "query": [
+                {
+                  "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
+                  "disabled": true,
+                  "key": "status",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+                  "disabled": true,
+                  "key": "status_code",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+                  "disabled": true,
+                  "key": "endpoint",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session (source_label): the session's trace id on a gateway request that named one, or the session/project label imported usage carried",
+                  "disabled": true,
+                  "key": "source_label",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
+                  "disabled": true,
+                  "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
+                  "disabled": true,
+                  "key": "tool",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
+                  "disabled": true,
+                  "key": "counts_toward_budget",
+                  "value": ""
+                },
+                {
+                  "description": "Time-series granularity: 'hour' or 'day'",
+                  "disabled": true,
+                  "key": "bucket",
+                  "value": ""
+                },
+                {
+                  "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+                  "disabled": true,
+                  "key": "dimensions",
+                  "value": ""
+                },
+                {
+                  "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+                  "disabled": true,
+                  "key": "group_by_tag",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/key/usage/summary?start_date=&end_date=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&priced=&tool=&counts_toward_budget=&bucket=&dimensions=&group_by_tag="
+            }
+          }
+        }
+      ],
+      "name": "key"
+    },
+    {
+      "item": [
+        {
           "name": "List Keys",
           "request": {
             "description": "List the API keys in the caller's organization.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\nin that organization; naming a workspace in another one lists nothing rather\nthan refusing, so the filter reports no more than the unfiltered read does.",
