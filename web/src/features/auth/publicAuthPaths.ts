@@ -139,13 +139,30 @@ export function isAcceptInvitationPath(hashOrPath: string): boolean {
 }
 
 /**
- * Whether a hash or a pathname marks a sign-in in progress through one
- * organization's own connection. Matched on the path alone, so a query string
- * does not hide it.
+ * The organization slug a hash or pathname names for a sign-in through its
+ * own connection, or null for any other path. Matched on the path alone, so a
+ * query string does not hide it.
+ */
+export function ssoAuthorizeSlug(hashOrPath: string): string | null {
+  const path = hashOrPath.replace(/^#/, "").split("?")[0] ?? ""
+  const match = /^\/sso\/([^/]+)$/.exec(path)
+  if (!match) {
+    return null
+  }
+  try {
+    return decodeURIComponent(match[1])
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether a hash or a pathname names a sign-in through one organization's own
+ * connection: a direct link naming its slug, or that same shape set while a
+ * sign-in started elsewhere is already under way.
  */
 export function isSsoAuthorizePath(hashOrPath: string): boolean {
-  const path = hashOrPath.replace(/^#/, "").split("?")[0] ?? ""
-  return /^\/sso\/[^/]+$/.test(path)
+  return ssoAuthorizeSlug(hashOrPath) !== null
 }
 
 /** Which provider an OAuth callback path finishes, or null for any other page. */

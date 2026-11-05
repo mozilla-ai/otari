@@ -10,6 +10,7 @@ import {
   publicAuthPath,
   rendersAheadOfRouter,
   resolveSignInReturnHash,
+  ssoAuthorizeSlug,
 } from "@/features/auth/publicAuthPaths"
 
 describe("isAcceptInvitationPath", () => {
@@ -40,6 +41,26 @@ describe("isSsoAuthorizePath", () => {
     expect(isSsoAuthorizePath("#/sso/")).toBe(false)
     expect(isSsoAuthorizePath("#/sso/acme/extra")).toBe(false)
     expect(isSsoAuthorizePath("#/")).toBe(false)
+  })
+})
+
+describe("ssoAuthorizeSlug", () => {
+  it("names the organization a direct link's slug names, whatever its query string", () => {
+    expect(ssoAuthorizeSlug("#/sso/acme")).toBe("acme")
+    expect(ssoAuthorizeSlug("/sso/acme")).toBe("acme")
+    expect(ssoAuthorizeSlug("#/sso/acme?x=1")).toBe("acme")
+  })
+
+  it("decodes a slug a browser percent-encoded", () => {
+    expect(ssoAuthorizeSlug("#/sso/acme%20corp")).toBe("acme corp")
+  })
+
+  it("answers null for every path that is not one, malformed encoding included", () => {
+    expect(ssoAuthorizeSlug("#/sso")).toBeNull()
+    expect(ssoAuthorizeSlug("#/sso/")).toBeNull()
+    expect(ssoAuthorizeSlug("#/sso/acme/extra")).toBeNull()
+    expect(ssoAuthorizeSlug("#/")).toBeNull()
+    expect(ssoAuthorizeSlug("#/sso/%")).toBeNull()
   })
 })
 

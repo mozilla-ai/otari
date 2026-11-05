@@ -10,6 +10,7 @@ import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import {
   isAcceptInvitationPath,
+  isSsoAuthorizePath,
   type PublicAuthPath,
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
@@ -135,13 +136,17 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // in an open tab has to tear both down rather than re-render on top of the
   // previous link's result.
   const publicAuth = publicAuthPath(hash)
-  if (publicAuth) {
+  if (publicAuth || isSsoAuthorizePath(hash)) {
     // Signup's heading is "Claim your account" where signup is closed, so its
-    // tab says the same.
+    // tab says the same. A direct link naming an organization's slug carries
+    // no entry of its own in that fixed table, so it falls back to the one
+    // title every sign-in surface here shares.
     const title =
       publicAuth === "/signup" && !open_signup
         ? "Claim account"
-        : PUBLIC_AUTH_TITLES[publicAuth]
+        : publicAuth
+          ? PUBLIC_AUTH_TITLES[publicAuth]
+          : "Sign in"
     return (
       <PublicPageTitle page={title}>
         <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
