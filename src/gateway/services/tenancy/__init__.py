@@ -14,7 +14,11 @@ service is in `services/providers/` for that reason among others.
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.membership_listener import MembershipListener, MembershipListeners
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
-from gateway.services.tenancy.organization_domain_service import DomainAutoJoinListener, OrganizationDomainService
+from gateway.services.tenancy.organization_domain_service import (
+    DomainAutoJoinListener,
+    OrganizationDomainService,
+    VerifiedDomainLookup,
+)
 from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
@@ -38,6 +42,7 @@ __all__ = [
     "OrgProviderKeyService",
     "OrganizationDomainService",
     "OrganizationService",
+    "VerifiedDomainLookup",
     "WorkspaceService",
     "describe_caller",
     "ensure_bootstrap_identity",
