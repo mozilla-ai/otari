@@ -14387,6 +14387,11 @@ export interface components {
             /** Provider */
             provider: string;
             /**
+             * Slug
+             * @description The name requests reach a key with a custom base URL by, as in `<slug>:<model>`. Only such a key has one, and once set it never changes. Left out, it is made from the key's name.
+             */
+            slug?: string | null;
+            /**
              * Zero Data Retention
              * @description The organization's declaration that the provider account behind this key keeps no prompt or completion data. The catalog shows it and filters on it; nothing is enforced on it.
              * @default false
@@ -14524,6 +14529,11 @@ export interface components {
              * @description How many of the offered models have their serving switch on. A key offering models and serving none refuses every request through it until one is switched on.
              */
             serving_count: number;
+            /**
+             * Slug
+             * @description What requests name this key by, as in `<slug>:<model>`, for a key with a custom base URL. Absent for a key reached as `<provider>:<model>`.
+             */
+            slug?: string | null;
             /** Updated At */
             updated_at?: string | null;
             /**
@@ -14552,6 +14562,11 @@ export interface components {
             } | null;
             /** Name */
             name?: string | null;
+            /**
+             * Slug
+             * @description Taken only by a key gaining a custom base URL; an existing slug never changes.
+             */
+            slug?: string | null;
             /** Zero Data Retention */
             zero_data_retention?: boolean | null;
         };

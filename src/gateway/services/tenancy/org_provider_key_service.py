@@ -33,6 +33,7 @@ benefit.
 """
 
 import asyncio
+import re
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
@@ -46,7 +47,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.core.config import PROVIDER_TYPE_ALIASES
+from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
 from gateway.core.database import create_session
 from gateway.exceptions.providers_exceptions import (
     OrgDefaultProviderKeyConflictError,
@@ -54,9 +55,11 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyArchivedError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNameRequiredError,
     OrgProviderKeyNotArchivedError,
     OrgProviderKeyNotFoundError,
+    OrgProviderKeySlugTakenError,
     OrgProviderKeyUnknownProviderError,
     OrgProviderKeyUnsafeApiBaseError,
     WorkspaceProviderKeyOverrideConflictError,
@@ -110,7 +113,10 @@ class KeyOffer:
     offered: dict[str, bool] | None
 
 
-# (workspace_id, provider) -> decrypted overlay entry, shaped like a
+# Every cache below is keyed on (workspace_id, prefix), where the prefix is the
+# key's ``selector_prefix``: its slug, or its provider for a key without one.
+
+# (workspace_id, prefix) -> decrypted overlay entry, shaped like a
 # config.providers value (api_key, api_base, client_args).
 _org_cache: dict[tuple[uuid.UUID, str], dict[str, Any]] = {}
 # (workspace_id, provider) -> the active key's model allow-list for that
@@ -124,6 +130,8 @@ _org_model_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}
 _org_key_offers: dict[tuple[uuid.UUID, str], KeyOffer] = {}
 # (workspace_id, provider) -> whether the active key is declared zero data retention.
 _org_key_zero_retention: dict[tuple[uuid.UUID, str], bool] = {}
+# (workspace_id, slug) -> the provider type of the key that slug names.
+_org_slug_providers: dict[tuple[uuid.UUID, str], str] = {}
 
 
 def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
@@ -212,12 +220,18 @@ def cached_org_key_zero_data_retention(workspace_id: uuid.UUID, provider: str) -
     return _org_key_zero_retention.get((workspace_id, provider), False)
 
 
+def cached_org_slug_provider(workspace_id: uuid.UUID, slug: str) -> str | None:
+    """The provider type of the key ``slug`` names in this workspace, or ``None`` if it names none."""
+    return _org_slug_providers.get((workspace_id, slug))
+
+
 def reset_org_provider_cache() -> None:
     """Drop the overlay cache so the next load starts clean (startup, tests)."""
     _org_cache.clear()
     _org_model_restrictions.clear()
     _org_key_offers.clear()
     _org_key_zero_retention.clear()
+    _org_slug_providers.clear()
 
 
 async def refresh_org_provider_cache(db: AsyncSession) -> None:
@@ -247,8 +261,8 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     keys_by_org_provider: dict[tuple[uuid.UUID, str], list[OrgProviderKey]] = defaultdict(list)
     providers_by_org: dict[uuid.UUID, set[str]] = defaultdict(set)
     for key in keys:
-        keys_by_org_provider[(key.organization_id, key.provider)].append(key)
-        providers_by_org[key.organization_id].add(key.provider)
+        keys_by_org_provider[(key.organization_id, key.selector_prefix)].append(key)
+        providers_by_org[key.organization_id].add(key.selector_prefix)
 
     override_by_workspace_key = {(o.workspace_id, o.org_provider_key_id): o for o in overrides}
 
@@ -269,6 +283,7 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     new_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}
     new_offers: dict[tuple[uuid.UUID, str], KeyOffer] = {}
     new_zero_retention: dict[tuple[uuid.UUID, str], bool] = {}
+    new_slug_providers: dict[tuple[uuid.UUID, str], str] = {}
     for workspace_id, organization_id in workspace_orgs:
         for provider in providers_by_org.get(organization_id, ()):
             candidates: list[Candidate] = [
@@ -290,6 +305,8 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
                 )
                 continue
             new_zero_retention[(workspace_id, provider)] = active.zero_data_retention
+            if active.slug is not None:
+                new_slug_providers[(workspace_id, provider)] = active.provider
             # Two narrowings, and neither may widen the other. The workspace's
             # own restriction is what it was; the organization's offered models
             # are the serving switches on this key. An entry is stored when
@@ -316,6 +333,8 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     _org_key_offers.update(new_offers)
     _org_key_zero_retention.clear()
     _org_key_zero_retention.update(new_zero_retention)
+    _org_slug_providers.clear()
+    _org_slug_providers.update(new_slug_providers)
 
 
 async def load_org_provider_keys_at_startup(db: AsyncSession) -> None:
@@ -401,6 +420,35 @@ def _validated_name(name: str | None) -> str:
     return trimmed
 
 
+_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_PROVIDER_NAMES = frozenset(
+    {provider.value for provider in LLMProvider} | set(PROVIDER_TYPE_ALIASES) | RESERVED_PROVIDER_INSTANCE_NAMES
+)
+
+
+def slug_from_name(name: str) -> str:
+    """A slug suggested by a key's display name: ``"Synthetic EU"`` becomes ``synthetic-eu``."""
+    return re.sub(r"[^a-z0-9._-]+", "-", name.strip().lower()).strip("-._")[:64]
+
+
+def _validated_slug(slug: str, config: GatewayConfig | None) -> str:
+    """Refuse a slug a selector could not name this key by.
+
+    A provider's own name would be shadowed by, or shadow, that provider, and a
+    configured instance is resolved before any organization's key is.
+    """
+    if not _SLUG_PATTERN.fullmatch(slug):
+        raise OrgProviderKeyInvalidSlugError(
+            "A slug uses lowercase letters, digits, '.', '_' and '-', starts with a letter or digit, "
+            "and is at most 64 characters"
+        )
+    if slug in _PROVIDER_NAMES:
+        raise OrgProviderKeyInvalidSlugError(f"'{slug}' names a provider, so it cannot name a key")
+    if config is not None and (slug in config.providers or slug in (config._provider_baseline or {})):
+        raise OrgProviderKeyInvalidSlugError(f"'{slug}' is a configured provider instance, so it cannot name a key")
+    return slug
+
+
 async def _gate_api_base(api_base: str | None) -> None:
     """Reject storing an internal ``api_base`` when the SSRF gate is on.
 
@@ -421,8 +469,9 @@ async def _gate_api_base(api_base: str | None) -> None:
 class OrgProviderKeyService:
     """Business logic for the organization provider key surface."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, config: GatewayConfig | None = None):
         self.db = db
+        self.config = config
         self.keys = OrgProviderKeyRepository(db)
         self.overrides = WorkspaceProviderKeyOverrideRepository(db)
         self.restrictions = WorkspaceProviderModelRestrictionRepository(db)
@@ -487,6 +536,7 @@ class OrgProviderKeyService:
         provider = _validated_provider(request.provider)
         name = _validated_name(request.name)
         await _gate_api_base(request.api_base)
+        slug = await self._slug_for(organization.id, request.slug, name=name, api_base=request.api_base)
 
         if (
             await self.keys.get_by_org_provider_name(organization_id=organization.id, provider=provider, name=name)
@@ -500,6 +550,7 @@ class OrgProviderKeyService:
                 organization_id=organization.id,
                 provider=provider,
                 name=name,
+                slug=slug,
                 encrypted_api_key=encrypted_api_key,
                 last4=last4,
                 api_base=request.api_base,
@@ -508,13 +559,28 @@ class OrgProviderKeyService:
             )
             await self.db.commit()
         except IntegrityError:
-            # The pre-check above races the insert; the unique constraint is
-            # what actually decides, as elsewhere in this slice.
+            # The pre-checks above race the insert; the unique constraints are
+            # what actually decide, as elsewhere in this slice.
             await self.db.rollback()
+            if slug is not None and await self.keys.get_by_org_slug(organization.id, slug) is not None:
+                raise OrgProviderKeySlugTakenError(slug) from None
             raise OrgProviderKeyAlreadyExistsError(provider, name) from None
 
         await refresh_org_provider_cache(self.db)
         return await self._public_row(key)
+
+    async def _slug_for(
+        self, organization_id: uuid.UUID, requested: str | None, *, name: str, api_base: str | None
+    ) -> str | None:
+        """The slug a key is stored with: only a key with a custom endpoint has one."""
+        if not api_base:
+            if requested:
+                raise OrgProviderKeyInvalidSlugError("Only a key with a custom base URL takes a slug")
+            return None
+        slug = _validated_slug(requested.strip() if requested else slug_from_name(name), self.config)
+        if await self.keys.get_by_org_slug(organization_id, slug) is not None:
+            raise OrgProviderKeySlugTakenError(slug)
+        return slug
 
     async def update_key_for_user(
         self,
@@ -548,6 +614,20 @@ class OrgProviderKeyService:
                     is not None
                 ):
                     raise OrgProviderKeyAlreadyExistsError(key.provider, new_name)
+        if "slug" in update_data:
+            requested_slug = update_data.pop("slug")
+            if key.slug is not None and requested_slug not in (None, key.slug):
+                raise OrgProviderKeyInvalidSlugError("A key's slug cannot be changed once set")
+        else:
+            requested_slug = None
+        if key.slug is None and update_data.get("api_base"):
+            # A key gaining a custom endpoint gets a selector name of its own.
+            update_data["slug"] = await self._slug_for(
+                organization.id,
+                requested_slug,
+                name=str(update_data.get("name", key.name)),
+                api_base=update_data["api_base"],
+            )
         if "api_base" in update_data:
             await _gate_api_base(update_data["api_base"])
             if update_data["api_base"] and update_data["api_base"] != key.api_base:
@@ -571,6 +651,8 @@ class OrgProviderKeyService:
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
+            if update_data.get("slug") is not None:
+                raise OrgProviderKeySlugTakenError(update_data["slug"]) from None
             raise OrgProviderKeyAlreadyExistsError(key.provider, str(update_data.get("name", key.name))) from None
 
         await refresh_org_provider_cache(self.db)
@@ -637,6 +719,10 @@ class OrgProviderKeyService:
             raise OrgProviderKeyNotFoundError(key_id)
         if key.archived_at is not None:
             raise OrgProviderKeyArchivedError(key_id)
+        if key.slug is not None:
+            raise OrgProviderKeyInvalidSlugError(
+                f"'{key.slug}' names this key alone, so it is not a default for {key.provider}"
+            )
 
         try:
             updated = await self.keys.set_org_default(key)
@@ -684,7 +770,7 @@ class OrgProviderKeyService:
 
         by_provider: dict[str, list[Candidate]] = defaultdict(list)
         for key, override in candidates:
-            by_provider[key.provider].append((key, override))
+            by_provider[key.selector_prefix].append((key, override))
         effective_ids = {
             active.id for group in by_provider.values() if (active := resolve_active_key(group)) is not None
         }
@@ -774,6 +860,7 @@ class OrgProviderKeyService:
                 organization_id=workspace.organization_id,
                 provider=key.provider,
                 except_key_id=key.id,
+                slug=key.slug,
             )
 
         if not new_default and not new_disabled:
@@ -803,6 +890,7 @@ class OrgProviderKeyService:
             organization_id=workspace.organization_id,
             provider=key.provider,
             workspace_id=workspace.id,
+            slug=key.slug,
         )
         active = resolve_active_key(candidates)
         # Read back rather than derived from the flags: disabling deletes the
@@ -932,7 +1020,7 @@ class OrgProviderKeyService:
         organization_id: uuid.UUID,
         workspace_ids: list[uuid.UUID],
     ) -> dict[uuid.UUID, dict[str, OrgProviderKey]]:
-        """Returns each workspace's active key for each provider.
+        """Returns each workspace's active key for each selector prefix: a key's slug, or its provider.
 
         NOTE: an active key may not decrypt, so check it before relying on it.
         """
@@ -943,13 +1031,19 @@ class OrgProviderKeyService:
         for workspace_id, rows in candidates.items():
             by_provider: dict[str, list[Candidate]] = defaultdict(list)
             for key, override in rows:
-                by_provider[key.provider].append((key, override))
+                by_provider[key.selector_prefix].append((key, override))
             active[workspace_id] = {
                 provider: chosen
                 for provider, group in by_provider.items()
                 if (chosen := resolve_active_key(group)) is not None
             }
         return active
+
+    async def slug_providers(self, organization_id: uuid.UUID) -> dict[str, str]:
+        """The organization's key slugs, each mapped to the provider type of the key it names."""
+        return {
+            key.slug: key.provider for key in await self.keys.list_live_keys(organization_id) if key.slug is not None
+        }
 
     async def get_workspace_byo_providers(self, *, workspace_id: uuid.UUID) -> frozenset[str]:
         """Returns the providers one workspace calls on a key of its own.
@@ -966,12 +1060,14 @@ class OrgProviderKeyService:
         return frozenset(provider for provider, key in active.get(workspace_id, {}).items() if has_credential(key))
 
     async def get_byo_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
-        """Returns the providers that every workspace in the organization calls with its own key.
+        """Returns the selector prefixes that every workspace in the organization calls with its own key.
+
+        A prefix is a provider, or the slug of a key with a custom endpoint.
 
         An organization with no workspaces counts every provider it holds a key with a credential for.
         """
         keys = await self.keys.list_live_keys(organization_id)
-        credentialed = {key.id: key.provider for key in keys if has_credential(key)}
+        credentialed = {key.id: key.selector_prefix for key in keys if has_credential(key)}
         workspace_ids = await self.workspaces.get_ids_by_organization(organization_id)
         if not workspace_ids:
             return frozenset(credentialed.values())
@@ -997,7 +1093,7 @@ class OrgProviderKeyService:
         """
         by_provider: dict[str, list[OrgProviderKey]] = defaultdict(list)
         for key in await self.keys.list_live_keys(organization_id):
-            by_provider[key.provider].append(key)
+            by_provider[key.selector_prefix].append(key)
         return frozenset(
             provider
             for provider, keys in by_provider.items()

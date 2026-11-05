@@ -1643,8 +1643,10 @@ def get_workspace_mcp_server_service(db: Annotated[AsyncSession, Depends(get_db)
 WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]
 
 
-def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrgProviderKeyService:
-    return OrgProviderKeyService(db)
+def get_org_provider_key_service(
+    db: Annotated[AsyncSession, Depends(get_db)], config: Annotated[GatewayConfig, Depends(get_config)]
+) -> OrgProviderKeyService:
+    return OrgProviderKeyService(db, config)
 
 
 OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]

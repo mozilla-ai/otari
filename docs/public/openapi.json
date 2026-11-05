@@ -14209,6 +14209,19 @@
             "title": "Provider",
             "type": "string"
           },
+          "slug": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name requests reach a key with a custom base URL by, as in `<slug>:<model>`. Only such a key has one, and once set it never changes. Left out, it is made from the key's name.",
+            "title": "Slug"
+          },
           "zero_data_retention": {
             "default": false,
             "description": "The organization's declaration that the provider account behind this key keeps no prompt or completion data. The catalog shows it and filters on it; nothing is enforced on it.",
@@ -14496,6 +14509,18 @@
             "title": "Serving Count",
             "type": "integer"
           },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What requests name this key by, as in `<slug>:<model>`, for a key with a custom base URL. Absent for a key reached as `<provider>:<model>`.",
+            "title": "Slug"
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -14582,6 +14607,19 @@
               }
             ],
             "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Taken only by a key gaining a custom base URL; an existing slug never changes.",
+            "title": "Slug"
           },
           "zero_data_retention": {
             "anyOf": [

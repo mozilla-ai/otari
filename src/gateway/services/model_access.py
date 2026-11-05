@@ -40,6 +40,7 @@ from gateway.services.tenancy.org_provider_key_service import (
     cached_org_key_zero_data_retention,
     cached_org_model_restriction,
     cached_org_provider_kwargs,
+    cached_org_slug_provider,
 )
 
 
@@ -438,6 +439,9 @@ def organization_key_refusal(
     # Imported here: the providers package imports this module through model discovery.
     from gateway.services.providers import workspace_requires_zero_data_retention
 
+    # A slug names its key's own cache entries; any other instance reads its provider's.
+    if cached_org_slug_provider(workspace_id, instance) is not None:
+        provider = instance
     if workspace_requires_zero_data_retention(workspace_id) and (
         instance in config.providers
         or (
