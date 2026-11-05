@@ -124,8 +124,6 @@ jobs:
             echo "label=$TAG"
             echo "branch=gitbook-docs"
             echo "site_url=https://docs.otari.ai"
-            echo "spec_name=otari-openapi-spec"
-            echo "spec_url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gitbook-docs/api/openapi.json"
           } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -134,15 +132,21 @@ jobs:
           ref: ${{ steps.tag.outputs.tag }}
 
       # Standard library only, so the runner's Python needs no project install.
+      # NOTE: A release build runs that tag's own script, which may predate the
+      # spec options, so only a preview build passes them; a release keeps the
+      # script's production defaults.
       - name: Build the site
         env:
           DOCS_REF: ${{ steps.tag.outputs.tag }}
           SITE_URL: ${{ steps.tag.outputs.site_url }}
           SPEC_NAME: ${{ steps.tag.outputs.spec_name }}
           SPEC_URL: ${{ steps.tag.outputs.spec_url }}
-        run: >-
-          python3 scripts/prepare_gitbook_site.py --ref "$DOCS_REF" --site-url "$SITE_URL"
-          --spec-name "$SPEC_NAME" --spec-url "$SPEC_URL"
+        run: |
+          args=(--ref "$DOCS_REF" --site-url "$SITE_URL")
+          if [ -n "$SPEC_NAME" ]; then
+            args+=(--spec-name "$SPEC_NAME" --spec-url "$SPEC_URL")
+          fi
+          python3 scripts/prepare_gitbook_site.py "${args[@]}"
 
       - name: Deploy
         env:
