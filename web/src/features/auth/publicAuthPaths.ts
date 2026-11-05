@@ -7,17 +7,18 @@ import type { OAuthProvider } from "./oauthProviders"
  * These are deliberately not files in `src/routes/`, for the reason
  * `AcceptInvitationPage` is not one either: every route there sits behind the
  * session gate `App.tsx`'s `DeploymentRoot` puts in front of the router, and
- * the whole point of these eight is that the visitor holds neither a session nor
- * the master key. `DeploymentRoot` renders them directly, ahead of that gate.
+ * the whole point of these paths is that the visitor holds neither a session
+ * nor the master key. `DeploymentRoot` renders them directly, ahead of that
+ * gate.
  *
  * The gateway agrees on the spelling rather than being told it: the
  * verification and reset messages it sends carry `/#/verify-email?token=…` and
- * `/#/reset-password?token=…` (`services/tenancy/user_service.py`), so a
- * rename here breaks a link that is already in somebody's inbox. The two OAuth
- * callbacks are the same kind of agreement for a different reason: the gateway
- * redirects `/auth/{provider}/callback` here (`gateway/main.py`), because a
- * redirect URI may not carry a fragment and so cannot be a hash path itself, so
- * renaming one breaks a URI already registered with a provider.
+ * `/#/reset-password?token=…`, so a rename here breaks a link that is already
+ * in somebody's inbox. Every OAuth or organization-connection callback is the
+ * same kind of agreement for a different reason: a redirect URI may not carry
+ * a fragment and so cannot be a hash path itself, so a fixed, registered path
+ * is redirected to one of these instead, and renaming one breaks a URI
+ * already registered with a provider.
  */
 
 /**
@@ -37,9 +38,10 @@ import type { OAuthProvider } from "./oauthProviders"
  * nor spend a code. The sign-in screen drops the button, and the callback URL a
  * provider or a bookmark still reaches answers with a panel saying so.
  *
- * `none` is the pair a token already in hand reaches. Neither sends anything,
- * and the message that carried the token was sent while mail *was* configured,
- * so refusing them on today's setting would strand a link that still works.
+ * `none` is a page reached only after something else already proved itself: a
+ * mailed link's token, or an authorization code an identity provider's own
+ * redirect carries. Nothing here sends anything, so refusing it on today's
+ * configuration would strand a proof that still works.
  */
 type PublicAuthRequirement = "mail" | "oauth" | "none"
 
@@ -75,6 +77,10 @@ export const PUBLIC_AUTH_PAGES = {
   // below is what keeps that spelling-out honest.
   "/auth/google/callback": "oauth",
   "/auth/github/callback": "oauth",
+  // Fixed for every organization's own connection alike, never per-provider:
+  // the deployment publishes no list to gate this on, the way `oauth_providers`
+  // gates the pair above, so it is always open.
+  "/auth/sso/callback": "none",
 } as const satisfies Record<string, PublicAuthRequirement> &
   Record<OAuthCallbackPath, "oauth">
 
@@ -102,7 +108,11 @@ export function publicAuthPath(hash: string): PublicAuthPath | null {
  * router: the accept-invitation page and every public auth page.
  */
 export function rendersAheadOfRouter(pathname: string): boolean {
-  return isAcceptInvitationPath(pathname) || publicAuthPath(pathname) !== null
+  return (
+    isAcceptInvitationPath(pathname) ||
+    isSsoAuthorizePath(pathname) ||
+    publicAuthPath(pathname) !== null
+  )
 }
 
 /**
@@ -126,6 +136,16 @@ export function resolveSignInReturnHash(hash: string): string {
  */
 export function isAcceptInvitationPath(hashOrPath: string): boolean {
   return hashOrPath.replace(/^#/, "").split("?")[0] === "/accept-invitation"
+}
+
+/**
+ * Whether a hash or a pathname marks a sign-in in progress through one
+ * organization's own connection. Matched on the path alone, so a query string
+ * does not hide it.
+ */
+export function isSsoAuthorizePath(hashOrPath: string): boolean {
+  const path = hashOrPath.replace(/^#/, "").split("?")[0] ?? ""
+  return /^\/sso\/[^/]+$/.test(path)
 }
 
 /** Which provider an OAuth callback path finishes, or null for any other page. */

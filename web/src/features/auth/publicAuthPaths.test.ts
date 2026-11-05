@@ -4,6 +4,7 @@ import { OAUTH_PROVIDER_LABELS } from "@/features/auth/oauthProviders"
 import {
   isAcceptInvitationPath,
   isPublicAuthPageAvailable,
+  isSsoAuthorizePath,
   oauthCallbackProvider,
   PUBLIC_AUTH_PAGES,
   publicAuthPath,
@@ -22,7 +23,23 @@ describe("isAcceptInvitationPath", () => {
   it("is one of the paths the router leaves to the page above it", () => {
     expect(rendersAheadOfRouter("/accept-invitation")).toBe(true)
     expect(rendersAheadOfRouter("/signup")).toBe(true)
+    expect(rendersAheadOfRouter("/sso/acme")).toBe(true)
     expect(rendersAheadOfRouter("/usage")).toBe(false)
+  })
+})
+
+describe("isSsoAuthorizePath", () => {
+  it("names a sign-in in progress through one organization's own connection, whatever its query string", () => {
+    expect(isSsoAuthorizePath("#/sso/acme")).toBe(true)
+    expect(isSsoAuthorizePath("/sso/acme")).toBe(true)
+    expect(isSsoAuthorizePath("#/sso/acme?x=1")).toBe(true)
+  })
+
+  it("claims nothing it does not own", () => {
+    expect(isSsoAuthorizePath("#/sso")).toBe(false)
+    expect(isSsoAuthorizePath("#/sso/")).toBe(false)
+    expect(isSsoAuthorizePath("#/sso/acme/extra")).toBe(false)
+    expect(isSsoAuthorizePath("#/")).toBe(false)
   })
 })
 
@@ -43,9 +60,11 @@ describe("resolveSignInReturnHash", () => {
     for (const hash of [
       "#/signup",
       "#/auth/google/callback?code=c&state=s",
+      "#/auth/sso/callback?code=c&state=s",
       "#/verify-email?token=t",
       "#/reset-password?token=t",
       "#/accept-invitation?token=t",
+      "#/sso/acme",
     ]) {
       expect(resolveSignInReturnHash(hash)).toBe("#/")
     }
@@ -75,6 +94,12 @@ describe("publicAuthPath", () => {
     expect(publicAuthPath("#/signup")).toBe("/signup")
     expect(publicAuthPath("#/verify-email?token=abc")).toBe("/verify-email")
     expect(publicAuthPath("#/check-email?type=resend")).toBe("/check-email")
+  })
+
+  it("recognizes the organization-connection callback, fixed for every organization alike", () => {
+    expect(publicAuthPath("#/auth/sso/callback?code=c&state=s")).toBe(
+      "/auth/sso/callback",
+    )
   })
 
   it("recognizes the two paths the gateway itself mails", () => {
@@ -149,6 +174,12 @@ describe("isPublicAuthPageAvailable", () => {
         mailReady: false,
         oauthProviders: ["google"],
       }),
+    ).toBe(true)
+  })
+
+  it("opens the organization-connection callback on any deployment, unlike the OAuth pair", () => {
+    expect(
+      isPublicAuthPageAvailable("/auth/sso/callback", NOTHING_CONFIGURED),
     ).toBe(true)
   })
 })
