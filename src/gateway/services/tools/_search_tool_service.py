@@ -146,6 +146,8 @@ class SearchToolService:
         from_config = config_file_tools(self.config, kind)
         async with self.uow:
             stored = await self.tools.list_by_kind(kind)
+            # One price lookup per tool: the price list resolves one tool's rate
+            # keys per call, and a deployment lists a handful of tools.
             listed: list[ListedSearchToolSchema] = []
             for row in stored:
                 per_call, source = await self._price(kind, row.name, row.provider, set_in_config=False)

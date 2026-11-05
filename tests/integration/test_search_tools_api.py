@@ -391,6 +391,26 @@ def test_the_listing_gives_each_tool_the_rate_its_calls_settle_at_and_its_row(
     assert _prices(client, headers)["config:file-old"] == (0.005, "own")
 
 
+@pytest.fixture
+def priced_fetch_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """Two config-file fetch tools priced by their price_per_call, one of them free."""
+    tools = {
+        "file-fetch": {"provider": "fake", "price_per_call": 0.002},
+        "free-fetch": {"provider": "fake", "price_per_call": 0},
+    }
+    yield from build_test_client(test_config.model_copy(update={"fetch_tools": tools}))
+
+
+def test_the_fetch_listing_gives_a_config_file_fetch_tool_its_price_per_call(
+    priced_fetch_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    assert _prices(priced_fetch_client, master_key_header, "fetch") == {
+        "config:builtin_fetch": (0.0, "own"),
+        "config:file-fetch": (0.002, "config"),
+        "config:free-fetch": (0.0, "config"),
+    }
+
+
 def test_the_fetch_listing_prices_builtin_fetch_and_stored_fetch_tools(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
