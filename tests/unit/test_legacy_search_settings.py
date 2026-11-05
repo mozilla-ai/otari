@@ -8,7 +8,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.services.tools import LegacySearchValues, reset_search_tool_cache, warn_about_legacy_search_settings
-from gateway.services.tools._legacy_search_settings import legacy_search_settings_warnings
+from gateway.services.tools._legacy_search_settings import _moves_unnamed_calls, legacy_search_settings_warnings
 
 _URL = "https://user:secret@searxng.example"
 _NONE = LegacySearchValues()
@@ -385,3 +385,10 @@ def test_converting_beside_a_tool_that_cannot_run_moves_nothing(caplog: pytest.L
     logged = _logged_for(caplog, config)
     assert "converts it into a stored search tool named searxng" in logged
     assert "refuses to start" not in logged
+
+
+def test_a_stored_default_inheriting_the_stored_url_keeps_its_unnamed_calls() -> None:
+    config = GatewayConfig(
+        web_search_url=_URL, web_search_default_tool="local", search_tools={"local": {"provider": "searxng"}}
+    )
+    assert not _moves_unnamed_calls(config, LegacySearchValues(url=_URL), False, {"local"})

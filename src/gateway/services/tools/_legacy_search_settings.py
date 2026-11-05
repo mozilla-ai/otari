@@ -378,14 +378,17 @@ def warn_about_legacy_search_settings(
             other_tool_names=frozenset(config.fetch_tools) | (stored_row_names() - stored_tool_names()),
             url_is_in_loop_default=_searches_on_url(config),
             conversion_sets_default=conversion_sets_default,
-            moves_unnamed_calls=bool(stored.url) and _moves_unnamed_calls(config, stored, conversion_sets_default),
+            moves_unnamed_calls=bool(stored.url)
+            and _moves_unnamed_calls(config, stored, conversion_sets_default, stored_names),
             provider_pair_set=config.web_search_provider_configured(),
         )
     for warning in warnings:
         logger.warning("%s", warning)
 
 
-def _moves_unnamed_calls(config: GatewayConfig, stored: LegacySearchValues, sets_default: bool) -> bool:
+def _moves_unnamed_calls(
+    config: GatewayConfig, stored: LegacySearchValues, sets_default: bool, stored_names: Collection[str]
+) -> bool:
     """Whether converting the stored web_search_url changes the tool a direct search naming none runs on.
 
     A search that had no tool to run on before is not moved: the converted
@@ -399,8 +402,13 @@ def _moves_unnamed_calls(config: GatewayConfig, stored: LegacySearchValues, sets
         "api_base": stored.url,
         "options": {"engines": ",".join(converted_engines(stored))},
     }
+    # The stored tools get the stored values they inherit copied in, as the conversion does.
+    tools = {
+        name: _with_stored_copies(name, entry, stored) if name in stored_names else entry
+        for name, entry in config.search_tools.items()
+    }
     update: dict[str, Any] = {
-        "search_tools": {**config.search_tools, CONVERTED_TOOL: converted},
+        "search_tools": {**tools, CONVERTED_TOOL: converted},
         "web_search_url": None,
         "web_search_engines": None,
     }
@@ -413,3 +421,14 @@ def _searches_on_url(config: GatewayConfig) -> bool:
     """Whether the in-loop search runs on ``web_search_url``, the backend the legacy settings describe."""
     in_loop = in_loop_default(config)
     return isinstance(in_loop, SynthesizedSearchInstance) and in_loop.provider == CONVERTED_PROVIDER
+
+
+def _with_stored_copies(name: str, entry: Mapping[str, Any], stored: LegacySearchValues) -> dict[str, Any]:
+    """A stored tool's entry with the stored values it inherits copied into its own fields."""
+    copied = dict(entry)
+    if stored.url and inherits_web_search_url(name, entry):
+        copied["api_base"] = stored.url
+    if stored.engines and _inherits_engines(name, entry):
+        options = entry.get("options")
+        copied["options"] = {**(options if isinstance(options, Mapping) else {}), "engines": stored.engines}
+    return copied
