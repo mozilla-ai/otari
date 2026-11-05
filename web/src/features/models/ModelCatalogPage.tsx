@@ -43,7 +43,6 @@ import {
   PRICING_OPTIONS,
   providerOptions,
   RELEASE_OPTIONS,
-  SEARCH_MAX_LENGTH,
   SORT_OPTIONS,
   SOURCE_OPTIONS,
   vendorOptions,
@@ -66,6 +65,7 @@ import type { DashboardSearch } from "@/shared/helpers/search"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
+import { SEARCH_MAX_LENGTH } from "@/shared/hooks/useListSearch"
 
 // The catalog, grouped by model: a rail of filters on the left, and on the
 // right a search, a sort, and one card per model. A card is a link to the model's own page, `/models/<id>`,
