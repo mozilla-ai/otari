@@ -430,13 +430,15 @@ class OIDCConnectionService:
                 configured a connection yet.
             OIDCConnectionUnprovenError: ``required`` is set before anybody has signed in through
                 the connection.
-            SsoBreakGlassRequiredError: ``required`` is set without naming one of the
-                organization's own owners to keep a non-SSO route, or waiving that exception.
+            SsoBreakGlassRequiredError: An account is named that is not one of the organization's
+                own active owners, or ``required`` is set naming none and waiving none.
         """
         organization = await self._managed_organization(user)
 
         async with self._uow:
             connection: OIDCConnection | None = None
+            if break_glass_user_id is not None:
+                await self._require_break_glass_owner(organization, break_glass_user_id)
             if required:
                 connection = await self._require_connection_ready_for_enforcement(
                     organization, break_glass_user_id=break_glass_user_id, break_glass_waived=break_glass_waived
@@ -470,13 +472,17 @@ class OIDCConnectionService:
             raise OIDCConnectionUnprovenError
         if break_glass_user_id is None and not break_glass_waived:
             raise SsoBreakGlassRequiredError
-        if break_glass_user_id is not None:
-            owner = await self._organizations.members.get_active_by_organization_and_user(
-                organization.id, break_glass_user_id
-            )
-            if owner is None or owner.role != "owner":
-                raise SsoBreakGlassRequiredError
         return connection
+
+    async def _require_break_glass_owner(self, organization: Organization, user_id: uuid.UUID) -> None:
+        """Refuse a break-glass account that is not one of this organization's own active owners.
+
+        Raises:
+            SsoBreakGlassRequiredError: The account is not an active owner here.
+        """
+        owner = await self._organizations.members.get_active_by_organization_and_user(organization.id, user_id)
+        if owner is None or owner.role != "owner":
+            raise SsoBreakGlassRequiredError
 
     async def _revoke_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
         """End the live session of every active member this organization's enforcement now refuses."""

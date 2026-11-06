@@ -548,6 +548,32 @@ def test_enforcement_refuses_a_caller_who_is_only_a_member(
         session.close()
 
 
+def test_naming_an_account_that_is_not_an_owner_is_refused_with_enforcement_off(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    """Refused rather than stored: the column is a foreign key, so an unknown id reached the database."""
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-off-stranger")
+        owner_token = _identity(
+            session, email="owner@acme-off-stranger.test", organization_id=organization.id, role="owner"
+        )
+        session.add(_connection(organization.id))
+        session.commit()
+    finally:
+        session.close()
+
+    response = _call(
+        client,
+        owner_token,
+        "PUT",
+        f"{_ENDPOINT}/enforcement",
+        json=_enforcement_body(required=False, break_glass_user_id=str(uuid.uuid4()), break_glass_waived=False),
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+
+
 def test_enforcement_turns_off_with_no_precondition(
     client: TestClient, db_session_factory: Callable[[], Session]
 ) -> None:
