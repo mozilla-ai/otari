@@ -5,6 +5,11 @@ policy:
 
 gates:
 
+  # Two kinds of gate live below, enforced differently. A prohibition names
+  # something that is always wrong and that nothing downstream catches, so it
+  # stays required. A regeneration reminder names a step owed after a change,
+  # and CI catches its omission separately, so it is advisory.
+
   - id: no-hand-edited-changelog
     type: path
     runs: [pre_tool_use.edit_target, stop.working_tree]
@@ -51,7 +56,7 @@ gates:
   - id: openapi-changed-needs-generator
     type: command_if_changed
     runs: [stop.session]
-    enforcement: required
+    enforcement: advisory
     when_changed: ["docs/public/openapi.json"]
     require: ["scripts/generate_openapi.py"]
     message: >-
@@ -78,7 +83,7 @@ gates:
   - id: dashboard-client-changed-needs-codegen
     type: command_if_changed
     runs: [stop.session]
-    enforcement: required
+    enforcement: advisory
     when_changed: ["web/src/client/schema.ts"]
     require: ["client:generate"]
     message: >-
@@ -90,7 +95,7 @@ gates:
   - id: routes-changed-needs-sdk-manifest
     type: command_if_changed
     runs: [stop.session]
-    enforcement: required
+    enforcement: advisory
     when_changed: ["src/gateway/api/routes/**", "docs/public/openapi.json"]
     require: ["tests/unit/test_sdk_endpoint_coverage.py", "make test-unit"]
     message: >-
@@ -107,7 +112,7 @@ gates:
   - id: pyproject-changed-needs-uv
     type: command_if_changed
     runs: [stop.session]
-    enforcement: required
+    enforcement: advisory
     when_changed: ["pyproject.toml"]
     require: ["uv add", "uv remove", "uv lock"]
     message: >-
