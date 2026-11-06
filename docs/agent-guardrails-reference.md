@@ -852,9 +852,15 @@ otari's command beside another hook's, `setup` leaves that entry's matcher
 alone and moves otari's command to an entry of its own, so narrowing the
 matcher cannot stop the other hook from seeing a tool call.
 
-On claude-code, `setup --repo-only` also warns when `~/.claude/settings.json`
-registers the hook for every repository without the flag, since that entry
-still enforces the user's gates here. Adding the flag there turns those gates
+`setup` rewrites every entry in the event that runs otari hook, not only the
+first. Claude Code runs every entry whose matcher matches, so one left behind
+would keep enforcing what the others no longer do.
+
+On claude-code, `setup --repo-only` also warns when Claude Code's user settings
+file registers the hook for every repository without the flag, since that entry
+still enforces the user's gates here. That file is `~/.claude/settings.json`,
+or `settings.json` under the directory `CLAUDE_CONFIG_DIR` names where that
+variable is set. Adding the flag there turns those gates
 off in every repository that entry covers, so the warning names removing it and
 registering per repository as the alternative.
 
