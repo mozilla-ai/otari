@@ -827,6 +827,20 @@ async def test_a_test_that_sends_no_arguments_uses_the_stored_ones(
     assert json.loads(seen[0].content)["validate_kwargs"] == {"threshold": 0.8}
 
 
+async def test_a_test_shows_an_answer_with_no_verdict(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationGuardrailService(async_db)
+    created = await service.create_guardrail(user=owner, request=_create(url=PUBLIC_URL))
+    _stub_service(monkeypatch, _verdict(valid=None, explanation="unknown profile"))
+
+    result = await service.test_guardrail(
+        user=owner, guardrail_id=created.id, request=OrganizationGuardrailTest(text="hello"), default_url=None
+    )
+
+    assert (result.valid, result.explanation) == (None, "unknown profile")
+
+
 async def test_a_failed_test_keeps_what_the_service_echoed_out_of_the_log(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
