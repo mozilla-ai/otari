@@ -85,7 +85,7 @@ class OrganizationModelPricingRates(BaseModel):
     """The rates and period shared by the create and update bodies."""
 
     input_price_per_million: float = Field(
-        ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
+        ge=0, description="Price per 1M of the rate's unit: input tokens, requests, images or characters"
     )
     output_price_per_million: float = Field(
         ge=0, description="Price per 1M output tokens; unused by a rate per request or per image"
@@ -105,7 +105,7 @@ class OrganizationModelPricingRates(BaseModel):
     unit: AcceptedPriceUnit = Field(
         default="token",
         description=(
-            "What the rates are per: token for a model, request or image for a non-token endpoint. "
+            "What the rates are per: token for a model, request, image or character for a non-token endpoint. "
             "A completion model priced per request is charged one request per successful call."
             " Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored "
             "and prices nothing. The plural names tokens, requests and images are still read for one release."

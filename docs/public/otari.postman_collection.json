@@ -672,7 +672,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"input\": \"string\",\n  \"voice\": \"string\"\n}"
             },
-            "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nBilled on the characters of ``input`` at a rate priced per character, or\none request at a rate priced per request. A model with no rate is refused\nunder ``require_pricing``. The body is audio, so the settled cost rides\nthe response headers: ``Otari-Cost-USD`` and ``Otari-Pricing-Source``, the\n``cost_usd`` and ``pricing_source`` other responses carry on ``usage``, and\n``Otari-Usage-Unit`` and ``Otari-Usage-Units`` for the meter billed and\nits count.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",

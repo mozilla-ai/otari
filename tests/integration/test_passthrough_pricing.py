@@ -153,6 +153,10 @@ def test_a_character_rate_holds_and_settles_the_characters_spoken(
 
     assert response.status_code == 200, response.text
     assert held == [Decimal("0.000165")]
+    assert response.headers["Otari-Cost-USD"] == "0.000165"
+    assert response.headers["Otari-Pricing-Source"] == "deployment"
+    assert response.headers["Otari-Usage-Unit"] == "characters"
+    assert response.headers["Otari-Usage-Units"] == "11"
     row = _row(db_session_factory)
     assert row.cost == Decimal("0.000165")
     assert row.billing_meters == {"characters": 11}
@@ -388,6 +392,61 @@ def test_require_pricing_refuses_a_measured_unit_the_request_cannot_measure(stri
     response = _generate(strict_client, headers, _images(1), n=1, size="1024x1024")
     assert response.status_code == 200, response.text
     _settled(strict_client, master, 0.052429)
+
+
+def test_require_pricing_refuses_an_unpriced_speech_model(strict_client: TestClient) -> None:
+    """Speech is no longer served without a rate: an unpriced model is refused before the provider is called."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock(return_value=b"audio")
+
+    with patch("gateway.api.routes.audio.aspeech", new=provider):
+        response = strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    assert response.headers["Otari-Error-Code"] == "pricing_required"
+    provider.assert_not_called()
+    _settled(strict_client, master, 0.0)
+
+
+def test_require_pricing_refuses_a_token_rate_on_speech(strict_client: TestClient) -> None:
+    """The audio reports no tokens, so a token rate would settle unpriced; it is refused instead."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price(strict_client, master, "openai:tts-1", unit="token", rate=0.6)
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock(return_value=b"audio")
+
+    with patch("gateway.api.routes.audio.aspeech", new=provider):
+        response = strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    detail = response.json()["detail"]
+    assert detail.startswith("Model 'openai:tts-1' is priced per token, which this request cannot be billed on")
+    assert "price it per character or per request" in detail
+    assert "No pricing is configured" not in detail
+    provider.assert_not_called()
+    _settled(strict_client, master, 0.0)
+
+
+def test_require_pricing_admits_a_character_rate_on_speech(strict_client: TestClient) -> None:
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price(strict_client, master, "openai:tts-1", unit="character", rate=15.0)
+    headers = _user_key(strict_client, master)
+
+    response = _speak(strict_client, headers, "Hello world")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["Otari-Cost-USD"] == "0.000165"
+    assert response.headers["Otari-Usage-Units"] == "11"
+    _settled(strict_client, master, 0.000165)
 
 
 def test_require_pricing_admits_a_rate_the_endpoint_can_settle(strict_client: TestClient) -> None:

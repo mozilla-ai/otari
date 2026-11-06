@@ -346,6 +346,14 @@ export interface paths {
          * Create Speech
          * @description OpenAI-compatible audio speech (TTS) endpoint.
          *
+         *     Billed on the characters of ``input`` at a rate priced per character, or
+         *     one request at a rate priced per request. A model with no rate is refused
+         *     under ``require_pricing``. The body is audio, so the settled cost rides
+         *     the response headers: ``Otari-Cost-USD`` and ``Otari-Pricing-Source``, the
+         *     ``cost_usd`` and ``pricing_source`` other responses carry on ``usage``, and
+         *     ``Otari-Usage-Unit`` and ``Otari-Usage-Units`` for the meter billed and
+         *     its count.
+         *
          *     Authentication modes:
          *     - Master key + user field: Use specified user (must exist)
          *     - API key + user field: Use specified user (must exist)
@@ -15571,7 +15579,7 @@ export interface components {
             effective_to?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M of the rate's unit: input tokens, requests or images
+             * @description Price per 1M of the rate's unit: input tokens, requests, images or characters
              */
             input_price_per_million: number;
             /**
@@ -15598,7 +15606,7 @@ export interface components {
             rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
-             * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
+             * @description What the rates are per: token for a model, request, image or character for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
              * @default token
              * @enum {string}
              */
@@ -15704,7 +15712,7 @@ export interface components {
             effective_to?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M of the rate's unit: input tokens, requests or images
+             * @description Price per 1M of the rate's unit: input tokens, requests, images or characters
              */
             input_price_per_million: number;
             /**
@@ -15721,7 +15729,7 @@ export interface components {
             rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
-             * @description What the rates are per: token for a model, request or image for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
+             * @description What the rates are per: token for a model, request, image or character for a non-token endpoint. A completion model priced per request is charged one request per successful call. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names tokens, requests and images are still read for one release.
              * @default token
              * @enum {string}
              */
@@ -16619,7 +16627,7 @@ export interface components {
             rates: components["schemas"]["RatesDocument-Output"];
             /**
              * Unit
-             * @description What the rates are per: token for a model, request or image for a non-token endpoint.
+             * @description What the rates are per: token for a model, request, image or character for a non-token endpoint.
              */
             unit: string;
             /** Updated At */
@@ -18233,7 +18241,7 @@ export interface components {
             effective_at?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M of the rate's unit: input tokens, requests or images
+             * @description Price per 1M of the rate's unit: input tokens, requests, images or characters
              */
             input_price_per_million?: number;
             /**
@@ -18265,7 +18273,7 @@ export interface components {
             rates?: components["schemas"]["RatesDocument-Input"] | null;
             /**
              * Unit
-             * @description What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.
+             * @description What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a moderation call, or a completion model billed per call, 'image' for image generation, 'character' for speech. Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release.
              * @default token
              * @enum {string}
              */
@@ -21482,6 +21490,14 @@ export interface operations {
             /** @description Audio bytes in the requested format */
             200: {
                 headers: {
+                    /** @description What the request cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description Which rate priced it: organization, deployment or defaults; absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
+                    /** @description The meter the request was billed on, characters or requests; absent when nothing was billed */
+                    "Otari-Usage-Unit"?: string;
+                    /** @description How many of that meter were billed; absent when nothing was billed */
+                    "Otari-Usage-Units"?: number;
                     [name: string]: unknown;
                 };
                 content: {

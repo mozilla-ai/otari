@@ -130,7 +130,7 @@ class SetPricingRequest(PricedKind):
         description="Model identifier in format 'provider:model', or a search or fetch instance's name for those kinds"
     )
     input_price_per_million: float = Field(
-        ge=0, description="Price per 1M of the rate's unit: input tokens, requests or images"
+        ge=0, description="Price per 1M of the rate's unit: input tokens, requests, images or characters"
     )
     output_price_per_million: float = Field(
         ge=0, description="Price per 1M output tokens; unused by a rate per request or per image"
@@ -181,7 +181,7 @@ class PricingResponse(BaseModel):
     cache_write_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str = Field(
-        description="What the rates are per: token for a model, request or image for a non-token endpoint."
+        description="What the rates are per: token for a model, request, image or character for a non-token endpoint."
     )
     price_per_request: float | None = Field(
         default=None, description="USD for each request, for a rate per request; null for any other unit."
