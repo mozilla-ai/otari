@@ -166,99 +166,113 @@ skipped because a check once passed.
 
 ### Server access
 
-Each stored server has an access list (ACL), which decides which keys reach it
-and which of its tools they may run. It works like a firewall, with keys as the
-source:
+Each stored server has an access list (ACL) that decides which keys reach it and
+which of its tools they may run. The dashboard steps are in
+[Control access to an MCP server](control-access-to-an-mcp-server.md).
 
-- **Rules** each match one source, a single key or a user (which covers every key
-  that user owns, including keys they create later), and either allow tools or
-  deny. On the API a rule is a grant, and its `tools` are the tool patterns it
-  allows; `[]` denies.
-- **The default policy** (`everyone_tools` on the server) applies to every key no
-  rule matches. `["*"]`, the default, allows every tool; `[]` denies.
-- **Match order:** the rule for the key, else the rule for the user who owns it,
-  else the default policy. There is no ordering to manage, so "deny by default, then
-  allow these keys" and "allow by default, except this key" are both a policy and a
-  rule.
+An ACL has two parts:
 
-A tool pattern is a tool name, `*` for every tool, a name prefix ending in `*`
-(`get_*`), or `@read` for the server's read tools; a pattern with `*` anywhere
-else, or any other `@` preset, is refused. Only the master key is not bound by
-any ACL. A dashboard session, which the Playground runs as, has no key, so it is
-bound as its user: that user's rule, else the default policy. The Playground
-offers only the servers it can reach.
+- **Rules**, each for one key or one user. A user's rule covers every key that
+  user owns, including keys created later. A rule's `tools` are the tool patterns
+  it allows; `[]` denies. The API calls a rule a grant.
+- **The default policy**, the server's `everyone_tools`, for every key no rule
+  names. `["*"]`, the default, allows every tool; `[]` denies.
+
+A key's rule wins, then its user's rule, then the default policy. There is no
+order to manage: "deny by default, allow these keys" and "allow by default,
+except this key" are each a policy plus rules.
+
+A tool pattern is one of:
+
+| Pattern | Matches |
+|---|---|
+| `create_issue` | that tool |
+| `*` | every tool |
+| `get_*` | every tool whose name starts with `get_` |
+| `@read` | the server's read tools |
+
+Any other use of `*` or `@` is refused.
+
+The master key is not bound by any ACL. A dashboard session, which is what the
+Playground runs as, has no key, so it is bound as its user: the user's rule, else
+the default policy. The Playground offers only the servers that user reaches.
 
 #### Read tools
 
-`read_tools` on a server lists the tools a manager labeled read, and `@read` in a
-rule or the default policy stands for exactly those, so "this key may only read"
-is one rule that keeps meaning that as the labels change. A tool nobody labeled
-counts as write: a server starts with none labeled, and an `@read` rule allows
-nothing until it has some. Set them with `PATCH` on the server; they are exact
-tool names, not patterns.
+`read_tools` on a server lists the tools a manager labeled read, as exact names,
+set with `PATCH` on the server. `@read` stands for exactly that list, so a rule of
+`["@read"]` keeps meaning "read only" as the labels change. A tool nobody labeled
+counts as write, and a new server has none labeled, so `@read` allows nothing
+until someone labels some.
 
-The labels are never read off the server. MCP lets a tool declare `readOnlyHint`,
-and a connection check reports the tools that do as
-`health.read_only_hinted_tools`, which the dashboard uses to tick a first draft.
-Nothing becomes read until a manager saves it, because a server can call any tool
-read-only.
+Otari never takes the labels from the server. A tool may declare MCP's
+`readOnlyHint`, and a connection check reports those tools as
+`health.read_only_hinted_tools`, which the dashboard offers as suggestions. A
+server can mark any tool read-only, so a hint counts only once a manager saves it.
 
-- **A server's own `allowed_tools` is a ceiling.** It decides which of the server's
-  tools Otari exposes at all, beneath every rule and the default policy. A disabled
-  server stays unreachable.
-- **A key the access list denies cannot tell the server exists.** Every route
-  answers it as it would an unknown id: `GET /api/v1/mcp/servers` leaves the server
-  out, a completion naming it in `mcp_server_ids` gets a `404`, and the
-  caller-orchestrated discovery and execution routes answer
-  `404 mcp_server_not_found`. A `403` would confirm the server is there, so a
-  restricted key could map a workspace's servers by probing ids. To see why a key
-  was turned away, a manager asks `GET .../access/check` (below), or reads the
-  blocked call in the [agent traces](traces.md) when it came through
-  [execution](#execution).
-- **A key that reaches a server but not one of its tools is told so.** The tool is
-  not offered to the model and, on `POST /api/v1/mcp/execute`, is refused with
-  `403 mcp_tool_not_allowed`, the code the server's own list uses.
-- **In a completion, the model is told what it may not use.** Where the matching
-  rule leaves out some of a server's tools, the server's line in the system message
-  names the tools the caller holds and the ones it does not (names only, no
-  schemas), so the model can say the caller lacks access instead of trying. A call
-  to a withheld tool, or to one outside the server's own `allowed_tools`, never
-  reaches the server or the client: the model reads `[tool error]
-  mcp_tool_not_allowed: ...` as its result, and the trace records the call as
-  blocked, naming the rule that refused it. A tool the request declares itself
-  under the same name stays the client's.
-- **Rules follow the server, the key and the user.** They name the server by id,
-  so renaming a server keeps them, and deleting the server, the key or the user
-  deletes them.
-- **Servers named in a request.** `mcp_servers` in a completion request names a server
-  by URL, which no ACL covers, so a workspace refuses such a request with a `400`
-  unless `request_mcp_servers_allowed` is on, and a new workspace starts with it off,
-  so that its ACLs cannot be stepped around. Turn it on with
-  `PATCH /api/v1/workspaces/{workspace_id}`. A workspace that existed before the ACLs
-  did, which includes the default workspace an install migrates into, keeps it on.
-  The switch covers a provider's own remote MCP too: a Responses tool of
-  `type: "mcp"`, or a Gemini tool carrying `mcp_servers` (`mcpServers`), asks the
-  provider to dial a server, so it is refused the same way. A Gemini field that
-  is empty or null names no server and is let through.
-  The master key may still name servers; a dashboard session may not.
+#### What a caller sees
 
-The ACL is managed under
-`/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}`, by organization
-owners/admins or the workspace's owners/admins:
+- **A denied key cannot tell the server exists.** Every route answers it as it
+  would an unknown id: `GET /api/v1/mcp/servers` leaves the server out, a
+  completion naming it in `mcp_server_ids` gets a `404`, and discovery and
+  execution answer `404 mcp_server_not_found`. A `403` would confirm the server
+  is there, so a restricted key could map a workspace's servers by probing ids.
+  To see why a key was turned away, use `GET .../access/check` (below).
+- **A tool outside the key's rule is never offered to the model.** On
+  `POST /api/v1/mcp/execute` it is refused with `403 mcp_tool_not_allowed`.
+- **In a completion, the model is told what it may not use.** The server's line in
+  the system message names the tools the caller holds and the ones it does not,
+  so the model can say the caller lacks access instead of trying. A name that is
+  not plain letters, digits, `_`, `.` and `-` is left out, since the server wrote
+  it. If the model calls a withheld tool anyway, the call never reaches the server
+  or the client: the model gets `[tool error] mcp_tool_not_allowed: ...` and the
+  trace records the call as blocked, with the rule that refused it. A tool the
+  request declares itself under the same name stays the client's.
+- **The server's `allowed_tools` comes first.** A tool it leaves out is
+  unreachable whatever a rule says, and a disabled server is unreachable to
+  everyone.
+
+Rules name the server by id, so renaming a server keeps them. Deleting the
+server, the key or the user deletes them.
+
+#### Servers named in a request
+
+`mcp_servers` in a completion request names a server by URL, which no ACL covers.
+A workspace refuses such a request with a `400` unless
+`request_mcp_servers_allowed` is on, so its ACLs cannot be stepped around. A new
+workspace starts with it off; one that existed before ACLs, including the default
+workspace an install migrates into, keeps it on. Change it with
+`PATCH /api/v1/workspaces/{workspace_id}`.
+
+The switch also covers asking a provider to dial a server itself: a Responses tool
+of `type: "mcp"`, or a Gemini tool with a non-empty `mcp_servers`
+(`mcpServers`). The master key may always name servers; a dashboard session may
+not.
+
+#### Managing the ACL
+
+These routes live under `/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}`
+and need an owner or admin of the organization or the workspace:
 
 | Route | Does |
 |---|---|
-| `PATCH /` with `everyone_tools` | change the default policy |
-| `GET /access` | the default policy and every rule, each naming its key (with its name, owner and whether it is active) or its user |
-| `POST /access/grants` | add the same rule for several `api_key_ids` and `user_ids`; a key or user that already has a rule gets this one instead. A key must belong to the workspace, and a user must own a key in it, or be someone the Playground lets in (an active member of the workspace, or an owner or admin of its organization) named by their identity's id in its canonical lowercase form, so a manager can restrict a member's Playground before they hold any key. A deleted user is refused |
-| `PATCH /access/grants/{grant_id}` | change one rule's `tools` |
-| `DELETE /access/grants/{grant_id}` | delete one rule, so its key or user matches the next rule down |
-| `GET /access/check?api_key_id=&tool=` | trace one call: whether a key may call a tool, and what matched (`key`, `user`, `everyone` for the default policy, or `server` when the server is disabled or does not expose the tool) |
+| `PATCH /` with `everyone_tools` | Change the default policy. |
+| `GET /access` | List the default policy and every rule, each naming its key (with name, owner and whether it is active) or user. |
+| `POST /access/grants` | Give one rule to several `api_key_ids` and `user_ids`. A key or user that has a rule gets this one instead. |
+| `PATCH /access/grants/{grant_id}` | Change one rule's `tools`. |
+| `DELETE /access/grants/{grant_id}` | Delete one rule; its key or user falls back to the next match. |
+| `GET /access/check?api_key_id=&tool=` | Say whether a key may call a tool, and what decided: `key`, `user`, `everyone` (the default policy) or `server` (disabled, or the tool is not exposed). |
 
-`GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access` answers
-the other way round: what one key reaches on each of the workspace's servers, and which
-rule matched. A server holds at most 1000 rules; write a rule for a user rather than
-one for each of their keys.
+`GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access`
+answers the other way round: what one key reaches on each of the workspace's
+servers, and which rule matched.
+
+A rule's key must belong to the workspace. A rule's user must own a key in it, or
+be someone the Playground admits (an active member of the workspace, or an owner
+or admin of its organization), so a manager can restrict a member's Playground
+before they hold a key; such a user is named by their identity id in lowercase. A
+deleted user is refused. A server holds at most 1000 rules, so write a rule for a
+user rather than one per key.
 
 ## Limits and safety
 
@@ -406,12 +420,10 @@ one with a `$ref` pointing outside itself:
 
 A tool name outside the 1–256-character execution limit is omitted with
 `mcp_tool_name_unsupported`, so every tool returned by discovery can be sent
-back to the execution endpoint. So is a name containing `*` or `,`, starting
-with `@`, or holding any whitespace or control character, which an access rule
-would read as a pattern (or, trimmed, as `@read`) and the dashboard's allow-list
-field would split, rather than as one name; such a tool is also left
-out of the tools a connection check lists, including a list stored before this
-rule.
+back to the execution endpoint. The same code omits a name that contains `*`,
+`,`, whitespace or a control character, or starts with `@`: an access rule would
+read it as a pattern, and the dashboard's allow-list field would split it. A
+connection check leaves such a tool out of the tools it lists too.
 
 Otari does not validate an `inputSchema` against a JSON Schema dialect, and never
 truncates, rewrites, or drops a keyword. It bounds the size, depth and property
