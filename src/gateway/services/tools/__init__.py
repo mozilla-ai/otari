@@ -10,6 +10,7 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``read_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
+``McpGrantMembershipListener`` removes a member's MCP grants as they leave a workspace,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
 ``web_access_disabled_refusal`` where the workspace turned web access off.
@@ -102,7 +103,12 @@ from gateway.services.tools._direct_tool_call import (
 )
 from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
-from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
+from gateway.services.tools._mcp_admission import (
+    admit_mcp_servers,
+    declares_provider_mcp,
+    refuse_shadowed_builtin_tools,
+)
+from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -271,7 +277,9 @@ __all__ = [
     "WebClaims",
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
+    "McpGrantMembershipListener",
     "admit_mcp_servers",
+    "declares_provider_mcp",
     "admit_web_access",
     "apply_web_access_policy",
     "web_access_disabled_refusal",

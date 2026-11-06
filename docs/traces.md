@@ -156,7 +156,10 @@ without a name.
   and **completed** otherwise. A routing attempt that failed and was recovered by
   a fallback does not fail its turn.
 - **Tools the gateway runs** (web search, web fetch, code execution, MCP tools)
-  are timed as they run.
+  are timed as they run. That includes a tool a client runs through
+  `POST /api/v1/mcp/execute`, whose span also names the access rule that
+  allowed it, or refused it, in which case the span is blocked (see
+  [Caller-orchestrated MCP](mcp.md#execution)).
 - **Tools the client runs** (a shell, a file read in a coding agent) are
   recorded from the request that carries their result: the tool's name, whether
   it returned an error, and when the result arrived. Their start is when the step before

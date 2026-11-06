@@ -28,7 +28,8 @@ recorded against.
 
 Applications never sign in. They send an API key, and the key ties each request
 to one workspace and one user. The workspace decides which provider keys,
-aliases, routing policies and tools the request can use; the user, narrowed by
+aliases, routing policies and tools the request can use, and each stored MCP
+server's [access list](mcp.md#server-access) decides which keys reach it; the user, narrowed by
 the key, decides which models it can reach, and the user's budget is the one it
 spends. The provider keys
 Otari calls upstream with belong to the organization, and the application never

@@ -38,9 +38,9 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -48,22 +48,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
+    WorkspaceMcpServerAccessDeniedError,
     WorkspaceMcpServerAlreadyExistsError,
     WorkspaceMcpServerCheckBusyError,
+    WorkspaceMcpServerGrantNotFoundError,
+    WorkspaceMcpServerGrantSubjectError,
+    WorkspaceMcpServerKeyNotFoundError,
     WorkspaceMcpServerLimitReachedError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
 )
 from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
-from gateway.models.tenancy import User
-from gateway.models.tools import WorkspaceMcpServer
-from gateway.repositories.tenancy import WorkspaceRepository
+from gateway.models.tenancy import MANAGEMENT_ROLES, User
+from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
+from gateway.repositories.tenancy import OrganizationMemberRepository, WorkspaceMemberRepository, WorkspaceRepository
+from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
+from gateway.repositories.users_repository import lock_live_users, provision_attribution_users
 
 # The module as well as the names, so the check is looked up at call time and a
 # test can stand in for the network.
 from gateway.services import mcp_stateless
-from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
+from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck, reads_as_pattern
+from gateway.services.model_access import (
+    expand_mcp_tool_patterns,
+    is_mcp_tool_allowed,
+    validate_mcp_read_tools,
+    validate_mcp_tool_patterns,
+)
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -73,6 +85,10 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, redact_url_secrets, validate_mcp_url
+
+if TYPE_CHECKING:
+    from gateway.services.api_keys import ApiKeyService, KeySummary
+    from gateway.services.model_access import McpAccess
 
 # What a workspace may configure. A resolved request opens a session to every
 # server it names, so this bounds the fan-out one workspace can ask a gateway
@@ -117,6 +133,22 @@ class WorkspaceMcpServerCreate(BaseModel):
         description="Allow-list of tool names; null exposes every tool the server offers",
     )
     enabled: bool = Field(default=True, description="Whether a request naming this server actually reaches it")
+    everyone_tools: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="What every key of the workspace may call on this server: tool names, '*' for every tool, or "
+        "'prefix*', or '@read' for read_tools; [] denies everyone. A grant for a key or its owner overrides it",
+    )
+    read_tools: list[str] = Field(
+        default_factory=list,
+        description="The tool names a manager labeled read, which '@read' in an access rule stands for. "
+        "The server's own readOnlyHint is never read as one",
+    )
+
+    @model_validator(mode="after")
+    def _check_tool_patterns(self) -> WorkspaceMcpServerCreate:
+        self.everyone_tools = validate_mcp_tool_patterns(self.everyone_tools)
+        self.read_tools = validate_mcp_read_tools(self.read_tools)
+        return self
 
 
 class WorkspaceMcpServerUpdate(BaseModel):
@@ -143,6 +175,8 @@ class WorkspaceMcpServerUpdate(BaseModel):
         default=None, max_length=MAX_ALLOWED_TOOLS
     )
     enabled: bool | SkipJsonSchema[None] = None
+    everyone_tools: list[str] | SkipJsonSchema[None] = None
+    read_tools: list[str] | SkipJsonSchema[None] = None
 
     @model_validator(mode="after")
     def _reject_explicit_nulls(self) -> WorkspaceMcpServerUpdate:
@@ -158,11 +192,15 @@ class WorkspaceMcpServerUpdate(BaseModel):
         """
         nulled = [
             field
-            for field in ("name", "url", "enabled")
+            for field in ("name", "url", "enabled", "everyone_tools", "read_tools")
             if field in self.model_fields_set and getattr(self, field) is None
         ]
         if nulled:
             raise ValueError(f"{', '.join(nulled)} cannot be null; omit the field to leave it unchanged")
+        if self.everyone_tools is not None:
+            self.everyone_tools = validate_mcp_tool_patterns(self.everyone_tools)
+        if self.read_tools is not None:
+            self.read_tools = validate_mcp_read_tools(self.read_tools)
         return self
 
 
@@ -188,6 +226,17 @@ class WorkspaceMcpServerHealth(BaseModel):
         default_factory=list,
         description=f"Every tool name the server offers, allowed or not, up to {MAX_ALLOWED_TOOLS}; empty on a failure",
     )
+    read_only_hinted_tools: list[str] = Field(
+        default_factory=list,
+        description="Those of tools the server annotates readOnlyHint: untrusted, a suggestion for labeling "
+        "read_tools and never applied as one",
+    )
+
+    @field_validator("tools", "read_only_hinted_tools")
+    @classmethod
+    def _literal_names(cls, names: list[str]) -> list[str]:
+        """Drop a name a rule would read as a pattern, from a fresh check and from one stored before this screen."""
+        return [name for name in names if not reads_as_pattern(name)]
 
 
 class WorkspaceMcpServerCheckRequest(BaseModel):
@@ -224,6 +273,8 @@ class WorkspaceMcpServerPublic(BaseModel):
     purpose_hint: str | None
     allowed_tools: list[str] | None
     enabled: bool
+    everyone_tools: list[str] = Field(description="What every key of the workspace may call; [] denies everyone")
+    read_tools: list[str] = Field(description="The tool names a manager labeled read, which '@read' stands for")
     has_token: bool
     health: WorkspaceMcpServerHealth | None = Field(description="The last connection check; null until one has run")
     created_at: str
@@ -249,6 +300,8 @@ class WorkspaceMcpServerPublic(BaseModel):
             purpose_hint=server.purpose_hint,
             allowed_tools=server.allowed_tools,
             enabled=server.enabled,
+            everyone_tools=server.everyone_tools,
+            read_tools=server.read_tools,
             has_token=server.encrypted_token is not None,
             health=WorkspaceMcpServerHealth.model_validate(server.health) if server.health is not None else None,
             created_at=server.created_at.isoformat(),
@@ -259,6 +312,108 @@ class WorkspaceMcpServerPublic(BaseModel):
 class WorkspaceMcpServersPublic(BaseModel):
     data: list[WorkspaceMcpServerPublic]
     count: int
+
+
+MAX_GRANTS_PER_SERVER = 1000
+"""Grants one server may hold. Bounds the access list a page reads, and what a request's resolve scans."""
+
+McpAccessDecider = Literal["key", "user", "everyone", "server"]
+
+
+class WorkspaceMcpServerGrantPublic(BaseModel):
+    """One exception to a server's ``everyone_tools``: for a key, or for a user and so every key they own."""
+
+    id: uuid.UUID
+    subject: Literal["key", "user"]
+    api_key_id: str | None = Field(description="The key a key grant names; null on a user's grant")
+    key_name: str | None = None
+    key_active: bool | None = Field(default=None, description="Whether a key grant's key is active")
+    user_id: str | None = Field(description="The user a grant names, or the owner of a key grant's key")
+    tools: list[str] = Field(
+        description="Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies"
+    )
+    created_at: str
+    updated_at: str
+
+
+class WorkspaceMcpServerAccess(BaseModel):
+    """A stored server's access list: what everyone may call, and the exceptions for keys and users.
+
+    A key's own grant decides over its owner's, and either decides over ``everyone_tools``. The
+    server's ``allowed_tools`` is a ceiling over all of them.
+    """
+
+    everyone_tools: list[str]
+    grants: list[WorkspaceMcpServerGrantPublic]
+
+
+class WorkspaceMcpServerGrantsCreate(BaseModel):
+    """Grant the same tools to several keys and users at once; a subject that already has a grant gets these tools."""
+
+    api_key_ids: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(default_factory=list, max_length=500)
+    user_ids: list[Annotated[str, Field(min_length=1, max_length=255)]] = Field(default_factory=list, max_length=500)
+    tools: list[str] = Field(
+        description="Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies"
+    )
+
+    @model_validator(mode="after")
+    def _check(self) -> WorkspaceMcpServerGrantsCreate:
+        if not self.api_key_ids and not self.user_ids:
+            raise ValueError("name at least one key in api_key_ids or one user in user_ids")
+        self.api_key_ids = list(dict.fromkeys(self.api_key_ids))
+        self.user_ids = list(dict.fromkeys(self.user_ids))
+        self.tools = validate_mcp_tool_patterns(self.tools)
+        return self
+
+
+class WorkspaceMcpServerGrantUpdate(BaseModel):
+    """New tools for one grant."""
+
+    tools: list[str] = Field(
+        description="Tool patterns: names, '*', 'prefix*' or '@read' for the server's read_tools; [] denies"
+    )
+
+    @model_validator(mode="after")
+    def _check(self) -> WorkspaceMcpServerGrantUpdate:
+        self.tools = validate_mcp_tool_patterns(self.tools)
+        return self
+
+
+class WorkspaceMcpServerAccessCheck(BaseModel):
+    """Whether one key may call one tool on a server, and which rule says so."""
+
+    allowed: bool
+    decided_by: McpAccessDecider = Field(
+        description="The key's own grant, its owner's, the server's everyone_tools, or the server itself "
+        "(disabled, or its allowed_tools leaves the tool out)"
+    )
+    grant_id: uuid.UUID | None = Field(description="The deciding grant, when a grant decided")
+    tools: list[str] = Field(
+        description="The deciding rule's tool patterns; the server's allowed_tools when it decided"
+    )
+
+
+class WorkspaceMcpServerKeyAccess(BaseModel):
+    """What one key reaches on one stored server, and which rule decides it."""
+
+    server_id: uuid.UUID
+    name: str
+    enabled: bool
+    decided_by: Literal["key", "user", "everyone"]
+    grant_id: uuid.UUID | None
+    tools: list[str] = Field(description="The deciding rule's tool patterns; [] means the key cannot reach the server")
+    allowed_tools: list[str] | None = Field(description="The server's own ceiling; null exposes every tool")
+    read_tools: list[str] = Field(
+        default_factory=list, description="The server's tools labeled read, which '@read' in tools stands for"
+    )
+
+
+class McpServerSummary(BaseModel):
+    """A stored server as a caller sees it: enough to name it in ``mcp_server_ids``, never its URL or token."""
+
+    id: uuid.UUID
+    name: str
+    purpose_hint: str | None
 
 
 async def _validate_url(url: str, *, has_token: bool) -> None:
@@ -332,6 +487,9 @@ def _health(allowed_tools: list[str] | None, check: ServerCheck) -> WorkspaceMcp
         tool_count=None if failed else len(offered) if allowed is None else len(set(allowed) & set(offered)),
         missing_allowed_tools=[] if failed or allowed is None else [name for name in allowed if name not in offered],
         tools=offered[:MAX_ALLOWED_TOOLS],
+        read_only_hinted_tools=[name for name in dict.fromkeys(check.read_only_hinted) if name in offered][
+            :MAX_ALLOWED_TOOLS
+        ],
     )
 
 
@@ -340,11 +498,14 @@ async def resolve_workspace_mcp_servers(
     *,
     workspace_id: uuid.UUID,
     server_ids: list[uuid.UUID],
+    access: McpAccess,
 ) -> list[McpServerConfig]:
     """Swap a request's ``mcp_server_ids`` for the workspace's stored configs.
 
     IDs are de-duplicated with their order preserved.
     An ID naming no server *in this workspace* raises :class:`WorkspaceMcpServerNotFoundError`.
+    So does one the caller's ``access`` grants nothing on, which answers exactly as an unknown ID does,
+    and each returned config carries the tool patterns the caller holds on it.
     A disabled server is skipped rather than refused.
 
     No authorization check, and none is missing: ``workspace_id`` comes off the
@@ -376,7 +537,8 @@ async def resolve_workspace_mcp_servers(
     )
     by_id = {row.id: row for row in rows}
 
-    missing = [server_id for server_id in ordered_ids if server_id not in by_id]
+    patterns = {row.id: access.patterns_for(row.id, row.everyone_tools, row.read_tools) for row in rows}
+    missing = [server_id for server_id in ordered_ids if server_id not in by_id or not patterns[server_id]]
     if missing:
         raise WorkspaceMcpServerNotFoundError(missing[0])
 
@@ -385,6 +547,7 @@ async def resolve_workspace_mcp_servers(
         row = by_id[server_id]
         if not row.enabled:
             continue
+        granted = patterns[server_id]
         resolved.append(
             McpServerConfig(
                 name=row.name,
@@ -392,6 +555,9 @@ async def resolve_workspace_mcp_servers(
                 authorization_token=decrypt_secret(row.encrypted_token) if row.encrypted_token else None,
                 purpose_hint=row.purpose_hint,
                 allowed_tools=row.allowed_tools,
+                caller_tool_patterns=None if "*" in granted else granted,
+                caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
+                stored_server_id=str(row.id),
             )
         )
     return resolved
@@ -402,6 +568,7 @@ async def resolve_workspace_mcp_server(
     *,
     workspace_id: uuid.UUID,
     server_id: uuid.UUID,
+    access: McpAccess | None = None,
 ) -> ResolvedMcpServer | None:
     """Resolve one stored server for the caller-orchestrated MCP endpoints.
 
@@ -420,6 +587,12 @@ async def resolve_workspace_mcp_server(
     decrypt, for the same reason the plural resolver does: connecting without a
     credential the workspace configured would send an unauthenticated request
     to a server that expects one.
+
+    With the caller's ``access``, a disabled server is ``None`` and one the
+    access list grants nothing on raises
+    :class:`~gateway.exceptions.tools_exceptions.WorkspaceMcpServerAccessDeniedError`,
+    both before the token is decrypted, so a token that will not decrypt cannot
+    tell a caller with no access that the server exists.
     """
     row = (
         await db.execute(
@@ -431,15 +604,58 @@ async def resolve_workspace_mcp_server(
     ).scalar_one_or_none()
     if row is None:
         return None
+    if access is not None:
+        if not row.enabled:
+            return None
+        if not access.patterns_for(row.id, row.everyone_tools, row.read_tools):
+            source, _ = access.decide(row.id, row.everyone_tools)
+            raise WorkspaceMcpServerAccessDeniedError(row.id, name=row.name, decided_by=f"mcp_{source}")
     return ResolvedMcpServer(
         id=row.id,
         name=row.name,
         url=row.url,
         authorization_token=decrypt_secret(row.encrypted_token) if row.encrypted_token else None,
         enabled=row.enabled,
+        everyone_tools=row.everyone_tools,
+        read_tools=row.read_tools,
         purpose_hint=row.purpose_hint,
         allowed_tools=row.allowed_tools,
     )
+
+
+async def list_reachable_mcp_servers(
+    db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess
+) -> list[McpServerSummary]:
+    """The enabled stored servers of a workspace the caller may reach, oldest first."""
+    rows = (
+        (
+            await db.execute(
+                select(WorkspaceMcpServer)
+                .where(WorkspaceMcpServer.workspace_id == workspace_id, WorkspaceMcpServer.enabled.is_(True))
+                .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        McpServerSummary(id=row.id, name=row.name, purpose_hint=row.purpose_hint)
+        for row in rows
+        if access.patterns_for(row.id, row.everyone_tools, row.read_tools)
+    ]
+
+
+def _decide(
+    key: KeySummary, server: WorkspaceMcpServer, grants: list[WorkspaceMcpServerGrant]
+) -> tuple[Literal["key", "user", "everyone"], uuid.UUID | None, list[str]]:
+    """The rule that decides a key's access to a server, among that server's grants: the same order a request uses."""
+    for grant in grants:
+        if grant.api_key_id == key.id:
+            return "key", grant.id, list(grant.tools)
+    for grant in grants:
+        if key.user_id is not None and grant.user_id == key.user_id:
+            return "user", grant.id, list(grant.tools)
+    return "everyone", None, list(server.everyone_tools)
 
 
 class WorkspaceMcpServers:
@@ -451,21 +667,35 @@ class WorkspaceMcpServers:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
-    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+    async def resolve_many(
+        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess
+    ) -> list[McpServerConfig]:
         """See :func:`resolve_workspace_mcp_servers`."""
-        return await resolve_workspace_mcp_servers(self._db, workspace_id=workspace_id, server_ids=server_ids)
+        return await resolve_workspace_mcp_servers(
+            self._db, workspace_id=workspace_id, server_ids=server_ids, access=access
+        )
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
+        """See :func:`list_reachable_mcp_servers`."""
+        return await list_reachable_mcp_servers(self._db, workspace_id=workspace_id, access=access)
+
+    async def resolve_one(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: McpAccess | None = None
+    ) -> ResolvedMcpServer | None:
         """See :func:`resolve_workspace_mcp_server`."""
-        return await resolve_workspace_mcp_server(self._db, workspace_id=workspace_id, server_id=server_id)
+        return await resolve_workspace_mcp_server(
+            self._db, workspace_id=workspace_id, server_id=server_id, access=access
+        )
 
 
 class WorkspaceMcpServerService:
     """CRUD for a workspace's MCP servers. Writes are management-gated; the list is not."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, api_keys: ApiKeyService | None = None):
         self.db = db
         self.organizations = OrganizationService(db, membership_listener=None)
+        # Reads the workspace's keys, which a server's access list names.
+        self.api_keys = api_keys
 
     async def _require_management(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         """Resolve the workspace and confirm the caller may manage it.
@@ -601,6 +831,8 @@ class WorkspaceMcpServerService:
             purpose_hint=request.purpose_hint,
             allowed_tools=request.allowed_tools,
             enabled=request.enabled,
+            everyone_tools=request.everyone_tools,
+            read_tools=request.read_tools,
         )
         self.db.add(server)
         # The unique index is the arbiter, not a preceding existence check: two
@@ -686,6 +918,257 @@ class WorkspaceMcpServerService:
             await self.db.refresh(server)
         return WorkspaceMcpServerPublic.from_model(server)
 
+    def _key_service(self) -> ApiKeyService:
+        if self.api_keys is None:
+            raise RuntimeError("WorkspaceMcpServerService was built without the key service its access list needs")
+        return self.api_keys
+
+    async def get_server(
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID
+    ) -> WorkspaceMcpServerPublic:
+        """One server, for any member who can see the workspace; its URL's credentials masked for a non-manager."""
+        workspace = await authorization.resolve_visible_workspace(
+            self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
+        )
+        manages = await authorization.has_workspace_management_access(
+            self.db, user=user, workspace=workspace, organizations=self.organizations
+        )
+        server = await self._get_or_404(workspace.id, server_id)
+        return WorkspaceMcpServerPublic.from_model(server, redact_url=not manages)
+
+    async def access(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServerAccess:
+        """A server's access list: ``everyone_tools`` and every grant, oldest first."""
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        return await self._access_of(resolved_workspace_id, server)
+
+    async def _access_of(self, workspace_id: uuid.UUID, server: WorkspaceMcpServer) -> WorkspaceMcpServerAccess:
+        everyone_tools = list(server.everyone_tools)
+        grants = await WorkspaceMcpServerGrantRepository(self.db).for_server(server.id)
+        key_ids = [grant.api_key_id for grant in grants if grant.api_key_id is not None]
+        keys = (
+            {key.id: key for key in await self._key_service().summaries_in_workspace(workspace_id, key_ids)}
+            if key_ids
+            else {}
+        )
+        public: list[WorkspaceMcpServerGrantPublic] = []
+        for grant in grants:
+            key = keys.get(grant.api_key_id) if grant.api_key_id is not None else None
+            public.append(
+                WorkspaceMcpServerGrantPublic(
+                    id=grant.id,
+                    subject="key" if grant.api_key_id is not None else "user",
+                    api_key_id=grant.api_key_id,
+                    key_name=key.name if key is not None else None,
+                    key_active=key.is_active if key is not None else None,
+                    user_id=grant.user_id if grant.user_id is not None else (key.user_id if key is not None else None),
+                    tools=list(grant.tools),
+                    created_at=grant.created_at.isoformat(),
+                    updated_at=grant.updated_at.isoformat(),
+                )
+            )
+        return WorkspaceMcpServerAccess(everyone_tools=everyone_tools, grants=public)
+
+    async def _members_by_attribution(self, workspace_id: uuid.UUID, user_ids: list[str]) -> set[str]:
+        """Which of ``user_ids`` name someone the Playground lets into the workspace, minting missing rows.
+
+        That is an active member of the workspace, or an owner or admin of its organization, who needs no workspace
+        row. Their request-plane id is their identity's UUID as a string, as the Playground and member keys write it,
+        so only that canonical spelling is accepted: a rule under another spelling would bind nobody.
+        """
+        identities: dict[uuid.UUID, str] = {}
+        for user_id in user_ids:
+            try:
+                identity = uuid.UUID(user_id)
+            except ValueError:
+                continue
+            if str(identity) == user_id:
+                identities[identity] = user_id
+        if not identities:
+            return set()
+        workspace = await WorkspaceRepository(self.db).get(workspace_id)
+        pairs = await WorkspaceMemberRepository(self.db).get_active_pairs([workspace_id], list(identities))
+        eligible = {identity for _, identity in pairs}
+        if workspace is not None:
+            eligible |= await OrganizationMemberRepository(self.db).active_with_roles(
+                workspace.organization_id, identities.keys() - eligible, MANAGEMENT_ROLES
+            )
+        return await provision_attribution_users(self.db, [identities[identity] for identity in eligible])
+
+    async def add_grants(
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, request: WorkspaceMcpServerGrantsCreate
+    ) -> WorkspaceMcpServerAccess:
+        """Give keys and users the same tools on a server, replacing what any of them held.
+
+        A key must belong to the server's workspace. A user must own a key in it, or be an active member of it,
+        whom the Playground binds as their user before they hold any key; such a member's request-plane row is
+        minted here if they have none yet.
+
+        Raises:
+            WorkspaceMcpServerGrantSubjectError: a key or user is not of this workspace, or the server
+                would hold more than ``MAX_GRANTS_PER_SERVER`` grants.
+        """
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        server_id = (await self._get_or_404(resolved_workspace_id, server_id)).id
+        keys = self._key_service()
+        if request.api_key_ids:
+            found = {key.id for key in await keys.summaries_in_workspace(resolved_workspace_id, request.api_key_ids)}
+            unknown = [key_id for key_id in request.api_key_ids if key_id not in found]
+            if unknown:
+                raise WorkspaceMcpServerGrantSubjectError(f"Key '{unknown[0]}' is not a key of this workspace")
+        if request.user_ids:
+            owners = await keys.owners_in_workspace(resolved_workspace_id, request.user_ids)
+            members = await self._members_by_attribution(
+                resolved_workspace_id, [user_id for user_id in request.user_ids if user_id not in owners]
+            )
+            strangers = [user_id for user_id in request.user_ids if user_id not in owners and user_id not in members]
+            if strangers:
+                raise WorkspaceMcpServerGrantSubjectError(
+                    f"'{strangers[0]}' is not a member of this workspace and owns no key in it"
+                )
+        repository = WorkspaceMcpServerGrantRepository(self.db)
+        # The key reads above end in commits; the server is read again here, locked, so two
+        # concurrent adds cannot both pass the cap.
+        server = await self.db.get(WorkspaceMcpServer, server_id, with_for_update=True)
+        if server is None:
+            raise WorkspaceMcpServerNotFoundError(server_id)
+        # Locked as a user's deletion locks it, so a grant and the deletion that removes the user's grants cannot
+        # interleave: whichever commits second sees the other, and a deleted user is refused here.
+        live = await lock_live_users(self.db, request.user_ids)
+        gone = [user_id for user_id in request.user_ids if user_id not in live]
+        if gone:
+            raise WorkspaceMcpServerGrantSubjectError(f"'{gone[0]}' has been deleted")
+        held = {(grant.api_key_id, grant.user_id) for grant in await repository.for_server(server.id)}
+        added = sum(1 for key_id in request.api_key_ids if (key_id, None) not in held) + sum(
+            1 for user_id in request.user_ids if (None, user_id) not in held
+        )
+        if len(held) + added > MAX_GRANTS_PER_SERVER:
+            raise WorkspaceMcpServerGrantSubjectError(
+                f"A server holds at most {MAX_GRANTS_PER_SERVER} grants; grant a user instead of each of their keys"
+            )
+        await repository.put(server.id, api_key_ids=request.api_key_ids, user_ids=request.user_ids, tools=request.tools)
+        await self.db.commit()
+        logger.info(
+            "MCP server grants added server_id=%s keys=%d users=%d",
+            server.id,
+            len(request.api_key_ids),
+            len(request.user_ids),
+        )
+        return await self._access_of(resolved_workspace_id, server)
+
+    async def update_grant(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        server_id: uuid.UUID,
+        grant_id: uuid.UUID,
+        request: WorkspaceMcpServerGrantUpdate,
+    ) -> WorkspaceMcpServerAccess:
+        """Change the tools of one grant."""
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        repository = WorkspaceMcpServerGrantRepository(self.db)
+        grant = await repository.get_on_server(server.id, grant_id)
+        if grant is None:
+            raise WorkspaceMcpServerGrantNotFoundError(grant_id)
+        await repository.set_tools(grant, request.tools)
+        await self.db.commit()
+        return await self._access_of(resolved_workspace_id, server)
+
+    async def delete_grant(
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, grant_id: uuid.UUID
+    ) -> WorkspaceMcpServerAccess:
+        """Remove one grant: its key or user falls back to the next rule."""
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        repository = WorkspaceMcpServerGrantRepository(self.db)
+        grant = await repository.get_on_server(server.id, grant_id)
+        if grant is None:
+            raise WorkspaceMcpServerGrantNotFoundError(grant_id)
+        await repository.remove(grant)
+        await self.db.commit()
+        return await self._access_of(resolved_workspace_id, server)
+
+    async def check_access(
+        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, api_key_id: str, tool: str
+    ) -> WorkspaceMcpServerAccessCheck:
+        """Whether a key of the workspace may call ``tool`` on a server, and which rule decides.
+
+        Raises:
+            WorkspaceMcpServerKeyNotFoundError: the key is not of this workspace.
+        """
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        server = await self._get_or_404(resolved_workspace_id, server_id)
+        decided, grant_id, patterns = await self._decide_for_key(resolved_workspace_id, api_key_id, server)
+        if not server.enabled:
+            return WorkspaceMcpServerAccessCheck(allowed=False, decided_by="server", grant_id=None, tools=[])
+        if server.allowed_tools is not None and tool not in server.allowed_tools:
+            return WorkspaceMcpServerAccessCheck(
+                allowed=False, decided_by="server", grant_id=None, tools=list(server.allowed_tools)
+            )
+        return WorkspaceMcpServerAccessCheck(
+            allowed=is_mcp_tool_allowed(expand_mcp_tool_patterns(patterns, server.read_tools), tool),
+            decided_by=decided,
+            grant_id=grant_id,
+            tools=patterns,
+        )
+
+    async def _decide_for_key(
+        self, workspace_id: uuid.UUID, api_key_id: str, server: WorkspaceMcpServer
+    ) -> tuple[Literal["key", "user", "everyone"], uuid.UUID | None, list[str]]:
+        """Which rule decides a key's access to a server: its grant, its owner's, or ``everyone_tools``."""
+        found = await self._key_service().summaries_in_workspace(workspace_id, [api_key_id])
+        if not found:
+            raise WorkspaceMcpServerKeyNotFoundError(api_key_id)
+        return _decide(found[0], server, await WorkspaceMcpServerGrantRepository(self.db).for_server(server.id))
+
+    async def key_access(
+        self, *, user: User, workspace_id: uuid.UUID, api_key_id: str
+    ) -> list[WorkspaceMcpServerKeyAccess]:
+        """What one key of the workspace reaches on each of its stored servers, oldest server first.
+
+        Raises:
+            WorkspaceMcpServerKeyNotFoundError: the key is not of this workspace.
+        """
+        resolved_workspace_id = await self._require_management(user, workspace_id)
+        found = await self._key_service().summaries_in_workspace(resolved_workspace_id, [api_key_id])
+        if not found:
+            raise WorkspaceMcpServerKeyNotFoundError(api_key_id)
+        key = found[0]
+        servers = (
+            (
+                await self.db.execute(
+                    select(WorkspaceMcpServer)
+                    .where(WorkspaceMcpServer.workspace_id == resolved_workspace_id)
+                    .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_server: dict[uuid.UUID, list[WorkspaceMcpServerGrant]] = {}
+        for grant in await WorkspaceMcpServerGrantRepository(self.db).for_caller(
+            key.id, key.user_id, [server.id for server in servers]
+        ):
+            by_server.setdefault(grant.server_id, []).append(grant)
+        result: list[WorkspaceMcpServerKeyAccess] = []
+        for server in servers:
+            decided, grant_id, patterns = _decide(key, server, by_server.get(server.id, []))
+            result.append(
+                WorkspaceMcpServerKeyAccess(
+                    server_id=server.id,
+                    name=server.name,
+                    enabled=server.enabled,
+                    decided_by=decided,
+                    grant_id=grant_id,
+                    tools=patterns,
+                    allowed_tools=server.allowed_tools,
+                    read_tools=server.read_tools,
+                )
+            )
+        return result
+
     async def check_connection(
         self, *, user: User, workspace_id: uuid.UUID, request: WorkspaceMcpServerCheckRequest
     ) -> WorkspaceMcpServerHealth:
@@ -739,6 +1222,14 @@ class WorkspaceMcpServerService:
 
 __all__ = [
     "MAX_MCP_SERVERS_PER_WORKSPACE",
+    "MAX_GRANTS_PER_SERVER",
+    "McpServerSummary",
+    "WorkspaceMcpServerAccess",
+    "WorkspaceMcpServerAccessCheck",
+    "WorkspaceMcpServerGrantPublic",
+    "WorkspaceMcpServerGrantUpdate",
+    "WorkspaceMcpServerGrantsCreate",
+    "WorkspaceMcpServerKeyAccess",
     "WorkspaceMcpServerCheckRequest",
     "WorkspaceMcpServerCreate",
     "WorkspaceMcpServerHealth",
@@ -747,6 +1238,7 @@ __all__ = [
     "WorkspaceMcpServerUpdate",
     "WorkspaceMcpServers",
     "WorkspaceMcpServersPublic",
+    "list_reachable_mcp_servers",
     "resolve_workspace_mcp_server",
     "resolve_workspace_mcp_servers",
 ]

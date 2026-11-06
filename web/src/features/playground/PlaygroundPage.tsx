@@ -19,6 +19,7 @@ import { PlaygroundGateNotice } from "./PlaygroundGateNotice"
 import { PlaygroundHistory } from "./PlaygroundHistory"
 import { PlaygroundToolbar } from "./PlaygroundToolbar"
 import { PlaygroundWelcome } from "./PlaygroundWelcome"
+import { PromptCaptureToggle } from "./PromptCaptureToggle"
 import { CHAT_COLUMN } from "./playgroundLayout"
 
 export function PlaygroundPage() {
@@ -104,6 +105,14 @@ export function PlaygroundPage() {
               hasTranscript={hasTranscript}
               onToggleCompare={playground.toggleCompare}
               onNewChat={() => playground.setIsNewChatConfirmOpen(true)}
+              capture={
+                playground.canCapturePrompts ? (
+                  <PromptCaptureToggle
+                    isSelected={playground.capturePrompts}
+                    onChange={playground.setCapturePrompts}
+                  />
+                ) : null
+              }
               files={
                 playground.canAttachFiles ? (
                   <PlaygroundFiles
@@ -179,6 +188,7 @@ export function PlaygroundPage() {
             pinnedKeys={playground.pinnedKeys}
             onTogglePin={playground.togglePin}
             onRegenerate={playground.regenerate}
+            stopPanel={playground.stopPanel}
           />
           <div ref={follow.setEndMarker} aria-hidden className="h-0" />
           <div

@@ -111,6 +111,7 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.guardrail.profile": str,
     "otari.guardrail.mode": str,
     "otari.mcp.server": str,
+    "otari.mcp.server_id": str,
     "otari.mcp.tool_count": int,
     "otari.tool_loop.round": int,
     "otari.harness.version": str,

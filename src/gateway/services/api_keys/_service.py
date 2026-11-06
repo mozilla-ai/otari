@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import ApiKeyConfig, https_url_problem
@@ -34,6 +34,15 @@ from gateway.services.model_access import (
 from gateway.services.organizations import AccessLists, UserAccess
 
 
+class KeySummary(NamedTuple):
+    """A key as an access list shows it: never its secret."""
+
+    id: str
+    name: str | None
+    user_id: str | None
+    is_active: bool
+
+
 class ApiKeyService:
     """Answer questions about API keys and their workspaces, and manage their federation rules and access lists.
 
@@ -65,6 +74,19 @@ class ApiKeyService:
         """
         async with self._uow:
             return await self._keys.names_by_id(key_ids, workspace_ids=workspace_ids)
+
+    async def summaries_in_workspace(
+        self, workspace_id: uuid.UUID, key_ids: Collection[str] | None = None
+    ) -> list[KeySummary]:
+        """A workspace's keys, oldest first; only those of ``key_ids`` when given. A business step of its own."""
+        async with self._uow:
+            rows = await self._keys.summaries_in_workspace(workspace_id, key_ids)
+        return [KeySummary(*row) for row in rows]
+
+    async def owners_in_workspace(self, workspace_id: uuid.UUID, user_ids: Collection[str]) -> set[str]:
+        """Which of ``user_ids`` own a key in the workspace. A business step of its own."""
+        async with self._uow:
+            return await self._keys.owners_in_workspace(workspace_id, user_ids)
 
     async def keys_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name the keys that start a new end user on this budget when a request names none."""

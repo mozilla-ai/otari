@@ -275,11 +275,13 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import (
+    McpAccess,
     key_model_refusal,
     model_not_allowed_detail,
     organization_key_refusal,
     owned_endpoint_refusal,
     resolve_request_allowlist,
+    resolve_request_mcp_access,
     unresolvable_model_detail,
     unresolved_model_refusal,
 )
@@ -387,6 +389,7 @@ from gateway.services.tools import (
     decide_candidate_tools,
     declare_code_execution,
     declares_code_execution,
+    declares_provider_mcp,
     extract_web_tools,
     native_rendering,
     read_web_declarations,
@@ -1249,8 +1252,14 @@ class RequestContext:
         trace: RequestTrace | None = None,
         source_label: str | None = None,
         country_gate: CountryGate | None = None,
+        api_key: APIKey | None = None,
+        session: bool = False,
     ) -> None:
         self.config = config
+        # The key that authenticated the request; ``None`` for the master key and a session principal.
+        self.api_key = api_key
+        # Whether a dashboard session (the Playground) made the request, which MCP access binds as its user.
+        self.session = session
         # The request's trace while it is served; None where nothing records one.
         self.trace = trace
         # Sent to the client as ``Otari-Request-ID``.
@@ -3516,6 +3525,8 @@ async def resolve_request_context(
         country_gate=country_gate,
         trace=trace,
         source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
+        api_key=api_key,
+        session=session_principal is not None,
     )
 
 
@@ -4436,9 +4447,22 @@ async def _admit_mcp_servers(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, servers: WorkspaceMcpServers
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
+    provider_mcp = declares_provider_mcp(declared.tools)
     try:
+        access = (
+            await resolve_request_mcp_access(
+                ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
+            )
+            if declared.mcp_servers or declared.mcp_server_ids or provider_mcp
+            else McpAccess()
+        )
         return await admit_mcp_servers(
-            declared.mcp_servers, declared.mcp_server_ids, servers=servers, workspace_id=ctx.workspace_id
+            declared.mcp_servers,
+            declared.mcp_server_ids,
+            servers=servers,
+            workspace_id=ctx.workspace_id,
+            access=access,
+            provider_mcp=provider_mcp,
         )
     except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
         raise domain_error(adapter, exc) from exc
@@ -5519,6 +5543,17 @@ def _native_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext
     return {"native_tools": native_tools} if native_tools else {}
 
 
+def _declared_tool_names(tools: list[dict[str, Any]] | None) -> frozenset[str]:
+    """The names of the tools a request declares for its client to run, in any of the three formats."""
+    names: set[str] = set()
+    for tool in tools or []:
+        function = tool.get("function")
+        name = function.get("name") if isinstance(function, dict) else tool.get("name")
+        if isinstance(name, str):
+            names.add(name)
+    return frozenset(names)
+
+
 @dataclass(frozen=True)
 class _OpenedTools:
     """The tool backends one request opened, as the pool its tool loop drives."""
@@ -5541,7 +5576,12 @@ async def _open_tool_backends(
     mcp: MCPClientPool | None = None
     if tool_ctx.mcp_server_configs:
         mcp = await stack.enter_async_context(
-            MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace)
+            MCPClientPool(
+                tool_ctx.mcp_server_configs,
+                tally=tool_ctx.tally,
+                trace=tool_ctx.trace,
+                ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+            )
         )
         try:
             refuse_shadowed_builtin_tools(mcp, tool_ctx.reserved_tool_names)
