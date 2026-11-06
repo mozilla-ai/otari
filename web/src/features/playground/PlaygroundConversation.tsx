@@ -15,7 +15,7 @@ export function PlaygroundConversation({
   pinnedKeys,
   onTogglePin,
   onRegenerate,
-  stop,
+  stopPanel,
 }: {
   isComparing: boolean
   panelA: PanelState
@@ -29,7 +29,7 @@ export function PlaygroundConversation({
     panel: PanelState,
     setPanel: Dispatch<SetStateAction<PanelState>>,
   ) => void
-  stop: () => void
+  stopPanel: (setPanel: Dispatch<SetStateAction<PanelState>>) => void
 }) {
   if (!isComparing)
     return (
@@ -80,23 +80,26 @@ export function PlaygroundConversation({
                 // trace session. B is cleared as well when A takes its model,
                 // or its answers would sit under an unchosen picker and be
                 // sent to whatever is chosen next. A reply still streaming
-                // would land in the cleared column, so it is stopped first.
+                // would land in the cleared column, so that column's is stopped
+                // first; the other column's keeps streaming.
                 onChange={(key) => {
                   if (key === panel.model) return
-                  stop()
+                  stopPanel(setPanel)
                   setPanel((prev) => ({
                     ...prev,
                     model: key,
                     turns: [],
                     sessionId: undefined,
                   }))
-                  if (name === "A" && key === panelB.model)
+                  if (name === "A" && key === panelB.model) {
+                    stopPanel(setPanelB)
                     setPanelB((prev) => ({
                       ...prev,
                       model: "",
                       turns: [],
                       sessionId: undefined,
                     }))
+                  }
                 }}
                 className="min-w-0 flex-1"
               />

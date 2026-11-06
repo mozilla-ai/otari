@@ -658,7 +658,7 @@ describe("sending a question", () => {
     expect(after["gemini-2.5-pro"]).not.toBe(before["claude-sonnet-4"])
   })
 
-  it("stops a compared reply in flight before changing a column's model", async () => {
+  it("stops only the changed column's reply in flight when its model changes", async () => {
     mockApi({
       catalog: catalogResponse([
         ...CATALOG.models,
@@ -693,12 +693,15 @@ describe("sending a question", () => {
     await stream.push(delta("late"))
     await stream.close()
 
-    expect(screen.queryByText(/late/)).not.toBeInTheDocument()
+    const columnB = screen.getByRole("region", { name: "Model B response" })
+    expect(within(columnB).queryByText(/late/)).not.toBeInTheDocument()
+    expect(within(columnB).queryByText(/mid-flight/)).not.toBeInTheDocument()
+    // Column A's stream is still open, so the frame after the change reaches it.
     expect(
-      within(
-        screen.getByRole("region", { name: "Model B response" }),
-      ).queryByText(/mid-flight/),
-    ).not.toBeInTheDocument()
+      await within(
+        screen.getByRole("region", { name: "Model A response" }),
+      ).findByText(/late/),
+    ).toBeInTheDocument()
   })
 
   it("offers no prompt capture where the deployment keeps no content", async () => {

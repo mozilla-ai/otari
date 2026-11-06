@@ -192,7 +192,7 @@ export function usePlayground() {
     string | undefined
   >(undefined)
 
-  const { streamReply, stop } = usePlaygroundStream({
+  const { streamReply, stop, stopPanel } = usePlaygroundStream({
     workspaceId: workspaceId ?? "",
     tools: toolSelection.selection,
     capturePrompts: canCapturePrompts && capturePrompts,
@@ -707,6 +707,7 @@ export function usePlayground() {
     submit,
     handleComposerKeyDown,
     stop,
+    stopPanel,
 
     // Panels
     panelA,

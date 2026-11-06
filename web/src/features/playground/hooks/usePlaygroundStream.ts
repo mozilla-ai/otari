@@ -36,6 +36,8 @@ export interface PlaygroundStream {
   ) => Promise<void>
   /** Abort every reply in flight. Safe to call when none is. */
   stop: () => void
+  /** Abort only the replies streaming into `setPanel`. */
+  stopPanel: (setPanel: SetPanel) => void
 }
 
 /**
@@ -54,11 +56,11 @@ export interface PlaygroundStream {
  * asking a second time could only disagree with the row that was actually
  * billed.
  *
- * **One controller per call, held in a set, and not one shared controller.**
+ * **One controller per call, keyed to its panel, and not one shared controller.**
  * Comparing sends the same question to both panels at once, so a single
  * controller would have B's stream abort A's the moment it started: the second
- * column would answer and the first would stop mid-sentence. The set is what
- * Stop aborts, all of it, and what unmount aborts, because leaving a provider
+ * column would answer and the first would stop mid-sentence. Stop aborts all of
+ * them, a column's model change only that column's, and unmount all of them, because leaving a provider
  * call streaming into a setter whose component is gone is a warning at best and
  * a leaked connection at worst.
  *
@@ -73,12 +75,12 @@ export function usePlaygroundStream(params: {
   capturePrompts: boolean
 }): PlaygroundStream {
   const { workspaceId, tools, capturePrompts } = params
-  const inFlightRef = useRef(new Set<AbortController>())
+  const inFlightRef = useRef(new Map<AbortController, SetPanel>())
 
   useEffect(() => {
     const inFlight = inFlightRef.current
     return () => {
-      inFlight.forEach((controller) => {
+      inFlight.forEach((_panel, controller) => {
         controller.abort()
       })
       inFlight.clear()
@@ -86,10 +88,18 @@ export function usePlaygroundStream(params: {
   }, [])
 
   const stop = useCallback(() => {
-    inFlightRef.current.forEach((controller) => {
+    inFlightRef.current.forEach((_panel, controller) => {
       controller.abort()
     })
     inFlightRef.current.clear()
+  }, [])
+
+  const stopPanel = useCallback((setPanel: SetPanel) => {
+    inFlightRef.current.forEach((panel, controller) => {
+      if (panel !== setPanel) return
+      controller.abort()
+      inFlightRef.current.delete(controller)
+    })
   }, [])
 
   const streamReply = useCallback(
@@ -100,7 +110,7 @@ export function usePlaygroundStream(params: {
       sessionId?: string,
     ) => {
       const controller = new AbortController()
-      inFlightRef.current.add(controller)
+      inFlightRef.current.set(controller, setPanel)
       const conversationId = sessionId ?? `playground-${crypto.randomUUID()}`
 
       setPanel((prev) => ({
@@ -192,5 +202,5 @@ export function usePlaygroundStream(params: {
     [workspaceId, tools, capturePrompts],
   )
 
-  return { streamReply, stop }
+  return { streamReply, stop, stopPanel }
 }

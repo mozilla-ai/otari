@@ -188,7 +188,7 @@ export function PlaygroundPage() {
             pinnedKeys={playground.pinnedKeys}
             onTogglePin={playground.togglePin}
             onRegenerate={playground.regenerate}
-            stop={playground.stop}
+            stopPanel={playground.stopPanel}
           />
           <div ref={follow.setEndMarker} aria-hidden className="h-0" />
           <div
