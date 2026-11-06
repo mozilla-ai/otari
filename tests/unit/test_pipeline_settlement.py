@@ -435,6 +435,32 @@ async def test_stream_carries_priced_cost_on_terminal_usage(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
+async def test_stream_carries_cost_on_a_usage_chunk_with_an_empty_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """any-llm's Bedrock adapter reports usage after the finish chunk, on a choice that has only a
+    role and no finish reason. That chunk is the stream's usage report, so the cost rides it (otari#2959)."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+        yield ChatCompletionChunk(
+            id="c1",
+            choices=[ChunkChoice(delta=ChoiceDelta(role="assistant"), finish_reason=None, index=0)],
+            created=0,
+            model="m",
+            object="chat.completion.chunk",
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+    frames = await _drain(_build(stream(), GatewayConfig()))
+
+    usage = _usage_payload(frames)
+    assert usage["cost_usd"] == "0.250000"
+    assert usage["pricing_source"] == "deployment"
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
 async def test_stream_omits_cost_when_the_model_is_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement(pricing_source=None)
     settlement.install(monkeypatch)

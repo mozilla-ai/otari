@@ -981,20 +981,42 @@ def _usage_only_chunk(usage: CompletionUsage) -> ChatCompletionChunk:
     return ChatCompletionChunk(id="x", choices=[], created=0, model="fake", object="chat.completion.chunk", usage=usage)
 
 
-def _round_end(finish: _FinishReason, usage: CompletionUsage, *, trailing: bool) -> list[ChatCompletionChunk]:
+def _usage_on_empty_choice_chunk(usage: CompletionUsage) -> ChatCompletionChunk:
+    """any-llm's Bedrock adapter: usage after the finish chunk, on a choice with only a role and no finish."""
+    return ChatCompletionChunk(
+        id="x",
+        choices=[ChunkChoice(delta=ChoiceDelta(role="assistant"), finish_reason=None, index=0)],
+        created=0,
+        model="fake",
+        object="chat.completion.chunk",
+        usage=usage,
+    )
+
+
+def _round_end(finish: _FinishReason, usage: CompletionUsage, *, trailing: bool | str) -> list[ChatCompletionChunk]:
+    """The chunks that end one round: finish and usage together, or usage on a trailing chunk of the given shape."""
+    if trailing == "empty-choice":
+        return [_chunk(finish=finish), _usage_on_empty_choice_chunk(usage)]
     if trailing:
         return [_chunk(finish=finish), _usage_only_chunk(usage)]
     return [_chunk(finish=finish, usage=usage)]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("trailing", [True, False], ids=["usage-only-chunk", "usage-on-finish-chunk"])
-async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.MonkeyPatch, trailing: bool) -> None:
+@pytest.mark.parametrize(
+    "trailing",
+    [True, False, "empty-choice"],
+    ids=["usage-only-chunk", "usage-on-finish-chunk", "usage-on-empty-choice-chunk"],
+)
+async def test_stream_loop_accumulates_usage_across_rounds(
+    monkeypatch: pytest.MonkeyPatch, trailing: bool | str
+) -> None:
     """Each round reports its own usage, but the client sees one report for the loop:
     the last chunk, carrying the sum across rounds, so a multi-round tool call is not
     billed for the last round alone (otari#1772). OpenAI and any-llm's Anthropic
     adapter report usage on a trailing chunk with no choices; some providers put it
-    on the finish chunk itself."""
+    on the finish chunk itself; any-llm's Bedrock adapter puts it on a trailing chunk
+    whose only choice is empty (otari#2958)."""
     round_one = CompletionUsage(
         prompt_tokens=100,
         completion_tokens=20,
