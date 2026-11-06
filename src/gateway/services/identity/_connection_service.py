@@ -38,7 +38,7 @@ from gateway.services.identity._connection_clients import client_for, pending_fl
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
 from gateway.services.identity._enforcement import (
     has_link_to_organization,
-    sso_enforcement_blocks_any_membership,
+    sso_enforcement_refuses_every_membership,
 )
 from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.organizations import ClaimedDomain, ClaimedDomains
@@ -524,10 +524,10 @@ class OIDCConnectionService:
             )
         return sso_blocks_membership(organization=organization, user=user, is_linked=linked)
 
-    async def blocks_any_membership(self, *, user: User) -> bool:
+    async def refuses_every_membership(self, *, user: User) -> bool:
         """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
         async with self._uow:
-            return await sso_enforcement_blocks_any_membership(
+            return await sso_enforcement_refuses_every_membership(
                 user, organizations=self._organizations, connections=self._connections, links=self._links
             )
 

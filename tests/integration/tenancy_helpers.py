@@ -70,7 +70,7 @@ async def no_sso_enforcement(_organization: Organization) -> bool:
 class _NoSsoEnforcement:
     """An ``SsoEnforcement`` that refuses no membership, for a test that is not about it."""
 
-    async def blocks_any_membership(self, *, user: User) -> bool:
+    async def refuses_every_membership(self, *, user: User) -> bool:
         return False
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
