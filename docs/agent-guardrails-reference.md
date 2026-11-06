@@ -470,7 +470,7 @@ A deterministic gate written `advisory` keeps `systemMessage` alone: its author 
 - Re-running `setup` updates both entries in place and leaves every other hook and permission untouched.
 - The path is absolute because the hook subprocess does not inherit an activated shell's `PATH`. A standalone install's stable link (Homebrew's `/opt/homebrew/bin/otari`) survives upgrades. A per-project venv records that venv's own `otari`, and a reinstalled or relocated venv leaves the old entry unrecognized rather than updated.
 - `.claude/settings.local.json` is personal and is best left gitignored.
-- The same entries in `~/.claude/settings.json` run the hook in every repository, which is how gates in `~/.otari/` apply everywhere. `setup` does not write that file. A repository that also registers the hook can then run it twice for each event.
+- The same entries in Claude Code's user settings file run the hook in every repository, which is how gates in `~/.otari/` apply everywhere. That file is `~/.claude/settings.json`, or `settings.json` in the directory `CLAUDE_CONFIG_DIR` names where that variable is set. `setup` does not write that file. A repository that also registers the hook can then run it twice for each event.
 
 ## Registering it for Codex
 
