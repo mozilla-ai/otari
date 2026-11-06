@@ -47,7 +47,7 @@ from gateway.services.secret_box import encrypt_secret, secret_box_configured
 from gateway.services.tenancy import OrganizationService, sso_blocks_membership
 
 # The preflight count is exact; the member list is a sample, so a large organization's
-# response stays small enough for the dashboard to render in one page.
+# response stays bounded.
 _PREFLIGHT_SAMPLE_LIMIT = 50
 
 
