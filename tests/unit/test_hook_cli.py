@@ -3218,6 +3218,63 @@ def test_discovery_reads_a_user_file_the_repo_links_to_once_as_the_users(tmp_pat
     assert found == [(isolated_home / ".otari/guardrails/mine.yml", hook_cli.GuardrailOrigin.USER)]
 
 
+def test_discovery_with_repo_only_leaves_out_the_user_level(tmp_path: Path, isolated_home: Path) -> None:
+    """`--repo-only` drops the user's own files, so a person can turn their rules off in one repo."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "r")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "u")
+
+    found = [(file.path, file.origin) for file in hook_cli._hook_guardrail_files(tmp_path, repo_only=True)]
+    assert found == [(tmp_path / ".otari/guardrails.yml", hook_cli.GuardrailOrigin.REPO)]
+
+
+def test_discovery_with_repo_only_keeps_a_file_the_repo_links_to_out(tmp_path: Path, isolated_home: Path) -> None:
+    """A repo link to a file in `~/.otari/` is the user's, so `--repo-only` drops it rather than keeping it."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails/mine.yml", "personal")
+    linked = tmp_path / ".otari/guardrails/personal/mine.yml"
+    linked.parent.mkdir(parents=True)
+    linked.symlink_to(isolated_home / ".otari/guardrails/mine.yml")
+
+    assert hook_cli._hook_guardrail_files(tmp_path, repo_only=True) == []
+
+
+def test_repo_only_leaves_a_user_level_gate_unenforced(tmp_path: Path, isolated_home: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+
+    result = CliRunner().invoke(
+        hook_cli.hook, ["--repo-only"], input=json.dumps(_edit_payload(tmp_path, "personal.txt"))
+    )
+    assert result.exit_code == 0, result.output
+    assert "personal is forbidden" not in result.output
+
+
+def test_repo_only_still_enforces_the_repos_own_gates(tmp_path: Path, isolated_home: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+
+    result = CliRunner().invoke(hook_cli.hook, ["--repo-only"], input=json.dumps(_edit_payload(tmp_path, "shared.txt")))
+    assert result.exit_code == 2, result.output
+    assert "shared is forbidden" in result.output
+
+
+def test_repo_only_with_both_origins_still_leaves_the_user_level_gate_unenforced(
+    tmp_path: Path, isolated_home: Path
+) -> None:
+    """A repo guardrail existing too must not bring the user's own gates back in."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+
+    result = CliRunner().invoke(
+        hook_cli.hook, ["--repo-only"], input=json.dumps(_edit_payload(tmp_path, "personal.txt"))
+    )
+    assert result.exit_code == 0, result.output
+    assert "personal is forbidden" not in result.output
+
+
 @pytest.mark.parametrize("error", [RuntimeError("no home"), PermissionError("unreadable home")])
 def test_a_home_directory_that_cannot_be_found_leaves_the_repo_gates_on(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: Exception
