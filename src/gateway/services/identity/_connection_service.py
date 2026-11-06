@@ -9,6 +9,7 @@ from apron_auth import BrowserBoundAuthorization, StoredStateClient
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionConflictError,
+    OIDCConnectionEnforcedError,
     OIDCConnectionNotFoundError,
     OIDCConnectionSecretRequiredError,
     OIDCConnectionUnprovenError,
@@ -215,6 +216,8 @@ class OIDCConnectionService:
 
         Raises:
             OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+            OIDCConnectionEnforcedError: The organization still requires sign-in through this
+                connection.
         """
         organization = await self._managed_organization(user)
 
@@ -222,6 +225,8 @@ class OIDCConnectionService:
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
                 raise OIDCConnectionNotFoundError
+            if organization.sso_required:
+                raise OIDCConnectionEnforcedError
             await self._connections.delete(connection)
 
     async def metadata_for_sign_in(self, connection: OIDCConnection) -> DiscoveredProvider:
@@ -406,10 +411,13 @@ class OIDCConnectionService:
     ) -> None:
         """Set whether the caller's organization requires sign-in through its own connection. Owners and admins only.
 
-        Setting it to ``True`` revokes the live session of every active member it currently refuses.
+        Setting it to ``True`` additionally revokes the live session of every active member it
+        currently refuses. Turning it off has no precondition, so an organization can always
+        undo it, even with no connection configured.
 
         Raises:
-            OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+            OIDCConnectionNotFoundError: ``required`` is set, and the organization has not
+                configured a connection yet.
             OIDCConnectionUnprovenError: ``required`` is set before anybody has signed in through
                 the connection.
             SsoBreakGlassRequiredError: ``required`` is set without naming one of the
@@ -418,20 +426,11 @@ class OIDCConnectionService:
         organization = await self._managed_organization(user)
 
         async with self._uow:
-            connection = await self._connections.get_for_organization(organization.id)
-            if connection is None:
-                raise OIDCConnectionNotFoundError
+            connection: OIDCConnection | None = None
             if required:
-                if connection.first_sign_in_at is None:
-                    raise OIDCConnectionUnprovenError
-                if break_glass_user_id is None and not break_glass_waived:
-                    raise SsoBreakGlassRequiredError
-                if break_glass_user_id is not None:
-                    owner = await self._organizations.members.get_active_by_organization_and_user(
-                        organization.id, break_glass_user_id
-                    )
-                    if owner is None or owner.role != "owner":
-                        raise SsoBreakGlassRequiredError
+                connection = await self._require_connection_ready_for_enforcement(
+                    organization, break_glass_user_id=break_glass_user_id, break_glass_waived=break_glass_waived
+                )
             await self._organizations.organizations.update_organization(
                 organization,
                 {
@@ -440,8 +439,34 @@ class OIDCConnectionService:
                     "sso_break_glass_waived": break_glass_waived,
                 },
             )
-            if required:
+            if connection is not None:
                 await self._revoke_blocked_sessions(organization, connection)
+
+    async def _require_connection_ready_for_enforcement(
+        self, organization: Organization, *, break_glass_user_id: uuid.UUID | None, break_glass_waived: bool
+    ) -> OIDCConnection:
+        """Return this organization's connection, proven fit to require sign-in through.
+
+        Raises:
+            OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+            OIDCConnectionUnprovenError: Nobody has signed in through the connection yet.
+            SsoBreakGlassRequiredError: No owner is named to keep a non-SSO route and none is
+                waived, or the named account is not one of the organization's own owners.
+        """
+        connection = await self._connections.get_for_organization(organization.id)
+        if connection is None:
+            raise OIDCConnectionNotFoundError
+        if connection.first_sign_in_at is None:
+            raise OIDCConnectionUnprovenError
+        if break_glass_user_id is None and not break_glass_waived:
+            raise SsoBreakGlassRequiredError
+        if break_glass_user_id is not None:
+            owner = await self._organizations.members.get_active_by_organization_and_user(
+                organization.id, break_glass_user_id
+            )
+            if owner is None or owner.role != "owner":
+                raise SsoBreakGlassRequiredError
+        return connection
 
     async def _revoke_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
         """End the live session of every active member this organization's enforcement now refuses."""

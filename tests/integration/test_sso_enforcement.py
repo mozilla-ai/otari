@@ -17,6 +17,7 @@ from gateway.adapters.identity_provider_adapter import DeploymentIdentityProvide
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    OIDCConnectionEnforcedError,
     OIDCConnectionNotFoundError,
     OIDCConnectionUnprovenError,
     PasswordLinkUnavailableError,
@@ -376,6 +377,28 @@ async def test_disabling_enforcement_needs_no_precondition(async_db: AsyncSessio
     assert (await _reloaded(async_db, organization)).sso_required is False
 
 
+async def test_disabling_enforcement_succeeds_once_its_connection_is_gone(async_db: AsyncSession) -> None:
+    """An organization must always have a way to turn enforcement off, even with no connection left."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+    )
+    uow = UnitOfWork(async_db)
+    async with uow:
+        await IdentityRepositories.on(uow).connections.delete(connection)
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=False, break_glass_user_id=None, break_glass_waived=False
+    )
+
+    assert (await _reloaded(async_db, organization)).sso_required is False
+
+
 @pytest.mark.parametrize("role", ["member", "viewer"])
 async def test_enforcement_cannot_be_set_by_a_caller_who_cannot_manage_the_organization(
     async_db: AsyncSession, role: str
@@ -389,6 +412,75 @@ async def test_enforcement_cannot_be_set_by_a_caller_who_cannot_manage_the_organ
             user=caller, required=True, break_glass_user_id=None, break_glass_waived=True
         )
     assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+# =============================================================================
+# Deleting the connection
+# =============================================================================
+
+
+async def test_deleting_an_enforced_connection_is_refused(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+    )
+
+    with pytest.raises(OIDCConnectionEnforcedError):
+        await _connection_service(async_db).delete_for_user(user=owner)
+
+    await async_db.refresh(owner)
+    stored = await _connection_service(async_db).get_for_user(user=owner)
+    assert stored is not None
+    assert stored.id == connection.id
+    assert (await _reloaded(async_db, organization)).sso_required is True
+
+
+async def test_disabling_enforcement_recovers_the_lockout_a_deleted_connection_would_leave(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    """Enforcement blocks every member once the connection that admitted them is deleted.
+
+    Turning it off must still succeed and still reach them, with no connection required to do it.
+    """
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    other = await create_organization(async_db, slug="other")
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=other.id, user_id=member.id, role="member"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+    )
+    uow = UnitOfWork(async_db)
+    async with uow:
+        await IdentityRepositories.on(uow).connections.delete(connection)
+    member.active_organization_id = other.id
+    async_db.add(member)
+    token = await _dashboard_session(async_db, member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    blocked = client.post(f"{API_ROOT}/organizations/me/switch", json={"organization_id": str(organization.id)})
+    assert blocked.status_code == 404, blocked.text
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=False, break_glass_user_id=None, break_glass_waived=False
+    )
+
+    recovered = client.post(f"{API_ROOT}/organizations/me/switch", json={"organization_id": str(organization.id)})
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["organization"]["id"] == str(organization.id)
 
 
 # =============================================================================

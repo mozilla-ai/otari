@@ -42884,7 +42884,7 @@
     },
     "/api/v1/organizations/me/sso": {
       "delete": {
-        "description": "Remove the caller's organization's own sign-in connection. Owners and admins only.\n\nRefused with 404 when the organization has not saved a connection yet.",
+        "description": "Remove the caller's organization's own sign-in connection. Owners and admins only.\n\nRefused with 404 when the organization has not saved a connection yet, and with 400 while\nthe organization still requires sign-in through it: turn that requirement off first.",
         "operationId": "organization-sso-delete_organization_sso",
         "responses": {
           "204": {
@@ -42983,7 +42983,7 @@
     },
     "/api/v1/organizations/me/sso/enforcement": {
       "put": {
-        "description": "Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.\n\nRefused with 404 when the organization has not configured a connection yet. Requiring sign-in is refused\nwith 400 before anybody has signed in through the connection, when it names no owner who keeps another\nway in and waives none, or when the named account is not one of the organization's own owners. Turning\nenforcement off has none of these preconditions.",
+        "description": "Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.\n\nRequiring sign-in is refused with 404 when the organization has not configured a connection yet,\nand with 400 before anybody has signed in through the connection, when it names no owner who keeps\nanother way in and waives none, or when the named account is not one of the organization's own\nowners. Turning enforcement off has none of these preconditions and always succeeds.",
         "operationId": "organization-sso-put_organization_sso_enforcement",
         "requestBody": {
           "content": {
