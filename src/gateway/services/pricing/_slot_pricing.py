@@ -23,7 +23,7 @@ from gateway.core.metered_pricing import (
 )
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing._charge import UsageCharge
-from gateway.types.models_dev import parse_pricing
+from gateway.types.models_dev import ModelsDevPricing, parse_pricing
 from gateway.types.price_unit import PRICE_UNITS, PriceUnit
 
 # What an endpoint measured, in each unit it can measure.
@@ -42,20 +42,26 @@ UNIT_METER: dict[PriceUnit, str] = {
 }
 
 
-def slot_rate(rate: ModelPricing | None, modality: str, direction: Direction) -> UnitRate | None:
-    """The price ``rate``'s block gives ``modality`` in ``direction``, or ``None`` when it gives none."""
+def _block(rate: ModelPricing | None) -> ModelsDevPricing | None:
+    """``rate``'s ``rates`` block, parsed, or ``None`` when it has none."""
     if rate is None or not rate.rates:
         return None
     pricing, _ = parse_pricing(rate.rates, units=PRICE_UNITS, path="rates")
+    return pricing
+
+
+def slot_rate(rate: ModelPricing | None, modality: str, direction: Direction) -> UnitRate | None:
+    """The price ``rate``'s block gives ``modality`` in ``direction``, or ``None`` when it gives none."""
+    if (pricing := _block(rate)) is None:
+        return None
     price = slot_price(pricing, modality, direction)
     return None if price is None else unit_rate(price)
 
 
 def search_rate(rate: ModelPricing | None) -> UnitRate | None:
     """The price ``rate``'s block gives a web search, USD per thousand searches, or ``None`` when it gives none."""
-    if rate is None or not rate.rates:
+    if (pricing := _block(rate)) is None:
         return None
-    pricing, _ = parse_pricing(rate.rates, units=PRICE_UNITS, path="rates")
     return web_search_rate(pricing)
 
 
