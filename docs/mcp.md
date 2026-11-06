@@ -206,12 +206,18 @@ read-only.
 - **A server's own `allowed_tools` is a ceiling.** It decides which of the server's
   tools Otari exposes at all, beneath every rule and the default policy. A disabled
   server stays unreachable.
-- **A server that denies a key does not exist for it.** The completion
-  endpoints answer a `mcp_server_ids` entry naming one as they answer an unknown id
-  (`404`), `GET /api/v1/mcp/servers` leaves it out, and the caller-orchestrated
-  discovery and execution routes answer `404 mcp_server_not_found`. A tool outside
-  the matching rule is not offered to the model and, on `POST /api/v1/mcp/execute`,
-  is refused with `403 mcp_tool_not_allowed`, the code the server's own list uses.
+- **A key the access list denies cannot tell the server exists.** Every route
+  answers it as it would an unknown id: `GET /api/v1/mcp/servers` leaves the server
+  out, a completion naming it in `mcp_server_ids` gets a `404`, and the
+  caller-orchestrated discovery and execution routes answer
+  `404 mcp_server_not_found`. A `403` would confirm the server is there, so a
+  restricted key could map a workspace's servers by probing ids. To see why a key
+  was turned away, a manager asks `GET .../access/check` (below), or reads the
+  blocked call in the [agent traces](traces.md) when it came through
+  [execution](#execution).
+- **A key that reaches a server but not one of its tools is told so.** The tool is
+  not offered to the model and, on `POST /api/v1/mcp/execute`, is refused with
+  `403 mcp_tool_not_allowed`, the code the server's own list uses.
 - **In a completion, the model is told what it may not use.** Where the matching
   rule leaves out some of a server's tools, the server's line in the system message
   names the tools the caller holds and the ones it does not (names only, no
