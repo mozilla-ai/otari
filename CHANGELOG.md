@@ -4,6 +4,49 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.40.0](https://github.com/mozilla-ai/otari/releases/tag/v0.40.0) - 2026-11-06
+
+
+
+### Bug Fixes
+
+- **web:** Open the public catalog filtered on the list a link names in [#2923](https://github.com/mozilla-ai/otari/pull/2923) by [@jigjigjig](https://github.com/jigjigjig) ([`bba566a`](https://github.com/mozilla-ai/otari/commit/bba566a0c4f90137fee735721d32f733fed71945))
+- **routing:** Stop optional params from failing every policy candidate in [#2914](https://github.com/mozilla-ai/otari/pull/2914) by [@daavoo](https://github.com/daavoo) ([`063083f`](https://github.com/mozilla-ai/otari/commit/063083ff913de512f33e58b5bf203149a4b3b771))
+- **web:** Save a retried budget's edits and refuse rounded counts in [#2927](https://github.com/mozilla-ai/otari/pull/2927) by [@daavoo](https://github.com/daavoo) ([`f62c64e`](https://github.com/mozilla-ai/otari/commit/f62c64ebf1bd69eedca1fcb1c13ede1e8a31e3a5))
+- **providers:** Address review on key request prefixes in [#2934](https://github.com/mozilla-ai/otari/pull/2934) by [@daavoo](https://github.com/daavoo) ([`56125e2`](https://github.com/mozilla-ai/otari/commit/56125e20c7fc1aae6c7023a8e311091e61a3c61b))
+- **key:** Address review on the key budget read by [@daavoo](https://github.com/daavoo) ([`b4d4857`](https://github.com/mozilla-ai/otari/commit/b4d4857296823d384bae86ad8aab4500e3cc64e0))
+- **search:** Drop the unused SearXNG client and document the adapter in [#2943](https://github.com/mozilla-ai/otari/pull/2943) by [@aittalam](https://github.com/aittalam) ([`eca744c`](https://github.com/mozilla-ai/otari/commit/eca744ccf17f12679e3b10dc7fd5715d8dfbd5c8))
+- **guardrails:** Keep a guardrails service's answer out of the gateway log in [#2906](https://github.com/mozilla-ai/otari/pull/2906) by [@hitakshiA](https://github.com/hitakshiA) ([`08e5a35`](https://github.com/mozilla-ai/otari/commit/08e5a35c48c01fe9e16748143f3ed3d434e968f6))
+- **web:** Send the auth Help link to the configured documentation by [@jigjigjig](https://github.com/jigjigjig) ([`07d707d`](https://github.com/mozilla-ai/otari/commit/07d707d95447a5d9155b1d0a3a2126db93c4ccee))
+- **web:** Share the welcome guide link between Help and the onboarding quickstart by [@jigjigjig](https://github.com/jigjigjig) ([`d135417`](https://github.com/mozilla-ai/otari/commit/d1354173413ac5a1072e5af4d6189c6ef7bddab9))
+- **otlp:** Price imported prompt cache once and keep each OTel trace in one priced session in [#2866](https://github.com/mozilla-ai/otari/pull/2866) by [@agpituk](https://github.com/agpituk) ([`bc43068`](https://github.com/mozilla-ai/otari/commit/bc43068f7a06470f65a812b8f0d1fd9a335b87ec))
+
+
+### Features
+
+- **pricing:** Price a pass-through report at its rate's slot by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`8e44bd0`](https://github.com/mozilla-ai/otari/commit/8e44bd0e7ac4aa079159eb6d2c3907c41fdaa1e4))
+- **pricing:** Price a catalog model that has no text price by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`ed11706`](https://github.com/mozilla-ai/otari/commit/ed11706d273de63b6a24e45304296b322424e629))
+- **api:** Measure what each pass-through endpoint bills by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`ea070e2`](https://github.com/mozilla-ai/otari/commit/ea070e27283ecf8d33536ea7f5a6ac776cc6898c))
+- **pricing:** Price a provider-run search at the model's own rate by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`997bb95`](https://github.com/mozilla-ai/otari/commit/997bb95001f8bd4ec813629ce72026869b6b78bd))
+- **web:** Set a budget's token and request limits from the dashboard by [@daavoo](https://github.com/daavoo) ([`0f6ec30`](https://github.com/mozilla-ai/otari/commit/0f6ec3061afec1af231c8676aeb0e04ed6b9da5d))
+- **BREAKING:** **providers:** Name an organization key with its own endpoint by a request prefix by [@daavoo](https://github.com/daavoo) ([`f7fa290`](https://github.com/mozilla-ai/otari/commit/f7fa2906c4e3eee716e5e45e77b0eba13ffbce15))
+- **key:** Let an API key read its own budget and usage by [@daavoo](https://github.com/daavoo) ([`21cffcc`](https://github.com/mozilla-ai/otari/commit/21cffccc03935ec298fb3448c4cdaa3dc50fa621))
+- **any-search:** Add the SearXNG adapter in [#2939](https://github.com/mozilla-ai/otari/pull/2939) by [@aittalam](https://github.com/aittalam) ([`16782b1`](https://github.com/mozilla-ai/otari/commit/16782b1f9dcf93fd2c16e6119cd07c7a8afb244f))
+- **any-search:** Add the Synthetic adapter in [#2933](https://github.com/mozilla-ai/otari/pull/2933) by [@daavoo](https://github.com/daavoo) ([`dde0ae1`](https://github.com/mozilla-ai/otari/commit/dde0ae110fd194dfcfba0c263cb2c548bc92268f))
+- **tools:** Run every SearXNG search on any-search's SearXNG adapter in [#2940](https://github.com/mozilla-ai/otari/pull/2940) by [@aittalam](https://github.com/aittalam) ([`9788e94`](https://github.com/mozilla-ai/otari/commit/9788e9457b3f1c9c5d8700a018b74ff8044c4a65))
+- **tools:** Deprecate web_search_url and web_search_engines in [#2945](https://github.com/mozilla-ai/otari/pull/2945) by [@aittalam](https://github.com/aittalam) ([`6d39709`](https://github.com/mozilla-ai/otari/commit/6d39709590f70c27ab3273a6b1f9b2214c635662))
+- **tools:** Warn at startup about what removing the SearXNG settings does in [#2947](https://github.com/mozilla-ai/otari/pull/2947) by [@aittalam](https://github.com/aittalam) ([`6411148`](https://github.com/mozilla-ai/otari/commit/6411148cfd202199e58b64009b6a522b7f1359ef))
+- **hook:** Let a person turn their own guardrails off in one repository in [#2925](https://github.com/mozilla-ai/otari/pull/2925) by [@peteski22](https://github.com/peteski22) ([`e2eebfa`](https://github.com/mozilla-ai/otari/commit/e2eebfa0243e6f184a751cc793f5c7f030baeab2))
+- **BREAKING:** **audio:** Refuse unpriced speech and return its cost on headers in [#2932](https://github.com/mozilla-ai/otari/pull/2932) by [@KevinGallaccio](https://github.com/KevinGallaccio) ([`fe9f2fc`](https://github.com/mozilla-ai/otari/commit/fe9f2fca35b6df203a53460f7ee2a967044ff51b))
+- **BREAKING:** **mcp:** Give stored MCP servers access rules for keys and users, with a read-tools preset in [#2897](https://github.com/mozilla-ai/otari/pull/2897) by [@agpituk](https://github.com/agpituk) ([`e9a72e7`](https://github.com/mozilla-ai/otari/commit/e9a72e7c8e7bb1a9bfe79c82cb0643f098488954))
+
+
+
+### New Contributors
+
+- [@hitakshiA](https://github.com/hitakshiA) made their first contribution in [#2906](https://github.com/mozilla-ai/otari/pull/2906)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.39.0...v0.40.0
 ## [0.39.0](https://github.com/mozilla-ai/otari/releases/tag/v0.39.0) - 2026-11-05
 
 
