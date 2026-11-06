@@ -46,6 +46,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.inference import VideoJobRecord
 from gateway.models.pricing import ModelPricing
+from gateway.ports.billing_port import NO_TOOLS
 from gateway.schemas.inference import (
     VideoError,
     VideoGenerationRequest,
@@ -53,7 +54,7 @@ from gateway.schemas.inference import (
     VideoJobResponse,
     VideoJobSummary,
 )
-from gateway.services.inference import VIDEO_BILLING, DeploymentCharge, VideoJobService
+from gateway.services.inference import VIDEO_BILLING, DeploymentCharge, VideoJobService, billed_model
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing import estimate_video_cost, video_rate
 from gateway.services.provider_kwargs import ResolvedProvider
@@ -228,6 +229,7 @@ async def _settle(
         async def charge_deployment(cost: Decimal | None) -> None:
             await deployment_charge.settle(
                 cost,
+                tools=NO_TOOLS,
                 model=record.model,
                 description=f"{record.provider}:{record.model}",
                 expects_cost=job.seconds is not None or record.seconds is not None,
@@ -307,6 +309,7 @@ async def _retrieve(
                 api_key_id=record.api_key_id,
                 actor_user_id=None,
                 request_id=None,
+                billed=billed_model(record.provider, record.model),
             )
         await _settle(
             record,

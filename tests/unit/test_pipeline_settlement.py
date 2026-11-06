@@ -2578,6 +2578,7 @@ def _deployment_charge(recorder: _ChargeRecorder) -> DeploymentCharge:
         api_key_id="key-1",
         actor_user_id=None,
         request_id="req-1",
+        billed=None,
     )
 
 

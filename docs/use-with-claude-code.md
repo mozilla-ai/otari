@@ -146,6 +146,10 @@ no Anthropic Messages API of its own, so Anthropic's server-side context editing
 never runs there; Claude Code's own compaction still does.
 Test the actual agent workflow before making one a default.
 
+To list only the open-weight models a key can use, ask the catalog for them:
+`GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
+are the names to configure.
+
 ### OpenAI models on your own gateway
 
 This is a self-hosting setting, made in the gateway's

@@ -1,7 +1,7 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -41,6 +41,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdi
 from gateway.ports.billing_port import (
     BillingPort,
     InsufficientFundsError,
+    ToolUse,
 )
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
@@ -2737,6 +2738,7 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
                 return await admit_deployment_paid(
                     billing,
                     deployment_paid=True,
+                    billed=None,
                     organization_id=organization_id,
                     api_key_id=api_key_id,
                     user_id=user_id,
@@ -2750,9 +2752,11 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
                 await release_session(db)
                 raise FundsCheckFailedError(describe_port_error(exc)) from exc
 
-        async def settle_funding(self, funding: object, cost: Decimal, *, model: str, description: str) -> None:
+        async def settle_funding(
+            self, funding: object, cost: Decimal, *, tools: Mapping[str, ToolUse], model: str, description: str
+        ) -> None:
             await cast(DeploymentCharge, funding).settle(
-                cost, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
+                cost, tools=tools, model=model, description=description, expects_cost=False, savepoint=db.begin_nested
             )
 
         async def release(self) -> bool:

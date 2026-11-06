@@ -91,7 +91,7 @@ from gateway.model_labeling import relabel_model
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import check_rate_limit, rate_limit_headers
 from gateway.schemas.inference import DecisionRequest, DecisionResponse
@@ -122,6 +122,7 @@ from gateway.services.inference import (
     ReportedUsage,
     UnknownDecisionProviderError,
     admit_deployment_paid,
+    billed_model,
     decision_body,
     describe_port_error,
     is_provider_credential_rejection,
@@ -592,6 +593,7 @@ async def run_passthrough(
                 billing_port_on(raw_request, db),
                 deployment_paid=True,
                 organization_id=organization_id,
+                billed=billed_model(served.provider, served.model),
                 api_key_id=api_key_id,
                 user_id=user_id,
                 request_id=request_id,
@@ -941,6 +943,7 @@ async def run_passthrough(
         if deployment_charge is not None:
             await deployment_charge.settle(
                 cost,
+                tools=NO_TOOLS,
                 model=resolved.model,
                 description=f"{resolved.instance}:{resolved.model}",
                 expects_cost=not billing.bills_on_completion,
@@ -1505,6 +1508,9 @@ async def run_decision(
                 await billing.charge(
                     organization_id=funding.organization_id,
                     amount=cost,
+                    # A decision is priced by the service that answers it, not by a model's rates.
+                    billed=None,
+                    tools=NO_TOOLS,
                     description=f"{provider_name}:{model}",
                     api_key_id=api_key_id,
                 )

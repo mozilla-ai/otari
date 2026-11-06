@@ -24,6 +24,7 @@ from gateway.types.tool_charges import (
     LabelCalls,
     RateKey,
     gateway_tool_pricing_key,
+    is_provider_web_search,
 )
 
 # Published per-search prices of searches a provider runs itself, keyed by label.
@@ -92,7 +93,10 @@ class ToolCharges(NamedTuple):
     row could price. A tool served under several labels has one unit rate, so
     its calls times that rate is still its spend. ``deployment_paid_total`` is
     the part of ``total`` the deployment's account ran, which its organization
-    is charged for whoever paid for the model call.
+    is charged for whoever paid for the model call, and ``deployment_paid_tools``
+    splits it per gateway-run tool, keyed by the tool's pricing name, as calls
+    and cost. Searches a model's provider ran are in the total but not the split:
+    they are part of the model call.
     """
 
     total: Decimal
@@ -100,6 +104,7 @@ class ToolCharges(NamedTuple):
     unit_rates: dict[str, Decimal]
     unpriced: list[UnpricedToolLabel]
     deployment_paid_total: Decimal
+    deployment_paid_tools: dict[str, tuple[int, Decimal]]
 
 
 def paid_by_the_deployment(label: str | None) -> bool:
@@ -154,6 +159,7 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
     # label with different rate keys still settle as one line, and a line says
     # whether the organization's funds were charged for it.
     by_label: dict[tuple[str, str, bool], tuple[int, Decimal]] = {}
+    paid_tools: dict[str, tuple[int, Decimal]] = {}
     unpriced: dict[tuple[str, str, RateKey], UnpricedToolLabel] = {}
     for entry in calls:
         if entry.calls <= 0:
@@ -165,6 +171,10 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
         line = (entry.tool, label, _deployment_paid(entry))
         units, label_cost = by_label.get(line, (0, Decimal(0)))
         by_label[line] = (units + entry.calls, label_cost + cost)
+        if _deployment_paid(entry) and not is_provider_web_search(entry.label, entry.rate_keys):
+            key = gateway_tool_pricing_key(entry.tool)
+            tool_calls, tool_cost = paid_tools.get(key, (0, Decimal(0)))
+            paid_tools[key] = (tool_calls + entry.calls, tool_cost + cost)
         if lookup is not None and lookup.rate_keys and rate is None:
             first = lookup.rate_keys[0]
             previous = unpriced.get((entry.tool, label, first))
@@ -192,4 +202,11 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
     total = quantize_cost(sum((cost for _units, cost in by_tool.values()), Decimal(0)))
     unit_rates = {tool: cost / units for tool, (units, cost) in by_tool.items()}
     deployment_paid = sum((cost for (_tool, _label, paid), (_units, cost) in by_label.items() if paid), Decimal(0))
-    return ToolCharges(total, lines, unit_rates, list(unpriced.values()), quantize_cost(deployment_paid))
+    return ToolCharges(
+        total,
+        lines,
+        unit_rates,
+        list(unpriced.values()),
+        quantize_cost(deployment_paid),
+        {key: (calls, quantize_cost(cost)) for key, (calls, cost) in sorted(paid_tools.items())},
+    )

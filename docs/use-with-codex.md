@@ -51,6 +51,10 @@ Responses features Codex may use, such as tool types other than `function`; see
 [Responses on providers without a Responses API](api-reference.md#responses-on-providers-without-a-responses-api).
 Codex works best on a provider with a native Responses API.
 
+To list only the open-weight models, ask the catalog for
+`GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
+are the names to configure.
+
 ## Model metadata
 
 Codex associates context windows, reasoning options, and tool support with exact

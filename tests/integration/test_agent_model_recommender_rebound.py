@@ -56,6 +56,7 @@ RELEASES = []  # Every release_hold call, landed or not.
 SESSIONS = []
 FUNDS = {"available": Decimal("1")}
 FAULTS = set()
+LIMIT = {"concurrency": None}
 
 
 class ProbeRecommender:
@@ -86,8 +87,11 @@ class ProbeBilling:
     async def apply_due_credit(self, *, organization_id):
         pass
 
-    async def require_funds_on_deposit(self, *, organization_id):
+    async def require_funds_on_deposit(self, *, organization_id, billed, actor_user_id):
         pass
+
+    async def concurrency_limit(self, *, organization_id, billed, actor_user_id):
+        return LIMIT["concurrency"]
 
     async def require_unheld_funds(self, *, organization_id):
         pass
@@ -104,7 +108,9 @@ class ProbeBilling:
         if "release" in FAULTS or ("release-once" in FAULTS and len(RELEASES) == 1):
             raise RuntimeError("ledger down")
 
-    async def charge(self, *, organization_id, amount, description=None, actor_user_id=None, api_key_id=None):
+    async def charge(
+        self, *, organization_id, amount, billed, tools, description=None, actor_user_id=None, api_key_id=None
+    ):
         if "charge" in FAULTS:
             raise RuntimeError("ledger down")
         self.write(("charge", str(organization_id), amount, description, api_key_id))

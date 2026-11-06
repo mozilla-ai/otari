@@ -226,6 +226,12 @@ and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
 across replicas. They apply to chat completions, messages, responses and search, after
 `rate_limit_rpm`.
 
+A build that bills organizations can also limit how many of an organization's
+calls on the deployment's own provider credentials are in flight at once, which
+no rule here sets. A chat completion, message or response over that limit waits
+up to 10 seconds for a slot, then is refused with a 429 naming the rule
+`organization_concurrency`. It counts in the same store.
+
 `per: model` limits each model in `models`, written as `instance:model` (the
 provider instance it is called through, then the model). One count is kept per
 model and shared by every policy, alias and direct call that reaches it, so it

@@ -5,11 +5,12 @@ Budgets are a separate capability and still bound what a request may spend.
 """
 
 import uuid
+from collections.abc import Mapping
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.ports.billing_port import BillingPort
+from gateway.ports.billing_port import BilledModel, BillingPort, ToolUse
 
 
 class NullBillingAdapter(BillingPort):
@@ -26,9 +27,16 @@ class NullBillingAdapter(BillingPort):
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
         return None
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
+    async def require_funds_on_deposit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel | None, actor_user_id: uuid.UUID | None
+    ) -> None:
         # Returns rather than raises: nothing is owed here, so no request is
         # ever refused for want of funds.
+        return None
+
+    async def concurrency_limit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
+    ) -> int | None:
         return None
 
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
@@ -45,6 +53,8 @@ class NullBillingAdapter(BillingPort):
         *,
         organization_id: uuid.UUID,
         amount: Decimal,
+        billed: BilledModel | None,
+        tools: Mapping[str, ToolUse],
         description: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         api_key_id: str | None = None,

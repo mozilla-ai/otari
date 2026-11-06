@@ -55,6 +55,10 @@ the spellings Otari accepts, and
 [Listing available models](models.md#listing-available-models) shows which
 models your key can use.
 
+To list only the open-weight models a key can use, ask the catalog for them:
+`GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
+are the names to configure.
+
 ## See also
 
 - [Use with Claude Code](use-with-claude-code.md): drive the Claude Code CLI
