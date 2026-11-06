@@ -39,6 +39,13 @@ test("add provider keys and choose which ones a workspace uses", async ({
       await provider.fill("OpenAI")
       await page.getByRole("option", { name: "OpenAI", exact: true }).click()
       await dismissComboBoxInDialog(provider)
+      if (name === "production") {
+        // The prefix is asked for only once the key has an endpoint of its own.
+        const apiBase = dialog.getByLabel("API base URL")
+        await apiBase.fill("https://llm.example.com/v1")
+        await expect(dialog.getByLabel("Request prefix")).toBeVisible()
+        await apiBase.fill("")
+      }
       await dialog.getByLabel("Name").fill(name)
       await dialog.getByLabel("API key").fill("sk-docs-example-not-a-real-key")
       if (name === "production") {

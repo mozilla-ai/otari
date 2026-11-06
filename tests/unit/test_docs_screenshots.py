@@ -60,7 +60,7 @@ def test_steps_name_only_what_the_spec_reaches(spec: Path) -> None:
     assert doc.is_file(), f"{spec.name} is named for {doc.relative_to(_ROOT)}, which does not exist"
     source = spec.read_text(encoding="utf-8")
     steps = _STEP.findall(doc.read_text(encoding="utf-8"))
-    terms = {term for step in steps for term in _BOLD.findall(step)}
+    terms = {" ".join(term.split()) for step in steps for term in _BOLD.findall(step)}
     unreached = sorted(term for term in terms if not _reaches(term, source))
     assert not unreached, (
         f"{doc.relative_to(_ROOT)} names {unreached} in its steps, which {spec.name} never looks for. "
