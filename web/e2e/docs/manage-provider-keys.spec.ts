@@ -55,6 +55,9 @@ test("add provider keys and choose which ones a workspace uses", async ({
       await expect(dialog).toBeHidden()
     }
 
+    // Pressed once both rows have landed: a press during the list's refetch is
+    // dropped with the row it was delivered to.
+    await expect(page.getByRole("row", { name: /backup/ })).toBeVisible()
     await page
       .getByRole("row", { name: /production/ })
       .getByRole("button", { name: "Make default provider" })
