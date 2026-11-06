@@ -1,16 +1,11 @@
 /**
  * A person or a workspace, as a monogram.
  *
- * It takes the letters rather than deriving them, which is the one decision in
- * here worth explaining. Turning an identity into two letters is application
- * logic, not presentation: this product falls back from a full name to an email
- * address, splits a name on spaces but an address on its own punctuation
- * (`Ada Lovelace-Byron` initials as AL, `ada.lovelace@…` also as AL), and
- * counts characters rather than code units so a name outside the basic plane
- * does not get half a surrogate pair. `AccountMenu`'s `initialsFor` already
- * carries all of that. A second derivation here would be the same rules,
- * spelled worse, in a layer that has no business knowing an account has an
- * email address at all.
+ * It takes the letters rather than deriving them: turning an identity into
+ * two letters is application logic, and a primitive has no business knowing
+ * an account has a name or an email address. The account control no longer
+ * draws initials (it draws the person's avatar face), and shows this with
+ * "··" only while the identity loads.
  *
  * No image, and no `src` prop to invite one. This dashboard has no avatar
  * upload, so the only way to fill one would be a third-party image host, which
