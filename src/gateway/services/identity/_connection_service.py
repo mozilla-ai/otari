@@ -15,7 +15,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.identity import OIDC_PROVIDER_PREFIX, OIDCConnection
+from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDC_PROVIDER_PREFIX, OIDCConnection
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, User
 from gateway.repositories.identity import IdentityRepositories
 from gateway.schemas.identity import OIDCConnectionDomain, OIDCConnectionPublic, OIDCConnectionRequest
@@ -139,6 +139,10 @@ class OIDCConnectionService:
 
         await self._uow.release()
         discovered = await discover_connection_metadata(request.issuer, allow_private_hosts=self._allow_private_hosts)
+        if len(discovered.resolved_issuer) > MAX_OIDC_ISSUER_LENGTH:
+            # Every sign-in names a provider derived from the stored issuer, so one too long to name
+            # would refuse the whole organization rather than this request.
+            raise OIDCDiscoveryError
 
         async with self._uow:
             connection = await self._connections.get_for_organization(organization.id)
