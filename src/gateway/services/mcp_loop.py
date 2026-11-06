@@ -24,9 +24,22 @@ from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, PromptTokensDetails
+from any_llm.types.completion import (
+    CacheCreationTokenDetails,
+    ChatCompletionChunk,
+    ChoiceDelta,
+    ChunkChoice,
+    CompletionTokensDetails,
+    PromptTokensDetails,
+)
 
 from gateway.core.env import otari_env
+from gateway.core.usage import (
+    cache_read_tokens_of,
+    cache_write_1h_tokens_of,
+    cache_write_tokens_of,
+    reasoning_tokens_of,
+)
 from gateway.log_config import logger
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.services._tool_loop import (
@@ -342,6 +355,9 @@ class _ChatTotals:
     prompt: int = 0
     completion: int = 0
     cache_read: int = 0
+    cache_write: int = 0
+    cache_write_1h: int = 0
+    reasoning: int = 0
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -351,33 +367,39 @@ def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
         return
     acc.prompt += usage.prompt_tokens or 0
     acc.completion += usage.completion_tokens or 0
-    details = usage.prompt_tokens_details
-    if details is not None:
-        acc.cache_read += details.cached_tokens or 0
+    acc.cache_read += cache_read_tokens_of(usage)
+    acc.cache_write += cache_write_tokens_of(usage)
+    acc.cache_write_1h += cache_write_1h_tokens_of(usage)
+    acc.reasoning += reasoning_tokens_of(usage)
 
 
-def _fold_usage(
-    completion: ChatCompletion | ChatCompletionChunk,
-    prompt_total: int,
-    completion_total: int,
-    cache_read_total: int = 0,
-) -> None:
-    if completion.usage is None:
+def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatTotals) -> None:
+    """Report the loop's totals on ``completion.usage``, the one usage the request is billed on."""
+    usage = completion.usage
+    if usage is None:
         return
-    completion.usage.prompt_tokens = prompt_total
-    completion.usage.completion_tokens = completion_total
-    completion.usage.total_tokens = prompt_total + completion_total
-    # OpenAI chat reports cached tokens as a subset of prompt_tokens. Fold the
-    # accumulated read count back into prompt_tokens_details so the downstream
-    # GatewayUsage wrapper forwards the loop-wide total, not just the last
-    # iteration's slice. (Chat has no cache-write concept.)
-    details = completion.usage.prompt_tokens_details
+    usage.prompt_tokens = totals.prompt
+    usage.completion_tokens = totals.completion
+    usage.total_tokens = totals.prompt + totals.completion
+    # Chat counts cache reads and writes inside prompt_tokens and breaks them out in
+    # the details, which are created here when only an earlier round reported them.
+    details = usage.prompt_tokens_details
+    if details is None and (totals.cache_read or totals.cache_write):
+        details = usage.prompt_tokens_details = PromptTokensDetails()
     if details is not None:
-        details.cached_tokens = cache_read_total
-    elif cache_read_total > 0:
-        # The final iteration carried no prompt_tokens_details, but an earlier
-        # one did; create the sub-object so the accumulated count is not lost.
-        completion.usage.prompt_tokens_details = PromptTokensDetails(cached_tokens=cache_read_total)
+        details.cached_tokens = totals.cache_read
+        if totals.cache_write or details.cache_write_tokens is not None:
+            details.cache_write_tokens = totals.cache_write
+        if totals.cache_write_1h or details.cache_creation_token_details is not None:
+            details.cache_creation_token_details = CacheCreationTokenDetails(
+                ephemeral_5m_input_tokens=totals.cache_write - totals.cache_write_1h,
+                ephemeral_1h_input_tokens=totals.cache_write_1h,
+            )
+    reasoning = usage.completion_tokens_details
+    if reasoning is None and totals.reasoning:
+        reasoning = usage.completion_tokens_details = CompletionTokensDetails()
+    if reasoning is not None:
+        reasoning.reasoning_tokens = totals.reasoning
 
 
 # The field a tool activity chunk carries. The Chat wire has no vocabulary for a
@@ -498,7 +520,7 @@ class _ChatToolLoopStrategy:
         _add_usage(acc, result.usage)
 
     def fold_usage(self, result: ChatCompletion, acc: _ChatTotals) -> None:
-        _fold_usage(result, acc.prompt, acc.completion, acc.cache_read)
+        _fold_usage(result, acc)
         # Every return path folds, so this is where the answer gains the report of
         # the calls the loop ran and the client never saw.
         if acc.tool_calls:
@@ -697,7 +719,7 @@ class _ChatToolLoopStrategy:
         if carrier is not None:
             totals = replace(acc, tool_calls=[])
             _add_usage(totals, carrier.usage)
-            _fold_usage(carrier, totals.prompt, totals.completion, totals.cache_read)
+            _fold_usage(carrier, totals)
         return state.deferred_terminal()
 
     def accumulate_stream_usage(self, acc: _ChatTotals, state: _ChatStreamState) -> None:
