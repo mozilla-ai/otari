@@ -44,8 +44,6 @@ interface MockOpts {
   save?: () => Response
   /** What setting enforcement answers, so a test can drive each of its refusals. */
   enforcement?: () => Response
-  /** What removing a member's link answers. */
-  unlink?: () => Response
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -72,9 +70,6 @@ function mockApi(opts: MockOpts = {}) {
       return opts.enforcement
         ? opts.enforcement()
         : jsonResponse(undefined, 204)
-    }
-    if (url.includes("/sso/links/")) {
-      return opts.unlink ? opts.unlink() : jsonResponse(undefined, 204)
     }
     if (url.includes("/sso")) {
       if (method === "GET") return jsonResponse(sso)
@@ -505,57 +500,5 @@ describe("OrganizationSsoPage", () => {
         "Name one of this organization's owners to keep a non-SSO route, or waive that exception explicitly, before requiring sign-in through this connection.",
       ),
     ).toBeInTheDocument()
-  })
-
-  it("removes a member's link only through the confirm dialog, with the stranded-keys warning", async () => {
-    const requests = mockApi({
-      sso: organizationSso({ connection: oidcConnection() }),
-      members: [
-        organizationMember({
-          user_id: "44444444-dddd-dddd-dddd-444444444444",
-          full_name: "Pat Member",
-          role: "member",
-          status: "active",
-        }),
-      ],
-    })
-    const user = userEvent.setup()
-    renderPage(<OrganizationSsoPage />)
-
-    await user.click(await screen.findByRole("button", { name: /Member/ }))
-    await user.click(await screen.findByRole("option", { name: "Pat Member" }))
-    await user.click(screen.getByRole("button", { name: "Remove link" }))
-
-    const dialog = await screen.findByRole("alertdialog")
-    expect(
-      within(dialog).getByText(
-        /next sign-in through this connection for Pat Member creates a new account/,
-      ),
-    ).toBeVisible()
-    expect(
-      within(dialog).getByText(/old account keeps its budgets and history/),
-    ).toBeVisible()
-    expect(
-      within(dialog).getByText(
-        /Their API keys stay on the old account and cannot be moved/,
-      ),
-    ).toBeVisible()
-    expect(within(dialog).getByText(/does not revoke access/)).toBeVisible()
-    expect(
-      requests.some((request) => request.url.includes("/sso/links/")),
-    ).toBe(false)
-
-    await user.click(
-      within(dialog).getByRole("button", { name: "Remove link" }),
-    )
-
-    await waitFor(() =>
-      expect(
-        requests.some(
-          (request) =>
-            request.method === "DELETE" && request.url.includes("/sso/links/"),
-        ),
-      ).toBe(true),
-    )
   })
 })

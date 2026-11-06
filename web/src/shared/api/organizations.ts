@@ -944,8 +944,7 @@ export function useDeleteOrganizationSso() {
 
 // Who requiring sign-in through the connection would affect today: every
 // active member holding no sign-in link to it. Read before the enforcement
-// toggle is offered, and short-lived, since a member linking or being
-// unlinked moves the count.
+// toggle is offered, and short-lived, since a member linking moves the count.
 export function useOrganizationSsoPreflight(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_SSO_PREFLIGHT],
@@ -965,23 +964,6 @@ export function useSetOrganizationSsoEnforcement() {
         body: JSON.stringify(body),
       }),
     onSuccess: () => invalidateOrganizationSso(queryClient),
-  })
-}
-
-// Removing one member's own link. The preflight count and sample are stale
-// the moment this succeeds: an unlinked member is affected again.
-export function useDeleteOrganizationSsoLink() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (userId: string) =>
-      apiFetch<void>(
-        `/organizations/me/sso/links/${encodeURIComponent(userId)}`,
-        {
-          method: "DELETE",
-        },
-      ),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO_PREFLIGHT] }),
   })
 }
 

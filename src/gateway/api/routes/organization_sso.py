@@ -106,8 +106,6 @@ async def delete_organization_sso(
     await connections.delete_for_user(user=identity)
 
 
-
-
 @router.get("/preflight")
 async def get_organization_sso_preflight(
     identity: CurrentIdentity,
@@ -118,6 +116,8 @@ async def get_organization_sso_preflight(
     Owners and admins only. Refused with 404 when the organization has not configured a connection yet.
     """
     return await connections.preflight_sso_enforcement_for_user(user=identity)
+
+
 @router.put("/enforcement", status_code=status.HTTP_204_NO_CONTENT)
 async def put_organization_sso_enforcement(
     request: OrganizationSsoEnforcementRequest,

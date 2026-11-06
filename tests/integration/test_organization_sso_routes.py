@@ -15,12 +15,14 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from sqlmodel import col, select
 
 from gateway.core.config import API_ROOT
 from gateway.models.identity import (
     EmailAssertion,
     OAuthIdentityLink,
     OIDCConnection,
+    oidc_identity_provider,
 )
 from gateway.models.tenancy import (
     DOMAIN_PROOF_TTL,

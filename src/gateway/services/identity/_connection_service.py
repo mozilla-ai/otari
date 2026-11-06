@@ -18,7 +18,12 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDC_PROVIDER_PREFIX, OIDCConnection
+from gateway.models.identity import (
+    MAX_OIDC_ISSUER_LENGTH,
+    OIDC_PROVIDER_PREFIX,
+    OIDCConnection,
+    oidc_identity_provider,
+)
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, OrganizationDomain, User
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.tenancy import OrganizationDomainRepository

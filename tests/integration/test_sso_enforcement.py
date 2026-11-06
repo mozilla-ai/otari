@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
@@ -862,11 +862,13 @@ async def test_saving_enforcement_again_revokes_a_member_whose_link_is_now_gone(
     )
     assert await _live_session_count(async_db, member.id) == 1
 
-    uow = UnitOfWork(async_db)
-    async with uow:
-        await IdentityRepositories.on(uow).links.delete_for_user_and_provider(
-            provider=oidc_identity_provider(connection.resolved_issuer), user_id=member.id
+    await async_db.execute(
+        delete(OAuthIdentityLink).where(
+            OAuthIdentityLink.user_id == member.id,
+            OAuthIdentityLink.provider == oidc_identity_provider(connection.resolved_issuer),
         )
+    )
+    await async_db.commit()
 
     await _connection_service(async_db).set_sso_enforcement_for_user(
         user=owner, required=True, break_glass_user_id=None, break_glass_waived=True

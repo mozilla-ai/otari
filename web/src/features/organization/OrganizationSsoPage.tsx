@@ -24,7 +24,6 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import {
   useDeleteOrganizationSso,
-  useDeleteOrganizationSsoLink,
   useOrganizationContext,
   useOrganizationMembers,
   useOrganizationSso,
@@ -457,85 +456,6 @@ function EnforcementSection({
   )
 }
 
-/** What removing ``name``'s link costs them, in the three facts an administrator needs. */
-function unlinkWarning(name: string): string {
-  return (
-    `The next sign-in through this connection for ${name} creates a new account. ` +
-    "The old account keeps its budgets and history. " +
-    `${strandedKeysExplanation()} ` +
-    'This does not revoke access. "Remove member" is the control for that.'
-  )
-}
-
-function UnlinkSection({
-  members,
-}: {
-  members: readonly OrganizationMember[]
-}) {
-  const unlink = useDeleteOrganizationSsoLink()
-  const [selectedUserId, setSelectedUserId] = useState("")
-  const [isConfirming, setIsConfirming] = useState(false)
-  const candidate = members.find((member) => member.user_id === selectedUserId)
-
-  return (
-    <Section
-      className="border-b border-border py-5"
-      contentClassName="flex flex-col gap-4"
-    >
-      <div className="flex flex-col gap-1">
-        <h2 className="text-title">Remove a sign-in link</h2>
-        <p className="text-caption">
-          Lets that member link afresh at their next sign-in. It removes a link
-          only. It does not delete an account or end a membership.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-end gap-3">
-        <Select
-          label="Member"
-          value={selectedUserId}
-          onChange={setSelectedUserId}
-          options={members
-            .filter((member) => Boolean(member.user_id))
-            .map((member) => ({
-              value: member.user_id as string,
-              label: displayName(member),
-            }))}
-          placeholder="Choose a member"
-          shouldReserveMessage={false}
-        />
-        <Button
-          variant="ghost"
-          className="shrink-0"
-          isDisabled={selectedUserId === ""}
-          onPress={() => {
-            unlink.reset()
-            setIsConfirming(true)
-          }}
-        >
-          Remove link
-        </Button>
-      </div>
-      <ConfirmDialog
-        isOpen={isConfirming}
-        onOpenChange={setIsConfirming}
-        heading="Remove this sign-in link"
-        body={candidate ? unlinkWarning(displayName(candidate)) : null}
-        confirmLabel="Remove link"
-        isPending={unlink.isPending}
-        error={unlink.error}
-        onConfirm={() =>
-          unlink.mutate(selectedUserId, {
-            onSuccess: () => {
-              setIsConfirming(false)
-              setSelectedUserId("")
-            },
-          })
-        }
-      />
-    </Section>
-  )
-}
-
 export function OrganizationSsoPage() {
   const context = useOrganizationContext()
   const canEdit = canManage(context.data)
@@ -625,7 +545,6 @@ export function OrganizationSsoPage() {
                 owners={activeOwners}
                 onSaved={() => setEnforcementSavedCount((count) => count + 1)}
               />
-              <UnlinkSection members={activeMembers} />
             </>
           ) : null}
         </>
