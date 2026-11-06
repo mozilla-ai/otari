@@ -40,9 +40,9 @@ describe("useAvatar", () => {
 
 describe("readAvatarChoice", () => {
   it("ignores a stored value that is not a face", () => {
-    window.localStorage.setItem(`otari.avatar.v1:${ADA}`, "not-a-face")
+    window.localStorage.setItem(`otari.avatar.v2:${ADA}`, "not-a-face")
     expect(readAvatarChoice(ADA)).toBeNull()
-    window.localStorage.setItem(`otari.avatar.v1:${ADA}`, String(FACE_COUNT))
+    window.localStorage.setItem(`otari.avatar.v2:${ADA}`, String(FACE_COUNT))
     expect(readAvatarChoice(ADA)).toBeNull()
   })
 

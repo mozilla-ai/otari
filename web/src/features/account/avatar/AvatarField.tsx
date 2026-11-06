@@ -32,11 +32,16 @@ import {
  * phone), the outer ring a little smaller and lighter.
  *
  * The lattice repeats every `COLS` by `ROWS` cells, one face per cell, so it
- * never runs out. The period is wider and taller than the window, so no face
- * is on show twice, and `ROWS` is even so the stagger lines up at the seam.
+ * never runs out. A period holds a random sample of the set (the dialog deals
+ * it), large enough that the repeat is hard to notice, and far wider and
+ * taller than the window, so no face is on show twice. `ROWS` is even so the
+ * stagger lines up at the seam.
  */
-const COLS = 12
-const ROWS = 6
+const COLS = 24
+const ROWS = 12
+
+/** How many faces one period of the field shows, for the dialog to deal. */
+export const FIELD_FACES = COLS * ROWS
 
 // A face fills 70% of its cell and rows sit one cell apart, so row and column
 // gaps match and a face swollen by the lens still clears its neighbours. A
