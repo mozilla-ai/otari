@@ -2,7 +2,7 @@
 
 Everything on this side of the exchange is real: the routes, the connection and domain-claim
 rows, and the session cookie a sign-in mints. What is replaced is apron-auth's outbound half
-(``auth_sso._exchange_sso_code``), the way ``tests/integration/test_oauth_api.py`` replaces
+(``auth_sso.exchange_sso_code``), the way ``tests/integration/test_oauth_api.py`` replaces
 ``auth_oauth.exchange_code``, because a test cannot complete a consent screen. A test about a
 refusal that happens before any exchange (an unknown slug, a missing flow cookie, an issuer
 mismatch) leaves it unstubbed, so the real check is what is proven.
@@ -138,7 +138,7 @@ def stub_exchange(
             email_verified=email_verified,
         )
 
-    monkeypatch.setattr("gateway.api.routes.auth_sso._exchange_sso_code", _exchange)
+    monkeypatch.setattr("gateway.api.routes.auth_sso.exchange_sso_code", _exchange)
     return spent
 
 
