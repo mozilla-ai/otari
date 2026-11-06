@@ -47,7 +47,7 @@ interface MockOpts {
 }
 
 function mockApi(opts: MockOpts = {}) {
-  const sso = opts.sso ?? organizationSso()
+  let served = opts.sso ?? organizationSso()
   const members = opts.members ?? []
   const preflight = opts.preflight ?? organizationSsoPreflight()
   const requests: Request[] = []
@@ -61,20 +61,27 @@ function mockApi(opts: MockOpts = {}) {
     })
 
     if (url.includes("/sso/test")) {
-      return jsonResponse(sso)
+      return jsonResponse(served)
     }
     if (url.includes("/sso/preflight")) {
       return jsonResponse(preflight)
     }
     if (url.includes("/sso/enforcement")) {
-      return opts.enforcement
-        ? opts.enforcement()
-        : jsonResponse(undefined, 204)
+      if (opts.enforcement) return opts.enforcement()
+      // The served connection reflects the write, so a later read sees what a real one would.
+      served = {
+        ...served,
+        enforcement: {
+          ...served.enforcement,
+          required: Boolean(JSON.parse(String(init?.body ?? "{}")).required),
+        },
+      }
+      return jsonResponse(undefined, 204)
     }
     if (url.includes("/sso")) {
-      if (method === "GET") return jsonResponse(sso)
+      if (method === "GET") return jsonResponse(served)
       if (method === "PUT") {
-        return opts.save ? opts.save() : jsonResponse(sso)
+        return opts.save ? opts.save() : jsonResponse(served)
       }
       if (method === "DELETE") return jsonResponse(undefined, 204)
     }
@@ -378,6 +385,31 @@ describe("OrganizationSsoPage", () => {
     expect(
       await screen.findByText(/Jane Owner keeps a non-SSO route/),
     ).toBeInTheDocument()
+  })
+
+  it("re-reads who enforcement affects after saving it", async () => {
+    const requests = mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    const before = requests.filter((request) =>
+      request.url.includes("/sso/preflight"),
+    ).length
+    await user.click(screen.getByRole("button", { name: "Save enforcement" }))
+
+    await waitFor(() => {
+      expect(
+        requests.filter((request) => request.url.includes("/sso/preflight"))
+          .length,
+      ).toBeGreaterThan(before)
+    })
   })
 
   it("states what the organization gives up when it waives the exception", async () => {
