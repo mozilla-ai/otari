@@ -24,6 +24,7 @@ from any_llm.types.completion import (
 from any_llm.types.completion import (
     ChoiceDeltaToolCallFunction as DeltaFn,
 )
+from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompletionMessageCustomToolCall, Custom
 
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
@@ -674,6 +675,32 @@ async def test_loop_foreign_tool_returns_to_caller_without_execution(monkeypatch
         max_iterations=5,
     )
     assert out.choices[0].finish_reason == "tool_calls"
+    assert pool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_loop_hides_a_gateway_tool_call_cut_off_by_the_token_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A round cut off mid-call returns the caller's own calls, without the gateway's, which it never declared."""
+
+    client_call = ChatCompletionMessageCustomToolCall(
+        id="u", type="custom", custom=Custom(name="apply_patch", input="x")
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        out = _completion(finish="length", tool_calls=[("c", CODE_EXECUTION_TOOL_NAME, '{"code": "prices = [19.1')])
+        out.choices[0].message.tool_calls = [client_call, *(out.choices[0].message.tool_calls or [])]
+        return out
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=[CODE_EXECUTION_TOOL_NAME])
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=3,
+    )
+    assert out.choices[0].finish_reason == "length"
+    assert out.choices[0].message.tool_calls == [client_call]
     assert pool.calls == []
 
 

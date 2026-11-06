@@ -627,7 +627,8 @@ async def test_loop_exits_when_stop_reason_isnt_tool_use_even_with_tool_use_bloc
 ) -> None:
     """If the model emits tool_use blocks but stops with a non-``tool_use`` reason
     (e.g. ``end_turn`` because ``max_tokens`` was hit mid-tool-call), the loop
-    must exit rather than try to execute them.
+    must exit rather than try to execute them, and must not hand the caller a
+    call to a tool it never declared.
     """
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
@@ -642,6 +643,7 @@ async def test_loop_exits_when_stop_reason_isnt_tool_use_even_with_tool_use_bloc
         max_iterations=5,
     )
     assert out.stop_reason == "end_turn"
+    assert out.content == []
     assert pool.calls == []  # never executed
 
 
