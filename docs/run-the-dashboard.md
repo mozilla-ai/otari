@@ -118,7 +118,9 @@ written as JSON. Edit and Remove change a stored tool; a `config.yml` tool,
 tools turns the model's search off, and sets the calls a request may make, the
 results per search, reading pages for hits without text, and running a
 provider's own web search here. The legacy SearXNG backend's URL and engines
-show while they are set.
+show while they are set, marked deprecated, with how to move them to a
+`searxng` search tool (see
+[The legacy SearXNG settings](configuration.md#the-legacy-searxng-settings)).
 
 Code execution pricing lists `otari:code_execution`.
 

@@ -115,6 +115,16 @@ def stored_tool_names() -> frozenset[str]:
     return frozenset(_cache) | frozenset(_fetch_cache)
 
 
+def stored_search_tool_names() -> frozenset[str]:
+    """The names of the stored search rows the last overlay holds."""
+    return frozenset(_cache)
+
+
+def stored_row_names() -> frozenset[str]:
+    """The names of every stored row the last overlay read, of either kind, with those it skipped."""
+    return frozenset(_seen_rows)
+
+
 def config_file_tools(config: GatewayConfig, kind: ToolKind) -> dict[str, dict[str, Any]]:
     """The config-file instances of ``kind``, with no stored overlay applied."""
     return config_file_search_tools(config) if kind == "search" else config_file_fetch_tools(config)

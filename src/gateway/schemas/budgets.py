@@ -7,6 +7,7 @@ Responses echo the stored string, so a row that holds an unknown value still rea
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
@@ -650,7 +651,53 @@ class WorkspaceMemberBudgetPoliciesPublic(BaseModel):
     count: int
 
 
+class KeyLimitPublic(BaseModel):
+    """One cap a request made with the calling key has to pass.
+
+    ``used_*`` counts what the budget gate counts: recorded use plus the holds of
+    requests still in flight. On a cap the key shares with the rest of its
+    workspace or organization the limit and the use are left out, and only what
+    is left is reported; that still moves as the others spend.
+    """
+
+    scope: str = Field(
+        description="Where the cap sits: 'user' for the budget the key's user is on, or the scope of a spend "
+        "ceiling: 'api_token', 'workspace_member', 'org_member', 'workspace' or 'organization'"
+    )
+    provider: str | None = Field(description="The provider this cap is narrowed to, or null when it caps every one")
+    resets_at: datetime | None = Field(
+        description="When the period ends and use starts again from zero; null for a cap that never resets"
+    )
+    limit_usd: float | None = Field(description="Dollars allowed per period; null when uncapped or shared")
+    used_usd: float | None = Field(description="Dollars spent and held this period; null when uncapped or shared")
+    remaining_usd: float | None = Field(description="Dollars left this period; null when dollars are uncapped")
+    limit_tokens: int | None = None
+    used_tokens: int | None = None
+    remaining_tokens: int | None = None
+    limit_requests: int | None = None
+    used_requests: int | None = None
+    remaining_requests: int | None = None
+
+
+class KeyBudgetPublic(BaseModel):
+    """What the calling key may still spend, and every cap that decides it."""
+
+    budgets_enforced: bool = Field(
+        description="False when budgets are off for this key: it is budget-exempt, or the deployment runs with "
+        "budget_strategy disabled. True otherwise, even when no cap applies"
+    )
+    remaining_usd: float | None = Field(
+        description="The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, "
+        "request or provider-narrowed cap in limits can refuse a request sooner"
+    )
+    limits: list[KeyLimitPublic] = Field(
+        description="The key's user's budget first, then each spend ceiling, the most specific first"
+    )
+
+
 __all__ = [
+    "KeyBudgetPublic",
+    "KeyLimitPublic",
     "BUDGET_ID_PATTERN",
     "BudgetResetLogResponse",
     "BudgetResponse",

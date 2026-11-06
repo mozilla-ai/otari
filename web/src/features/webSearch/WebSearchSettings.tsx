@@ -51,8 +51,8 @@ const COPY: Readonly<Record<string, SettingCopy>> = {
   },
   web_search_engines: {
     label: "Engines",
-    help: "Comma-separated SearXNG engines. Blank uses the backend's defaults.",
-    placeholder: "google,bing,duckduckgo",
+    help: "Comma-separated SearXNG engines for the backend URL, and for a searxng search tool that sets none. With none set here or in the configuration, the backend URL searches duckduckgo, mojeek, qwant and wikipedia.",
+    placeholder: "duckduckgo,mojeek,qwant,wikipedia",
     isMachineReadable: true,
   },
 }
@@ -185,7 +185,7 @@ export function WebSearchSettings({
       {legacy.some(isSet) ? (
         <SettingsGroup
           title="Legacy SearXNG backend"
-          description="The model's search backend from before search tools. Keep it until a searxng search tool can serve the model."
+          description="Deprecated: a coming breaking release removes these settings. Move them to a searxng search tool with its own endpoint and engines, starred when the model searches on these settings, then clear these, here and in the configuration file or the environment. The gateway's log says at each start what that release does with them."
         >
           {legacy.map(renderField)}
         </SettingsGroup>

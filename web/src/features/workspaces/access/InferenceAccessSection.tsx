@@ -21,6 +21,7 @@ import { KeyModelsDialog } from "@/features/workspaces/access/KeyModelsDialog"
 import {
   keyLabel,
   keyModelProblem,
+  keyPrefix,
 } from "@/features/workspaces/access/keyModels"
 import {
   ACCESS_FILTERS,
@@ -119,14 +120,14 @@ export function InferenceAccessSection({
   const byId = new Map(keys.map((key) => [key.id, key]))
   const keysPerProvider = keys.reduce(
     (counts, key) =>
-      counts.set(key.provider, (counts.get(key.provider) ?? 0) + 1),
+      counts.set(keyPrefix(key), (counts.get(keyPrefix(key)) ?? 0) + 1),
     new Map<string, number>(),
   )
   const keyRows = overrides.data ?? []
   const hostedRows = hosted.data ?? []
   // What a typed model name's prefix is checked against.
   const knownProviders: ReadonlySet<string> = new Set([
-    ...keys.map((key) => key.provider),
+    ...keys.flatMap((key) => [key.provider, keyPrefix(key)]),
     ...hostedRows.map((row) => row.provider),
   ])
   const isPending =
@@ -175,7 +176,7 @@ export function InferenceAccessSection({
         row,
         id: row.org_provider_key_id,
         // A key whose name this caller cannot read stands alone.
-        provider: orgKey?.provider ?? row.org_provider_key_id,
+        provider: orgKey ? keyPrefix(orgKey) : row.org_provider_key_id,
         name: keyLabel(orgKey, row.org_provider_key_id),
         isCustomized: keyIsCustomized(row),
         isOff:
@@ -379,10 +380,14 @@ export function InferenceAccessSection({
           workspaceId={workspaceId}
           keyId={openKey.org_provider_key_id}
           keyName={keyLabel(openKeyRecord, openKey.org_provider_key_id)}
-          provider={openKeyRecord?.provider ?? ""}
+          provider={openKeyRecord ? keyPrefix(openKeyRecord) : ""}
           allowed={openKey.allowed_models}
           validateEntry={(name) =>
-            keyModelProblem(name, openKeyRecord?.provider, knownProviders)
+            keyModelProblem(
+              name,
+              openKeyRecord ? keyPrefix(openKeyRecord) : undefined,
+              knownProviders,
+            )
           }
           onClose={() => setOpen(undefined)}
         />

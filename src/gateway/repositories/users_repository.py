@@ -1,6 +1,8 @@
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import NamedTuple, Never
 
 from sqlalchemy import String, and_, cast, func, or_, select
@@ -279,6 +281,20 @@ async def count_users(db: AsyncSession, organization_id: uuid.UUID, filters: Use
     return int(total or 0)
 
 
+@dataclass(frozen=True)
+class BudgetUse:
+    """The budget a user is on and the user's use of it on every axis, with when its window ends."""
+
+    budget_id: str
+    spend: Decimal
+    reserved: Decimal
+    current_tokens: int
+    reserved_tokens: int
+    current_requests: int
+    reserved_requests: int
+    next_budget_reset_at: datetime | None
+
+
 class AccessLists(NamedTuple):
     """A user's or a key's ``allowed_models`` and ``allowed_tools``."""
 
@@ -307,6 +323,24 @@ class UserAccessRepository(BaseRepository[User, Never, Never]):
             )
         ).all()
         return {user_id: AccessLists(models, tools) for user_id, models, tools in rows}
+
+    async def budget_use(self, user_id: str) -> BudgetUse | None:
+        """The budget a live user is on and the user's use of it, or None when it is on none."""
+        row = (
+            await self.db.execute(
+                select(
+                    User.budget_id,
+                    User.spend,
+                    User.reserved,
+                    User.current_tokens,
+                    User.reserved_tokens,
+                    User.current_requests,
+                    User.reserved_requests,
+                    User.next_budget_reset_at,
+                ).where(User.user_id == user_id, User.deleted_at.is_(None), User.budget_id.is_not(None))
+            )
+        ).first()
+        return None if row is None else BudgetUse(**row._asdict())
 
     async def aliases(self, user_ids: Collection[str]) -> dict[str, str | None]:
         """Each of these users that has a row, deleted or not, to its alias."""

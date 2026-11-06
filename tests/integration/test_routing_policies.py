@@ -17,7 +17,7 @@ The invariants worth defending, and why:
 
 import asyncio
 import json
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -61,7 +61,7 @@ from gateway.core.error_codes import (
 from gateway.models.routing import RoutingConfig
 from gateway.services import catalog as selectors
 
-from .conftest import build_test_client
+from .conftest import build_test_client, price_fake_search
 from .test_scoped_budgets import _a_budget_id, _a_workspace_id
 
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
@@ -2010,6 +2010,12 @@ def test_configured_retries_reach_a_single_candidate(retrying_client: TestClient
 # ---------------------------------------------------------------------------
 
 
+def _serve_priced_searches(client: TestClient, serve_search_on_fake: Callable[..., None]) -> None:
+    """Serve the in-loop search on the ``fake`` instance, reading no pages, at a cent per search."""
+    serve_search_on_fake(extract=False)
+    price_fake_search(client, HEADERS, per_million=10_000.0)
+
+
 def _tool_completion(model: str, *, tool_call: bool) -> ChatCompletion:
     """A response that either asks for the gateway's web_search tool or answers."""
     tool_calls = (
@@ -2045,6 +2051,7 @@ def _tool_completion(model: str, *, tool_call: bool) -> ChatCompletion:
 
 def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
     client: TestClient,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A failed-over request bills its searches once, on the row that served.
 
@@ -2056,16 +2063,7 @@ def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
     ``users.spend``.
     """
     _create_user(client)
-    client.post(
-        f"{API_ROOT}/pricing",
-        json={
-            "model_key": "otari:web_search",
-            # USD per million calls: a cent per search.
-            "input_price_per_million": 10_000.0,
-            "output_price_per_million": 0.0,
-        },
-        headers=HEADERS,
-    )
+    _serve_priced_searches(client, serve_search_on_fake)
 
     scripted: list[ChatCompletion | Exception] = [
         # Attempt 1 falls over before any assistant output, so the policy may retry.
@@ -2083,14 +2081,7 @@ def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
             raise nxt
         return nxt
 
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=scripted_provider),
-        patch(
-            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
-            new=AsyncMock(return_value="results"),
-        ),
-        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=scripted_provider):
         resp = _chat(client, "fast", tools=[{"type": "otari_web_search"}])
 
     assert resp.status_code == 200, resp.text
@@ -2121,6 +2112,7 @@ def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
 
 def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     client: TestClient,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A tool loop that dies mid-flight is terminal, and the searches are still owed.
 
@@ -2132,15 +2124,7 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     what would leave the cost on the row and absent from the spend ledger.
     """
     _create_user(client)
-    client.post(
-        f"{API_ROOT}/pricing",
-        json={
-            "model_key": "otari:web_search",
-            "input_price_per_million": 10_000.0,
-            "output_price_per_million": 0.0,
-        },
-        headers=HEADERS,
-    )
+    _serve_priced_searches(client, serve_search_on_fake)
 
     scripted: list[ChatCompletion | Exception] = [
         # One search, then the provider falls over with the loop already committed.
@@ -2154,14 +2138,7 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
             raise nxt
         return nxt
 
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=scripted_provider),
-        patch(
-            "gateway.services.web_retrieval_backend.WebSearchBackend._search_tool",
-            new=AsyncMock(return_value="results"),
-        ),
-        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=scripted_provider):
         resp = _chat(client, "fast", tools=[{"type": "otari_web_search"}])
 
     # Terminal, not failed over: the second candidate is never tried.

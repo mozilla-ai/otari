@@ -140,12 +140,15 @@ providers:
 # destinations. It is disabled by default. See docs/tools.md.
 # web_fetch_enabled: true
 
-# Direct search tools. Model-initiated web search uses web_search_url instead.
-# See docs/tools.md.
+# Search tools, for POST /api/v1/search and, through web_search_default_tool,
+# for the model's web search. See docs/configuration.md.
 # search_tools:
 #   local:
 #     provider: searxng
 #     api_base: "http://searxng:8080"
+#     options: {engines: "duckduckgo,mojeek,qwant,wikipedia"}
+#     price_per_call: 0   # USD; with require_pricing, an unpriced tool is refused
+# web_search_default_tool: local
 
 # What runs code-execution tool calls: "protocol" (the default) talks to the
 # backend at sandbox_url, "e2b" runs them on E2B from this process and needs

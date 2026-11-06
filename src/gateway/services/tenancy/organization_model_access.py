@@ -138,7 +138,7 @@ async def resolve_organization_byo_providers(db: AsyncSession, organization_id: 
     if organization_id is None:
         return frozenset()
     live = await OrgProviderKeyRepository(db).list_live_keys(organization_id)
-    return frozenset(provider_key(key.provider) for key in live if key_is_usable(key))
+    return frozenset(key.selector_prefix for key in live if key_is_usable(key))
 
 
 async def resolve_workspace_byo_providers(db: AsyncSession, workspace_id: uuid.UUID | None) -> frozenset[str]:
@@ -270,7 +270,7 @@ async def resolve_organization_offered_keys(db: AsyncSession, organization_id: u
     offered = await OrgProviderKeyModelRepository(db).enabled_models_for_keys({key.id for key in live})
     entries: set[str] = set()
     for key in live:
-        entries |= _narrowed(provider_key(key.provider), offered.get(key.id), None)
+        entries |= _narrowed(key.selector_prefix, offered.get(key.id), None)
     return frozenset(entry for entry in entries if not entry.endswith(":*"))
 
 
@@ -287,11 +287,20 @@ async def resolve_all_organizations_offered_keys(db: AsyncSession) -> dict[uuid.
     offered = await OrgProviderKeyModelRepository(db).enabled_models_for_keys({key.id for key in live})
     by_organization: dict[uuid.UUID, set[str]] = {}
     for key in live:
-        entries = _narrowed(provider_key(key.provider), offered.get(key.id), None)
+        entries = _narrowed(key.selector_prefix, offered.get(key.id), None)
         by_organization.setdefault(key.organization_id, set()).update(
             entry for entry in entries if not entry.endswith(":*")
         )
     return {organization: frozenset(keys) for organization, keys in by_organization.items() if keys}
+
+
+async def resolve_all_organizations_slug_providers(db: AsyncSession) -> dict[uuid.UUID, dict[str, str]]:
+    """Every organization's key slugs, each mapped to the provider type of the key it names."""
+    by_organization: dict[uuid.UUID, dict[str, str]] = {}
+    for key in await OrgProviderKeyRepository(db).list_all_live():
+        if key.slug is not None:
+            by_organization.setdefault(key.organization_id, {})[key.slug] = key.provider
+    return by_organization
 
 
 async def workspace_organizations(db: AsyncSession) -> dict[uuid.UUID, uuid.UUID]:
@@ -371,7 +380,7 @@ async def resolve_session_catalog_scope(
         offered = await OrgProviderKeyModelRepository(db).enabled_models_for_keys({live.id for live in live_keys})
         byo_allowlist: set[str] = set()
         for live in live_keys:
-            byo_allowlist |= _narrowed(provider_key(live.provider), offered.get(live.id), None)
+            byo_allowlist |= _narrowed(live.selector_prefix, offered.get(live.id), None)
         reachable_hosted = hosted
     else:
         active_keys = await provider_keys.get_active_keys(

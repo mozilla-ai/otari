@@ -28,7 +28,7 @@ MAX_EXTERNAL_ID_LENGTH = 256
 
 # Generated ids carry a prefix that does not parse as a UUID, so an end user is
 # never mistaken for a tenancy member's attribution row (see
-# ``_scoped_enforcement._identity_uuid``).
+# ``_scoped_enforcement.identity_uuid``).
 END_USER_ID_PREFIX = "eu_"
 
 

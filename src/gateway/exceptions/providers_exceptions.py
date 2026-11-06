@@ -81,6 +81,18 @@ class OrgProviderKeyAlreadyExistsError(TenancyConflictError):
         super().__init__(f"A '{provider}' key named '{name}' already exists in this organization")
 
 
+class OrgProviderKeyInvalidSlugError(TenancyValidationError):
+    """A slug that cannot name a key: malformed, a provider's name, or sent without a custom base URL."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class OrgProviderKeySlugTakenError(TenancyConflictError):
+    def __init__(self, slug: str):
+        super().__init__(f"Another key in this organization is already named '{slug}' in selectors")
+
+
 class OrgProviderKeyArchivedError(TenancyValidationError):
     """The key is archived, which refuses every mutation except restore."""
 

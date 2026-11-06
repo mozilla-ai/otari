@@ -77,6 +77,10 @@ class GuardrailsNotReachableError(RuntimeError):
     public error response covers exactly that. The one message that stays whole
     is the no-URL-configured case: it names an environment variable rather than
     an address, and it is the only one a reader can actually act on.
+
+    Neither message quotes what the endpoint sent back, because an answer can
+    echo the prompt. A bad answer is named by its HTTP status, its exception
+    class, or the type of the bad value.
     """
 
     def __init__(
@@ -192,11 +196,26 @@ async def _validate_one(
     try:
         response = await client.post(f"{base_url}/validate", json=payload, headers=headers)
         response.raise_for_status()
-        body = response.json()
-        result = body["result"]
-    except (httpx.HTTPError, KeyError, ValueError) as exc:
+    except httpx.HTTPStatusError as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} failed against {base_url}: HTTP {exc.response.status_code}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    except (httpx.ProtocolError, httpx.DecodingError) as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} failed against {base_url}: {type(exc).__name__}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    except (httpx.HTTPError, ValueError) as exc:
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} failed against {base_url}: {exc}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    try:
+        result = response.json()["result"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} returned no readable 'result': {type(exc).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         ) from exc
 
@@ -206,7 +225,7 @@ async def _validate_one(
         result = result[0] if result else {}
     if not isinstance(result, dict):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}",
+            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {type(result).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         )
 
@@ -216,13 +235,13 @@ async def _validate_one(
     # explicit `valid: null` is a legitimate inconclusive verdict (not flagged).
     if "valid" not in result:
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}",
+            f"guardrail profile {cfg.profile!r} returned no 'valid' field",
             public_detail=_unevaluated_detail(cfg.profile),
         )
     valid = result["valid"]
     if valid is not None and not isinstance(valid, bool):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}",
+            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {type(valid).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         )
 

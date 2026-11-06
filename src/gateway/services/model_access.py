@@ -40,6 +40,7 @@ from gateway.services.tenancy.org_provider_key_service import (
     cached_org_key_zero_data_retention,
     cached_org_model_restriction,
     cached_org_provider_kwargs,
+    cached_org_slug_provider,
 )
 
 
@@ -438,10 +439,17 @@ def organization_key_refusal(
     # Imported here: the providers package imports this module through model discovery.
     from gateway.services.providers import workspace_requires_zero_data_retention
 
+    # A slug names its key's own cache entries, and dispatch serves it on that
+    # key even where a hosted provider shares the name; any other instance reads
+    # its provider's.
+    named_by_slug = cached_org_slug_provider(workspace_id, instance) is not None
+    if named_by_slug:
+        provider = instance
+    on_organization_key = named_by_slug or reaches_organization_key(config, instance)
     if workspace_requires_zero_data_retention(workspace_id) and (
         instance in config.providers
         or (
-            reaches_organization_key(config, instance)
+            on_organization_key
             and cached_org_provider_kwargs(workspace_id, provider) is not None
             and not cached_org_key_zero_data_retention(workspace_id, provider)
         )
@@ -451,7 +459,7 @@ def organization_key_refusal(
             status_code=HTTPStatus.FORBIDDEN,
             detail=f"Model '{selector}' is not served with zero data retention, which this workspace requires.",
         )
-    if not reaches_organization_key(config, instance):
+    if not on_organization_key:
         return None
     return org_model_refusal(workspace_id, provider, model, selector=selector, through_alias=through_alias)
 
