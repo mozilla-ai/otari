@@ -12,10 +12,11 @@ export function documentationHref({
 /**
  * The link a page offers to the getting-started guide.
  *
- * `/welcome` is the gateway's own self-hosted quickstart. A deployment that
- * configures `docs_url` (otari.ai) does not serve it at its origin, so there the
- * guide is its documentation, which lives on another origin and so opens in a
- * new tab. Unset, the same-origin `/welcome` stays as it was.
+ * `/welcome` is the gateway's own self-hosted quickstart. otari.ai configures
+ * `docs_url` and does not serve `/welcome` at its origin, so where `docs_url` is
+ * set the guide is that documentation: an operator who points `docs_url` at
+ * their own site gets it instead of `/welcome`. It lives on another origin, so
+ * it opens in a new tab. Unset, the same-origin `/welcome` stays as it was.
  */
 export function welcomeGuideLink({
   docs_url,
