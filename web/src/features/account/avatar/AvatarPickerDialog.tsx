@@ -4,29 +4,20 @@ import { FiShuffle } from "react-icons/fi"
 import { Button } from "@/design-system/actions/Button"
 import { Dialog } from "@/design-system/feedback/Dialog"
 
-import { AvatarField, type ChangeSource } from "./AvatarField"
-import { FACE_COUNT, face } from "./faces"
+import { AvatarField, type ChangeSource, FIELD_FACES } from "./AvatarField"
+import { face, sampleFaces } from "./faces"
 import { EASE_OUT, prefersReducedMotion } from "./motion"
 
-function shuffled(): number[] {
-  const order = Array.from({ length: FACE_COUNT }, (_, i) => i)
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[order[i], order[j]] = [order[j], order[i]]
-  }
-  return order
-}
-
 /**
- * A fresh order with `keep` left in the slot it had, so the selected face stays
- * under the person's eye while everything around it rearranges.
+ * A fresh deal of faces for the field, with `keep` in the slot it had (or the
+ * first slot, on opening), so the face in the frame stays under the person's
+ * eye while everything around it changes.
  */
-function reshuffled(previous: readonly number[], keep: number): number[] {
-  const order = shuffled()
-  const slot = previous.indexOf(keep)
-  const from = order.indexOf(keep)
-  ;[order[slot], order[from]] = [order[from], order[slot]]
-  return order
+function deal(keep: number, previous?: readonly number[]): number[] {
+  const faces = sampleFaces(FIELD_FACES).filter((id) => id !== keep)
+  const slot = Math.max(0, previous?.indexOf(keep) ?? 0)
+  faces.splice(slot, 0, keep)
+  return faces.slice(0, FIELD_FACES)
 }
 
 /**
@@ -45,7 +36,7 @@ export function AvatarPickerDialog({
   onSave: (id: number) => void
 }) {
   const [draft, setDraft] = useState(initial)
-  const [order, setOrder] = useState(shuffled)
+  const [order, setOrder] = useState(() => deal(initial))
   const source = useRef<ChangeSource | null>(null)
 
   return (
@@ -57,7 +48,7 @@ export function AvatarPickerDialog({
       footerStart={
         <Button
           size="sm"
-          onPress={() => setOrder((previous) => reshuffled(previous, draft))}
+          onPress={() => setOrder((previous) => deal(draft, previous))}
         >
           <FiShuffle aria-hidden className="h-3.5 w-3.5" />
           Shuffle

@@ -11,7 +11,8 @@ import { defaultFaceFor, FACE_COUNT } from "./faces"
  * profile is the whole of making it shared; every reader goes through
  * `useAvatar`.
  */
-const PREFIX = "otari.avatar.v1:"
+// v2: the generated set. A v1 pick indexed the retired 72-face set.
+const PREFIX = "otari.avatar.v2:"
 const listeners = new Set<() => void>()
 
 export function readAvatarChoice(userId: string): number | null {
