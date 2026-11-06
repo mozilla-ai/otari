@@ -47,7 +47,14 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
-from .tenancy_helpers import NO_BLOCKED_ADDRESSES, NO_MAIL_LIMIT, NO_TERMS, membership_writes, no_sso_enforcement
+from .tenancy_helpers import (
+    NO_BLOCKED_ADDRESSES,
+    NO_MAIL_LIMIT,
+    NO_SSO_ENFORCEMENT,
+    NO_TERMS,
+    membership_writes,
+    no_sso_enforcement,
+)
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -407,7 +414,9 @@ async def test_a_suspended_membership_falls_back_to_a_live_one(async_db: AsyncSe
     assert membership is not None
     await members.update_membership(membership, {"status": "suspended"})
 
-    context = await OrganizationService(async_db, membership_listener=None).get_active_membership_context_for_user(user)
+    context = await OrganizationService(async_db, membership_listener=None).get_active_membership_context_for_user(
+        user, sso_enforcement=NO_SSO_ENFORCEMENT
+    )
 
     assert context.organization.id == live.id
     assert user.active_organization_id == live.id
@@ -422,7 +431,9 @@ async def test_an_identity_with_no_live_membership_has_no_context(async_db: Asyn
     await members.update_membership(membership, {"status": "suspended"})
 
     with pytest.raises(NoActiveOrganizationError):
-        await OrganizationService(async_db, membership_listener=None).get_active_membership_context_for_user(user)
+        await OrganizationService(async_db, membership_listener=None).get_active_membership_context_for_user(
+            user, sso_enforcement=NO_SSO_ENFORCEMENT
+        )
 
 
 # =============================================================================
