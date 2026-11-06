@@ -21,6 +21,7 @@ import {
   type PricedRow,
   pairWithRates,
   type ToolPricingService,
+  toPerCall,
   toRowId,
 } from "./toolRates"
 
@@ -148,7 +149,11 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
         <ToolRateForm
           key={editingId}
           row={editing.row}
-          current={editing.price.data?.input_price_per_million}
+          current={
+            editing.price.data
+              ? toPerCall(editing.price.data.input_price_per_million)
+              : undefined
+          }
           onClose={() => setEditingId("")}
         />
       ) : null}

@@ -1,10 +1,10 @@
 {
-  "description": "What one successful pass-through attempt costs at a rate. Shared by otari's settlement tests and otari.ai's, so both editions are held to one table. Rates are per million: tokens, requests or images. A token rate on image generation is read as raw USD per image. Every expected cost is worked out by hand from the rate and the counts, not generated from the code. An expected value of null means the rate prices nothing the attempt reported.",
+  "description": "What one successful pass-through attempt costs at a rate. Shared by otari's settlement tests and otari.ai's, so both editions are held to one table. Rates are per million: tokens, requests or images. A token rate prices the tokens an attempt reports, on every endpoint. Every expected cost is worked out by hand from the rate and the counts, not generated from the code. An expected value of null means the rate prices nothing the attempt reported.",
   "cases": [
     {
       "name": "a requests rate bills the requests count",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "2000"
       },
       "tokens": null,
@@ -29,7 +29,7 @@
     {
       "name": "a requests rate bills each search unit",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "2000"
       },
       "tokens": {
@@ -57,7 +57,7 @@
     {
       "name": "a requests rate bills one request for a completion that reports only tokens",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "5000"
       },
       "tokens": {
@@ -83,7 +83,7 @@
     {
       "name": "a requests rate on embeddings bills one request, not the tokens",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "5000"
       },
       "tokens": {
@@ -109,7 +109,7 @@
     {
       "name": "a requests rate on image generation bills one request, not one rate per image",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "2000"
       },
       "tokens": null,
@@ -134,7 +134,7 @@
     {
       "name": "a requests count is preferred over search units and never summed with them",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "2000"
       },
       "tokens": null,
@@ -160,7 +160,7 @@
     {
       "name": "zero requests cost nothing and carry no meter",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "2000"
       },
       "tokens": null,
@@ -176,7 +176,7 @@
     {
       "name": "a free requests rate costs nothing and carries no meter",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "0"
       },
       "tokens": null,
@@ -192,7 +192,7 @@
     {
       "name": "a per-request price under half a micro-dollar rounds a single request to nothing",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "0.4"
       },
       "tokens": null,
@@ -208,7 +208,7 @@
     {
       "name": "sub-micro-dollar requests are summed before rounding",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "0.4"
       },
       "tokens": null,
@@ -233,7 +233,7 @@
     {
       "name": "an unknown meter is ignored",
       "rate": {
-        "unit": "requests",
+        "unit": "request",
         "input": "2000"
       },
       "tokens": null,
@@ -258,7 +258,7 @@
     {
       "name": "an images rate bills each image returned",
       "rate": {
-        "unit": "images",
+        "unit": "image",
         "input": "40000"
       },
       "tokens": null,
@@ -283,7 +283,7 @@
     {
       "name": "an images rate is per million images, as the dashboard stores $40 per 1,000 images",
       "rate": {
-        "unit": "images",
+        "unit": "image",
         "input": "40000"
       },
       "tokens": null,
@@ -308,7 +308,7 @@
     {
       "name": "an images rate bills the largest count one attempt may report",
       "rate": {
-        "unit": "images",
+        "unit": "image",
         "input": "40000"
       },
       "tokens": null,
@@ -333,7 +333,7 @@
     {
       "name": "no images returned cost nothing",
       "rate": {
-        "unit": "images",
+        "unit": "image",
         "input": "40000"
       },
       "tokens": null,
@@ -349,7 +349,7 @@
     {
       "name": "an images rate prices nothing on an endpoint that reports no images",
       "rate": {
-        "unit": "images",
+        "unit": "image",
         "input": "40000"
       },
       "tokens": {
@@ -362,7 +362,7 @@
     {
       "name": "an images rate prices nothing on an endpoint billed per request",
       "rate": {
-        "unit": "images",
+        "unit": "image",
         "input": "40000"
       },
       "tokens": null,
@@ -372,9 +372,9 @@
       "expected": null
     },
     {
-      "name": "a token rate on an image endpoint is read per image",
+      "name": "a token rate on an image endpoint prices the tokens it reports",
       "rate": {
-        "unit": "tokens",
+        "unit": "token",
         "input": "0.04",
         "output": "0"
       },
@@ -386,24 +386,13 @@
         "images": 2
       },
       "expected": {
-        "cost": "0.080000",
-        "meters": {
-          "images": 2
-        },
-        "lines": [
-          {
-            "meter": "images",
-            "units": 2,
-            "unit_rate": 0.04,
-            "cost": 0.08
-          }
-        ]
+        "cost": "0.000002"
       }
     },
     {
-      "name": "a token rate on a per-request endpoint is read per request",
+      "name": "a token rate on a per-request endpoint prices the tokens it reports",
       "rate": {
-        "unit": "tokens",
+        "unit": "token",
         "input": "2.5",
         "output": "10"
       },
@@ -415,24 +404,43 @@
         "requests": 1
       },
       "expected": {
-        "cost": "0.000003",
-        "meters": {
-          "requests": 1
-        },
-        "lines": [
-          {
-            "meter": "request",
-            "units": 1,
-            "unit_rate": 2.5e-06,
-            "cost": 3e-06
-          }
-        ]
+        "cost": "0.003500"
+      }
+    },
+    {
+      "name": "a token rate on a per-request endpoint prices nothing when no tokens were reported",
+      "rate": {
+        "unit": "token",
+        "input": "2.5",
+        "output": "10"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 1
+      },
+      "expected": null
+    },
+    {
+      "name": "a free token rate settles free when no tokens were reported",
+      "rate": {
+        "unit": "token",
+        "input": "0",
+        "output": "0"
+      },
+      "tokens": null,
+      "units": {
+        "requests": 1
+      },
+      "expected": {
+        "cost": "0.000000",
+        "meters": {},
+        "lines": []
       }
     },
     {
       "name": "a token rate on rerank prices the tokens and leaves the search units",
       "rate": {
-        "unit": "tokens",
+        "unit": "token",
         "input": "50",
         "output": "0"
       },
@@ -450,7 +458,7 @@
     {
       "name": "a token rate on rerank prices nothing when the provider reports only search units",
       "rate": {
-        "unit": "tokens",
+        "unit": "token",
         "input": "50",
         "output": "0"
       },
@@ -463,7 +471,7 @@
     {
       "name": "a token rate prices embeddings on their input tokens",
       "rate": {
-        "unit": "tokens",
+        "unit": "token",
         "input": "2",
         "output": "8"
       },
@@ -479,7 +487,7 @@
     {
       "name": "a token rate prices nothing when no tokens were reported",
       "rate": {
-        "unit": "tokens",
+        "unit": "token",
         "input": "2",
         "output": "8"
       },

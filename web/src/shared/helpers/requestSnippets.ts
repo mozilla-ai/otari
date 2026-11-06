@@ -78,11 +78,9 @@ export function buildCurlSnippet({
 }
 
 /**
- * Python through the Otari SDK (`pip install otari`), which sends the key in
- * the same `Otari-Key` header the cURL snippet teaches.
- *
- * `api_base` is the gateway origin with no path: the SDK appends `/api/v1`
- * itself and rejects a value that already carries it.
+ * Python through the OpenAI client (`pip install openai`), pointed at the
+ * gateway's `/api/v1`. It sends the key as `Authorization: Bearer`, which the
+ * gateway also accepts.
  */
 export function buildPythonSnippet({
   baseUrl,
@@ -91,10 +89,10 @@ export function buildPythonSnippet({
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
   return [
-    "from otari import OtariClient",
+    "from openai import OpenAI",
     "",
-    `client = OtariClient(api_base=${literal(baseUrl)}, api_key="${apiKey}")`,
-    "resp = client.completion(",
+    `client = OpenAI(base_url=${literal(`${baseUrl}${API_ROOT}`)}, api_key="${apiKey}")`,
+    "resp = client.chat.completions.create(",
     `    model=${literal(model)},`,
     `    messages=[{"role": "user", "content": ${literal(message)}}],`,
     ")",
@@ -102,7 +100,7 @@ export function buildPythonSnippet({
   ].join("\n")
 }
 
-/** TypeScript through the Otari SDK (`@mozilla-ai/otari`), the same call the Python snippet makes. */
+/** TypeScript through the OpenAI client (`openai`), the same call the Python snippet makes. */
 export function buildTypescriptSnippet({
   baseUrl,
   apiKey,
@@ -110,10 +108,10 @@ export function buildTypescriptSnippet({
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
   return [
-    'import { OtariClient } from "@mozilla-ai/otari"',
+    'import OpenAI from "openai"',
     "",
-    `const client = new OtariClient({ apiBase: ${literal(baseUrl)}, apiKey: "${apiKey}" })`,
-    "const resp = await client.completion({",
+    `const client = new OpenAI({ baseURL: ${literal(`${baseUrl}${API_ROOT}`)}, apiKey: "${apiKey}" })`,
+    "const resp = await client.chat.completions.create({",
     `  model: ${literal(model)},`,
     `  messages: [{ role: "user", content: ${literal(message)} }],`,
     "})",
@@ -168,8 +166,8 @@ export function buildAgentPrompt({
 }
 
 /**
- * Where a snippet should send its request: the origin the dashboard's own API
- * requests reach.
+ * Where a snippet should send its request: the request policy's public origin
+ * when it names one, otherwise the origin the dashboard's own API requests reach.
  *
  * That is the browser's own origin, which is more trustworthy than anything the
  * server could say about itself from behind a proxy, unless the request policy
@@ -183,7 +181,8 @@ export function resolveSnippetBaseUrl(origin: string = apiOrigin()): string {
 }
 
 function apiOrigin(): string {
-  const { origin } = requestPolicy()
+  const { origin, publicOrigin } = requestPolicy()
+  if (publicOrigin) return publicOrigin
   if (origin) return origin
   return typeof window === "undefined" ? "" : window.location.origin
 }

@@ -48,6 +48,7 @@ import {
   ProviderCredentialFields,
   parseClientArgs,
 } from "@/features/providers/providerFields"
+import { ZeroDataRetentionField } from "@/features/providers/ZeroDataRetentionField"
 import {
   useArchiveOrgProviderKey,
   useCreateOrgProviderKey,
@@ -64,6 +65,7 @@ import { useOrganizationPricing } from "@/shared/api/pricing"
 import { formatRelative } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
+import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
@@ -104,6 +106,8 @@ const URL_DEFAULTS = {
 interface KeyDraft {
   provider: string
   name: string
+  /** Blank leaves it to the gateway, which makes it from the name. */
+  slug: string
   apiKey: string
   apiBase: string
   /** The JSON escape hatch: whatever the provider's typed fields do not own. */
@@ -112,16 +116,19 @@ interface KeyDraft {
   credentials: CredentialFieldValues
   /** Typed secrets already stored, so blank means "keep it" rather than "clear it". */
   redacted: string[]
+  zeroDataRetention: boolean
 }
 
 const EMPTY_DRAFT: KeyDraft = {
   provider: "",
   name: "",
+  slug: "",
   apiKey: "",
   apiBase: "",
   clientArgs: "",
   credentials: {},
   redacted: [],
+  zeroDataRetention: false,
 }
 
 function draftFrom(key: OrgProviderKey): KeyDraft {
@@ -134,6 +141,7 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
   return {
     provider: key.provider,
     name: key.name,
+    slug: key.slug ?? "",
     // Never prefilled: the gateway stores the ciphertext and returns `last4`,
     // so there is nothing to prefill with. Blank on save means "leave it".
     apiKey: "",
@@ -141,7 +149,18 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
     clientArgs: formatClientArgs(rest),
     credentials: typed,
     redacted,
+    zeroDataRetention: key.zero_data_retention,
   }
+}
+
+/** The prefix the gateway makes from a key's name when none is given. */
+function slugFromName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[-._]+|[-._]+$/g, "")
+    .slice(0, 64)
 }
 
 function KeyForm({
@@ -177,7 +196,8 @@ function KeyForm({
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
-    (editing !== null || draft.provider !== "")
+    (editing !== null || draft.provider !== "") &&
+    !(editing?.slug && draft.apiBase.trim() === "")
 
   const submit = () => {
     if (!parsedClientArgs.ok) return
@@ -189,11 +209,13 @@ function KeyForm({
       parsedClientArgs.value,
       draft.redacted,
     )
+    const slug = draft.slug.trim()
     if (editing) {
       const body: UpdateOrgProviderKeyRequest = {
         name: draft.name.trim(),
         api_base: apiBase === "" ? null : apiBase,
         client_args: clientArgs,
+        zero_data_retention: draft.zeroDataRetention,
       }
       // Omitted rather than sent as null when it was left blank: an explicit
       // null clears the stored credential, and "I did not retype the secret" is
@@ -207,7 +229,9 @@ function KeyForm({
       name: draft.name.trim(),
       api_key: draft.apiKey === "" ? null : draft.apiKey,
       api_base: apiBase === "" ? null : apiBase,
+      slug: apiBase !== "" && slug !== "" ? slug : null,
       client_args: clientArgs,
+      zero_data_retention: draft.zeroDataRetention,
     }
     create.mutate(body, { onSuccess: onClose })
   }
@@ -278,15 +302,45 @@ function KeyForm({
           .join(" ")}
       />
 
-      <Field
-        label="API base URL"
-        value={draft.apiBase}
-        onChange={(apiBase) => setDraft({ ...draft, apiBase })}
-        placeholder="https://api.example.com/v1"
-        description={
-          editing
-            ? "Optional. Point this key at a compatible endpoint of your own instead of the provider's default. A new URL needs the API key, and any hidden credential below, entered again, because the key will be sent there."
-            : "Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+      {/* The endpoint is chosen at creation: a key for the provider's own one
+          cannot move to another, and one with its own prefix keeps a URL. */}
+      {editing && !editing.slug && !editing.api_base ? null : (
+        <Field
+          label="API base URL"
+          value={draft.apiBase}
+          onChange={(apiBase) => setDraft({ ...draft, apiBase })}
+          isRequired={Boolean(editing?.slug)}
+          placeholder="https://api.example.com/v1"
+          description={
+            editing
+              ? "A new URL needs the API key, and any hidden credential below, entered again, because the key will be sent there."
+              : "Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+          }
+        />
+      )}
+
+      {/* A key with its own endpoint is a different service, so requests name
+          it by a prefix of its own rather than by the provider it speaks. Fixed
+          once set, because clients already send it. */}
+      {editing?.slug ? (
+        <div className="flex flex-col gap-1">
+          <span className="text-body">Request prefix</span>
+          <code className="font-mono text-caption">{editing.slug}:</code>
+        </div>
+      ) : draft.apiBase.trim() !== "" ? (
+        <Field
+          label="Request prefix"
+          value={draft.slug}
+          onChange={(slug) => setDraft({ ...draft, slug })}
+          placeholder={slugFromName(draft.name) || "my-endpoint"}
+          description="Requests reach this key's models as prefix:model. It cannot change later."
+        />
+      ) : null}
+
+      <ZeroDataRetentionField
+        isSelected={draft.zeroDataRetention}
+        onChange={(zeroDataRetention) =>
+          setDraft({ ...draft, zeroDataRetention })
         }
       />
 
@@ -374,7 +428,10 @@ export function OrganizationProvidersPage() {
     setAdding(true)
   }
 
-  const editing = keys.data?.find((key) => key.id === editingId)
+  const editingTarget = useHeldDialogTarget(
+    keys.data?.find((key) => key.id === editingId),
+  )
+  const editing = editingTarget.held
   const archivedCount = (keys.data ?? []).filter((key) =>
     Boolean(key.archived_at),
   ).length
@@ -408,6 +465,12 @@ export function OrganizationProvidersPage() {
               DEFAULT
             </span>
           ) : null}
+          {row.zero_data_retention ? (
+            <span className="flex items-center gap-2 text-mono-caption text-muted">
+              <Dot className="bg-text-subtle" />
+              ZERO DATA RETENTION
+            </span>
+          ) : null}
           {row.archived_at ? (
             <span className="flex items-center gap-2 text-mono-caption text-subtle">
               <Dot className="bg-text-subtle" />
@@ -433,7 +496,12 @@ export function OrganizationProvidersPage() {
       header: "Provider",
       // The vendor's own spelling; the id stays what the form and the API use.
       cell: (row) => (
-        <span className="text-muted">{providerDisplayName(row.provider)}</span>
+        <span className="flex items-center gap-2 text-muted">
+          {providerDisplayName(row.provider)}
+          {row.slug ? (
+            <code className="font-mono text-caption">{row.slug}:</code>
+          ) : null}
+        </span>
       ),
     },
     {
@@ -521,20 +589,23 @@ export function OrganizationProvidersPage() {
                   })
                 }
               />
-              <RowAction
-                icon={row.is_org_default ? FilledStar : FiStar}
-                label={
-                  row.is_org_default
-                    ? "Default provider, click to remove"
-                    : "Make default provider"
-                }
-                isDisabled={setDefault.isPending || unsetDefault.isPending}
-                onPress={() =>
-                  (row.is_org_default ? unsetDefault : setDefault).mutate(
-                    row.id,
-                  )
-                }
-              />
+              {/* A key named by its own prefix is no provider's default. */}
+              {row.slug ? null : (
+                <RowAction
+                  icon={row.is_org_default ? FilledStar : FiStar}
+                  label={
+                    row.is_org_default
+                      ? "Default provider, click to remove"
+                      : "Make default provider"
+                  }
+                  isDisabled={setDefault.isPending || unsetDefault.isPending}
+                  onPress={() =>
+                    (row.is_org_default ? unsetDefault : setDefault).mutate(
+                      row.id,
+                    )
+                  }
+                />
+              )}
               <RowAction
                 icon={FiEdit2}
                 label="Edit"
@@ -569,7 +640,7 @@ export function OrganizationProvidersPage() {
   return (
     <div className="flex flex-col">
       <PageIntro
-        title="Providers"
+        title="Inference providers"
         action={
           canEdit ? (
             <Button
@@ -651,8 +722,8 @@ export function OrganizationProvidersPage() {
         // Remounted per row: the draft is seeded from the key once, so editing a
         // second key would otherwise open with the first one's values.
         <KeyForm
-          key={editing.id}
-          isOpen
+          key={`${editing.id}:${editingTarget.generation}`}
+          isOpen={editingTarget.isOpen}
           editing={editing}
           onClose={() => setEditingId(undefined)}
         />
@@ -704,7 +775,9 @@ export function OrganizationProvidersPage() {
             providerKey={expandedKey}
             canEdit={canEdit}
             onEditRate={(model) =>
-              url.patch({ override: `${expandedKey.provider}:${model.model}` })
+              url.patch({
+                override: `${expandedKey.slug ?? expandedKey.provider}:${model.model}`,
+              })
             }
             page={modelsPage}
             pageSize={modelsSize}

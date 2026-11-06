@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -34,11 +34,17 @@ from gateway.api.deps import (
 )
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
 from gateway.core.settings.pricing import PricingConfig
-from gateway.exceptions.tools_exceptions import SearchToolNotFoundError
+from gateway.exceptions.tools_exceptions import (
+    SearchToolNotFoundError,
+    WebSearchCredentialRefusedError,
+    WebSearchPolicyResolutionFailedError,
+    WebSearchPolicyResolutionFailure,
+)
 from gateway.inflight import InFlightRegistry
 from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
+from gateway.models.usage import UsageLog
 from gateway.schemas.tools import SearchResponse
 from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
 from gateway.services.secret_box import generate_secret_key
@@ -698,7 +704,7 @@ def test_an_unrelated_edit_resends_a_tool_list_naming_a_deleted_tool(
 def test_a_tool_list_names_a_configured_tool(client: TestClient, master_key_header: dict[str, str]) -> None:
     unknown = _key_with(client, master_key_header, {"user_id": "typo-user"}, allowed_tools=["fake-serch"])
     assert unknown.status_code == 400
-    assert "'fake-serch' is not a search tool" in unknown.json()["detail"]
+    assert "'fake-serch' is not a search or fetch tool" in unknown.json()["detail"]
     user = client.post(
         f"{API_ROOT}/users", json={"user_id": "typo-default", "allowed_tools": ["nope"]}, headers=master_key_header
     )
@@ -983,7 +989,7 @@ def test_a_search_tools_own_row_prices_it_ahead_of_its_old_key(
         headers=master_key_header,
     )
     assert own.status_code == 200, own.text
-    assert (own.json()["kind"], own.json()["unit"]) == ("search", "requests")
+    assert (own.json()["kind"], own.json()["unit"]) == ("search", "request")
     # The two kinds are two rows: the tool's is not read as a model's, nor the other way round.
     assert client.get(f"{API_ROOT}/pricing/fake-fast", headers=master_key_header).status_code == 404
     assert client.get(f"{API_ROOT}/pricing/fake-fast?kind=search", headers=master_key_header).status_code == 200
@@ -1068,7 +1074,7 @@ def test_a_config_priced_search_is_reserved_before_it_runs(
         headers=master_key_header,
     ).json()
 
-    with patch("gateway.api.routes.search.run_direct_search", AsyncMock()) as searched:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", AsyncMock()) as searched:
         resp = client.post(
             f"{API_ROOT}/search/fake-search",
             json=SEARCH_PAYLOAD,
@@ -1093,7 +1099,7 @@ def test_search_is_tracked_while_its_provider_call_runs(client: TestClient, api_
         seen.append(registry.snapshot())
         return DirectSearchResult(response=SearchResponse(search_tool=search.instance.name, results=[]), cost=None)
 
-    with patch("gateway.api.routes.search.run_direct_search", slow_search):
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", slow_search):
         resp = client.post(
             f"{API_ROOT}/search",
             json={**SEARCH_PAYLOAD, "search_tool_name": "fake-search"},
@@ -1236,6 +1242,7 @@ def test_a_service_key_starts_a_search_end_user_on_the_budget_it_names(
 
 
 def _add_org_search_key(client: TestClient, headers: dict[str, str], api_key: str) -> str:
+    """Add a Tavily key and make it the organization's default, so every workspace searches with it."""
     created = client.post(
         f"{API_ROOT}/organizations/me/web-search-keys",
         json={"provider": "tavily", "name": "ours", "api_key": api_key},
@@ -1243,6 +1250,8 @@ def _add_org_search_key(client: TestClient, headers: dict[str, str], api_key: st
     )
     assert created.status_code == 201, created.text
     key_id: str = created.json()["id"]
+    starred = client.post(f"{API_ROOT}/organizations/me/web-search-keys/{key_id}/default", headers=headers)
+    assert starred.status_code == 200, starred.text
     return key_id
 
 
@@ -1289,6 +1298,10 @@ def test_an_unnamed_call_on_an_exa_key_runs_through_any_search_with_the_key(
         headers=master_key_header,
     )
     assert created.status_code == 201, created.text
+    starred = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys/{created.json()['id']}/default", headers=master_key_header
+    )
+    assert starred.status_code == 200, starred.text
     _price(client, master_key_header, "otari:web_search", 5000.0)
     seen: list[httpx.Request] = []
 
@@ -1384,6 +1397,30 @@ def test_a_named_call_runs_on_the_tools_own_key_though_the_workspace_has_one(
     ]
 
 
+def test_a_pick_that_raises_answers_with_the_errors_own_status(
+    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str], api_key_obj: dict[str, Any]
+) -> None:
+    """A domain error from the pick answers with its status, a 5xx with the generic detail, and each is logged."""
+    not_found = SearchToolNotFoundError("fake-search")
+    with patch("gateway.services.tools._direct_tool_call.pick_direct_search_instance", side_effect=not_found):
+        resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert (resp.status_code, resp.json()["detail"]) == (404, not_found.message)
+
+    refused = WebSearchCredentialRefusedError("exa", "carries no API key, which the provider requires")
+    with patch("gateway.services.tools._direct_tool_call.pick_direct_search_instance", side_effect=refused):
+        resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "The request could not be completed by the provider"
+    assert "exa" not in resp.text
+
+    rows = _search_rows(client, master_key_header, api_key_obj["user_id"])
+    assert sorted((row["model"], row["provider"], row["status_code"]) for row in rows) == [
+        ("fake-search", None, 404),
+        ("fake-search", None, 502),
+    ]
+    assert [row["error_message"] for row in rows if row["status_code"] == 502] == [refused.message]
+
+
 def test_a_tool_removed_after_it_was_picked_is_refused_and_logged(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1391,7 +1428,10 @@ def test_a_tool_removed_after_it_was_picked_is_refused_and_logged(
     api_key_obj: dict[str, Any],
 ) -> None:
     """Another writer can delete a stored tool between the pick and the resolve."""
-    with patch("gateway.api.routes.search.resolve_direct_search", side_effect=SearchToolNotFoundError("fake-search")):
+    with patch(
+        "gateway.services.tools._direct_tool_call.resolve_direct_search",
+        side_effect=SearchToolNotFoundError("fake-search"),
+    ):
         resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
 
     assert resp.status_code == 404
@@ -1428,7 +1468,7 @@ def test_a_library_tool_without_its_key_is_refused_before_the_provider(
     keyless_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     headers = _keyed(keyless_client, master_key_header, "keyless")
-    with patch("gateway.api.routes.search.run_direct_search", AsyncMock()) as searched:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", AsyncMock()) as searched:
         resp = keyless_client.post(f"{API_ROOT}/search/exa", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 400
@@ -1533,8 +1573,21 @@ def test_no_policy_from_the_port_sets_no_ceiling(client: TestClient, api_key_hea
 
 
 # --------------------------------------------------------------------------- #
-# A searxng tool, on the old client until any-search has its adapter
+# A searxng tool, on any-search's SearXNG adapter
 # --------------------------------------------------------------------------- #
+
+_SEARXNG_ANSWER = {
+    "query": "otari",
+    "results": [
+        {
+            "url": "https://example.com/searxng",
+            "title": "SearXNG",
+            "content": "From SearXNG.",
+            "publishedDate": "2026-11-04T09:30:00",
+        }
+    ],
+    "unresponsive_engines": [],
+}
 
 
 @pytest.fixture
@@ -1543,48 +1596,86 @@ def searxng_client(test_config: GatewayConfig) -> Generator[TestClient]:
     yield from _client_on(test_config, search_tools=tools)
 
 
-@pytest.mark.parametrize("field", [{"include_raw": True}, {"provider_options": {"engines": "wikipedia"}}])
-def test_the_new_fields_are_refused_on_a_searxng_tool(
-    searxng_client: TestClient, master_key_header: dict[str, str], field: dict[str, Any]
-) -> None:
-    headers = _keyed(searxng_client, master_key_header, "searxng-user")
-    old = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS, cost_usd=None))
-    with patch("gateway.services.search_backend.run_search", old):
-        refused = searxng_client.post(f"{API_ROOT}/search/local", json={**SEARCH_PAYLOAD, **field}, headers=headers)
-        defaults = searxng_client.post(
-            f"{API_ROOT}/search/local",
-            json={**SEARCH_PAYLOAD, "include_raw": False, "provider_options": {}, "max_results": 4},
-            headers=headers,
-        )
+def _searxng_answers(client: TestClient, answer: httpx.Response | None = None) -> list[httpx.Request]:
+    """Route the app's web provider client to a SearXNG that answers ``answer``, and keep what it was sent."""
+    seen: list[httpx.Request] = []
 
-    assert refused.status_code == 400
-    assert refused.json()["detail"] == (
-        "include_raw and provider_options are not available yet for a searxng search: leave them unset."
-    )
-    assert defaults.status_code == 200, defaults.text
-    tool, query = old.call_args.args
-    assert (tool.name, tool.provider, tool.api_base) == ("local", "searxng", "http://searxng:8080")
-    assert query.max_results == 4
-    assert old.call_args.kwargs["client"] is searxng_client.app.state.web_provider_client  # type: ignore[attr-defined]
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return answer if answer is not None else httpx.Response(200, json=_SEARXNG_ANSWER)
+
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+    return seen
 
 
-def test_an_old_clients_failure_carries_its_safe_fields_and_never_its_body(
+def test_a_searxng_tool_searches_its_instance_with_get(
     searxng_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    headers = _keyed(searxng_client, master_key_header, "searxng-failed")
-    failed = SearchProviderError(
-        "searxng search returned HTTP 503: upstream-body-sentinel", tag="http_error", status=503
+    headers = _keyed(searxng_client, master_key_header, "searxng-user")
+    seen = _searxng_answers(searxng_client)
+
+    resp = searxng_client.post(
+        f"{API_ROOT}/search/local",
+        json={**SEARCH_PAYLOAD, "include_raw": True, "provider_options": {"language": "de"}},
+        headers=headers,
     )
-    with patch("gateway.services.search_backend.run_search", AsyncMock(side_effect=failed)):
-        resp = searxng_client.post(f"{API_ROOT}/search/local", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    [request] = seen
+    assert (request.method, str(request.url.copy_with(query=None))) == ("GET", "http://searxng:8080/search")
+    assert dict(request.url.params) == {"q": SEARCH_PAYLOAD["query"], "format": "json", "language": "de"}
+    [result] = resp.json()["results"]
+    # SearXNG's own date string, as it sent it.
+    assert (result["url"], result["snippet"], result["date"]) == (
+        "https://example.com/searxng",
+        "From SearXNG.",
+        "2026-11-04T09:30:00",
+    )
+    assert resp.json()["raw"] == _SEARXNG_ANSWER
+    # Only the operator chooses the engines and the method.
+    refused = searxng_client.post(
+        f"{API_ROOT}/search/local", json={**SEARCH_PAYLOAD, "provider_options": {"engines": "google"}}, headers=headers
+    )
+    assert (refused.status_code, len(seen)) == (400, 1)
+
+
+@pytest.mark.parametrize(
+    ("answer", "failure"),
+    [
+        (httpx.Response(503, text="upstream-body-sentinel"), ("searxng", "503", "http_error", "true")),
+        (
+            httpx.Response(
+                200,
+                json={"results": [], "unresponsive_engines": [["duckduckgo", "upstream-body-sentinel"]]},
+            ),
+            ("searxng", None, "engines_unresponsive", "false"),
+        ),
+    ],
+    ids=["http-status", "every-engine-failed"],
+)
+def test_a_searxng_failure_carries_its_safe_fields_and_never_its_body(
+    searxng_client: TestClient,
+    master_key_header: dict[str, str],
+    answer: httpx.Response,
+    failure: tuple[str | None, ...],
+) -> None:
+    headers = _keyed(searxng_client, master_key_header, "searxng-failed")
+    _searxng_answers(searxng_client, answer)
+
+    resp = searxng_client.post(f"{API_ROOT}/search/local", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 502
-    assert tuple(resp.headers.get(name) for name in _FAILURE_HEADERS) == ("searxng", "503", "http_error", "true")
+    assert tuple(resp.headers.get(name) for name in _FAILURE_HEADERS) == failure
     assert "upstream-body-sentinel" not in resp.text
     assert all("upstream-body-sentinel" not in value for value in resp.headers.values())
-    # Nor on the usage row, which keeps the failure's safe fields and the provider's status.
     (row,) = _search_rows(searxng_client, master_key_header, "searxng-failed")
-    assert (row["error_message"], row["status_code"]) == ("searxng search failed (http_error, HTTP 503)", 503)
+    assert "upstream-body-sentinel" not in (row["error_message"] or "")
+    assert row["error_message"].startswith(f"searxng search failed ({failure[2]}")
+    assert row["status_code"] == (int(failure[1]) if failure[1] else 502)
 
 
 def test_a_searxng_tools_reported_cost_is_none_so_its_rate_bills(
@@ -1592,9 +1683,8 @@ def test_a_searxng_tools_reported_cost_is_none_so_its_rate_bills(
 ) -> None:
     headers = _keyed(searxng_client, master_key_header, "searxng-billed")
     _price(searxng_client, master_key_header, "searxng:local", 2000.0)
-    old = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_search", old):
-        assert searxng_client.post(f"{API_ROOT}/search/local", json=SEARCH_PAYLOAD, headers=headers).status_code == 200
+    _searxng_answers(searxng_client)
+    assert searxng_client.post(f"{API_ROOT}/search/local", json=SEARCH_PAYLOAD, headers=headers).status_code == 200
     (row,) = _search_rows(searxng_client, master_key_header, "searxng-billed")
     assert Decimal(str(row["cost"])) == Decimal("0.002")
 
@@ -1651,7 +1741,7 @@ def test_an_unpriced_search_is_refused_with_402_naming_its_row(
     """Refused after the budget checks, its hold released, the provider never called, the refusal logged."""
     headers = _on_request_budget(strict_client, master_key_header, "unpriced-search")
     run = AsyncMock()
-    with patch("gateway.api.routes.search.run_direct_search", run):
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", run):
         resp = strict_client.post(f"{API_ROOT}/search/fake-fast", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 402, resp.text
@@ -1862,3 +1952,89 @@ def test_a_refused_search_carries_its_request_id(client: TestClient, api_key_hea
     resp = client.post(f"{API_ROOT}/search/no-such-tool", json=SEARCH_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 400, resp.text
     assert resp.headers[REQUEST_ID_HEADER]
+
+
+@pytest.fixture
+def rpm_client(test_config: GatewayConfig) -> Generator[TestClient]:
+    yield from _client_on(test_config, rate_limit_rpm=3)
+
+
+def test_a_served_search_carries_its_rate_limit_headers(
+    rpm_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _keyed(rpm_client, master_key_header, "rpm-search")
+
+    resp = rpm_client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert (resp.headers["X-RateLimit-Limit"], resp.headers["X-RateLimit-Remaining"]) == ("3", "2")
+    assert int(resp.headers["X-RateLimit-Reset"]) > 0
+
+
+def test_a_refused_search_carries_no_rate_limit_headers(
+    rpm_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _keyed(rpm_client, master_key_header, "rpm-refused")
+
+    resp = rpm_client.post(f"{API_ROOT}/search/nope", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 400, resp.text
+    assert "X-RateLimit-Limit" not in resp.headers
+
+
+class _UnreadablePolicy:
+    """A web search policy whose stored rules cannot be read."""
+
+    async def resolve(
+        self, workspace_id: uuid.UUID, requested_tools: Sequence[WebTool]
+    ) -> ResolvedWebSearchConfig | None:
+        raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID)
+
+
+def test_a_policy_that_cannot_be_read_is_a_503_naming_why(
+    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str], api_key_obj: dict[str, Any]
+) -> None:
+    client.app.dependency_overrides[get_workspace_web_search_policies] = _UnreadablePolicy  # type: ignore[attr-defined]
+
+    resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+
+    assert resp.status_code == 503, resp.text
+    message = WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID.message
+    assert resp.json()["detail"] == message
+    assert resp.headers[REQUEST_ID_HEADER]
+    (row,) = _search_rows(client, master_key_header, api_key_obj["user_id"])
+    assert (row["status"], row["status_code"], row["error_message"], row["model"]) == (
+        "error",
+        503,
+        message,
+        "fake-search",
+    )
+
+
+def test_every_usage_row_names_its_request_its_workspace_and_counts_toward_budget(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A served search, a failed one and a refused one each write one row the request's id groups."""
+    headers = _keyed(client, master_key_header, "row-shapes")
+    failing = {**SEARCH_PAYLOAD, "provider_options": {"error": "http_error", "error_status": 503}}
+
+    served = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+    failed = client.post(f"{API_ROOT}/search/fake-search", json=failing, headers=headers)
+    refused = client.post(f"{API_ROOT}/search/nope", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert [served.status_code, failed.status_code, refused.status_code] == [200, 502, 400]
+    rows = {row["request_group_id"]: row for row in _search_rows(client, master_key_header, "row-shapes")}
+    assert set(rows) == {resp.headers[REQUEST_ID_HEADER] for resp in (served, failed, refused)}
+    ok, error, refusal = (rows[resp.headers[REQUEST_ID_HEADER]] for resp in (served, failed, refused))
+    assert (ok["status"], ok["status_code"], ok["error_message"]) == ("success", None, None)
+    assert (ok["prompt_tokens"], ok["completion_tokens"], ok["total_tokens"]) == (0, 0, 0)
+    assert (error["status"], error["status_code"], error["cost"]) == ("error", 503, None)
+    assert (error["prompt_tokens"], error["model"], error["provider"]) == (None, "fake-search", "fake")
+    assert (refusal["status"], refusal["status_code"], refusal["cost"]) == ("error", 400, None)
+    assert (refusal["prompt_tokens"], refusal["model"], refusal["provider"]) == (None, "nope", None)
+    for row in (ok, error, refusal):
+        assert row["counts_toward_budget"] is True
+        assert row["latency_ms"] is not None
+        assert row["api_key_id"] is not None
+    workspaces = set(db_session.scalars(select(UsageLog.workspace_id).where(UsageLog.user_id == "row-shapes")).all())
+    assert workspaces == {uuid.UUID(_default_workspace_id(client, master_key_header))}

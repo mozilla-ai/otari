@@ -3,37 +3,42 @@
 models.dev (https://models.dev, MIT licensed) publishes per-model metadata beyond
 what pricing needs: input/output modalities, reasoning and
 tool-calling flags, structured-output and attachment support, knowledge cutoff,
-release date, and open-weights status. This module fetches its ``api.json`` once,
-caches it in-memory with a long TTL, and degrades to "no metadata" on any failure
-so an offline or unreachable models.dev never breaks the dashboard.
+release date, and open-weights status. This module fetches its ``api.json`` (the
+v2 document, or v1 when v2 fails), reads it into the typed catalog of
+``gateway.types.models_dev``, and serves that from memory, keeping the last good
+copy through a failure, so an offline or unreachable models.dev never breaks the
+dashboard. The catalog refresher (``services/pricing_refresh_service.py``)
+stores each download in the database and serves the stored copy on every worker.
 
-The outbound call is gated by ``GatewayConfig.models_dev_metadata``; when that is
-false, or when the fetch fails, callers simply get an empty map and the UI shows
-the model without that enrichment. Prices and context windows come from the
-bundled or accepted snapshot (``services/pricing``), not from this fetch.
+Until a worker has a downloaded or stored catalog, it serves the one bundled
+with the gateway. ``GatewayConfig.models_dev_metadata`` gates the outbound call
+only. Prices come from the bundled or accepted snapshot (``services/pricing``),
+not from this fetch.
 """
 
 import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from datetime import UTC, datetime
 
 import httpx
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-
-MODELS_DEV_URL = "https://models.dev/api.json"
+from gateway.services.pricing import bundled_catalog
+from gateway.types.model_endpoint import ModelEndpoint, models_dev_endpoints
+from gateway.types.model_type import ModelType, models_dev_model_type
+from gateway.types.models_dev import MODELS_DEV_SOURCES, ModelsDevCatalog, ModelsDevModel, ModelsDevSource
 
 # The catalog is a few MB; a short read timeout keeps a slow models.dev from
-# stalling a dashboard load, and a failure just means "no enrichment this time".
+# stalling a dashboard load, and a failure just means "the last good copy this time".
 _FETCH_TIMEOUT_SECONDS = 15.0
 
 # Read the body incrementally and stop if it exceeds this, so a misbehaving or
 # compromised models.dev cannot force the gateway to buffer an unbounded response
-# into memory. Generous relative to the few-MB real catalog; overflow degrades to
-# "no enrichment", the same as any other fetch failure.
+# into memory. Generous relative to the few-MB real catalog; overflow is a failed
+# fetch like any other.
 _MAX_CATALOG_BYTES = 64 * 1024 * 1024
 
 # A failed fetch is cached briefly so an offline gateway does not re-attempt (and
@@ -67,13 +72,54 @@ class ModelCatalogEntry:
     deprecated: bool = False
     cost_input: float | None = None
     cost_output: float | None = None
+    type: ModelType | None = None
+    """The kind models.dev gives the model; ``None`` from a v1 document, which gives none."""
+    endpoints: list[ModelEndpoint] = field(default_factory=list)
+    """The Otari routes that serve the model, from its ``api`` block; none from a v1 document, which has none."""
+
+    @classmethod
+    def from_model(cls, model: ModelsDevModel) -> "ModelCatalogEntry":
+        """The metadata view of one catalog model."""
+        rates = model.cost.rates if model.cost is not None else None
+        return cls(
+            name=model.name,
+            description=model.description,
+            family=model.family,
+            canonical_model_id=model.canonical_model_id,
+            input_modalities=list(model.input_modalities),
+            output_modalities=list(model.output_modalities),
+            reasoning=model.reasoning,
+            tool_call=model.tool_call,
+            structured_output=model.structured_output,
+            attachment=model.attachment,
+            temperature=model.temperature,
+            context_window=model.context_window,
+            max_output_tokens=model.max_output_tokens,
+            knowledge_cutoff=model.knowledge,
+            release_date=model.release_date,
+            last_updated=model.last_updated,
+            open_weights=model.open_weights,
+            deprecated=model.status == "deprecated",
+            cost_input=None if rates is None or rates.input is None else float(rates.input),
+            cost_output=None if rates is None or rates.output is None else float(rates.output),
+            type=models_dev_model_type(model.type),
+            endpoints=list(models_dev_endpoints(api.protocol for api in model.api)),
+        )
 
 
 @dataclass
 class _CatalogCache:
-    """Single-blob TTL cache for the whole models.dev catalog."""
+    """Single-blob TTL cache for the whole models.dev catalog.
 
-    data: dict[str, Any] | None = None
+    ``data`` is the catalog this worker serves, kept through a failed fetch so
+    an outage does not take the facts away, and ``fetched_at`` when it was
+    downloaded, by this worker or by the one that stored it. ``ok`` and ``at``
+    describe this worker's last fetch attempt, and so which TTL governs the next
+    one.
+    """
+
+    data: ModelsDevCatalog | None = None
+    fetched_at: datetime | None = None
     ok: bool = False
     at: float = 0.0  # time.monotonic() of the last attempt, 0.0 when never tried
 
@@ -83,47 +129,46 @@ _lock = asyncio.Lock()
 _MISS = object()
 
 
-def cached_models_dev_catalog(config: GatewayConfig) -> dict[str, Any] | None:
-    """The catalog as last fetched, at any age, without fetching or locking.
+def _fallback() -> ModelsDevCatalog | None:
+    """The catalog a worker serves before it has downloaded one: the bundled one."""
+    return bundled_catalog()
+
+
+def _served() -> ModelsDevCatalog | None:
+    return _cache.data if _cache.data is not None else _fallback()
+
+
+def cached_models_dev_catalog() -> ModelsDevCatalog | None:
+    """The catalog as last fetched, at any age, else the bundled one, without fetching or locking.
 
     For a reader that runs off the request path and must not bind the fetch
     lock to its own loop: it answers from whatever a page load or the catalog
-    refresher last put here, and ``None`` until something has.
+    refresher last put here.
     """
-    if not config.models_dev_metadata or not _cache.ok:
-        return None
-    return _cache.data
+    return _served()
+
+
+def serve_catalog(catalog: ModelsDevCatalog, fetched_at: datetime) -> None:
+    """Serve ``catalog``, downloaded at ``fetched_at``: a stored copy, or one this worker fetched."""
+    _cache.data = catalog
+    _cache.fetched_at = fetched_at
 
 
 def clear_catalog_cache() -> None:
     """Reset the cache (tests, and after a config change)."""
     _cache.data = None
+    _cache.fetched_at = None
     _cache.ok = False
     _cache.at = 0.0
 
 
-def _read_cache(ttl: int, *, serve_stale: bool = False, force: bool = False) -> object:
+def _read_cache(ttl: int) -> object:
     """Return the cached data if still fresh, else the ``_MISS`` sentinel.
 
-    ``serve_stale`` accepts a cached *successful* blob at any age, so a read
-    never pays the 15s fetch timeout; the background refresher is what keeps it
-    current. A failed fetch is deliberately excluded: it falls through to
-    ``_NEGATIVE_TTL_SECONDS`` below, because the refresh interval is the success
-    cadence (a day by default) and pinning a transient models.dev outage for that
-    long, with no read able to retry it and no ``refresh`` flag on
-    ``/v1/models/metadata``, would lose enrichment far longer than the failure.
-    ``force`` is the refresher's own read: it treats every entry as expired so
-    the fetch actually happens.
+    A successful fetch honors the configured TTL (0 disables caching, so it is
+    never fresh); a failed one is held only for ``_NEGATIVE_TTL_SECONDS``.
     """
-    if _cache.at == 0.0:
-        return _MISS
-    if force:
-        return _MISS
-    if serve_stale and _cache.ok:
-        return _cache.data
-    # A successful fetch honors the configured TTL (0 disables caching, so it is
-    # never fresh); a failed one is held only briefly before retrying.
-    if _cache.ok and ttl == 0:
+    if _cache.at == 0.0 or (_cache.ok and ttl == 0):
         return _MISS
     limit = ttl if _cache.ok else _NEGATIVE_TTL_SECONDS
     if (time.monotonic() - _cache.at) < limit:
@@ -132,15 +177,41 @@ def _read_cache(ttl: int, *, serve_stale: bool = False, force: bool = False) -> 
 
 
 class ModelsDevFetchError(Exception):
-    """The models.dev catalog could not be downloaded or was not a JSON object."""
+    """The models.dev catalog could not be downloaded or read."""
 
 
-async def _download() -> dict[str, Any]:
-    """One bounded download of ``api.json``; every failure is a ``ModelsDevFetchError``."""
+class ModelsDevRefusedError(ModelsDevFetchError):
+    """The download has a shape the gateway cannot read, so it is not served."""
+
+
+async def _download() -> ModelsDevCatalog:
+    """The first models.dev document that downloads and reads, v2 then v1; raises the last one's failure.
+
+    Each document that fails is logged once, with the one tried next.
+    """
+    failure: ModelsDevFetchError | None = None
+    for source in MODELS_DEV_SOURCES:
+        if failure is not None:
+            logger.warning("%s; reading the models.dev %s catalog instead", failure, source.name)
+        try:
+            return await _download_from(source)
+        except ModelsDevFetchError as exc:
+            failure = exc
+    assert failure is not None
+    raise failure
+
+
+async def _download_from(source: ModelsDevSource) -> ModelsDevCatalog:
+    """One bounded download of one document, read into a catalog; every failure is a ``ModelsDevFetchError``.
+
+    A document whose shape the gateway cannot read is refused. One it reads
+    with a few damaged models is kept, with one warning naming them.
+    """
+    name = f"models.dev {source.name} catalog"
     try:
         async with (
             httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
-            client.stream("GET", MODELS_DEV_URL, headers={"User-Agent": "otari-gateway"}) as resp,
+            client.stream("GET", source.url, headers={"User-Agent": "otari-gateway"}) as resp,
         ):
             resp.raise_for_status()
             chunks: list[bytes] = []
@@ -148,89 +219,86 @@ async def _download() -> dict[str, Any]:
             async for chunk in resp.aiter_bytes():
                 total += len(chunk)
                 if total > _MAX_CATALOG_BYTES:
-                    raise ModelsDevFetchError(f"models.dev catalog exceeded {_MAX_CATALOG_BYTES} bytes")
+                    raise ModelsDevFetchError(f"{name} exceeded {_MAX_CATALOG_BYTES} bytes")
                 chunks.append(chunk)
         data = json.loads(b"".join(chunks))
     except ModelsDevFetchError:
         raise
     except Exception as exc:
-        raise ModelsDevFetchError(f"models.dev catalog fetch failed: {exc}") from exc
+        raise ModelsDevFetchError(f"{name} fetch failed: {exc}") from exc
     if not isinstance(data, dict):
-        raise ModelsDevFetchError("models.dev catalog was not a JSON object")
-    return data
+        raise ModelsDevRefusedError(f"{name} refused: it is not a JSON object")
+    catalog = source.parse(data)
+    if (reason := catalog.refusal()) is not None:
+        raise ModelsDevRefusedError(f"{name} refused: {reason}")
+    if catalog.issues.count or catalog.issues.unknown_units:
+        # The line carries fetched text, so the console handler must not read it as markup.
+        logger.warning("%s read with %s", name, catalog.issues.describe(), extra={"markup": False})
+    return catalog
 
 
-async def _fetch() -> dict[str, Any] | None:
+async def _fetch() -> ModelsDevCatalog | None:
     try:
         return await _download()
+    except ModelsDevRefusedError as exc:
+        logger.error("%s; keeping the last good copy", exc)
+        return None
     except ModelsDevFetchError as exc:
-        logger.warning("%s; ignoring", exc)
+        logger.warning("%s; keeping the last good copy", exc)
         return None
 
 
-def _fresh_cached(reuse_within: float) -> dict[str, Any] | None:
-    if reuse_within > 0 and _cache.ok and (time.monotonic() - _cache.at) < reuse_within:
+def _fresh_cached(reuse_within: float) -> ModelsDevCatalog | None:
+    fetched_at = _cache.fetched_at
+    if reuse_within > 0 and fetched_at is not None and (datetime.now(UTC) - fetched_at).total_seconds() < reuse_within:
         return _cache.data
     return None
 
 
-async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bool = False) -> dict[str, Any]:
+async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bool = False) -> ModelsDevCatalog:
     """Download ``api.json`` for a caller that needs it now, raising on failure.
 
-    The price refresh uses this, so it works whether or not
-    ``models_dev_metadata`` is on. A copy the metadata cache fetched within
-    ``reuse_within`` seconds is returned instead of downloading again, and a
-    download made here fills that cache when ``fill_cache`` is set (the caller
-    passes ``models_dev_metadata``), so the catalog refresher need not repeat it.
+    The price refresh and the catalog refresher use this. A catalog served here
+    that was downloaded within ``reuse_within`` seconds, by this worker or by the
+    one that stored it, is returned instead of downloading again. A download
+    made here is served from then on when ``fill_cache`` is set.
     """
     async with _lock:
         if (reused := _fresh_cached(reuse_within)) is not None:
             return reused
         data = await _download()
         if fill_cache:
-            _cache.data = data
-            _cache.ok = True
-            _cache.at = time.monotonic()
+            serve_catalog(data, datetime.now(UTC))
         return data
 
 
-async def load_models_dev_catalog(
-    config: GatewayConfig,
-    *,
-    serve_stale: bool = False,
-    force: bool = False,
-    reuse_within: float = 0.0,
-) -> dict[str, Any] | None:
-    """Return the cached models.dev catalog, fetching it if stale.
+async def load_models_dev_catalog(config: GatewayConfig, *, serve_stale: bool = False) -> ModelsDevCatalog | None:
+    """Return the models.dev catalog this worker serves, fetching it first only where a read may.
 
-    Returns ``None`` when metadata enrichment is disabled or the fetch failed.
-    ``serve_stale`` answers from the cache at any age so a dashboard read never
-    waits on models.dev; ``force`` is the background refresher's fetch, which
-    still skips the download when a copy newer than ``reuse_within`` seconds is
-    cached (the price refresh may have just fetched it).
+    A read fetches only with ``models_dev_metadata`` on, ``serve_stale`` off
+    and the cache past ``models_dev_cache_ttl_seconds``. ``serve_stale`` is for
+    a read the catalog refresher keeps warm (:func:`background_catalog_enabled`),
+    so it never waits on models.dev. Until a catalog is fetched or stored, the
+    bundled one is returned; a failed fetch returns the last good catalog.
     """
-    if not config.models_dev_metadata:
-        return None
+    if not config.models_dev_metadata or serve_stale:
+        return _served()
 
     ttl = config.models_dev_cache_ttl_seconds
-    cached = _read_cache(ttl, serve_stale=serve_stale, force=force)
-    if cached is not _MISS:
-        return cached  # type: ignore[return-value]
+    if _read_cache(ttl) is not _MISS:
+        return _served()
 
     async with _lock:
         # Double-check under the lock so a burst of dashboard loads triggers one
         # fetch, not one per request.
-        cached = _read_cache(ttl, serve_stale=serve_stale, force=force)
-        if cached is not _MISS:
-            return cached  # type: ignore[return-value]
-        if (reused := _fresh_cached(reuse_within)) is not None:
-            return reused
-
+        if _read_cache(ttl) is not _MISS:
+            return _served()
         data = await _fetch()
-        _cache.data = data
+        if data is not None:
+            serve_catalog(data, datetime.now(UTC))
         _cache.ok = data is not None
         _cache.at = time.monotonic()
-        return data
+        return _served()
 
 
 # Floor on the refresh cadence, for the same reason as the discovery refresher's:
@@ -239,130 +307,21 @@ _MIN_REFRESH_INTERVAL_SECONDS = 300.0
 
 
 def background_catalog_enabled(config: GatewayConfig) -> bool:
-    """Whether reads may answer from the cache because a refresher fills it.
+    """Whether the catalog refresher downloads, so reads answer from what it serves.
 
     ``models_dev_cache_ttl_seconds = 0`` is the documented way to disable
-    caching, so it keeps meaning "fetch on every read", and ``models_dev_metadata``
-    already disables enrichment outright.
+    caching, so it keeps meaning "fetch on every read", and without
+    ``models_dev_metadata`` nothing is downloaded for the facts.
     """
     return config.models_dev_metadata and config.models_dev_cache_ttl_seconds > 0
 
 
-def _catalog_refresh_interval(config: GatewayConfig) -> float:
+def catalog_refresh_interval(config: GatewayConfig) -> float:
+    """How often the catalog refresher downloads models.dev, in seconds."""
     return max(_MIN_REFRESH_INTERVAL_SECONDS, float(config.models_dev_cache_ttl_seconds))
 
 
-async def run_catalog_refresher(config: GatewayConfig, interval: float | None = None) -> None:
-    """Keep the models.dev catalog warm so no read waits on the 15s fetch.
-
-    Primes once immediately, then refetches on the interval. Errors are already
-    swallowed inside ``_fetch`` (a failure degrades to "no enrichment"), so the
-    guard here only covers an unexpected one taking the refresher down.
-
-    Re-checks ``background_catalog_enabled`` every tick rather than being started
-    only when it holds, for the same reason as the discovery refresher:
-    ``models_dev_metadata`` and ``models_dev_cache_ttl_seconds`` are both
-    runtime-settable, so the loop has to be able to start and stop refetching
-    without a restart.
-    """
-    while True:
-        # Recomputed per tick, not captured once, so a TTL changed at runtime
-        # takes effect on the next round.
-        delay = interval if interval is not None else _catalog_refresh_interval(config)
-        try:
-            if background_catalog_enabled(config):
-                await load_models_dev_catalog(config, force=True, reuse_within=delay / 2)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("models.dev catalog refresh failed; retrying on the next tick", exc_info=True)
-        await asyncio.sleep(delay)
-
-
-def _as_str(value: Any) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def token_limit(value: Any) -> int | None:
-    """A token limit, or ``None`` for anything but a positive integer.
-
-    models.dev writes 0 for a limit it does not know, and a client would read
-    0 as no tokens at all.
-    """
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
-
-
-def _as_float(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
-    """Build a :class:`ModelCatalogEntry` from a models.dev model object."""
-    modalities = _as_dict(model.get("modalities"))
-    limit = _as_dict(model.get("limit"))
-    cost = _as_dict(model.get("cost"))
-    return ModelCatalogEntry(
-        name=_as_str(model.get("name")),
-        description=_as_str(model.get("description")),
-        family=_as_str(model.get("family")),
-        canonical_model_id=_as_str(model.get("canonical_model_id")),
-        input_modalities=_str_list(modalities.get("input")),
-        output_modalities=_str_list(modalities.get("output")),
-        reasoning=bool(model.get("reasoning")),
-        tool_call=bool(model.get("tool_call")),
-        structured_output=bool(model.get("structured_output")),
-        attachment=bool(model.get("attachment")),
-        temperature=bool(model.get("temperature")),
-        context_window=token_limit(limit.get("context")),
-        max_output_tokens=token_limit(limit.get("output")),
-        knowledge_cutoff=_as_str(model.get("knowledge")),
-        release_date=_as_str(model.get("release_date")),
-        last_updated=_as_str(model.get("last_updated")),
-        open_weights=bool(model.get("open_weights")),
-        deprecated=model.get("status") == "deprecated",
-        cost_input=_as_float(cost.get("input")),
-        cost_output=_as_float(cost.get("output")),
-    )
-
-
-# models.dev spells a handful of providers differently from any-llm. Looked up
-# by the any-llm implementation name; a provider absent here is spelled the same
-# in both, or is one models.dev does not carry (a local server, a proxy).
-_MODELS_DEV_PROVIDER_IDS: dict[str, str] = {
-    "fireworks": "fireworks-ai",
-    "gemini": "google",
-    "vertexai": "google-vertex",
-    "vertexaianthropic": "google-vertex-anthropic",
-    "bedrock": "amazon-bedrock",
-    "together": "togetherai",
-    "moonshot": "moonshotai",
-    "azureopenai": "azure",
-    "github": "github-copilot",
-    "gmi": "gmicloud",
-    "qiniu": "qiniu-ai",
-}
-
-
-def models_dev_provider_id(provider_type: str) -> str:
-    """The models.dev provider id for an any-llm implementation."""
-    return _MODELS_DEV_PROVIDER_IDS.get(provider_type, provider_type)
-
-
-def build_metadata_map(config: GatewayConfig, catalog: dict[str, Any] | None) -> dict[str, ModelCatalogEntry]:
+def build_metadata_map(config: GatewayConfig, catalog: ModelsDevCatalog | None) -> dict[str, ModelCatalogEntry]:
     """Metadata for every model under a configured provider, keyed ``instance:model``.
 
     Keys use the configured instance name (not the provider type), so a named
@@ -370,17 +329,12 @@ def build_metadata_map(config: GatewayConfig, catalog: dict[str, Any] | None) ->
     under that instance. models.dev is looked up by the instance's provider type.
     """
     out: dict[str, ModelCatalogEntry] = {}
-    if not catalog:
+    if catalog is None:
         return out
     for instance in config.providers:
-        provider_type = config.provider_instance_type(instance)
-        provider = catalog.get(models_dev_provider_id(provider_type))
-        if not isinstance(provider, dict):
+        provider = catalog.provider_for(config.provider_instance_type(instance))
+        if provider is None:
             continue
-        models = provider.get("models")
-        if not isinstance(models, dict):
-            continue
-        for model_id, model in models.items():
-            if isinstance(model_id, str) and isinstance(model, dict):
-                out[f"{instance}:{model_id}"] = parse_entry(model)
+        for model_id, model in provider.models.items():
+            out[f"{instance}:{model_id}"] = ModelCatalogEntry.from_model(model)
     return out

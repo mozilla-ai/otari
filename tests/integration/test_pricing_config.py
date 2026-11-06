@@ -268,7 +268,7 @@ def test_a_tools_price_per_call_is_stored_under_its_kind_and_name(postgres_url: 
 
     rows = {(row.kind, row.model_key): row for row in test_db.query(ModelPricing).all()}
     assert rows[("search", "exa")].input_price_per_million == 5000
-    assert rows[("search", "exa")].unit == "requests"
+    assert rows[("search", "exa")].unit == "request"
     assert rows[("fetch", "exa-fetch")].input_price_per_million == 1000
     assert rows[("model", "exa:exa")].input_price_per_million == 1
     assert test_db.query(ModelPricing).filter(ModelPricing.kind == "search").count() == 1
@@ -705,8 +705,9 @@ def test_pricing_initialization_with_no_config(postgres_url: str, test_db: Sessi
         with TestClient(app):
             # App should start successfully
             # No pricing should be in database
-            pricing_count = test_db.query(ModelPricing).count()
-            assert pricing_count == 0, "No pricing should be loaded when config is empty"
+            rows = [(row.kind, row.model_key, row.origin) for row in test_db.query(ModelPricing)]
+            # The one row on a fresh database is the migration's price of 0 for the built-in fetcher.
+            assert rows == [("fetch", "builtin_fetch", "migration")], "No pricing should be loaded when config is empty"
     finally:
         dispose_override()
 
@@ -799,3 +800,37 @@ async def test_log_usage_finds_pricing_with_colon_format(async_db: AsyncSession)
     log = writer.logs[0]
     expected_cost = (Decimal(1000) * Decimal("30") + Decimal(500) * Decimal("60")) / Decimal(1_000_000)
     assert log.cost == expected_cost
+
+
+def test_pricing_loaded_from_config_as_rates(postgres_url: str, test_db: Session) -> None:
+    """A config entry given as a cost block stores the block and the columns read out of it."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        providers={"openai": {"api_key": "test-key"}},
+        pricing={
+            "openai:gpt-image-1": PricingConfig.model_validate(
+                {"rates": {"image": {"output": {"price": 0.04, "unit": "image"}}}}
+            ),
+        },
+    )
+    app = create_app(config)
+    with TestClient(app):
+        pass
+
+    pricing = test_db.query(ModelPricing).filter(ModelPricing.model_key == "openai:gpt-image-1").one()
+    assert (pricing.unit, pricing.input_price_per_million, pricing.output_price_per_million) == (
+        "image",
+        Decimal(40000),
+        Decimal(0),
+    )
+    assert pricing.rates == {"image": {"output": {"price": Decimal("0.04"), "unit": "image"}}}
+
+
+def test_pricing_config_refuses_rates_beside_per_million_fields() -> None:
+    with pytest.raises(ValueError, match="remove input_price_per_million"):
+        PricingConfig.model_validate(
+            {"input_price_per_million": 3, "output_price_per_million": 15, "rates": {"text": {"input": {"price": 3}}}}
+        )

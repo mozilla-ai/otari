@@ -65,6 +65,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthIdentityLinkConflictError,
     OAuthNotConfiguredError,
     OAuthProviderUnavailableError,
+    SignInBlockedError,
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
@@ -83,7 +84,7 @@ from gateway.services.oauth_service import (
     provider_label,
     require_configured,
 )
-from gateway.services.tenancy import report_new_account
+from gateway.services.tenancy import report_new_account, report_sign_in
 
 router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
 
@@ -316,8 +317,9 @@ async def callback(
             config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
         )
         signed_in = await identities.sign_in_with_oauth(external, terms_accepted=body.terms_accepted)
-    except (OAuthIdentityLinkConflictError, TermsNotAcceptedError):
-        # A concurrent sign-in finished first, or the terms are still to accept, so nobody failed to authenticate.
+    except (OAuthIdentityLinkConflictError, SignInBlockedError, TermsNotAcceptedError):
+        # A concurrent sign-in finished first, the address is blocked, or the terms are still to accept, so nobody
+        # failed to authenticate.
         raise
     except OAuthProviderUnavailableError as exc:
         # Rendered here so the 502 keeps its message, which the tenancy handler would blank.
@@ -330,6 +332,7 @@ async def callback(
     identity = signed_in.account
     logger.info("Signed in %s with %s", identity.id, provider_label(provider))
     await report_new_account(growth, identity, background_tasks=background_tasks, new_account=signed_in.new_account)
+    await report_sign_in(growth, identity, background_tasks=background_tasks)
     apply_session_cookie(
         response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
     )

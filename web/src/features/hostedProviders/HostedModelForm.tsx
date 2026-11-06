@@ -7,6 +7,7 @@ import { Field } from "@/design-system/forms/Field"
 import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import {
+  PRICING_UNIT_DESCRIPTION,
   PRICING_UNIT_OPTIONS,
   pricingUnitOf,
   unitRateLabel,
@@ -176,9 +177,9 @@ export function HostedModelForm({
           setDraft({ ...draft, unit: pricingUnitOf(value) })
         }}
         options={PRICING_UNIT_OPTIONS}
-        description="What the rate bills: tokens the provider reports, each call (or rerank search unit), or each image returned. Price audio and moderation models per request."
+        description={PRICING_UNIT_DESCRIPTION}
       />
-      {draft.unit === "tokens" ? (
+      {draft.unit === "token" ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {rateField(
             "Input, per 1M tokens",

@@ -1,7 +1,7 @@
 # otari-router
 
 Claude Code plugin for [Otari](https://github.com/mozilla-ai/otari), the
-open-source LLM gateway. When Claude Code spawns a subagent, the plugin asks
+open-source AI gateway. When Claude Code spawns a subagent, the plugin asks
 the gateway which model that subagent should run on, and starts it there.
 
 Switching the model inside a running conversation cold-starts its prompt

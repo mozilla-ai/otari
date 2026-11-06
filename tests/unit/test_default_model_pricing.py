@@ -264,7 +264,7 @@ def test_model_context_window_reads_the_catalog() -> None:
 
 def test_as_of_prices_from_the_snapshot_in_force_then(install_models_dev: Install) -> None:
     """The rate follows the accepted snapshot in effect at the lookup time."""
-    old = ModelsDevPriceIndex.from_catalog(
+    old = ModelsDevPriceIndex.from_document(
         {"openai": {"id": "openai", "models": {"gpt-4.1": {"id": "gpt-4.1", "cost": {"input": 5, "output": 9}}}}}
     )
     new = install_models_dev(None)
@@ -333,3 +333,72 @@ def test_the_bundled_snapshot_serves_when_nothing_was_accepted() -> None:
     assert pricing is not None
     assert pricing.input_price_per_million > 0
     assert pricing.output_price_per_million > 0
+
+
+def test_a_default_from_a_v2_catalog_carries_the_cost_block_as_rates() -> None:
+    """The block a seeded row stores, beside the per-million columns the index derives from it."""
+    import json
+    from pathlib import Path
+
+    from gateway.types.models_dev import parse_catalog_v2
+
+    sample = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_v2_sample.json"
+    document = json.loads(sample.read_text("utf-8"))
+    index = ModelsDevPriceIndex.from_catalog(parse_catalog_v2(document))
+    set_accepted_generations(
+        [PriceGeneration(effective_at=datetime(2020, 1, 1, tzinfo=UTC), index=index)], complete=False
+    )
+
+    pricing = default_model_pricing("openai", "gpt-4o", NOW)
+
+    assert pricing is not None
+    assert pricing.rates == document["openai"]["models"]["gpt-4o"]["cost"]
+    assert pricing.input_price_per_million == Decimal("2.5")
+
+
+def _v2_catalog(models: dict[str, dict[str, Any]]) -> None:
+    from gateway.types.models_dev import parse_catalog_v2
+
+    index = ModelsDevPriceIndex.from_catalog(parse_catalog_v2({"openai": {"id": "openai", "models": models}}))
+    set_accepted_generations(
+        [PriceGeneration(effective_at=datetime(2020, 1, 1, tzinfo=UTC), index=index)], complete=False
+    )
+
+
+def test_a_model_priced_only_per_minute_of_audio_is_priced_in_that_unit() -> None:
+    """A transcription model has no text price, so the columns read the one slot its block prices."""
+    cost = {"audio": {"input": {"price": 0.006, "unit": "minute"}}}
+    _v2_catalog({"whisper-1": {"id": "whisper-1", "cost": cost}})
+
+    pricing = default_model_pricing("openai", "whisper-1", NOW)
+
+    assert pricing is not None
+    assert pricing.unit == "minute"
+    assert pricing.input_price_per_million == Decimal(6000)
+    assert pricing.output_price_per_million == Decimal(0)
+    assert pricing.rates == cost
+
+
+def test_a_model_priced_only_per_character_of_text_is_priced_in_that_unit() -> None:
+    cost = {"text": {"input": {"price": 15, "unit": "character"}}}
+    _v2_catalog({"tts-1": {"id": "tts-1", "cost": cost}})
+
+    pricing = default_model_pricing("openai", "tts-1", NOW)
+
+    assert pricing is not None
+    assert (pricing.unit, pricing.input_price_per_million) == ("character", Decimal(15))
+    assert pricing.rates == cost
+
+
+def test_a_model_with_half_a_text_token_price_stays_unpriced() -> None:
+    """A missing text rate is never read as free, whatever else the block prices."""
+    _v2_catalog({"tts": {"id": "tts", "cost": {"text": {"input": {"price": 0.6}}, "audio": {"output": {"price": 12}}}}})
+
+    assert default_model_pricing("openai", "tts", NOW) is None
+
+
+def test_a_default_from_a_v1_catalog_carries_no_block() -> None:
+    pricing = default_model_pricing("openai", "gpt-4.1", NOW)
+
+    assert pricing is not None
+    assert pricing.rates is None

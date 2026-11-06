@@ -23,6 +23,7 @@ from gateway.schemas.budgets import (
     CreateBudgetRequest,
     EndUserBudgetPublic,
     EndUserPublic,
+    KeyBudgetPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
     OrganizationBudgetsPublic,
@@ -40,6 +41,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets._declared import attach_key_ceiling
 from gateway.services.budgets._deployment_surface import _DeploymentSurface
 from gateway.services.budgets._end_users import ResolvedEndUser, _EndUsers, end_user_budget_list
+from gateway.services.budgets._key_limits import _KeyLimits
 from gateway.services.budgets._member_policies import _MemberPolicies
 from gateway.services.budgets._organization_surface import _OrganizationSurface
 from gateway.services.budgets._reservation_moves import (
@@ -50,6 +52,7 @@ from gateway.services.budgets._reservation_moves import (
 )
 from gateway.services.budgets._reservations import EstimateInputs, ReservationHandle, _normalize_strategy
 from gateway.services.budgets._scopes import ScopeOwnership
+from gateway.services.organizations import UserAccess
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.attempt import Attempt
@@ -68,6 +71,8 @@ class BudgetService:
         organizations: OrganizationService,
         api_keys: ApiKeyService,
         workspace_access: WorkspaceAccess,
+        *,
+        users: UserAccess,
     ) -> None:
         self._uow = uow
         self._repositories = repositories
@@ -80,6 +85,7 @@ class BudgetService:
         self._deployment = _DeploymentSurface(repositories)
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
         self._moves = _ReservationMoves(repositories)
+        self._key_limits = _KeyLimits(repositories, organizations, users)
 
     async def list_deployment_budgets(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
         """A page of the budgets the deployment owns and the operator's organization owns."""
@@ -284,6 +290,13 @@ class BudgetService:
             async with self._uow:
                 await self._end_users.require_assignable_budgets(to_check, organization_id)
         return listed
+
+    async def key_budget(self, api_key: APIKey, *, strategy: str | None) -> KeyBudgetPublic:
+        """What a key may still spend, and every cap that decides it; none when no budget gates the key."""
+        if api_key.exclude_from_budget or _normalize_strategy(strategy) == "disabled":
+            return KeyBudgetPublic(budgets_enforced=False, remaining_usd=None, limits=[])
+        async with self._uow:
+            return await self._key_limits.read(api_key)
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
         """The user's own budget and its per-minute limits, or None when the user is on none or budgets are disabled."""

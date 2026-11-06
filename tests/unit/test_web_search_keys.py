@@ -28,10 +28,16 @@ from gateway.models.tools import (
     WebToolCredentialSource,
     WorkspaceWebSearchKeyOverride,
 )
-from gateway.repositories.tools import resolve_web_search_key
 from gateway.services import search_backend
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
-from gateway.services.tools import SearchQuery, _web_search_keys, apply_web_access_policy, resolve_search
+from gateway.services.tools import (
+    SearchQuery,
+    _web_search_keys,
+    apply_web_access_policy,
+    page_budget_chars,
+    resolve_search,
+)
+from gateway.services.tools._web_search_keys import resolve_web_search_key
 from gateway.services.web_search_providers import WebSearchProviderError
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -94,22 +100,24 @@ def test_without_a_pin_the_default_wins_over_an_older_key() -> None:
     assert _chosen((oldest, None), (default, None)) == "default"
 
 
-def test_without_a_pin_or_default_the_oldest_key() -> None:
-    assert _chosen((_key("oldest"), None), (_key("newer", age=1), None)) == "oldest"
+def test_without_a_pin_or_default_the_deployments_search() -> None:
+    assert _chosen((_key("oldest"), None), (_key("newer", age=1), None)) is None
 
 
-def test_a_key_the_workspace_turned_off_is_passed_over() -> None:
+def test_a_default_the_workspace_turned_off_is_passed_over() -> None:
     default = _key("default", default=True)
     other = _key("other", age=1)
 
-    assert _chosen((default, _override(default, disabled=True)), (other, None)) == "other"
+    assert _chosen((default, _override(default, disabled=True)), (other, None)) is None
+    assert _chosen((default, _override(default, disabled=True)), (other, _override(other, pinned=True))) == "other"
 
 
 def test_a_key_this_deployment_cannot_decrypt_is_passed_over() -> None:
     pinned = _key("pinned")
-    other = _key("other", age=1)
+    default = _key("default", default=True, age=1)
 
-    assert _chosen((pinned, _override(pinned, pinned=True)), (other, None), unusable="pinned") == "other"
+    assert _chosen((pinned, _override(pinned, pinned=True)), (default, None), unusable="pinned") == "default"
+    assert _chosen((pinned, _override(pinned, pinned=True)), (default, None), unusable="default") == "pinned"
 
 
 def test_no_usable_key_means_the_deployments_search() -> None:
@@ -273,6 +281,35 @@ async def test_direct_search_on_a_workspace_key_reads_the_providers_hits(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_a_workspace_keys_hits_keep_their_page_text_within_the_page_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def provider_search(**_kwargs: Any) -> list[dict[str, Any]]:
+        page = {"url": "https://a.example", "content": "a snippet", "extracted_content": "page text " * 100}
+        return [
+            {**page, "title": "A", "published_date": "2026-11-04"},
+            {"title": "no url"},
+            {"url": "", "title": "an empty url"},
+            {"url": "https://b.example", "content": "only a snippet"},
+        ]
+
+    monkeypatch.setattr(search_backend, "provider_search", provider_search)
+    query = SearchQuery(query="q", max_tokens_per_page=5)
+    async with httpx.AsyncClient(transport=_NO_NETWORK) as client:
+        outcome = await search_backend.run_keyed_search(
+            WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key"),
+            query,
+            timeout_s=3.0,
+            client=client,
+        )
+
+    first, second = outcome.results
+    assert (first.url, first.title, first.date) == ("https://a.example", "A", "2026-11-04")
+    assert first.snippet == ("page text " * 100)[: page_budget_chars(query)]
+    assert (second.url, second.snippet, second.date) == ("https://b.example", "only a snippet", None)
+
+
+@pytest.mark.asyncio
 async def test_direct_search_on_a_workspace_key_reports_a_provider_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     async def failing_provider_search(**_kwargs: Any) -> list[dict[str, Any]]:
         raise WebSearchProviderError("tavily search returned HTTP 401", tag="http_error", status=401)
@@ -330,24 +367,11 @@ class _Overrides:
         self.reads.append(f"preferred {kind or 'every kind'}")
         return [(key, None) for key in self._of(kind) if key.is_org_default]
 
-    async def candidate_page(
-        self, *, skip: int, limit: int, kind: str | None, **_kwargs: Any
-    ) -> list[tuple[OrgWebSearchKey, None]]:
-        self.reads.append(f"page {skip} {kind or 'every kind'}")
-        return [(key, None) for key in self._of(kind)[skip : skip + limit]]
-
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("usable_name", "reads"),
-    [
-        ("default", ["preferred search"]),
-        ("k3", ["preferred search", "page 0 search"]),
-        ("k45", ["preferred search", "page 0 search", "page 20 search", "page 40 search"]),
-    ],
-)
-async def test_the_choice_reads_only_the_keys_it_reaches(
-    monkeypatch: pytest.MonkeyPatch, usable_name: str, reads: list[str]
+@pytest.mark.parametrize(("usable_name", "chosen_name"), [("default", "default"), ("k3", None)])
+async def test_the_choice_reads_only_the_pins_and_defaults(
+    monkeypatch: pytest.MonkeyPatch, usable_name: str, chosen_name: str | None
 ) -> None:
     keys = [_key(f"k{index}", age=index) for index in range(50)]
     keys.append(_key("default", default=True, age=60))
@@ -364,9 +388,8 @@ async def test_the_choice_reads_only_the_keys_it_reaches(
         )
     )["search"]
 
-    assert chosen is not None
-    assert chosen.name == usable_name
-    assert overrides.reads == reads
+    assert (chosen.name if chosen is not None else None) == chosen_name
+    assert overrides.reads == ["preferred search"]
 
 
 @pytest.mark.parametrize(
@@ -393,7 +416,7 @@ def test_a_key_may_name_a_provider_the_libraries_serve_for_its_kind(kind: ToolKi
         ("search", "tabstack"),
         ("fetch", "mojeek"),
         ("fetch", "tavily"),
-        ("search", "searxng"),
+        ("fetch", "searxng"),
         ("search", "nowhere"),
     ],
 )
@@ -411,6 +434,17 @@ def test_a_key_may_not_name_a_provider_its_kind_does_not_offer(kind: ToolKind, p
 async def test_a_keyed_provider_needs_a_key(kind: ToolKind, provider: str) -> None:
     with pytest.raises(WebSearchKeyIncompleteError, match="needs an API key"):
         await _web_search_keys._check_settings(kind, provider, has_key=False, api_base=None, options=None)
+
+
+@pytest.mark.asyncio
+async def test_a_searxng_key_needs_its_own_endpoint_and_no_api_key() -> None:
+    assert _web_search_keys._validated_provider("search", "searxng") == "searxng"
+    with pytest.raises(WebSearchKeyIncompleteError, match="api_base"):
+        await _web_search_keys._check_settings("search", "searxng", has_key=False, api_base=None, options=None)
+
+    await _web_search_keys._check_settings(
+        "search", "searxng", has_key=False, api_base="https://1.1.1.1/searx", options={"engines": "wikinews"}
+    )
 
 
 @pytest.mark.asyncio
@@ -462,17 +496,9 @@ async def test_a_keys_options_are_checked_against_its_provider() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("defaults", "reads"),
-    [
-        ({"search", "fetch"}, ["preferred every kind"]),
-        ({"search"}, ["preferred every kind", "page 0 fetch"]),
-        (set(), ["preferred every kind", "page 0 every kind"]),
-    ],
-    ids=["both-defaults", "search-default", "no-default"],
-)
+@pytest.mark.parametrize("defaults", [{"search", "fetch"}, {"search"}, set()], ids=["both", "search", "none"])
 async def test_both_kinds_are_chosen_from_one_read_of_the_pins_and_defaults(
-    monkeypatch: pytest.MonkeyPatch, defaults: set[str], reads: list[str]
+    monkeypatch: pytest.MonkeyPatch, defaults: set[str]
 ) -> None:
     keys = [
         _key(f"{kind}-key", provider=provider, kind=kind, default=kind in defaults)
@@ -488,7 +514,7 @@ async def test_both_kinds_are_chosen_from_one_read_of_the_pins_and_defaults(
     )
 
     assert {kind: key.name if key else None for kind, key in chosen.items()} == {
-        "search": "search-key",
-        "fetch": "fetch-key",
+        "search": "search-key" if "search" in defaults else None,
+        "fetch": "fetch-key" if "fetch" in defaults else None,
     }
-    assert overrides.reads == reads
+    assert overrides.reads == ["preferred every kind"]

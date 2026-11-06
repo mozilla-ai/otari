@@ -4,6 +4,7 @@ from typing import Any
 
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import ApiKeyConfig, https_url_problem
+from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import (
     FederationIssuerInvalidError,
@@ -37,8 +38,8 @@ class ApiKeyService:
     """Answer questions about API keys and their workspaces, and manage their federation rules and access lists.
 
     The lookups run in the caller's Unit of Work block and raise ``OutsideUnitOfWorkError`` outside one; the
-    federation-rule and access-list methods are business steps of their own. A key's owner's lists come from
-    ``users``.
+    federation-rule and access-list methods and ``key_names`` are business steps of their own. A key's owner's
+    lists come from ``users``.
     """
 
     def __init__(self, uow: UnitOfWork, repositories: ApiKeyRepositories, *, users: UserAccess) -> None:
@@ -54,6 +55,16 @@ class ApiKeyService:
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""
         return await self._keys.get_key_ids_in_workspaces(workspace_ids)
+
+    async def key_names(
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID] | None
+    ) -> dict[str, str | None]:
+        """Each of these keys that still exists in these workspaces, or in any with ``None``, to its name.
+
+        Read in a block of its own.
+        """
+        async with self._uow:
+            return await self._keys.names_by_id(key_ids, workspace_ids=workspace_ids)
 
     async def keys_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name the keys that start a new end user on this budget when a request names none."""
@@ -232,10 +243,10 @@ class ApiKeyService:
             raise ValueError(KEY_TOOLS_EXCEED_USER_DETAIL)
         return checked
 
-    async def search_tool_refusal(
-        self, config: GatewayConfig, api_key: APIKey | None, *, provider: str, tool: str
+    async def tool_refusal(
+        self, config: GatewayConfig, api_key: APIKey | None, *, kind: ToolKind, provider: str, tool: str
     ) -> str | None:
-        """Why a request's key may not run a search tool, or ``None`` when it may.
+        """Why a request's key may not run a search or fetch tool, or ``None`` when it may.
 
         Master-key callers (``api_key is None``) run every tool. The key's owner's
         lists are read only when the key has no ``allowed_tools`` of its own.
@@ -259,7 +270,7 @@ class ApiKeyService:
         legacy_models: list[list[str]] = []
         if api_key.allowed_tools is None and owner.tools is None:
             legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
-        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models)
+        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models, kind=kind)
 
     async def pin_before_user_grant(
         self, config: GatewayConfig, user_id: str, *, before: AccessLists, user_tools: list[str] | None

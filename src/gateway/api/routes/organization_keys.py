@@ -78,8 +78,8 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
+from gateway.models.tenancy import Organization, Workspace
 from gateway.models.tenancy import User as TenancyUser
-from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import add_service_key_owner, get_or_create_attribution_user
@@ -135,8 +135,9 @@ class CreateOwnKeyRequest(BaseModel):
     )
     allowed_tools: list[str] | None = Field(
         default=None,
-        description="Search tool allow-list for POST /api/v1/search: null = inherit your own, [] = no tool, "
-        "or search tool names ('*' for every search tool). A key can only narrow your own tool access.",
+        description="Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, "
+        "[] = no tool, or search and fetch tool names ('*' for every tool). "
+        "A key can only narrow your own tool access.",
     )
     reject_user_mismatch: bool | None = Field(
         default=None,
@@ -236,17 +237,28 @@ async def _load_own_writable_key(
     switching it off or deleting it, and nothing else.
     """
     organization = await organizations.get_active_organization_for_user(identity)
-    key = await _load_key_in_organization(
+    key = await _load_member_key(db, organizations, identity, organization, key_id)
+    await organizations.hold_workspace_write_access(
+        user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=revoking
+    )
+    return key
+
+
+async def _load_member_key(
+    db: AsyncSession,
+    organizations: OrganizationService,
+    identity: TenancyUser,
+    organization: Organization,
+    key_id: str,
+) -> APIKey:
+    """One of the caller's own keys in ``organization``, or for an owner or admin one of its service keys, or 404."""
+    return await _load_key_in_organization(
         db,
         key_id,
         organization.id,
         owner_user_id=str(identity.id),
         or_organization_service_keys=await organizations.manages_organization(user=identity, organization=organization),
     )
-    await organizations.hold_workspace_write_access(
-        user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=revoking
-    )
-    return key
 
 
 @router.post("")
@@ -576,13 +588,7 @@ async def _federation_rule_key(
         return await _load_key_in_organization(db, key_id, organization.id)
     if adding:
         await organizations.require_active_organization_management_access(user=identity, organization=organization)
-    return await _load_key_in_organization(
-        db,
-        key_id,
-        organization.id,
-        owner_user_id=str(identity.id),
-        or_organization_service_keys=await organizations.manages_organization(user=identity, organization=organization),
-    )
+    return await _load_member_key(db, organizations, identity, organization, key_id)
 
 
 @router.post("/{key_id}/federation-rules", status_code=status.HTTP_201_CREATED)

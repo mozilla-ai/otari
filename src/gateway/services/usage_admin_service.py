@@ -35,7 +35,7 @@ from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
-from gateway.services.tool_usage import TOOL_METER_NAMESPACE
+from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 
 # Cap on an explicit id list. Page selections drive the id path and the largest
 # rows-per-page the UI offers is 500; 1000 leaves headroom without letting a single
@@ -139,11 +139,6 @@ class UsageSetPriceResult(BaseModel):
     unchanged: int = 0
 
 
-def usage_in(workspaces: Select[uuid.UUID]) -> ColumnElement[bool]:
-    """Match the usage rows of these workspaces: the scope of the operator's usage reads."""
-    return UsageLog.workspace_id.in_(workspaces)
-
-
 def _selection_conditions(
     selection: UsageSelection, *, workspace_ids: Collection[uuid.UUID] | Select[uuid.UUID]
 ) -> list[ColumnElement[bool]]:
@@ -208,7 +203,7 @@ def _selection_conditions(
     if selection.tool is not None:
         namespace = UsageLog.billing_meters[TOOL_METER_NAMESPACE]
         conditions.append(
-            # See routes/usage._tool_used_expr: the text coercion is what makes a
+            # See the usage log repository's _tool_used_expr: the text coercion is what makes a
             # missing key compare as SQL NULL rather than JSON null.
             namespace.as_string().is_not(None)
             if selection.tool == "any"
@@ -281,13 +276,31 @@ def _row_usage(row: UsageLog) -> BillableUsage:
     )
 
 
+def _manual_pricing(request: UsageSetPriceRequest, row: UsageLog) -> ModelPricing:
+    """Transient pricing for ``row`` from the manual rates, under the row's own model key.
+
+    The key matters: rules keyed on the model (the Claude 1h cache-write multiple)
+    read it from the pricing object, so a synthetic key would drop them. It is
+    always qualified, even without a provider, so a model id that itself contains
+    a colon is not split as if its prefix were the provider.
+    """
+    return ModelPricing(
+        model_key=f"{row.provider or ''}:{row.model}",
+        input_price_per_million=request.input_price_per_million,
+        output_price_per_million=request.output_price_per_million,
+        cache_read_price_per_million=request.cache_read_price_per_million,
+        cache_write_price_per_million=request.cache_write_price_per_million,
+        pricing_tiers=[],
+    )
+
+
 async def set_usage_price(
     db: AsyncSession, request: UsageSetPriceRequest, *, workspace_ids: Collection[uuid.UUID] | Select[uuid.UUID]
 ) -> UsageSetPriceResult:
     """Recompute cost for matched imported rows from manual per-1M rates.
 
-    Builds a transient ``ModelPricing`` from the supplied rates and reprices each
-    matched row against its own token counts, writing ``cost`` / ``billing_meters`` /
+    Builds a transient ``ModelPricing`` per row from the supplied rates, keyed on the
+    row's own model, and reprices each matched row against its own token counts, writing ``cost`` / ``billing_meters`` /
     ``pricing_breakdown`` back and clearing the row's pricing provenance, which the
     old amount's source no longer explains. Only imported rows are touched (see
     ``_selection_conditions``), so recomputing cost can never desync ``users.spend``.
@@ -301,14 +314,6 @@ async def set_usage_price(
     rows sit behind the cursor and are never revisited, even when a ``priced=False``
     filter would no longer match them.
     """
-    pricing = ModelPricing(
-        model_key="__manual__",
-        input_price_per_million=request.input_price_per_million,
-        output_price_per_million=request.output_price_per_million,
-        cache_read_price_per_million=request.cache_read_price_per_million,
-        cache_write_price_per_million=request.cache_write_price_per_million,
-        pricing_tiers=[],
-    )
     conditions = _selection_conditions(request, workspace_ids=workspace_ids)
     result = UsageSetPriceResult()
 
@@ -331,7 +336,7 @@ async def set_usage_price(
                 break
             for row in rows:
                 result.matched += 1
-                cost, meters, breakdown = price_billable_usage(pricing, _row_usage(row))
+                cost, meters, breakdown = price_billable_usage(_manual_pricing(request, row), _row_usage(row))
                 if cost == row.cost:
                     result.unchanged += 1
                     continue

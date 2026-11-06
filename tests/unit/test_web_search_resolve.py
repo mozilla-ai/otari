@@ -25,9 +25,9 @@ from gateway.models.tools import (
     WebSearchCredential,
     WebToolCredentialSource,
 )
-from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tools import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search import _resolve
+from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import ORGANIZATION_KEY_LABEL_PREFIX, InstanceRateKey
 
 _ORG = WebToolCredentialSource.ORG
@@ -99,7 +99,7 @@ _SEARCH_CASES = [
             "api_key": "exa-instance-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa",
-            "rate_keys": (InstanceRateKey("search", "exa", "exa:exa"), "otari:web_search"),
+            "rate_keys": (InstanceRateKey("search", "exa", "exa:exa"),),
             "timeout": 15.0,
         },
     ),
@@ -138,7 +138,14 @@ _SEARCH_CASES = [
     _SearchCase(
         "the legacy URL, with the four engines",
         {"web_search_url": "http://searxng:8080"},
-        {"name": "searxng", "provider": "searxng", "runner": "old", "api_base": "http://searxng:8080"},
+        {
+            "name": "searxng",
+            "provider": "searxng",
+            "runner": "library",
+            "api_base": "http://searxng:8080",
+            "label": "otari:web_search",
+            "rate_keys": ("otari:web_search",),
+        },
         options={"engines": "duckduckgo,mojeek,qwant,wikipedia"},
     ),
     _SearchCase(
@@ -148,7 +155,9 @@ _SEARCH_CASES = [
         options={"engines": "brave,wikipedia"},
     ),
     _SearchCase("the one instance", {"search_tools": {"test": _FAKE}}, {"name": "test", "runner": "library"}),
-    _SearchCase("the one instance, any-search not serving it yet", {"search_tools": {"local": _SEARXNG}}, None),
+    _SearchCase(
+        "the one instance, on SearXNG", {"search_tools": {"local": _SEARXNG}}, {"name": "local", "runner": "library"}
+    ),
     _SearchCase("several instances and no default", {"search_tools": {"exa": _EXA, "test": _FAKE}}, None),
     _SearchCase("nothing configured", {}, None),
     # The policy's credential wins over the in-loop default.
@@ -201,7 +210,7 @@ _SEARCH_CASES = [
     _SearchCase(
         "a SearXNG key on its own endpoint, never the deployment's",
         {"web_search_url": "http://deployment-searxng:8080", "web_search_engines": "brave"},
-        {"provider": "searxng", "runner": "old", "api_key": "", "api_base": "https://org-searxng.example"},
+        {"provider": "searxng", "runner": "library", "api_key": "", "api_base": "https://org-searxng.example"},
         policy=_policy(
             credential=WebSearchCredential(provider="searxng", source=_ORG, api_base="https://org-searxng.example")
         ),
@@ -270,7 +279,7 @@ _SEARCH_CASES = [
         {
             "name": "local",
             "provider": "searxng",
-            "runner": "old",
+            "runner": "library",
             "api_base": "http://searxng:8080",
             "label": "searxng:local",
         },
@@ -285,9 +294,9 @@ _SEARCH_CASES = [
         options={"engines": "qwant"},
     ),
     _SearchCase(
-        "a SearXNG instance opts into POST over otari's default",
+        "a SearXNG instance that sends its searches by POST",
         {"search_tools": {"local": {**_SEARXNG, "options": {"method": "post"}}}},
-        {"runner": "old"},
+        {"runner": "library"},
         requested="local",
         options={"method": "post"},
     ),
@@ -323,13 +332,16 @@ def test_an_organization_keys_label_carries_the_prefix_pricing_reads() -> None:
     assert resolved.label.startswith(ORGANIZATION_KEY_LABEL_PREFIX)
 
 
-def test_the_fallback_rate_keys_are_the_pricing_services_keys_for_the_tools() -> None:
-    search = resolve_search(GatewayConfig(search_tools={"test": _FAKE}), None, requested=None, request_options=None)
+def test_an_instance_is_priced_by_its_own_row_alone_in_the_loop_and_direct() -> None:
+    config = GatewayConfig(search_tools={"test": _FAKE})
+    in_loop = resolve_search(config, None, requested=None, request_options=None)
+    direct = resolve_search(config, None, requested="test", request_options=None)
     fetch = resolve_fetch(GatewayConfig(), None, requested=None, for_search=None)
 
-    assert search is not None
-    assert search.rate_keys[-1] == gateway_tool_pricing_key("web_search")
-    assert fetch.rate_keys[-1] == gateway_tool_pricing_key("web_fetch")
+    assert in_loop is not None
+    assert direct is not None
+    assert in_loop.rate_keys == direct.rate_keys == (InstanceRateKey("search", "test", "fake:test"),)
+    assert fetch.rate_keys == (InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"),)
 
 
 def test_a_name_no_search_instance_has_is_not_found() -> None:
@@ -393,7 +405,7 @@ def test_a_searxng_instance_needs_no_key() -> None:
     resolved = _named(
         GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": "http://searxng:8080/"}}), "local"
     )
-    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("old", "", "http://searxng:8080")
+    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("library", "", "http://searxng:8080")
 
 
 @pytest.mark.parametrize(
@@ -696,6 +708,20 @@ def test_an_instances_options_that_broke_the_rules_at_load_are_dropped(caplog: p
     assert "secret-value" not in _warnings(caplog)
 
 
+def test_a_workspace_cannot_choose_searxngs_engines_or_method(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+
+    resolved = _in_loop(
+        GatewayConfig(search_tools={"local": {**_SEARXNG, "options": {"engines": "wikinews"}}}),
+        workspace={"engines": "google", "method": "post", "language": "de"},
+    )
+
+    assert dict(resolved.options) == {"engines": "wikinews", "language": "de"}
+    assert "'engines'" in _warnings(caplog)
+    assert "'method'" in _warnings(caplog)
+    assert "google" not in _warnings(caplog)
+
+
 def test_an_instance_sets_an_operator_only_option() -> None:
     config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"account": "a"}}})
 
@@ -754,7 +780,7 @@ _FETCH_CASES = [
             "api_key": "",
             "api_base": "",
             "label": "builtin:builtin_fetch",
-            "rate_keys": (InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"), "otari:web_fetch"),
+            "rate_keys": (InstanceRateKey("fetch", "builtin_fetch", "builtin:builtin_fetch"),),
             # The built-in fetcher's own deadline.
             "timeout": 5.0,
         },
@@ -768,7 +794,7 @@ _FETCH_CASES = [
             "api_key": "exa-fetch-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa-fetch",
-            "rate_keys": (InstanceRateKey("fetch", "exa-fetch", "exa:exa-fetch"), "otari:web_fetch"),
+            "rate_keys": (InstanceRateKey("fetch", "exa-fetch", "exa:exa-fetch"),),
             "timeout": 15.0,
         },
     ),
@@ -864,6 +890,39 @@ def test_fetch_options_layer_the_instances_and_take_out_the_count(caplog: pytest
     assert resolved.max_chars == 500
     assert dict(resolved.options) == {"title": "T", "account": "a"}
     assert "'max_results'" in _warnings(caplog)
+
+
+def test_a_direct_fetch_takes_the_request_layer_checked() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake", "options": {"title": "T"}}})
+
+    resolved = resolve_fetch(config, None, requested="test-fetch", for_search=None, request_options={"title": "R"})
+
+    assert dict(resolved.options) == {"title": "R"}
+    for refused in ({"nope": 1}, {"account": "ours"}):
+        with pytest.raises(WebSearchOptionRefusedError):
+            resolve_fetch(config, None, requested="test-fetch", for_search=None, request_options=refused)
+
+
+def test_a_direct_fetch_on_a_credential_keeps_the_instances_name_and_timeout() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake", "timeout": 4}})
+    credential = WebFetchCredential(provider="exa", source=_ORG, api_key="org-fetch-key")
+
+    resolved = resolve_fetch(config, None, requested="test-fetch", for_search=None, direct_credential=credential)
+
+    assert (resolved.name, resolved.provider, resolved.api_key, resolved.timeout) == (
+        "test-fetch",
+        "exa",
+        "org-fetch-key",
+        4.0,
+    )
+    assert (resolved.label, resolved.rate_keys, resolved.on_credential) == ("org:exa", ("otari:web_fetch",), True)
+
+
+def test_a_direct_fetch_on_an_instance_without_a_timeout_gets_the_direct_one() -> None:
+    config = GatewayConfig(fetch_tools={"test-fetch": {"provider": "fake"}})
+
+    assert resolve_fetch(config, None, requested="test-fetch", for_search=None).timeout == 30.0
+    assert resolve_fetch(config, None, requested="builtin_fetch", for_search=None).timeout == NETWORK_DEADLINE_SECONDS
 
 
 def test_fetch_takes_no_workspace_layer() -> None:

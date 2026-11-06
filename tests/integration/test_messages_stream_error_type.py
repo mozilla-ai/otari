@@ -13,7 +13,7 @@ from typing import Any
 from unittest.mock import patch
 
 import anthropic
-import httpx
+import httpx2
 from any_llm.types.messages import MessageStreamEvent
 from fastapi.testclient import TestClient
 from urllib3.exceptions import ReadTimeoutError
@@ -26,7 +26,7 @@ from .test_messages_streaming_usage import _message_start, _seed_budgeted_user, 
 
 def _overloaded_mid_stream() -> anthropic.APIStatusError:
     body = {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}, "request_id": "req_x"}
-    response = httpx.Response(200, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+    response = httpx2.Response(200, request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"))
     return anthropic.APIStatusError(str(body), response=response, body=body)
 
 

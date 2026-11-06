@@ -1,7 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Outlet } from "@tanstack/react-router"
 
-import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage"
-
+// A layout, not a page: the list lives in workspaces.index.tsx and a
+// workspace's own page in workspaces.$workspaceId.tsx; this only nests them
+// under one path.
 export const Route = createFileRoute("/workspaces")({
-  component: WorkspacesPage,
+  component: Outlet,
 })

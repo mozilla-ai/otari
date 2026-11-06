@@ -5,10 +5,13 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import AsyncGenerator, Callable, Generator
+from collections.abc import AsyncGenerator, Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -40,9 +43,28 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
 from gateway.rate_limit import RateLimiter
+from gateway.services.budgets import reserve_budget
 from gateway.services.feedback import new_feedback_rate_limiter
+from gateway.services.tools import WebSearchBackend
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
+# The ``fake`` search instance ``serve_search_on_fake`` serves the in-loop search on, and the fetch instance it may
+# enrich its hits through.
+FAKE_SEARCH = "fake-search"
+FAKE_FETCH = "fake-fetch"
+
+
+@contextmanager
+def held_reservations() -> Iterator[list[Decimal]]:
+    """Every amount a pass-through request reserved before calling the provider."""
+    held: list[Decimal] = []
+
+    async def capture(*args: Any, **kwargs: Any) -> Any:
+        held.append(Decimal(str(args[2])))
+        return await reserve_budget(*args, **kwargs)
+
+    with patch("gateway.api.routes._passthrough.reserve_budget", side_effect=capture):
+        yield held
 
 
 def alembic_config(database_url: str) -> Config:
@@ -214,6 +236,13 @@ def clean_database(postgres_url: str) -> None:
     """
     _run_alembic_migrations(postgres_url)
     reset_database(postgres_url)
+
+
+@pytest.fixture
+def unpriced_builtin_fetch(postgres_url: str, clean_database: None) -> None:
+    """A database whose ``builtin_fetch`` has no price: a migration gives it 0 on a fresh one."""
+    with _reset_engine(postgres_url).begin() as conn:
+        conn.execute(text("DELETE FROM model_pricing WHERE kind = 'fetch' AND model_key = 'builtin_fetch'"))
 
 
 @pytest.fixture
@@ -459,6 +488,64 @@ def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestCl
     outlives the test unless ``_refresh_process_state`` redoes it.
     """
     yield from build_test_client(test_config)
+
+
+@pytest.fixture
+def serve_search_on_fake(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Serve the in-loop search on the ``fake`` search instance ``FAKE_SEARCH``, named in ``web_search_default_tool``.
+
+    Call it with the instance's options; with ``fetch``, the options of the
+    ``fake`` fetch instance ``FAKE_FETCH`` that enriches its hits; and with
+    ``extract=False`` for a search that reads no pages.
+
+    It sets the instances once the client has booted, on the config its app
+    reads, and sets them as that config's baseline too. The overlay rebuilds
+    the maps from the baseline at each boot and each refresh, and the worker's
+    shared ``test_config`` keeps the baseline it first boots with, so an
+    instance set before the boot would reach every later test, and one set only
+    in the maps would be dropped by a refresh during the test.
+    """
+    config: GatewayConfig = cast(FastAPI, client.app).state.config
+
+    def serve(
+        options: dict[str, Any] | None = None, *, fetch: dict[str, Any] | None = None, extract: bool = True
+    ) -> None:
+        search: dict[str, Any] = {"provider": "fake", "options": options or {}}
+        if fetch is not None:
+            search["fetch_tool"] = FAKE_FETCH
+            fetch_tools = {FAKE_FETCH: {"provider": "fake", "options": fetch}}
+            monkeypatch.setattr(config, "fetch_tools", fetch_tools)
+            monkeypatch.setattr(config, "_fetch_tool_baseline", fetch_tools)
+        monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+        monkeypatch.setattr(config, "search_tools", {FAKE_SEARCH: search})
+        monkeypatch.setattr(config, "_search_tool_baseline", {FAKE_SEARCH: search})
+        monkeypatch.setattr(config, "web_search_default_tool", FAKE_SEARCH)
+        if not extract:
+            monkeypatch.setattr(config, "web_search_extract", False)
+
+    return serve
+
+
+def price_fake_search(client: TestClient, headers: dict[str, str], *, per_million: float) -> dict[str, Any]:
+    """Price calls to ``FAKE_SEARCH`` at its own row, at ``per_million`` USD per million calls."""
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "kind": "search",
+            "model_key": FAKE_SEARCH,
+            "input_price_per_million": per_million,
+            "output_price_per_million": 0.0,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    priced: dict[str, Any] = response.json()
+    return priced
+
+
+def admitted_search_spy() -> Any:
+    """A spy on each search the library backend runs once its call cap and the request's budget admitted it."""
+    return patch.object(WebSearchBackend, "_call", autospec=True, side_effect=WebSearchBackend._call)
 
 
 @pytest.fixture

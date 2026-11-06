@@ -57,7 +57,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text, true
+from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, false, text, true
 from sqlmodel import Field
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
@@ -89,14 +89,24 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
         # rather than only in the service layer so a race between two
         # concurrent "set default" calls has a real arbiter instead of a
         # last-write-wins column; `OrgProviderKeyRepository.set_org_default`
-        # catches the resulting `IntegrityError`.
+        # catches the resulting `IntegrityError`. A key with a slug is addressed
+        # by it alone, so it is never anyone's default and is left out.
         Index(
             "uq_org_provider_keys_org_default",
             "organization_id",
             "provider",
             unique=True,
-            postgresql_where=text("is_org_default AND archived_at IS NULL"),
-            sqlite_where=text("is_org_default AND archived_at IS NULL"),
+            postgresql_where=text("is_org_default AND archived_at IS NULL AND slug IS NULL"),
+            sqlite_where=text("is_org_default AND archived_at IS NULL AND slug IS NULL"),
+        ),
+        # Archived keys included: a slug once handed out keeps naming that key.
+        Index(
+            "uq_org_provider_keys_org_slug",
+            "organization_id",
+            "slug",
+            unique=True,
+            postgresql_where=text("slug IS NOT NULL"),
+            sqlite_where=text("slug IS NOT NULL"),
         ),
         # Covers (organization_id, id) so the two link tables below can carry a
         # composite FK to it, pinning each link row to *its own* organization
@@ -107,6 +117,10 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     organization_id: uuid.UUID = Field(foreign_key="organization.id", ondelete="CASCADE", index=True)
     provider: str = Field(max_length=255)
     name: str = Field(max_length=255)
+    # The selector prefix of a key with a custom endpoint (``synthetic`` in
+    # ``synthetic:<model>``), set once and never changed. ``None`` for a key
+    # reached as ``provider:<model>``.
+    slug: str | None = Field(default=None, max_length=64)
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     encrypted_api_key: str | None = Field(default=None)
@@ -117,6 +131,14 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # ``UtcDateTime``'s own docstring describes for the tenancy timestamps).
     archived_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     is_org_default: bool = Field(default=False, nullable=False)
+    # The organization's declaration that this key's upstream account keeps no
+    # prompt or completion data. Shown in the catalog; nothing is enforced on it.
+    zero_data_retention: bool = Field(default=False, nullable=False, sa_column_kwargs={"server_default": false()})
+
+    @property
+    def selector_prefix(self) -> str:
+        """What a selector names this key by: its slug, or else its provider."""
+        return self.slug or self.provider
 
 
 # ==============================================================================

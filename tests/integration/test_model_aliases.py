@@ -168,10 +168,11 @@ def test_legacy_form_pricing_row_still_prices_alias(client: TestClient, alias_co
             conn.execute(
                 text(
                     "INSERT INTO model_pricing "
-                    "(model_key, effective_at, input_price_per_million, output_price_per_million, "
+                    "(model_key, effective_at, input_price_per_million, output_price_per_million, rates, "
                     " created_at, updated_at) "
-                    "VALUES ('anthropic/claude-opus-4', NOW(), 15.0, 75.0, NOW(), NOW())"
+                    "VALUES ('anthropic/claude-opus-4', NOW(), 15.0, 75.0, :rates, NOW(), NOW())"
                 ),
+                {"rates": '{"text":{"input":{"price":15,"unit":"token"},"output":{"price":75,"unit":"token"}}}'},
             )
             conn.commit()
     finally:
@@ -205,7 +206,7 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
         "input_price_per_million": 1.0,
         "output_price_per_million": 2.0,
         "pricing_tiers": [],
-        "unit": "tokens",
+        "unit": "token",
     }
 
 

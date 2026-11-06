@@ -18,6 +18,7 @@ from typing import Any
 
 import anthropic
 import httpx
+import httpx2
 import openai
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
@@ -67,7 +68,11 @@ from gateway.services.inference import (
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import MissingCredential
-from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
+from gateway.services.upstream_redaction import (
+    MAX_EXPOSED_DETAIL_CHARS,
+    redact_upstream_message,
+    redacted_upstream_detail,
+)
 from gateway.streaming import OPENAI_STREAM_FORMAT, IncompleteStreamError, openai_error_event
 
 _RAW = "raw provider detail SECRET token=abc123"
@@ -149,7 +154,7 @@ def test_sdk_wrapped_timeout_maps_to_504() -> None:
     as a 504, not fall through to the generic 502."""
     for exc in (
         OpenAIAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
-        AnthropicAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
+        AnthropicAPITimeoutError(request=httpx2.Request("POST", "http://upstream")),
     ):
         assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
         assert failure_status_code(exc) == 504
@@ -651,6 +656,46 @@ def test_unsupported_parameter_maps_to_400_with_the_reason() -> None:
     assert failure_status_code(exc) == 400
 
 
+def test_unsupported_parameter_carries_its_code() -> None:
+    exc = UnsupportedParameterError("response_format", "bedrock")
+
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "unsupported_parameter"}
+    assert refusal_code(exc) == "unsupported_parameter"
+
+
+def test_attempts_that_all_refuse_a_parameter_share_one_400_naming_each() -> None:
+    """#2881: a policy whose every candidate cannot express a parameter says which one."""
+    errors = [
+        UnsupportedParameterError("reasoning_effort", "bedrock"),
+        UnsupportedParameterError("response_format", "bedrock"),
+        UnsupportedParameterError("response_format", "anthropic"),
+    ]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.status_code == 400
+    assert rejection.detail == "None of the models tried accepts reasoning_effort, response_format (3 attempts)."
+    assert rejection.headers == {"Otari-Error-Code": "unsupported_parameter"}
+
+
+def test_a_refusal_naming_no_parameter_carries_no_code() -> None:
+    """An operation or feature a provider lacks (rerank, context_management) is no parameter to name."""
+    exc = NotImplementedError(_CONTEXT_MANAGEMENT_MSG)
+
+    assert classify_provider_error(exc) is not None
+    assert provider_error_headers(exc, 400) is None
+
+
+def test_a_parameter_refusal_beside_another_rejection_shares_the_generic_400() -> None:
+    other = _openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG))
+
+    rejection = get_shared_rejection([UnsupportedParameterError("response_format", "bedrock"), other])
+
+    assert rejection is not None
+    assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
+
+
 def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
     """A capability error that echoes the payload never returns an empty detail."""
     exc = UnsupportedParameterError(
@@ -795,6 +840,29 @@ def test_redaction_keeps_the_part_that_explains_the_rejection() -> None:
     assert "max_tokens" in redacted
     assert "8192" in redacted
     assert "claude-opus-5" in redacted
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("sk-ant-abcdefghijklmnopqrstuvwxyz0123456789", id="only a credential"),
+        pytest.param("https://proxy.internal.example/v1 123456789012", id="only a url and an account id"),
+        pytest.param("messages: please summarize this", id="a payload echo"),
+    ],
+)
+def test_redacted_detail_falls_back_when_nothing_explanatory_survives(raw: str) -> None:
+    """A message that redaction empties, or leaves as placeholders alone, tells
+    the caller nothing, so the fixed detail is returned in its place."""
+    assert redacted_upstream_detail(raw, "fallback detail") == "fallback detail"
+
+
+def test_redacted_detail_keeps_the_redacted_explanation() -> None:
+    raw = "Invalid key sk-ant-abcdefghijklmnopqrstuvwxyz0123456789: max_tokens too large"
+    detail = redacted_upstream_detail(raw, "fallback detail")
+    assert detail == redact_upstream_message(raw)
+    assert "max_tokens too large" in detail
+    assert "abcdefghijklmnopqrstuvwxyz" not in detail
 
 
 def test_exposed_detail_is_length_capped() -> None:
@@ -1341,9 +1409,9 @@ def _openai_status_error(status_code: int, error: dict[str, Any]) -> openai.APIS
 def _anthropic_bad_request(message: str) -> anthropic.BadRequestError:
     """An Anthropic SDK 400, whose body keeps the ``{"type": "error", "error": {...}}`` envelope."""
     body = {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     return anthropic.BadRequestError(
-        f"Error code: 400 - {body}", response=httpx.Response(400, request=request, json=body), body=body
+        f"Error code: 400 - {body}", response=httpx2.Response(400, request=request, json=body), body=body
     )
 
 
@@ -1487,9 +1555,9 @@ _OPENAI_LOGPROBS_MSG = "You are not allowed to request logprobs from this model"
 
 def _anthropic_forbidden() -> anthropic.PermissionDeniedError:
     body = {"type": "error", "error": {"type": "permission_error", "message": "Your API key does not have permission"}}
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     return anthropic.PermissionDeniedError(
-        f"Error code: 403 - {body}", response=httpx.Response(403, request=request, json=body), body=body
+        f"Error code: 403 - {body}", response=httpx2.Response(403, request=request, json=body), body=body
     )
 
 

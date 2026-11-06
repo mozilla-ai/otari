@@ -11,6 +11,10 @@ import {
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { useAuth } from "@/features/auth/AuthContext"
+import {
+  LOGIN_REFUSAL_HINT_ID,
+  LoginRefusalHint,
+} from "@/features/auth/overlayLoginRefusalHint"
 import type { SignInCredential } from "@/shared/api/client"
 import {
   ApiError,
@@ -84,6 +88,13 @@ const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
  */
 class EmailUnverifiedRefusal extends Error {}
 
+/**
+ * The gateway's 401 to a password sign-in: it will not say whether the address
+ * or the password was wrong, so a contributed hint under the field may add
+ * what this build can say about where the account might be.
+ */
+class CredentialRefusal extends Error {}
+
 const ERROR_IDS: Record<CredentialField, string> = {
   email: "login-email-error",
   password: "login-password-error",
@@ -132,12 +143,15 @@ function LabelRow({
   error,
   errorId,
   className = "",
+  messageOnOwnLine = false,
 }: {
   label: string
   error: unknown
   errorId: string
   /** Placement in the caller's own layout. */
   className?: string
+  /** Break the refusal onto a line of its own under the label. */
+  messageOnOwnLine?: boolean
 }) {
   const message = error ? errorMessage(error) : null
 
@@ -146,8 +160,9 @@ function LabelRow({
   // refusal beside its label rather than at the column's right edge.
   // Deliberate: the password row shares its line with the recovery link, so
   // stretching this to reach that link only parts the refusal from the label it
-  // belongs to. The column is `minmax(0,1fr)`, so at 320px the refusal still
-  // wraps under the label inside it rather than pushing the link off the row.
+  // belongs to. That caller spans both columns and puts the refusal on its own
+  // line (`messageOnOwnLine`), because beside the label it has too little width
+  // at 320px: it wraps to three lines and touches the recovery link.
   return (
     <div
       className={`flex min-h-5 flex-wrap items-center justify-between gap-x-3 ${className}`}
@@ -172,7 +187,11 @@ function LabelRow({
         <span
           id={errorId}
           role="alert"
-          className="flex min-w-0 items-center gap-1 text-caption text-danger"
+          className={
+            messageOnOwnLine
+              ? "flex min-w-0 basis-full items-center gap-1 text-caption text-danger"
+              : "flex min-w-0 items-center gap-1 text-caption text-danger"
+          }
         >
           <AlertIcon />
           <span title={message}>{message}</span>
@@ -212,7 +231,7 @@ function LabelRow({
  * which is the gateway saying some identity holds one. Nothing has a reset link
  * to reset before then, and an operator who has not claimed the deployment
  * recovers through the master key against `PUT /v1/auth/password` instead (see
- * docs/access-control.md) rather than through a mailed link.
+ * docs/sign-in.md) rather than through a mailed link.
  *
  * A passkey signs in as a row above the typed credential rather than instead
  * of it (otari#652), offered only when the gateway publishes `passkey` *and*
@@ -327,6 +346,8 @@ export function Login() {
   const handOverAddress = () => {
     if (email.trim() !== "") rememberSignInAddress(email.trim())
   }
+
+  const isCredentialRefusal = error instanceof CredentialRefusal
 
   const clearError = () => {
     if (error) {
@@ -476,7 +497,9 @@ export function Login() {
         setError(
           usesPassword && result.status === 403
             ? new EmailUnverifiedRefusal(message)
-            : new Error(message),
+            : usesPassword && result.status === 401
+              ? new CredentialRefusal(message)
+              : new Error(message),
         )
       }
     } catch (caught) {
@@ -778,20 +801,28 @@ export function Login() {
                       label="Password"
                       error={errorField === "password" ? error : null}
                       errorId={ERROR_IDS.password}
-                      className="justify-self-start"
+                      className="col-span-2 col-start-1 row-start-1 justify-self-start"
+                      messageOnOwnLine
                     />
                     <Input
                       autoFocus={focusesOnArrival && prefilledEmail !== ""}
                       autoComplete="current-password"
                       aria-describedby={
                         errorField === "password"
-                          ? ERROR_IDS.password
+                          ? [
+                              ERROR_IDS.password,
+                              isCredentialRefusal
+                                ? LOGIN_REFUSAL_HINT_ID
+                                : undefined,
+                            ]
+                              .filter(Boolean)
+                              .join(" ")
                           : undefined
                       }
                       className="col-span-2 h-10 text-base"
                     />
                     {offersRecovery ? (
-                      <div className="col-start-2 row-start-1">
+                      <div className="col-start-2 row-start-1 flex self-start">
                         <PublicAuthLink
                           isInline
                           to="#/recover-password"
@@ -801,6 +832,10 @@ export function Login() {
                         </PublicAuthLink>
                       </div>
                     ) : null}
+                    <LoginRefusalHint
+                      email={email.trim()}
+                      refused={isCredentialRefusal}
+                    />
                   </TextField>
                   {offersResendVerification ? (
                     <PublicAuthLink

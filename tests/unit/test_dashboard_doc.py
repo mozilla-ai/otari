@@ -13,7 +13,7 @@ import pytest
 
 _DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
 _DASHBOARD_DOC = _DOCS_DIR / "dashboard.md"
-_INDEX_DOC = _DOCS_DIR / "index.md"
+_OPERATOR_DOC = _DOCS_DIR / "run-the-dashboard.md"
 
 # Markdown links to other docs, e.g. [text](configuration.md#anchor).
 _LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -35,19 +35,22 @@ def test_dashboard_doc_has_single_top_level_heading(dashboard_text: str) -> None
 
 def test_dashboard_doc_covers_required_sections(dashboard_text: str) -> None:
     for heading in (
-        "## Sign-in and secrets",
-        "## First-run walkthrough",
+        "## Signing in",
+        "## The setup guide",
         "## Navigation",
     ):
         assert heading in dashboard_text, f"missing required section: {heading!r}"
 
 
-def test_dashboard_doc_explains_the_two_keys(dashboard_text: str) -> None:
-    # The whole point of the guide: keep the sign-in key and the encryption key
-    # distinct. Both env var names must appear so the guide stays accurate if
-    # either is renamed in code.
+def test_operator_doc_explains_the_two_keys() -> None:
+    # The operator page keeps the sign-in key and the encryption key distinct.
+    # Both env var names must appear so it stays accurate if either is renamed
+    # in code.
+    operator_text = _OPERATOR_DOC.read_text(encoding="utf-8")
+    for heading in ("## Sign-in and secrets", "## First-run walkthrough"):
+        assert heading in operator_text, f"missing required section: {heading!r}"
     for token in ("OTARI_MASTER_KEY", "OTARI_SECRET_KEY", "master key", "gen-secret-key"):
-        assert token in dashboard_text, f"two-key model text should mention {token!r}"
+        assert token in operator_text, f"two-key model text should mention {token!r}"
 
 
 def test_dashboard_doc_internal_links_resolve(dashboard_text: str) -> None:
@@ -61,9 +64,9 @@ def test_dashboard_doc_internal_links_resolve(dashboard_text: str) -> None:
         assert resolved.is_file(), f"broken doc link: {target} -> {resolved}"
 
 
-def test_dashboard_doc_is_linked_from_index() -> None:
-    index_text = _INDEX_DOC.read_text(encoding="utf-8")
-    assert "(dashboard.md)" in index_text, "docs/index.md does not link to dashboard.md"
+def test_dashboard_doc_is_on_the_menu() -> None:
+    summary_text = (_DOCS_DIR / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "(dashboard.md)" in summary_text, "docs/SUMMARY.md does not list dashboard.md"
 
 
 def test_dashboard_doc_avoids_em_dash_prose(dashboard_text: str) -> None:

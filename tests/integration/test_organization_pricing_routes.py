@@ -669,17 +669,84 @@ async def test_only_the_operator_sets_a_search_tools_rate(async_db: AsyncSession
 
     with pytest.raises(OrganizationPricingToolRateError, match="only the deployment operator sets its rate"):
         await service.create_for_caller(admin, "exa", _rates(input_price_per_million=0.0), kind="search")
-    created = await service.create_for_caller(operator, "exa", _rates(unit="requests"), kind="search")
+    created = await service.create_for_caller(operator, "exa", _rates(unit="request"), kind="search")
     model = await service.create_for_caller(operator, "exa:exa", _rates())
 
     assert (created.kind, created.model_key) == ("search", "exa")
     assert (model.kind, model.model_key) == ("model", "exa:exa")
 
     # A search rate is per call, on a create and on a replacement alike.
-    with pytest.raises(TenancyValidationError, match="unit is 'requests'"):
-        await service.create_for_caller(operator, "exa-news", _rates(unit="tokens"), kind="search")
-    with pytest.raises(TenancyValidationError, match="unit is 'requests'"):
-        await service.replace_for_caller(operator, created.id, _rates(unit="tokens"))
+    with pytest.raises(TenancyValidationError, match="unit is 'request'"):
+        await service.create_for_caller(operator, "exa-news", _rates(unit="token"), kind="search")
+    with pytest.raises(TenancyValidationError, match="unit is 'request'"):
+        await service.replace_for_caller(operator, created.id, _rates(unit="token"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["owner", "admin"])
+@pytest.mark.parametrize("model_key", ["otari:code_execution", "otari/code_execution"])
+async def test_only_the_operator_prices_code_execution(async_db: AsyncSession, role: str, model_key: str) -> None:
+    """Every run is on the deployment's sandbox, so an organization's own rate would price none of them.
+
+    Both spellings, since a rate lookup reads either.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug=f"acme-code-execution-{role}", created_by_user_id=None
+    )
+    manager = await _identity(async_db, organization, role=role, name=f"{role} person")
+    operator = await _operator(async_db, organization)
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
+
+    with pytest.raises(OrganizationPricingToolRateError, match="only the deployment operator sets its rate"):
+        await service.create_for_caller(manager, model_key, _rates(unit="request"))
+    created = await service.create_for_caller(operator, model_key, _rates(unit="request"))
+
+    assert created.model_key == model_key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_key", ["otari:web_search", "otari:web_fetch"])
+async def test_an_organization_prices_the_calls_on_its_own_search_and_fetch_keys(
+    async_db: AsyncSession, model_key: str
+) -> None:
+    """These rows price a search or fetch on the organization's own key, which its own account pays for."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-own-web-keys", created_by_user_id=None
+    )
+    admin = await _identity(async_db, organization, role="admin", name="admin person")
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
+
+    created = await service.create_for_caller(admin, model_key, _rates(unit="request"))
+
+    assert created.model_key == model_key
+
+
+@pytest.mark.asyncio
+async def test_a_stored_code_execution_rate_may_be_deleted_but_not_replaced(async_db: AsyncSession) -> None:
+    """An organization's stored code execution rate prices no sandbox run, so it may go, not change."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-stored-code-execution", created_by_user_id=None
+    )
+    admin = await _identity(async_db, organization, role="admin", name="admin person")
+    stored = OrganizationModelPricing(
+        organization_id=organization.id,
+        model_key="otari:code_execution",
+        input_price_per_million=0.0,
+        output_price_per_million=0.0,
+        effective_from=datetime.now(UTC) - timedelta(days=1),
+        pricing_tiers=[],
+        unit="request",
+    )
+    async_db.add(stored)
+    await async_db.flush()
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
+
+    with pytest.raises(OrganizationPricingToolRateError):
+        await service.replace_for_caller(admin, stored.id, _rates(unit="request"))
+    await service.delete_for_caller(admin, stored.id)
+
+    remaining = await async_db.execute(select(OrganizationModelPricing).where(OrganizationModelPricing.id == stored.id))
+    assert remaining.scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio
@@ -702,7 +769,7 @@ async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment
                 effective_at=earlier,
                 input_price_per_million=6_000.0,
                 output_price_per_million=0.0,
-                unit="requests",
+                unit="request",
             ),
             ModelPricing(
                 kind="search",
@@ -710,7 +777,7 @@ async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment
                 effective_at=earlier,
                 input_price_per_million=4_000.0,
                 output_price_per_million=0.0,
-                unit="requests",
+                unit="request",
             ),
         ]
     )
@@ -725,7 +792,7 @@ async def test_an_operator_override_on_a_tools_old_key_outranks_a_new_deployment
     agreed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek", organization_id=organization.id)
     listed = await resolve_tool_rate(async_db, (key,), label="mojeek:mojeek")
 
-    assert agreed == ToolRate(key, Decimal("0.003"), "organization")
+    assert agreed == ToolRate(key, Decimal("0.003"), "organization", old_key=True)
     assert listed == ToolRate(key, Decimal("0.004"), "deployment")
 
 
@@ -737,7 +804,7 @@ def test_a_tool_kind_override_is_keyed_by_a_bare_instance_name(
     assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
 
     created = client.post(
-        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="requests"), headers=master_key_header
+        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="request"), headers=master_key_header
     )
     assert created.status_code == status.HTTP_201_CREATED, created.text
     assert created.json()["kind"] == "search"
@@ -752,10 +819,10 @@ def test_a_tool_kind_override_is_per_call_and_named_as_its_instance(
     """Its unit defaults to requests and may be nothing else; the name follows the instance name rule."""
     defaulted = client.post(_ENDPOINT, json=_body(kind="fetch", model_key="team fetch"), headers=master_key_header)
     assert defaulted.status_code == status.HTTP_201_CREATED, defaulted.text
-    assert (defaulted.json()["model_key"], defaulted.json()["unit"]) == ("team fetch", "requests")
+    assert (defaulted.json()["model_key"], defaulted.json()["unit"]) == ("team fetch", "request")
 
     refused = client.post(
-        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="tokens"), headers=master_key_header
+        _ENDPOINT, json=_body(kind="search", model_key="exa", unit="token"), headers=master_key_header
     )
     assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
 
@@ -1066,6 +1133,40 @@ def test_the_route_asks_the_port_this_build_bound(
     container: Any = client.app.state.container  # type: ignore[attr-defined]
     container.bind(ModelProviderPort, lambda session: _FakeHostedModelProvider(served="openai"))
 
+    client.cookies.set(SESSION_COOKIE_NAME, _sign_in_an_admin(db_session_factory))
+    try:
+        unserved = client.post(_ENDPOINT, json=_body(model_key="anthropic:claude-3-5-haiku-latest"))
+        served = client.post(_ENDPOINT, json=_body())
+    finally:
+        client.cookies.clear()
+
+    assert unserved.status_code == status.HTTP_201_CREATED, unserved.text
+    assert served.status_code == status.HTTP_403_FORBIDDEN, served.text
+    assert _MODEL_KEY in served.json()["detail"]
+
+
+@pytest.mark.parametrize("model_key", ["otari:code_execution", "otari/code_execution"])
+def test_the_route_refuses_an_admin_a_code_execution_rate(
+    client: TestClient,
+    db_session_factory: Callable[[], Session],
+    model_key: str,
+) -> None:
+    """The route normalizes the key first, so the refusal names the canonical spelling."""
+    client.cookies.set(SESSION_COOKIE_NAME, _sign_in_an_admin(db_session_factory))
+    try:
+        refused = client.post(_ENDPOINT, json=_body(model_key=model_key, unit="request"))
+    finally:
+        client.cookies.clear()
+
+    assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
+    assert "'otari:code_execution'" in refused.json()["detail"]
+
+
+def _sign_in_an_admin(db_session_factory: Callable[[], Session]) -> str:
+    """A dashboard session for an admin of a new organization, who does not operate the deployment.
+
+    Returns the session token, for the session cookie.
+    """
     token = "otari-sess-admin@tenant.test"
     session = db_session_factory()
     try:
@@ -1091,17 +1192,7 @@ def test_the_route_asks_the_port_this_build_bound(
         session.commit()
     finally:
         session.close()
-
-    client.cookies.set(SESSION_COOKIE_NAME, token)
-    try:
-        unserved = client.post(_ENDPOINT, json=_body(model_key="anthropic:claude-3-5-haiku-latest"))
-        served = client.post(_ENDPOINT, json=_body())
-    finally:
-        client.cookies.clear()
-
-    assert unserved.status_code == status.HTTP_201_CREATED, unserved.text
-    assert served.status_code == status.HTTP_403_FORBIDDEN, served.text
-    assert _MODEL_KEY in served.json()["detail"]
+    return token
 
 
 @pytest.mark.asyncio
@@ -1576,3 +1667,56 @@ def test_the_model_listing_states_the_organizations_own_rate(
             assert single.status_code == status.HTTP_200_OK, single.text
             assert single.json()["pricing_source"] == "organization"
             assert single.json()["pricing"]["input_price_per_million"] == 2.5
+
+
+def test_an_override_given_as_rates_reads_back_with_both(client: TestClient, master_key_header: dict[str, str]) -> None:
+    block = {
+        "text": {"input": {"price": 2.5, "cache": {"read": 1.25}}, "output": {"price": 10}},
+        "web_search": {"price": 10},
+    }
+
+    created = client.post(_ENDPOINT, json={"model_key": _MODEL_KEY, "rates": block}, headers=master_key_header)
+
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    override = created.json()
+    assert (override["unit"], override["input_price_per_million"], override["cache_read_price_per_million"]) == (
+        "token",
+        2.5,
+        1.25,
+    )
+    assert override["rates"] == block
+
+    replaced = client.put(
+        f"{_ENDPOINT}/{override['id']}",
+        json={
+            "rates": {"image": {"output": {"price": 0.04, "unit": "image"}}},
+            "effective_from": override["effective_from"],
+        },
+        headers=master_key_header,
+    )
+
+    assert replaced.status_code == status.HTTP_200_OK, replaced.text
+    assert (replaced.json()["unit"], replaced.json()["input_price_per_million"]) == ("image", 40000.0)
+    assert replaced.json()["rates"] == {"image": {"output": {"price": 0.04, "unit": "image"}}}
+
+
+def test_an_override_given_as_columns_reads_back_with_rates(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    created = client.post(_ENDPOINT, json=_body(), headers=master_key_header)
+
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    assert created.json()["rates"] == {
+        "text": {"input": {"price": 2.5, "unit": "token"}, "output": {"price": 5.0, "unit": "token"}}
+    }
+
+
+def test_an_override_mixing_rates_and_columns_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(
+        _ENDPOINT,
+        json=_body(rates={"text": {"input": {"price": 1}, "output": {"price": 2}}}),
+        headers=master_key_header,
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, response.text
+    assert "remove input_price_per_million, output_price_per_million" in response.text

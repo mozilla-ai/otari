@@ -26,8 +26,9 @@ from decimal import Decimal
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing
+from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing, rates_of
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
+from gateway.types.price_unit import PriceUnit
 
 _CACHE_RATE_FIELDS = (
     "cache_read_price_per_million",
@@ -115,8 +116,9 @@ class DeploymentPricingService:
                     cache_read_price_per_million=default.cache_read_price_per_million,
                     cache_write_price_per_million=default.cache_write_price_per_million,
                     pricing_tiers=default.pricing_tiers or [],
-                    unit=default.unit or "tokens",
+                    unit=default.unit or "token",
                     origin=SEED_ORIGIN,
+                    rates=rates_of(default),
                 )
             await self.pricing.flush()
 
@@ -141,7 +143,7 @@ class DeploymentPricingService:
         input_price_per_million: float,
         output_price_per_million: float,
         cache_rates: Mapping[str, float | None],
-        unit: str | None = None,
+        unit: PriceUnit | None = None,
     ) -> ModelPricing:
         """Record the deployment's rates for ``model_key`` as a new version at the current instant.
 
@@ -178,7 +180,7 @@ class DeploymentPricingService:
                     cache_read_price_per_million=cache_rate("cache_read_price_per_million"),
                     cache_write_price_per_million=cache_rate("cache_write_price_per_million"),
                     pricing_tiers=tiers,
-                    unit=unit or (latest.unit if latest is not None else "tokens"),
+                    unit=unit or (latest.unit if latest is not None else "token"),
                     origin=API_ORIGIN,
                 )
             else:

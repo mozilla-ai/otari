@@ -42,7 +42,6 @@ from gateway.core.config import (
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
     RESPONSE_DURATION_HEADER,
-    ROUTER_TASK_HEADER,
     SERVER_TIMING_HEADER,
     TAGS_HEADER,
     GatewayConfig,
@@ -255,7 +254,7 @@ def test_reusing_a_key_with_different_tool_headers_is_refused(
     assert provider.await_count == 1
 
 
-@pytest.mark.parametrize("header", [ROUTER_TASK_HEADER, CONVERSATION_HEADER])
+@pytest.mark.parametrize("header", [CONVERSATION_HEADER])
 def test_reusing_a_key_with_different_routing_headers_is_refused(
     client: TestClient, master_key_header: dict[str, str], user: None, header: str
 ) -> None:
@@ -266,6 +265,20 @@ def test_reusing_a_key_with_different_routing_headers_is_refused(
     refused = _post_chat(client, {**headers, header: "second"}, provider)
 
     assert refused.status_code == 422, refused.text
+    assert provider.await_count == 1
+
+
+def test_the_retired_router_task_header_does_not_change_the_fingerprint(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "retired-router-task")
+
+    assert _post_chat(client, {**headers, "Otari-Router-Task": "first"}, provider).status_code == 200
+    replayed = _post_chat(client, {**headers, "Otari-Router-Task": "second"}, provider)
+
+    assert replayed.status_code == 200, replayed.text
+    assert replayed.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
     assert provider.await_count == 1
 
 

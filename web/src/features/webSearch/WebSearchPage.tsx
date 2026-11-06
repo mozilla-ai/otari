@@ -6,11 +6,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { ToolRateForm } from "@/features/toolPricing/ToolRateForm"
-import {
-  type PriceKind,
-  type ToolRateRow,
-  toRowId,
-} from "@/features/toolPricing/toolRates"
+import { type ToolRateRow, toRowId } from "@/features/toolPricing/toolRates"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { usePricesInEffect } from "@/shared/api/pricing"
 import { useSettings } from "@/shared/api/settings"
@@ -28,15 +24,14 @@ import { WebToolDialog } from "./WebToolDialog"
 import { WebToolsTable, type WebToolTableRow } from "./WebToolsTable"
 import {
   BUILTIN_FETCH,
-  FALLBACK_KEY,
-  hasUnpricedCalls,
   isNoSearch,
+  type ListedWebTool,
   listWebTools,
-  priceOf,
+  ORGANIZATION_KEY_RATE,
+  ORGANIZATION_KEY_ROW,
   rateOnly,
   type ToolPrice,
   type WebToolKind,
-  type WebToolRow,
 } from "./webTools"
 
 // The search and fetch tools this deployment runs for every workspace, what
@@ -47,17 +42,12 @@ import {
 // shows the row and the page words the refusal itself, asking nothing first.
 // The workspace's own web access stays on Tools > Web search.
 
-const FALLBACK_LABEL: Readonly<Record<WebToolKind, string>> = {
-  search: "Web search",
-  fetch: "Web fetch",
-}
-
 type Dialog =
   | { type: "none" }
   | { type: "add"; kind: WebToolKind }
-  | { type: "edit"; tool: WebToolRow }
+  | { type: "edit"; tool: ListedWebTool }
   | { type: "price"; row: ToolRateRow; current: number | undefined }
-  | { type: "remove"; tool: WebToolRow }
+  | { type: "remove"; tool: ListedWebTool }
 
 export function WebSearchPage() {
   const { isOperator, isSettled } = useDeploymentOperator()
@@ -75,17 +65,11 @@ export function WebSearchPage() {
   // whatever another page left in the cache.
   const searchTools = isOperator ? listWebTools("search", searchList.data) : []
   const fetchTools = isOperator ? listWebTools("fetch", fetchList.data) : []
-  const priceKeys: { kind: PriceKind; modelKey: string }[] = [
-    { kind: "model", modelKey: FALLBACK_KEY.search },
-    { kind: "model", modelKey: FALLBACK_KEY.fetch },
-    ...searchTools.map((tool) => ({
-      kind: "search" as const,
-      modelKey: tool.name,
-    })),
-    ...fetchTools.map((tool) => ({
-      kind: "fetch" as const,
-      modelKey: tool.name,
-    })),
+  // A tool's price comes with the listing; the organization keys' rows are
+  // read as rows.
+  const priceKeys = [
+    { kind: "model" as const, modelKey: ORGANIZATION_KEY_RATE.search },
+    { kind: "model" as const, modelKey: ORGANIZATION_KEY_RATE.fetch },
   ]
   const reads = usePricesInEffect(priceKeys, isOperator)
 
@@ -105,26 +89,20 @@ export function WebSearchPage() {
   const readOf = new Map(
     priceKeys.map((key, index) => [toRowId(key), reads[index]]),
   )
-  const fallbackRead = (kind: WebToolKind) =>
-    readOf.get(toRowId({ kind: "model", modelKey: FALLBACK_KEY[kind] }))
-  const toolPrice = (tool: WebToolRow): ToolPrice =>
-    priceOf(
-      tool,
-      readOf.get(toRowId({ kind: tool.kind, modelKey: tool.name })),
-      fallbackRead(tool.kind),
-    )
-  const fallbackPrice = (kind: WebToolKind): ToolPrice =>
-    rateOnly(fallbackRead(kind))
+  const modelRead = (modelKey: string) =>
+    readOf.get(toRowId({ kind: "model", modelKey }))
+  const organizationKeyPrice = (kind: WebToolKind): ToolPrice =>
+    rateOnly(modelRead(ORGANIZATION_KEY_RATE[kind]))
   const rowsFor = (
     kind: WebToolKind,
-    tools: readonly WebToolRow[],
+    tools: readonly ListedWebTool[],
   ): WebToolTableRow[] => [
     ...tools.map((tool) => ({
       type: "tool" as const,
       tool,
-      price: toolPrice(tool),
+      price: tool.price,
     })),
-    { type: "fallback" as const, price: fallbackPrice(kind) },
+    { type: "organization" as const, price: organizationKeyPrice(kind) },
   ]
   const searchRows = rowsFor("search", searchTools)
   const fetchRows = rowsFor("fetch", fetchTools)
@@ -140,10 +118,8 @@ export function WebSearchPage() {
   const fetchDefault = settingOf("web_fetch_default_tool") || BUILTIN_FETCH
   const takenNames = [...searchTools, ...fetchTools].map((tool) => tool.name)
 
-  const isUnpriced = [...searchRows, ...fetchRows].some((row) =>
-    row.type === "tool"
-      ? hasUnpricedCalls(row.price)
-      : row.price.state === "unpriced",
+  const isUnpriced = [...searchRows, ...fetchRows].some(
+    (row) => row.price.state === "unpriced",
   )
 
   const openAdd = (kind: WebToolKind) => {
@@ -157,7 +133,7 @@ export function WebSearchPage() {
     label: string,
   ): ToolRateRow => ({ kind, modelKey, label, role: "" })
   const currentOf = (price: ToolPrice) =>
-    price.state === "own" ? price.perMillion : undefined
+    price.state === "own" ? price.perCall : undefined
 
   const tableProps = (kind: WebToolKind) => ({
     kind,
@@ -165,20 +141,24 @@ export function WebSearchPage() {
       (kind === "search" ? searchCatalog.data : fetchCatalog.data) ?? [],
     fetchDefault,
     onAdd: () => openAdd(kind),
-    onEdit: (tool: WebToolRow) => setDialog({ type: "edit", tool }),
-    onEditPrice: (tool: WebToolRow) =>
+    onEdit: (tool: ListedWebTool) => setDialog({ type: "edit", tool }),
+    onEditPrice: (tool: ListedWebTool) =>
       setDialog({
         type: "price",
         row: priceRow(kind, tool.name, tool.name),
-        current: currentOf(toolPrice(tool)),
+        current: currentOf(tool.price),
       }),
-    onEditFallbackPrice: () =>
+    onEditOrganizationKeyPrice: () =>
       setDialog({
         type: "price",
-        row: priceRow("model", FALLBACK_KEY[kind], FALLBACK_LABEL[kind]),
-        current: currentOf(fallbackPrice(kind)),
+        row: priceRow(
+          "model",
+          ORGANIZATION_KEY_RATE[kind],
+          ORGANIZATION_KEY_ROW[kind].label,
+        ),
+        current: currentOf(organizationKeyPrice(kind)),
       }),
-    onRemove: (tool: WebToolRow) => setDialog({ type: "remove", tool }),
+    onRemove: (tool: ListedWebTool) => setDialog({ type: "remove", tool }),
     onSetDefault: (name: string | null) =>
       setDefault.mutate(
         kind === "search"
@@ -203,9 +183,9 @@ export function WebSearchPage() {
       >
         The search and fetch tools this deployment runs for every workspace,
         what each call costs, and which tool the model uses. A call is billed at
-        its tool&rsquo;s own rate, else at the Web search or Web fetch rate,
-        except a search on the search API, which only the tool&rsquo;s own rate
-        prices.
+        its tool&rsquo;s own rate, and a tool with none is unpriced. Each
+        table&rsquo;s last row prices a call on an organization&rsquo;s own key,
+        and the search table&rsquo;s a search on the legacy settings too.
       </PageIntro>
 
       <ErrorBanner
@@ -214,8 +194,7 @@ export function WebSearchPage() {
       {isUnpriced && settings.data?.require_pricing === true ? (
         <InfoBanner tone="warning">
           require_pricing is on, so a call on an unpriced tool is refused with
-          402 before it runs, and a search on the search API needs its
-          tool&rsquo;s own rate. A rate of 0 prices a tool as free.
+          402 before it runs. A rate of 0 prices a tool as free.
         </InfoBanner>
       ) : null}
 
@@ -253,9 +232,7 @@ export function WebSearchPage() {
           fetchProviders={fetchCatalog.data ?? []}
           fetchDefault={fetchDefault}
           currentPrice={
-            dialog.type === "edit"
-              ? currentOf(toolPrice(dialog.tool))
-              : undefined
+            dialog.type === "edit" ? currentOf(dialog.tool.price) : undefined
           }
           onClose={close}
           onAddAnother={() => openAdd(dialogKind)}

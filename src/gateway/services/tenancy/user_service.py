@@ -78,6 +78,7 @@ from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
+from gateway.services.organizations import BlockedAddresses
 from gateway.services.password_service import (
     hash_password_async,
     verify_absent_password_async,
@@ -329,6 +330,22 @@ async def report_new_account(
     )
 
 
+async def report_sign_in(growth: GrowthSignalPort, identity: User, *, background_tasks: BackgroundTasks) -> None:
+    """Report a dashboard session just committed for ``identity`` to ``GrowthSignalPort``, or do nothing.
+
+    Nothing for an identity with no address, the bootstrap operator's normal state
+    (``services/tenancy/provisioning_service``): the address is what a vendor keys a person on.
+    """
+    if identity.email is None:
+        return
+    await growth.record_sign_in(
+        background_tasks=background_tasks,
+        user_id=identity.id,
+        email=identity.email,
+        signed_in_at=datetime.now(UTC),
+    )
+
+
 class _SignupRaceLostError(Exception):
     """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
 
@@ -342,6 +359,7 @@ async def create_user_for_signup(
     password: str,
     uow: UnitOfWork,
     organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
     full_name: str | None = None,
     terms_accepted: bool = False,
 ) -> User | None:
@@ -363,6 +381,7 @@ async def create_user_for_signup(
     An address that is already verified is mailed a notice that it has an account and how it signs in.
     An unknown address is registered where ``open_signup`` is on, and refused otherwise.
     An identity ``unverified_identity_is_claimable`` refuses is refused too.
+    So is an address the deployment's email blocklist matches, before its identity is looked up.
     A verified address is refused because a password set on it would sign in with no proof of the mailbox.
     A deactivated identity is refused so that no password or verification token waits on it for a reactivation.
     ``password`` is validated before the lookup, so a policy violation answers the same for every address.
@@ -392,6 +411,9 @@ async def create_user_for_signup(
     full_name = _normalized_full_name(full_name)
 
     address = validated_email(email)
+    if await blocked_addresses.blocked_among([address]):
+        await verify_absent_password_async(password)
+        return None
     identity = await UserRepository(db).get_by_email(address)
     if identity is not None and (
         identity.hashed_password is not None or identity.email_verified_at is not None or not identity.is_active
@@ -470,7 +492,13 @@ async def create_user_for_signup(
 
 
 async def verify_email(
-    db: AsyncSession, *, organizations: OrganizationService, token: str, password: str, open_signup: bool
+    db: AsyncSession,
+    *,
+    organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
+    token: str,
+    password: str,
+    open_signup: bool,
 ) -> User:
     """Confirm an address, lifting the sign-in gate #650 added to ``authenticate``.
 
@@ -514,6 +542,9 @@ async def verify_email(
     identity = await users.get_by_verification_token_hash(hash_token(token))
     if identity is None or identity.email_verification_token_expires_at is None or not identity.is_active:
         raise VerificationTokenInvalidError
+    # Before the lock: the check reads through its own block, whose commit would release the lock.
+    if identity.email is not None and await blocked_addresses.blocked_among([identity.email]):
+        raise VerificationTokenInvalidError
     await users.lock(identity.id)
     identity = await users.get_by_verification_token_hash(hash_token(token))
     if identity is None or identity.email_verification_token_expires_at is None or not identity.is_active:
@@ -549,6 +580,7 @@ async def resend_verification_email(
     config: GatewayConfig,
     *,
     organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
     background_tasks: BackgroundTasks,
     email: str,
 ) -> None:
@@ -574,7 +606,9 @@ async def resend_verification_email(
     mailer.require_ready()
 
     address = validated_email(email)
-    identity = await UserRepository(db).get_by_email(address)
+    identity = (
+        None if await blocked_addresses.blocked_among([address]) else await UserRepository(db).get_by_email(address)
+    )
     if (
         identity is None
         or identity.hashed_password is None
@@ -609,6 +643,7 @@ async def request_password_reset(
     config: GatewayConfig,
     *,
     organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
     background_tasks: BackgroundTasks,
     email: str,
 ) -> None:
@@ -632,7 +667,9 @@ async def request_password_reset(
     mailer.require_ready()
 
     address = validated_email(email)
-    identity = await UserRepository(db).get_by_email(address)
+    identity = (
+        None if await blocked_addresses.blocked_among([address]) else await UserRepository(db).get_by_email(address)
+    )
     if identity is not None and identity.is_active and _signs_in_only_without_password(identity):
         await verify_absent_password_async(_TIMING_EQUALIZER)
         _schedule_account_exists_notice(mailer, identity, background_tasks=background_tasks, to=address)
@@ -667,6 +704,7 @@ async def reset_password(
     config: GatewayConfig,
     *,
     organizations: OrganizationService,
+    blocked_addresses: BlockedAddresses,
     token: str,
     new_password: str,
     terms_accepted: bool = False,
@@ -716,8 +754,13 @@ async def reset_password(
 
     Where ``open_signup`` is off, an unverified identity is held to signup's
     rule again here, because the roster can drop it after the link was mailed.
+    A link mailed before its address was blocked is refused as invalid.
     """
     users = UserRepository(db)
+    # Before the lock: the check reads through its own block, whose commit would release the lock.
+    pending = await users.get_by_reset_token_hash(hash_token(token))
+    if pending is not None and pending.email is not None and await blocked_addresses.blocked_among([pending.email]):
+        raise ResetTokenInvalidError
     identity = await _locked_reset_identity(users, organizations, token=token, open_signup=config.open_signup)
     validate_new_password(new_password)
     needs_terms = identity.terms_accepted_at is None and config.terms_url is not None
@@ -896,6 +939,7 @@ __all__ = [
     "request_password_reset",
     "resend_verification_email",
     "report_new_account",
+    "report_sign_in",
     "reset_password",
     "set_password",
     "unverified_identity_is_claimable",

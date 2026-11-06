@@ -25,7 +25,9 @@ every writer and none of them can be expressed in the schema at all:
   deployment's own credential, so the deployment settles its upstream bill and
   owns its rate. A bare ``provider:model`` key gets the same refusal when a
   workspace lacks a usable BYO key and the bound ``ModelProviderPort`` would
-  serve it on a deployment-owned hosted credential. See
+  serve it on a deployment-owned hosted credential. A search or fetch tool's
+  rate, and ``otari:code_execution``, get the same refusal, since the
+  deployment's own account runs those calls. See
   :meth:`OrganizationPricingService.raise_if_deployment_supplied`.
 
 Periods are half-open, ``[effective_from, effective_to)``. Two adjacent periods
@@ -40,7 +42,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -72,11 +74,19 @@ from gateway.services.pricing_service import (
     default_model_pricing,
     normalize_effective_at,
     override_as_model_pricing,
+    pricing_key_forms,
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.price_unit import PriceUnit
+from gateway.types.tool_charges import gateway_tool_pricing_key
+
+# Every spelling a lookup reads code execution's rate under. Each run is on the
+# deployment's sandbox, so only the operator's rate prices it.
+_CODE_EXECUTION_KEYS = frozenset(pricing_key_forms(gateway_tool_pricing_key(CODE_EXECUTION_TOOL_NAME)))
 
 
 @dataclass(frozen=True)
@@ -99,7 +109,8 @@ class PricingOverrideInput:
     pricing_tiers: list[dict[str, object]]
     effective_from: datetime
     effective_to: datetime | None
-    unit: str = "tokens"
+    unit: PriceUnit = "token"
+    rates: dict[str, Any] | None = None
 
 
 def _describe_period(effective_from: datetime, effective_to: datetime | None) -> str:
@@ -247,10 +258,10 @@ class OrganizationPricingService:
         *,
         kind: PricingKind = MODEL_KIND,
     ) -> None:
-        """Refuse a rate for a model this deployment, not this organization, pays for.
+        """Refuse a rate for a model or tool this deployment, not this organization, pays for.
 
-        A search or fetch instance always runs on the deployment's own key, so
-        its rate is the operator's to set.
+        A search or fetch instance always runs on the deployment's own key, and
+        code execution on its sandbox, so their rates are the operator's to set.
 
         Public for the reason :meth:`raise_if_overlapping` is: it is one of the
         rules this surface exists to enforce, and asserting it through a create
@@ -272,6 +283,8 @@ class OrganizationPricingService:
             return
         if kind != MODEL_KIND:
             raise OrganizationPricingToolRateError(kind, model_key)
+        if model_key in _CODE_EXECUTION_KEYS:
+            raise OrganizationPricingToolRateError("code execution", model_key)
         if model_key in await self.deployment_supplied_keys(organization_id, [model_key]):
             raise OrganizationPricingManagedModelError(model_key)
 
@@ -452,8 +465,9 @@ class OrganizationPricingService:
     ) -> OrganizationModelPricing:
         """Store a new override.
 
-        Refused for a model the deployment supplies the credential for, and for a
-        period that overlaps one already stored for this key.
+        Refused for a model the deployment supplies the credential for, for a
+        tool the deployment's own account runs, and for a period that overlaps
+        one already stored for this key.
         """
         organization_id = await self._writable_organization_id(user)
         await self.raise_if_deployment_supplied(user, model_key, organization_id, kind=kind)
@@ -483,6 +497,7 @@ class OrganizationPricingService:
             effective_from=effective_from,
             effective_to=effective_to,
             unit=override.unit,
+            rates=override.rates,
             origin=await self._origin_for(user),
         )
         self.db.add(row)
@@ -608,6 +623,8 @@ class OrganizationPricingService:
         row.effective_from = effective_from
         row.effective_to = effective_to
         row.unit = override.unit
+        if override.rates is not None:
+            row.rates = override.rates
         # The rate is somebody's choice now, whatever it was before. A row the
         # offered-models surface seeded carries ``seed`` and its refresh moves it
         # to each day's community default; leaving that marking on a rate an
@@ -653,9 +670,9 @@ def validate_rates(override: PricingOverrideInput) -> None:
 
 
 def validate_unit(kind: PricingKind, unit: str) -> None:
-    """Refuse a search or fetch rate in any unit but ``requests``, since it is charged per call."""
-    if kind != MODEL_KIND and unit != "requests":
-        raise TenancyValidationError(f"a {kind} rate is per call, so its unit is 'requests'")
+    """Refuse a search or fetch rate in any unit but ``request``, since it is charged per call."""
+    if kind != MODEL_KIND and unit != "request":
+        raise TenancyValidationError(f"a {kind} rate is per call, so its unit is 'request'")
 
 
 def validate_period(effective_from: datetime, effective_to: datetime | None) -> None:

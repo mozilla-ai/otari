@@ -25,8 +25,11 @@ context and calls the adapter.
 2. **Write the adapter.** Build the request from the shared parameters and the native options,
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
-   - Send with `self._http.request`, which uses the host's client and the provider's timeout and
-     turns a transport failure into a `ProviderError` without its text.
+   - Send with `self._http.request`, which uses the host's client and the provider's timeout,
+     names the library in the request's `User-Agent` (`any-search/<version>` or
+     `any-fetch/<version>`) and turns a transport failure into a `ProviderError` without its
+     text. An adapter sets no `User-Agent` of its own, even where the provider's SDK names
+     itself: that header is the one exception to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
@@ -45,6 +48,8 @@ context and calls the adapter.
    - A date without a zone is UTC.
    - The cost is the provider's reported figure only, as a `Decimal`, with `cost_source` set.
    - `api_base` replaces the endpoint for every provider; strip its trailing slash.
+   - Bump the package's `__version__` (`<import name>/__init__.py`): it names the library in
+     every request's `User-Agent`, so a provider can tie a change in its traffic to a release.
 3. **Record fixtures and test.** Record one fixture per case (below) with
    `uv run python <package>/scripts/record_fixture.py`. Keep them small: ask for few results and
    little text. Check the key is not in them. Then add:
@@ -90,7 +95,9 @@ The four cases a fixture can record:
   native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
   `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
 - A hit needs a URL. Drop an item without one only when the provider's documentation allows such
-  an item; otherwise it is `unexpected_response`. `title` and `snippet` are strings, never `None`.
+  an item; otherwise it is `unexpected_response`. When the provider is seen to send a string that
+  is not an http(s) URL with a host, such as Serply's Google redirect tokens, drop that item too
+  and fill the count from the items after it. `title` and `snippet` are strings, never `None`.
   `snippet` is the provider's short text; `text` is page text, when it came back.
 - List the fields the adapter checks in the module's docstring and the README's section on the
   provider.
@@ -243,3 +250,92 @@ provider with no empty page.
   (`?spm=a2c6h`, `#1`); the adapter passes them as they are.
 - Fixture recipes: an empty search with `site:` set to a domain that does not exist; a refused
   key as any `sk-` string of the right length.
+
+### 2026-11-03, Serply (any-search)
+
+The first search provider with the query in the URL and the key in a header, and the first that
+returns a scraped results page.
+
+- Set `query_in_url` without `key_in_url` when only the query travels in the URL; the real-socket
+  log test still applies, since httpx logs the URL with the query in it.
+- A native option can be a request header: Serply's `X-Proxy-Location` and `X-User-Agent` keep
+  the provider's header names and go out as headers, and the key is set after them, so no option
+  replaces it.
+- A provider can pass parameters through that its documentation does not list: Serply forwards
+  Google's own `tbs` and `tbm`, which is how `time_range` is mapped. Check each one live before
+  offering it, and say in the docstring when it was checked: `tbm=nws` works, `tbm=isch` returned
+  no `results`.
+- A result can carry a value of the right type that is not what the field promises: Serply
+  sometimes returns an opaque Google token in `link` in place of a URL. Drop such an item rather
+  than failing the whole search, and fill the count from the items after it.
+- A provider can choose the region a search runs from unless an option pins it. Without `gl`,
+  Serply answered a news query with Swedish relative times, and the same English web result came
+  dated `May 27, 2026` on one call and `27.05.2026` on another. Say in the option's description
+  and in the pricing note which option an operator should set on the instance.
+- A results page shows its dates as text in the language of the region that served it: Serply's
+  come in `metadata.published_time` (`Oct 7, 2026`, `17 hours ago`) or `metadata.attributes`
+  (`27.05.2026`, `vor 23 Stunden`). Such a field stays in `raw`, as Tabstack's PDF dates do: a
+  parser for the one form a fixture shows dates some hits and silently drops the rest. Probe with
+  several queries rather than one repeated, since Serply answered a repeated query identically.
+- A documentation's default can be wrong: Serply documents `desktop` as its `X-User-Agent`
+  default, but its answers reported `mobile`. Describe an option by what it does, not by a default
+  you have not seen.
+
+### 2026-11-05, Synthetic (any-search)
+
+The first provider added without a recorded success: its search answers only a subscribed key.
+
+- A provider can refuse a valid key for want of a plan, with the same status as a bad one:
+  Synthetic answers both with a 401, and only the `error` sentence tells them apart
+  (`Invalid API Key.` against `The search API is subscription-only: ...`). Probe with a real key
+  before choosing tags, and give the plan refusal a tag of its own (`subscription_required`), so an
+  operator is not sent to rotate a key that works.
+- When no key can record a success, the `normal` fixture is the documentation's own example and
+  `empty` that shape with no results, said in a comment beside the conformance scenarios, and the
+  live workflow skips the provider on every trigger rather than failing a scheduled run without
+  the secret. What a recording would settle stays open in the PR: the most results a search
+  returns, whether `text` is page text or an excerpt, and whether `published` can be null.
+- A provider can take nothing but the query. Then `max_results` only cuts the hits, and
+  `time_range` filters them by date after the answer, keeping the undated ones, since nothing
+  says they fall outside the range.
+
+### 2026-11-05, SearXNG (any-search)
+
+The first provider with no key and no address of its own, and the first that replaced code otari
+already had for it.
+
+- An adapter speaks the provider's own API: its parameter names, its defaults and its fields,
+  nothing carried over from a client the host had before. otari's old SearXNG client read
+  `published_date` and `extracted_content`, which only otari's own SearXNG-shaped services sent;
+  the adapter reads `publishedDate` and `content`, as SearXNG sends them. When the provider has
+  no SDK, follow its server's own default: SearXNG's `server.method` is GET.
+- A provider that every user runs for themselves has no default address: set
+  `requires_api_base`, and an `env_api_base` so the CLI and the live tests can find an instance.
+  The conformance fixture gives every such variable a fake value, as it does a key.
+- What an instance answers depends on how its operator configured it. A name in `engines` that
+  SearXNG does not know is not an error: with no name it knows, it searches its default engines
+  (`mojeek` is not among its engines). `wikipedia` answers an infobox and no results. The engines that scrape search
+  sites (`duckduckgo`, `qwant`) answer a laptop and a CI runner with CAPTCHAs, on some calls and
+  not others. The live tests therefore pin two engines that call public APIs, `wikinews` and
+  `arxiv`, which date their hits; neither has a time filter, and SearXNG leaves an engine
+  without one out of a search that sets it, so that search comes back empty without an error.
+- An error inside a 200 can be partial: `unresponsive_engines` names each engine that failed,
+  beside the results of those that did not. Only a search that leaves no usable hit while an
+  engine failed is the search's error; with hits, the failures stay in `raw`.
+- When a provider documents none of its answer's fields, the 2026-10-13 rule applies in full:
+  require only what the adapter cannot answer without (SearXNG's `results`), take the rest as
+  optional but type-checked, and drop an item without a usable URL. A date in a form the provider
+  does not hold stays in `raw`; one that starts like ISO 8601 and does not parse
+  (`2026-13-40`) fails the call, since it means the provider's serializer broke.
+- Tag a status by what it can mean, not by its likeliest cause: SearXNG answers 403 when `json`
+  is not enabled, but so can a proxy in front of it, so the tag is `forbidden` and the docs name
+  the likely cause. An option whose values only the adapter acts on (`method`) is refused
+  outside its enum before any request; SearXNG cannot refuse what the adapter never sends.
+- For a provider the host runs itself, the live workflow starts it: a
+  container from a dated image, with the settings the host's compose file mounts, and the
+  workflow runs again when those settings change.
+- Fixture recipes: the `in_body_error` with `engines=google news`, which answers "access denied";
+  the `error` with `pageno` set to a word, a 400 with a sentence in `error` (an empty value gives
+  `Empty pageno parameter`); an empty search with `engines=wikinews` and words no article holds.
+  A 403 is SearXNG's answer when `json` is not among the instance's `search.formats`, which no
+  fixture records.

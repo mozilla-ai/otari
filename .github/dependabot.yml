@@ -45,8 +45,20 @@ updates:
           - "minor"
           - "patch"
 
-  # No entry for the dashboard: Dependabot documents pnpm support only through
-  # v10 and web/ requires a newer pnpm, so one would target a lockfile format it
-  # cannot resolve. Its security alerts do not reach web/ either, because the
-  # dependency graph no longer reads that lockfile. otari-dashboard-audit.yml
-  # covers advisories in the meantime; version updates are tracked in #1001.
+  # The dashboard. The ecosystem is "npm" for pnpm too; Dependabot reads
+  # web/pnpm-lock.yaml and updates it with the pnpm web/package.json pins.
+  #
+  # Version updates only, in practice: security updates follow alerts, and the
+  # dependency graph raises none for web/. pnpm 11+ writes the lockfile as two
+  # YAML documents (one pinning pnpm itself, then the real one), and the graph
+  # reads only the first, so it sees pnpm's binaries and none of the dashboard's
+  # packages. otari-dashboard-audit.yml covers advisories instead.
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    groups:
+      dashboard-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

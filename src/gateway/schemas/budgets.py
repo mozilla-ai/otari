@@ -7,6 +7,7 @@ Responses echo the stored string, so a row that holds an unknown value still rea
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
@@ -239,9 +240,49 @@ class EndUserBudgetPublic(BaseModel):
     """A budget a service key may put its end users on, and how many of them are on it."""
 
     budget_id: str
+    name: str | None = None
+    max_budget: float | None = Field(default=None, description="Dollars each end user may spend over the period")
+    token_limit: int | None = None
+    request_limit: int | None = None
+    rpm_limit: int | None = None
+    tpm_limit: int | None = None
+    budget_duration_sec: int | None = None
+    reset_alignment: str | None = None
     is_default: bool = Field(description="Whether a new end user starts here when its request names no budget")
     end_user_count: int = Field(description="End users of the key's user on this budget, blocked ones included")
     blocked_end_user_count: int
+
+    @classmethod
+    def from_model(
+        cls,
+        budget_id: str,
+        budget: Budget | None,
+        *,
+        is_default: bool,
+        end_user_count: int,
+        blocked_end_user_count: int,
+    ) -> EndUserBudgetPublic:
+        """The entry for ``budget_id``, with no name or limits when the budget was deleted after the key was read."""
+        entry = cls(
+            budget_id=budget_id,
+            is_default=is_default,
+            end_user_count=end_user_count,
+            blocked_end_user_count=blocked_end_user_count,
+        )
+        if budget is None:
+            return entry
+        return entry.model_copy(
+            update={
+                "name": budget.name,
+                "max_budget": as_float(budget.max_budget),
+                "token_limit": budget.token_limit,
+                "request_limit": budget.request_limit,
+                "rpm_limit": budget.rpm_limit,
+                "tpm_limit": budget.tpm_limit,
+                "budget_duration_sec": budget.budget_duration_sec,
+                "reset_alignment": budget.reset_alignment,
+            }
+        )
 
 
 class BudgetResetLogResponse(BaseModel):
@@ -610,7 +651,53 @@ class WorkspaceMemberBudgetPoliciesPublic(BaseModel):
     count: int
 
 
+class KeyLimitPublic(BaseModel):
+    """One cap a request made with the calling key has to pass.
+
+    ``used_*`` counts what the budget gate counts: recorded use plus the holds of
+    requests still in flight. On a cap the key shares with the rest of its
+    workspace or organization the limit and the use are left out, and only what
+    is left is reported; that still moves as the others spend.
+    """
+
+    scope: str = Field(
+        description="Where the cap sits: 'user' for the budget the key's user is on, or the scope of a spend "
+        "ceiling: 'api_token', 'workspace_member', 'org_member', 'workspace' or 'organization'"
+    )
+    provider: str | None = Field(description="The provider this cap is narrowed to, or null when it caps every one")
+    resets_at: datetime | None = Field(
+        description="When the period ends and use starts again from zero; null for a cap that never resets"
+    )
+    limit_usd: float | None = Field(description="Dollars allowed per period; null when uncapped or shared")
+    used_usd: float | None = Field(description="Dollars spent and held this period; null when uncapped or shared")
+    remaining_usd: float | None = Field(description="Dollars left this period; null when dollars are uncapped")
+    limit_tokens: int | None = None
+    used_tokens: int | None = None
+    remaining_tokens: int | None = None
+    limit_requests: int | None = None
+    used_requests: int | None = None
+    remaining_requests: int | None = None
+
+
+class KeyBudgetPublic(BaseModel):
+    """What the calling key may still spend, and every cap that decides it."""
+
+    budgets_enforced: bool = Field(
+        description="False when budgets are off for this key: it is budget-exempt, or the deployment runs with "
+        "budget_strategy disabled. True otherwise, even when no cap applies"
+    )
+    remaining_usd: float | None = Field(
+        description="The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, "
+        "request or provider-narrowed cap in limits can refuse a request sooner"
+    )
+    limits: list[KeyLimitPublic] = Field(
+        description="The key's user's budget first, then each spend ceiling, the most specific first"
+    )
+
+
 __all__ = [
+    "KeyBudgetPublic",
+    "KeyLimitPublic",
     "BUDGET_ID_PATTERN",
     "BudgetResetLogResponse",
     "BudgetResponse",

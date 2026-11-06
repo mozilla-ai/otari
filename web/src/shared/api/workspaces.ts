@@ -7,18 +7,23 @@ import {
 import type {
   CreateWorkspaceBudgetDefaultRequest,
   CreateWorkspaceRequest,
+  SetWorkspaceHostedProviderRequest,
   SetWorkspaceProviderKeyOverrideRequest,
   UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceRequest,
   Workspace,
   WorkspaceBudgetDefault,
+  WorkspaceHostedProvider,
   WorkspaceMember,
   WorkspaceMemberRole,
   WorkspaceProviderKeyOverride,
+  WorkspaceProviderPolicy,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  CATALOG,
+  MODELS,
   ORGANIZATIONS,
   TRACES,
   WORKSPACES,
@@ -358,7 +363,8 @@ export function useAllWorkspaceProviderKeys(workspaceIds: string[]) {
 // Pinning a key clears whichever of the provider's other keys this workspace had
 // pinned, and disabling one deletes its model allow-list server-side, so every
 // write here re-reads the workspace's whole provider-key subtree rather than
-// patching the row it acted on.
+// patching the row it acted on. The catalog follows too: the Models page lists
+// what the selected workspace may call, which these writes change.
 function invalidateWorkspaceProviderKeys(
   queryClient: ReturnType<typeof useQueryClient>,
   workspaceId: string,
@@ -366,6 +372,8 @@ function invalidateWorkspaceProviderKeys(
   void queryClient.invalidateQueries({
     queryKey: [WORKSPACES, workspaceId, "provider-keys"],
   })
+  void queryClient.invalidateQueries({ queryKey: [MODELS] })
+  void queryClient.invalidateQueries({ queryKey: [CATALOG] })
 }
 
 export function useSetWorkspaceProviderKeyOverride() {
@@ -454,6 +462,127 @@ export function useRemoveWorkspaceProviderKeyModel() {
   })
 }
 
+/**
+ * One workspace's view of the hosted providers its organization may use.
+ *
+ * Every provider the deployment serves the organization, each with this
+ * workspace's rule on it. Not paged, for the reason `useWorkspaceProviderKeys`
+ * is not: the set is bounded by what the deployment hosts.
+ */
+export function useWorkspaceHostedProviders(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "hosted-providers"],
+    meta: workspaceMeta(workspaceId),
+    queryFn: async () =>
+      (
+        await apiFetch<{ data: WorkspaceHostedProvider[] }>(
+          `/workspaces/${encodeURIComponent(workspaceId as string)}/hosted-providers`,
+        )
+      ).data,
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+// A hosted rule narrows what the workspace's callers can see as well as call,
+// so a write also refreshes the model lists that read through it.
+function invalidateWorkspaceHostedProviders(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: [WORKSPACES, workspaceId, "hosted-providers"],
+  })
+  void queryClient.invalidateQueries({ queryKey: [MODELS] })
+  void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+}
+
+/** What the workspace requires of every provider serving it. */
+export function useWorkspaceProviderPolicy(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "provider-policy"],
+    meta: workspaceMeta(workspaceId),
+    queryFn: () =>
+      apiFetch<WorkspaceProviderPolicy>(
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/provider-policy`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+/** Require zero data retention of every provider serving the workspace, or stop requiring it. */
+export function useSetWorkspaceProviderPolicy() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      requireZeroDataRetention,
+    }: {
+      workspaceId: string
+      requireZeroDataRetention: boolean
+    }) =>
+      apiFetch<WorkspaceProviderPolicy>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/provider-policy`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            require_zero_data_retention: requireZeroDataRetention,
+          }),
+        },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "provider-policy"],
+      })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+    },
+  })
+}
+
+/** Switch a hosted provider off for the workspace, or narrow it to `models`. */
+export function useSetWorkspaceHostedProvider() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      provider,
+      body,
+    }: {
+      workspaceId: string
+      provider: string
+      body: SetWorkspaceHostedProviderRequest
+    }) =>
+      apiFetch<WorkspaceHostedProvider>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/hosted-providers/${encodeURIComponent(provider)}`,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) =>
+      invalidateWorkspaceHostedProviders(queryClient, workspaceId),
+  })
+}
+
+/** Drop the workspace's rule, so it inherits the hosted provider whole again. */
+export function useResetWorkspaceHostedProvider() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      provider,
+    }: {
+      workspaceId: string
+      provider: string
+    }) =>
+      apiFetch<WorkspaceHostedProvider>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/hosted-providers/${encodeURIComponent(provider)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) =>
+      invalidateWorkspaceHostedProviders(queryClient, workspaceId),
+  })
+}
+
 // The guardrails the caller's organization mandates over its workspaces. A
 // small hand-edited list rather than a growing table, but paged through like
 // the rest of the tenancy surface so a backend that ignored `skip` cannot spin
@@ -488,10 +617,17 @@ export function useRemoveWorkspaceMember() {
 export function useSetWorkspaceTraceContent() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+    mutationFn: ({
+      id,
+      ...switches
+    }: {
+      id: string
+      trace_content_enabled?: boolean
+      trace_content_tool_output?: boolean
+    }) =>
       apiFetch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        body: JSON.stringify({ trace_content_enabled: enabled }),
+        body: JSON.stringify(switches),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })

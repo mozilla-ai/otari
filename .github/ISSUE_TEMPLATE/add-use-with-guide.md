@@ -46,4 +46,4 @@ Cursor, Continue, Aider, Zed, Cline, Windsurf, Codex CLI, and Gemini CLI all sup
 
 - Exemplars: `docs/use-with-claude-code.md`, `docs/use-with-opencode.md`
 - Model format and providers: `docs/models.md`
-- Base config: `docs/quickstart.md`
+- Base config: `docs/self-hosted-quickstart.md`

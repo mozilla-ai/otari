@@ -16,7 +16,11 @@ import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
-import { parsePerCallPrice, toPerCall } from "@/features/toolPricing/toolRates"
+import {
+  parsePerCallPrice,
+  perCallText,
+  toPerCall,
+} from "@/features/toolPricing/toolRates"
 import { useSetPricing } from "@/shared/api/pricing"
 import {
   useCreateSearchTool,
@@ -30,7 +34,6 @@ import { ProviderOptionFields } from "./ProviderOptionFields"
 import {
   buildOptions,
   nameProblem,
-  perCallText,
   sameOptions,
   servesTheModel,
   splitOptions,
@@ -61,20 +64,12 @@ const NOUN: Readonly<Record<WebToolKind, string>> = {
 const REDIRECT_WARNING =
   "does not report where a redirect led, so a workspace's allowed and blocked domains are not checked past one. Keep builtin_fetch where they must hold."
 
-const PRICE_HELP: Readonly<Record<WebToolKind, string>> = {
-  search:
-    "Blank: the model's searches on it are billed at Web search's rate, and its calls on the search API are unpriced, which require_pricing refuses. A call the provider reports a cost for is billed at that cost instead.",
-  fetch:
-    "Blank bills it at Web fetch's rate. A call the provider reports a cost for is billed at that cost instead.",
-}
+const PRICE_HELP =
+  "Blank: the tool takes a rate already stored for it, if there is one, and is otherwise unpriced, which require_pricing refuses. A call the provider reports a cost for is billed at that cost instead."
 
-/** What a tool added with no price of its own is billed at, for the result step. */
-const UNPRICED_RESULT: Readonly<Record<WebToolKind, string>> = {
-  search:
-    "It has no price of its own: the model's searches on it are billed at Web search's rate, and its calls on the search API go unpriced, which require_pricing refuses. Set one with Edit on its row.",
-  fetch:
-    "It has no price of its own, so its calls are billed at Web fetch's rate. Set one with Edit on its row.",
-}
+/** What the result step says of a tool added with no price. */
+const UNPRICED_RESULT =
+  "No price was set here, so unless one is already stored for it, it is unpriced, which require_pricing refuses. Set one with Edit on its row."
 
 function capitalized(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
@@ -135,7 +130,7 @@ export function WebToolDialog({
   fetchProviders: readonly SearchProviderInfo[]
   /** The fetch tool that enriches a search tool that names none. */
   fetchDefault: string
-  /** The tool's own per-million rate in force, `undefined` when it has none. */
+  /** The rate in force in dollars per call, `undefined` when the tool is unpriced. */
   currentPrice: number | undefined
   onClose: () => void
   onAddAnother: () => void
@@ -251,7 +246,7 @@ export function WebToolDialog({
       input_price_per_million: perMillion,
       // A call is one unit; there is no output side of it to price.
       output_price_per_million: 0,
-      unit: "requests",
+      unit: "request",
     })
 
   const submit = async () => {
@@ -322,7 +317,7 @@ export function WebToolDialog({
               tool.api_base ?? "provider endpoint",
               hasPrice && priceError === null && price !== undefined
                 ? `${formatUnitRate(toPerCall(price))} a call`
-                : "no price of its own",
+                : "no price set",
             ].join(" · ")}
           </p>
         </div>
@@ -333,7 +328,7 @@ export function WebToolDialog({
             on its row.
           </InfoBanner>
         ) : !hasPrice ? (
-          <p className="text-caption">{UNPRICED_RESULT[kind]}</p>
+          <p className="text-caption">{UNPRICED_RESULT}</p>
         ) : null}
       </FormDialog>
     )
@@ -483,7 +478,7 @@ export function WebToolDialog({
             description={
               isEdit && currentPrice !== undefined
                 ? "0 prices it as free. Clearing the field keeps the current price."
-                : PRICE_HELP[kind]
+                : PRICE_HELP
             }
           />
 
@@ -530,8 +525,8 @@ export function WebToolDialog({
                   ]}
                   description={
                     enrichingProvider?.reports_final_url === false
-                      ? `Reads the page for a hit that has no text. ${enrichingProvider.id} ${REDIRECT_WARNING}`
-                      : "Reads the page for a hit that has no text."
+                      ? `With enrichment on, reads the page for a hit that has no text and bills it as a fetch on that tool. ${enrichingProvider.id} ${REDIRECT_WARNING}`
+                      : "With enrichment on, reads the page for a hit that has no text and bills it as a fetch on that tool."
                   }
                 />
               ) : null}

@@ -7,6 +7,8 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.types.price_rates import MODALITIES, RATES_DESCRIPTION, RatesDocument, columns_from_rates
+from gateway.types.price_unit import AcceptedPriceUnit, current_unit_name
 
 PRICING_REFRESH_POLICIES: tuple[str, ...] = ("manual", "review", "auto")
 
@@ -42,8 +44,16 @@ _TOKEN_PRICE_FIELDS = (
 )
 PRICE_PER_REQUEST_DESCRIPTION = (
     "USD for each request, whatever it uses: a completion model billed per call, such as Exa's or Liner's "
-    "answers. Shorthand for unit 'requests' with input_price_per_million at a million times this; not "
+    "answers. Shorthand for unit 'request' with input_price_per_million at a million times this; not "
     "combined with token prices."
+)
+
+PRICE_UNIT_DESCRIPTION = (
+    "What the rates are per: 'token' for a model, 'request' for a gateway-run tool, a "
+    "moderation call, or a completion model billed per call, 'image' for image generation, "
+    "'character' for speech."
+    " Every rate is USD per million of its unit. A rate in a unit that has no meter yet is stored "
+    "and prices nothing. The plural names 'tokens', 'requests' and 'images' are still read for one release."
 )
 
 
@@ -61,7 +71,7 @@ def _finite_decimal(value: Any) -> Decimal | None:
 def price_per_request_shorthand(data: Any) -> Any:
     """Expand ``price_per_request`` into the per-request rate it stands for, refusing a mix with token prices.
 
-    ``{"price_per_request": 0.005}`` becomes ``unit: requests`` with
+    ``{"price_per_request": 0.005}`` becomes ``unit: request`` with
     ``input_price_per_million: 5000`` and ``output_price_per_million: 0``,
     which is how a per-request rate is stored and billed. Exact in decimal, so
     a price like 0.003 does not come out as 3000.0000000000005 per million.
@@ -71,8 +81,8 @@ def price_per_request_shorthand(data: Any) -> Any:
     price = _finite_decimal(data["price_per_request"])
     if price is None:
         return data  # Left for the field's own validation to refuse.
-    if data.get("unit", "requests") != "requests":
-        raise ValueError("price_per_request is a price per request: leave unit out or set it to 'requests'")
+    if current_unit_name(data.get("unit", "request")) != "request":
+        raise ValueError("price_per_request is a price per request: leave unit out or set it to 'request'")
     per_million = price * 1_000_000
     mixed = [name for name in _TOKEN_PRICE_FIELDS if data.get(name) not in (None, 0, [])]
     # An input rate equal to the expansion is this same price validated again, as a dump of it reads.
@@ -83,10 +93,62 @@ def price_per_request_shorthand(data: Any) -> Any:
         raise ValueError(f"price_per_request replaces token prices; remove {', '.join(mixed)}")
     return {
         **data,
-        "unit": "requests",
+        "unit": "request",
         "input_price_per_million": float(per_million),
         "output_price_per_million": 0.0,
     }
+
+
+# The fields ``rates`` carries, so a body that gives it gives none of them.
+_RATES_REPLACES = (
+    "input_price_per_million",
+    "output_price_per_million",
+    "cache_read_price_per_million",
+    "cache_write_price_per_million",
+    "pricing_tiers",
+    "unit",
+    "price_per_request",
+)
+
+
+def rates_shorthand(data: Any) -> Any:
+    """Read the per-million fields out of ``rates``, refusing a mix of the two.
+
+    A body that gives ``rates`` gives every price there, so the six fields are
+    written from it: the unit, the two rates, the cache rates (``None`` where
+    the block has none, so an earlier version's are not inherited) and the
+    tiers. A block no column can hold is refused with its reason.
+    """
+    if not isinstance(data, dict) or data.get("rates") is None:
+        return data
+    mixed = [name for name in _RATES_REPLACES if data.get(name) not in (None, [])]
+    if mixed:
+        raise ValueError(f"rates carries every price; remove {', '.join(mixed)}")
+    if isinstance(data["rates"], dict):
+        unknown = [key for key in data["rates"] if key not in (*MODALITIES, "web_search", "multipliers")]
+        if unknown:
+            raise ValueError(
+                f"rates price a modality not known here: {', '.join(unknown)}; one of {', '.join(MODALITIES)}"
+            )
+    try:
+        # The strict shape first, so a typo or a negative price is named as such before the columns are read.
+        RatesDocument.model_validate(data["rates"])
+        columns = columns_from_rates(data["rates"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(str(exc)) from None
+    return {
+        **data,
+        "unit": columns.unit,
+        "input_price_per_million": float(columns.input_price_per_million),
+        "output_price_per_million": float(columns.output_price_per_million),
+        "cache_read_price_per_million": _float_or_none(columns.cache_read_price_per_million),
+        "cache_write_price_per_million": _float_or_none(columns.cache_write_price_per_million),
+        "pricing_tiers": [dict(tier) for tier in columns.pricing_tiers],
+    }
+
+
+def _float_or_none(value: Decimal | None) -> float | None:
+    return None if value is None else float(value)
 
 
 class PricingConfig(BaseModel):
@@ -112,22 +174,16 @@ class PricingConfig(BaseModel):
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
-    unit: Literal["tokens", "requests", "images"] = Field(
-        default="tokens",
-        description=(
-            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
-            "moderation call, or a completion model billed per call (USD per million requests), "
-            "'images' for image generation (USD per million images)."
-        ),
-    )
+    unit: AcceptedPriceUnit = Field(default="token", description=PRICE_UNIT_DESCRIPTION)
     price_per_request: float | None = Field(
         default=None, ge=0, allow_inf_nan=False, description=PRICE_PER_REQUEST_DESCRIPTION
     )
+    rates: RatesDocument | None = Field(default=None, description=RATES_DESCRIPTION)
 
     @model_validator(mode="before")
     @classmethod
-    def _expand_price_per_request(cls, data: Any) -> Any:
-        return price_per_request_shorthand(data)
+    def _expand_shorthands(cls, data: Any) -> Any:
+        return price_per_request_shorthand(rates_shorthand(data))
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "PricingConfig":
@@ -152,7 +208,7 @@ class PricingSettings(BaseModel):
             "Reject requests for models, direct searches and gateway-run tools that have no configured pricing "
             "(fail-closed, default). When False, unpriced models are served and logged without cost (legacy "
             "behavior), and unpriced searches and tool calls are served at the cost their provider reports, if any. "
-            "Audio and moderation endpoints are always exempt: they have no token-based pricing."
+            "Audio transcription and moderation endpoints are always exempt: they have no token-based pricing."
         ),
     )
     default_pricing: Annotated[bool, Shown(SettingsGroup.METERING)] = Field(

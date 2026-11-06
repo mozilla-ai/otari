@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Literal, TypeVar
 
 import httpx
+import httpx2
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
 from anthropic import APITimeoutError as _AnthropicAPITimeoutError
 from openai import APIConnectionError as _OpenAIAPIConnectionError
@@ -47,6 +48,19 @@ _BILLING_MESSAGE_PROBES: tuple[str, ...] = (
     "exceeded your current quota",  # openai
     "insufficient credits",  # openrouter, together
 )
+
+# How a provider's own message opens when it refuses the model itself, for
+# every caller and every request, rather than anything a request carried. As
+# narrow as the billing probes, and for a stronger reason: a match switches the
+# model off for the whole deployment. Matched at the start of the message, so
+# request text a provider echoes back inside a refusal of its own never matches.
+# "Does not exist" is deliberately absent, because some providers answer a chat
+# request to an embedding model with it.
+_UNAVAILABLE_MODEL_REFUSALS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"unable to access non-serverless model "),  # together: the model now needs a dedicated endpoint
+    re.compile(r"the model `[^`]+` has been decommissioned"),  # groq
+)
+_UNAVAILABLE_MODEL_STATUS_CODES = {400, 404}
 
 # Exceptions that only a bug or a mismatch in the code making the call raises,
 # never an upstream: the request fails the same way however often it is resent.
@@ -147,7 +161,7 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
     Recognizes, in order, walking ``.original_exception`` when the current
     exception carries no signal of its own:
 
-    1. Stdlib/httpx timeout and network exceptions directly.
+    1. Stdlib, httpx and httpx2 (Anthropic's SDK) timeout and network exceptions directly.
     2. The OpenAI and Anthropic SDKs' own ``APITimeoutError`` /
        ``APIConnectionError``. any-llm calls these SDKs directly (it does not
        wrap httpx itself unless ``ANY_LLM_UNIFIED_EXCEPTIONS=1``), and both
@@ -185,12 +199,15 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
                 asyncio.TimeoutError,
                 TimeoutError,
                 httpx.TimeoutException,
+                httpx2.TimeoutException,
                 _OpenAIAPITimeoutError,
                 _AnthropicAPITimeoutError,
             ),
         ):
             return "timeout", None
-        if isinstance(current, (httpx.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)):
+        if isinstance(
+            current, (httpx.NetworkError, httpx2.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)
+        ):
             return "conn_err", None
 
         status_code = _error_status_code(current)
@@ -419,6 +436,25 @@ def upstream_retry_after(exc: BaseException) -> str | None:
     return None
 
 
+def is_model_unavailable_error(exc: BaseException) -> bool:
+    """True when the provider refused the model itself, as no longer served on this account.
+
+    A request cannot cause it and a retry cannot cure it, so the model is one an
+    operator should stop offering. Recognized by how the provider's own message
+    opens, read from the error body where the SDK kept one; a refusal worded
+    otherwise is not one.
+    """
+    _kind, status_code = upstream_exception_shape(exc)
+    if status_code not in _UNAVAILABLE_MODEL_STATUS_CODES:
+        return False
+    messages = upstream_body_messages(exc)
+    if messages is None:
+        messages = [str(getattr(current, "message", None) or current) for current in upstream_exception_chain(exc)]
+    return any(
+        refusal.match(message.strip().lower()) for message in messages for refusal in _UNAVAILABLE_MODEL_REFUSALS
+    )
+
+
 def is_provider_billing_error(exc: BaseException) -> bool:
     """True when a 4xx is the provider saying "this account is out of money".
 
@@ -467,7 +503,7 @@ def is_retry_futile(exc: BaseException) -> bool:
 
 def is_upstream_connect_failure(exc: BaseException) -> bool:
     """Whether the connection to the provider was never opened, as opposed to dropped once open."""
-    return any(isinstance(link, httpx.ConnectError) for link in _causal_chain(exc))
+    return any(isinstance(link, (httpx.ConnectError, httpx2.ConnectError)) for link in _causal_chain(exc))
 
 
 def is_upstream_stream_interrupted(exc: BaseException) -> bool:
@@ -482,7 +518,16 @@ def is_upstream_stream_interrupted(exc: BaseException) -> bool:
     if upstream_exception_shape(exc)[0] == "conn_err":
         return True
     return any(
-        isinstance(link, (IncompleteStreamError, httpx.RemoteProtocolError, httpx.NetworkError))
+        isinstance(
+            link,
+            (
+                IncompleteStreamError,
+                httpx.RemoteProtocolError,
+                httpx.NetworkError,
+                httpx2.RemoteProtocolError,
+                httpx2.NetworkError,
+            ),
+        )
         for link in _causal_chain(exc)
     )
 
@@ -503,6 +548,6 @@ def _causal_chain(exc: BaseException) -> Iterator[BaseException]:
 
 def _carries_upstream_signal(exc: BaseException) -> bool:
     """Whether ``exc`` came from talking to the provider, and so may not recur."""
-    if isinstance(exc, (IncompleteStreamError, OSError, httpx.HTTPError)):
+    if isinstance(exc, (IncompleteStreamError, OSError, httpx.HTTPError, httpx2.HTTPError)):
         return True
     return upstream_exception_shape(exc) != (None, None)

@@ -4,7 +4,15 @@ from typing import Any
 
 import httpx
 
+from any_fetch import __version__
 from any_fetch._errors import ProviderError
+
+USER_AGENT = f"any-fetch/{__version__}"
+"""Sent with every request, so a provider can tell the library's traffic apart and tie it to a release."""
+
+# What a client sends when its host set no ``User-Agent``. The library replaces it, and fills in
+# a client that carries none; any other value is the host's own and is kept.
+_HTTPX_USER_AGENT = f"python-httpx/{httpx.__version__}"
 
 
 class ProviderHttp:
@@ -15,6 +23,10 @@ class ProviderHttp:
     its pool and its proxy settings. Without one, a client with httpx's
     defaults and the provider's timeout is opened on the first request and
     closed by ``aclose``.
+
+    Each request names the library in its ``User-Agent``, so a provider can
+    tell whose traffic it is, unless the host's client carries one of its own:
+    httpx's default is replaced and a missing one filled in, any other kept.
     """
 
     def __init__(self, provider: str, client: httpx.AsyncClient | None, timeout: float) -> None:
@@ -36,7 +48,11 @@ class ProviderHttp:
                 self._own_client = httpx.AsyncClient(timeout=self._timeout)
             client = self._own_client
         try:
-            return await client.request(method, url, timeout=self._timeout, **kwargs)
+            # ``Headers`` encodes eagerly, so a header httpx cannot send fails inside the handler.
+            headers = httpx.Headers(kwargs.pop("headers", None))
+            if client.headers.get("User-Agent") in (None, _HTTPX_USER_AGENT):
+                headers["User-Agent"] = USER_AGENT
+            return await client.request(method, url, headers=headers, timeout=self._timeout, **kwargs)
         except httpx.TimeoutException:
             tag = "timeout"
         except (httpx.HTTPError, httpx.InvalidURL):

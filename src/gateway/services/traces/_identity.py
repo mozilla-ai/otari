@@ -16,9 +16,10 @@ import hashlib
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import assert_never
 
 from gateway.core.config import CONVERSATION_HEADER
-from gateway.types.traces import is_identifier
+from gateway.types.traces import SessionSource, is_identifier
 
 # The request tag a client can name its session with.
 SESSION_TAG = "session_id"
@@ -45,17 +46,35 @@ _HARNESS_PRODUCTS: Mapping[str, str] = {"claude-cli": "claude-code"}
 _MAX_KEY_LENGTH = 512
 
 
+def _namespace(source: SessionSource) -> str:
+    """The namespace a session's key is hashed in.
+
+    An exporter's session id is its harness's own (Claude Code's ``session.id`` is the
+    ``x-claude-code-session-id`` it routes with, and ``otari hook`` reports under the
+    id its harness hands it), so the two hash alike: a session routed through the
+    gateway and the spans exported for it land on one trace. A client's chosen key
+    stays apart.
+    """
+    match source:
+        case "harness" | "otlp":
+            return "harness"
+        case "client" | "none":
+            return source
+        case _:
+            assert_never(source)
+
+
 @dataclass(frozen=True)
 class SessionRef:
     """The signal that named a request's session: where it came from, and the key it carries."""
 
-    source: str
+    source: SessionSource
     key: str
 
     def trace_id(self, workspace_id: uuid.UUID, user_id: str | None, api_key_id: str | None = None) -> str:
         """The session's trace id, scoped to the workspace and the user, or to the key where it has no user."""
         owner = user_id if user_id is not None else f"key:{api_key_id or ''}"
-        material = "\x00".join((str(workspace_id), owner, self.source, self.key))
+        material = "\x00".join((str(workspace_id), owner, _namespace(self.source), self.key))
         return "s-" + hashlib.sha256(material.encode()).hexdigest()[:40]
 
     @property

@@ -14,7 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from gateway.exceptions.tools_exceptions import WebSearchInterceptedError, WebToolDeclarationError
+from gateway.core.settings.tools import enrichment_enabled
+from gateway.exceptions.tools_exceptions import (
+    WebSearchInterceptedError,
+    WebToolDeclarationError,
+    WebToolExecutorPinnedError,
+)
 from gateway.models.tools import CodeExecutor, WebTool
 from gateway.services.tools import _web_fetch_tool, _web_search_tool
 from gateway.services.tools._candidate_tools import ProviderToolDeclaration
@@ -38,15 +43,28 @@ from gateway.services.tools._web_search import in_loop_search_for, resolve_fetch
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, DomainPolicy, read_domain_list
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from gateway.core.config import GatewayConfig
     from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
     from gateway.services.tools._web_search import InLoopSearch, ResolvedFetch
+
+# Who a workspace pinned to run a provider's own search and fetch keywords, ``None`` where it did not.
+WorkspaceWebExecutors = tuple[CodeExecutor | None, CodeExecutor | None]
 
 WEB_SEARCH_HEADER_INVALID_DETAIL = f"{WEB_SEARCH_HEADER} must be one of auto, otari, provider"
 WEB_FETCH_HEADER_INVALID_DETAIL = f"{WEB_FETCH_HEADER} must be one of auto, otari, provider"
 WEB_SEARCH_INTERCEPTED_DETAIL = (
     f"this deployment runs every web search on its own backend; the {WEB_SEARCH_HEADER} "
     "header cannot hand it to the provider"
+)
+WEB_SEARCH_EXECUTOR_PINNED_DETAIL = (
+    f"this workspace's web access policy decides who runs a web search; the {WEB_SEARCH_HEADER} "
+    "header cannot choose otherwise"
+)
+WEB_FETCH_EXECUTOR_PINNED_DETAIL = (
+    f"this workspace's web access policy decides who runs a web fetch; the {WEB_FETCH_HEADER} "
+    "header cannot choose otherwise"
 )
 WEB_SEARCH_NOT_CONFIGURED_DETAIL = (
     "otari_web_search tool requested but there is nothing to search with: this gateway has no search tool, "
@@ -170,24 +188,29 @@ def validate_web_declarations(tools: list[dict[str, Any]] | None, *, claims: Web
         raise WebToolDeclarationError(WEB_TOOL_RESERVED_NAME_DETAIL)
 
 
-def read_web_declarations(
+async def read_web_declarations(
     tools: list[dict[str, Any]] | None,
     *,
     web_search_header: str | None,
     web_fetch_header: str | None = None,
     config: GatewayConfig,
     uniform: bool,
+    resolve_executors: Callable[[], Awaitable[WorkspaceWebExecutors]] | None = None,
 ) -> list[ProviderToolDeclaration]:
     """The provider web keywords one request declared, and who it asked to run each.
 
     Only with a backend to run it on does Otari claim a keyword. Interception claims
-    every search keyword, and the request's :data:`WEB_SEARCH_HEADER` cannot take that
-    back; without it the header decides, and without either the keyword is forwarded.
+    every search keyword, and nothing below it can take that back. Next the workspace's
+    pin decides, then the request's header; without any of them the keyword is forwarded.
     ``uniform`` decides every candidate alike, Otari's for all where any one needs it.
+
+    ``resolve_executors`` reads the workspace's pins, as ``(search, fetch)``, and is
+    awaited only when the request declares a provider keyword this deployment could run.
 
     Raises:
         WebToolDeclarationError: a header cannot be read.
         WebSearchInterceptedError: the header hands the provider a search this deployment runs itself.
+        WebToolExecutorPinnedError: the header asks for other than what the workspace pinned.
     """
     try:
         requested_web_search = parse_web_search_header(web_search_header)
@@ -198,22 +221,31 @@ def read_web_declarations(
     except ValueError:
         raise WebToolDeclarationError(WEB_FETCH_HEADER_INVALID_DETAIL) from None
     provider_search_entry = first_provider_web_search_tool(tools)
+    provider_fetch_entry = first_provider_web_fetch_tool(tools)
     intercept_web_search = web_search_intercept_enabled(config)
     backend_configured = _web_search_tool.TOOL.configured(config)
-    if (
-        provider_search_entry is not None
-        and backend_configured
-        and web_search_header_conflicts(requested_web_search, intercept=intercept_web_search)
-    ):
-        raise WebSearchInterceptedError(WEB_SEARCH_INTERCEPTED_DETAIL)
+    search_claimable = provider_search_entry is not None and backend_configured
+    fetch_claimable = provider_fetch_entry is not None and config.web_fetch_enabled
+    workspace_search_executor, workspace_fetch_executor = (
+        await resolve_executors()
+        if (search_claimable or fetch_claimable) and resolve_executors is not None
+        else (None, None)
+    )
+    search_preference: CodeExecutor | None = None
+    if search_claimable:
+        if web_search_header_conflicts(requested_web_search, intercept=intercept_web_search):
+            raise WebSearchInterceptedError(WEB_SEARCH_INTERCEPTED_DETAIL)
+        search_preference = (
+            CodeExecutor.OTARI
+            if intercept_web_search
+            else _pinned(requested_web_search, workspace_search_executor, WEB_SEARCH_EXECUTOR_PINNED_DETAIL)
+        )
+    fetch_preference: CodeExecutor | None = None
+    if fetch_claimable:
+        fetch_preference = _pinned(requested_web_fetch, workspace_fetch_executor, WEB_FETCH_EXECUTOR_PINNED_DETAIL)
     declared = (
-        (
-            _web_search_tool.TOOL,
-            provider_search_entry,
-            CodeExecutor.OTARI if intercept_web_search else requested_web_search,
-            backend_configured,
-        ),
-        (_web_fetch_tool.TOOL, first_provider_web_fetch_tool(tools), requested_web_fetch, config.web_fetch_enabled),
+        (_web_search_tool.TOOL, provider_search_entry, search_preference, backend_configured),
+        (_web_fetch_tool.TOOL, provider_fetch_entry, fetch_preference, config.web_fetch_enabled),
     )
     return [
         ProviderToolDeclaration(
@@ -222,6 +254,19 @@ def read_web_declarations(
         for tool, entry, preference, configured in declared
         if entry is not None
     ]
+
+
+def _pinned(requested: CodeExecutor | None, workspace: CodeExecutor | None, refusal: str) -> CodeExecutor | None:
+    """The workspace's pin where it set one, refusing a header that asks otherwise; else the header.
+
+    Raises:
+        WebToolExecutorPinnedError: the header asks for other than what the workspace pinned.
+    """
+    if workspace is None:
+        return requested
+    if requested is not None and requested is not workspace:
+        raise WebToolExecutorPinnedError(refusal)
+    return workspace
 
 
 @dataclass(frozen=True)
@@ -301,9 +346,10 @@ class AdmittedWebTools:
     ``search_tool_entry`` is the search declaration as the policy narrowed it,
     ``None`` where none was declared, and ``fetch_tool_entry`` the fetch
     declaration. ``in_loop_search`` is what the searches run on through the
-    libraries, ``None`` where the old backend serves them, and ``fetch`` the
-    instance the fetch tool runs on, ``None`` where it was not declared.
-    ``search_url`` is the old backend's, which the pipeline sets.
+    libraries, ``None`` where the old backend serves them, ``enrichment`` the
+    fetch that reads the pages of their hits, ``None`` where no page is read,
+    and ``fetch`` the instance the fetch tool runs on, ``None`` where it was
+    not declared. ``search_url`` is the old backend's, which the pipeline sets.
     """
 
     search_tool_entry: dict[str, Any] | None
@@ -313,10 +359,19 @@ class AdmittedWebTools:
     # The workspace's own search key, set only where it declared a search.
     search_credential: WebSearchCredential | None = None
     in_loop_search: InLoopSearch | None = None
+    enrichment: ResolvedFetch | None = None
     fetch: ResolvedFetch | None = None
 
 
 NO_WEB_TOOLS = AdmittedWebTools(search_tool_entry=None, fetch_tool_entry=None, fetch_policy=DomainPolicy())
+
+
+def enrichment_for(config: GatewayConfig, in_loop: InLoopSearch | None) -> ResolvedFetch | None:
+    """The fetch that reads the pages of ``in_loop``'s hits without text, or ``None`` where no page is read.
+
+    No page is read with enrichment off, and the old backend's pages are its own.
+    """
+    return in_loop.enrichment if in_loop is not None and enrichment_enabled(config) else None
 
 
 def admit_web_access(
@@ -369,5 +424,6 @@ def admit_web_access(
         fetch_policy=grant.fetch_policy,
         search_credential=grant.search_credential,
         in_loop_search=in_loop_search,
+        enrichment=enrichment_for(config, in_loop_search),
         fetch=fetch,
     )

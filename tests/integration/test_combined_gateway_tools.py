@@ -1,8 +1,8 @@
 """One request combining the gateway's web search, web fetch, code execution sandbox and MCP servers.
 
 The code execution port is faked at the composition root and the MCP pool at the
-pipeline, while the web retrieval backend runs with only its search and its page
-fetch patched, so the real admission, backends, combined pool and tool loops run.
+pipeline, while the search runs on a ``fake`` search instance and the fetch with only
+its page read patched, so the real admission, backends, combined pool and tool loops run.
 The provider is scripted to call every declared tool in one round and answer in the next.
 """
 
@@ -56,24 +56,26 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import SandboxFileEntry
+from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
-from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
     MAX_USES_EXCEEDED_ERROR,
+    OTARI_TOOL_CALLS_FIELD,
     SERVER_TOOL_USE_ID_PREFIX,
     WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
 )
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 from gateway.types.code_execution import ResultBlock
 
-from .conftest import MODEL_NAME
+from .conftest import MODEL_NAME, admitted_search_spy
 
 _MCP_TOOL = "lookup"
+# The hit carries its page text, so a search reads no page and every page read is a fetch call.
+_HITS = [{"url": "https://python.org", "title": "Python", "text": "3.14"}]
 _MCP_SERVER = {"name": "docs", "url": "http://127.0.0.1:9999/mcp"}
 _SEARCH = {"type": "otari_web_search"}
 _FETCH = {"type": "otari_web_fetch"}
@@ -139,11 +141,8 @@ class _Backends:
     port: _Port = field(default_factory=_Port)
     mcp_tools: tuple[str, ...] = (_MCP_TOOL,)
     mcp_calls: list[str] = field(default_factory=list)
-    searches: AsyncMock = field(
-        default_factory=lambda: AsyncMock(
-            return_value=[{"url": "https://python.org", "title": "Python", "content": "3.14"}]
-        )
-    )
+    # The searches the backend ran: the fixture replaces it with a spy on the real backend.
+    searches: AsyncMock = field(default_factory=AsyncMock)
     fetches: AsyncMock = field(default_factory=lambda: AsyncMock(return_value=_page()))
 
 
@@ -201,9 +200,14 @@ def _fake_mcp_pool(backends: _Backends) -> Callable[..., Any]:
 
 
 @pytest.fixture
-def backends(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig, tmp_path: Path) -> Iterator[_Backends]:
+def backends(
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+    tmp_path: Path,
+    serve_search_on_fake: Callable[..., None],
+) -> Iterator[_Backends]:
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://web-search.invalid")
+    serve_search_on_fake({"hits": _HITS})
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     # The local file store writes the sandbox's output files under the working directory.
     monkeypatch.chdir(tmp_path)
@@ -211,11 +215,10 @@ def backends(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig, tmp_pa
     with (
         patch("gateway.container.build_code_execution_port", new=lambda _config, **_kwargs: seen.port),
         patch("gateway.api.routes._pipeline.MCPClientPool", new=_fake_mcp_pool(seen)),
-        patch.object(WebRetrievalBackend, "_search", new=seen.searches),
+        admitted_search_spy() as searches,
         patch.object(WebFetchService, "fetch", new=seen.fetches),
-        # A search reads each hit's page through the same service; these hits keep their snippets.
-        patch.object(WebFetchService, "fetch_for_search", new=AsyncMock(side_effect=OSError)),
     ):
+        seen.searches = searches
         yield seen
 
 
@@ -685,6 +688,49 @@ def test_chat_stream_runs_all_four_in_one_loop(
     deltas = [p["choices"][0]["delta"] for p in _sse_payloads(response.text) if p.get("choices")]
     assert not any(delta.get("tool_calls") for delta in deltas), "a gateway-run call leaked to the client"
     assert "".join(delta.get("content") or "" for delta in deltas) == "done"
+    ended = [
+        e
+        for p in _sse_payloads(response.text)
+        for e in p.get(OTARI_TOOL_CALLS_FIELD, [])
+        if e["status"] != "in_progress"
+    ]
+    assert {e["type"] for e in ended} == {"web_search", "web_fetch", "code_execution", "mcp"}
+
+
+def test_a_chat_answer_reports_what_the_sandbox_printed_and_what_mcp_returned(
+    client: TestClient, api_key_header: dict[str, str], backends: _Backends
+) -> None:
+    names = ["code_execution", _MCP_TOOL]
+    with _scripted("gateway.services.mcp_loop.acompletion", [_completion(names), _completion(None)]):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "compute and look up"}],
+                "tools": [_CODE],
+                "mcp_servers": [_MCP_SERVER],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    code, mcp = response.json()[OTARI_TOOL_CALLS_FIELD]
+    assert (code["type"], code["status"], code["code"], code["stdout"], code["exit_code"]) == (
+        "code_execution",
+        "completed",
+        "print(6 * 7)",
+        "42\n",
+        0,
+    )
+    assert len(code["file_ids"]) == 1
+    assert mcp == {
+        "id": mcp["id"],
+        "type": "mcp",
+        "status": "completed",
+        "server": "docs",
+        "name": _MCP_TOOL,
+        "output": "mcp result",
+    }
 
 
 def _default_workspace_id(client: TestClient, master_key_header: dict[str, str]) -> str:

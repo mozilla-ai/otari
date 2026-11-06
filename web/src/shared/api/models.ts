@@ -17,7 +17,10 @@ import { CATALOG, DISCOVERABLE, MODELS, NO_RETRY } from "@/shared/api/queryKeys"
 // under the CATALOG prefix invalidations use.
 // Existing consumers such as the Playground keep their original bounded read.
 // The Models page supplies its filters, skip, and limit explicitly.
-export function useCatalog(params: CatalogQueryParams = { limit: 1000 }) {
+export function useCatalog(
+  params: CatalogQueryParams = { limit: 1000 },
+  enabled = true,
+) {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value == null) continue
@@ -31,7 +34,15 @@ export function useCatalog(params: CatalogQueryParams = { limit: 1000 }) {
     queryFn: ({ signal }) =>
       apiFetch<CatalogResponse>(`/catalog/models?${search}`, { signal }),
     staleTime: 60_000,
-    placeholderData: keepPreviousData,
+    // The previous page stands in while a filter or a page changes, never
+    // across workspaces: another workspace's list names models this one may
+    // not call.
+    placeholderData: (previous, previousQuery) =>
+      (previousQuery?.queryKey[2] as CatalogQueryParams | undefined)
+        ?.workspace_id === params.workspace_id
+        ? previous
+        : undefined,
+    enabled,
   })
 }
 
@@ -65,10 +76,19 @@ export function useCatalogSearch(
   })
 }
 
-export function useCatalogModel(modelId: string | undefined) {
+/**
+ * One model, as the caller may use it. `workspaceId` narrows its offerings to
+ * what a request billed to that workspace may call; empty is the caller's whole
+ * reach. `enabled` holds the read until the workspace is known.
+ */
+export function useCatalogModel(
+  modelId: string | undefined,
+  workspaceId = "",
+  enabled = true,
+) {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [CATALOG, "model", modelId],
+    queryKey: [CATALOG, "model", modelId, workspaceId],
     queryFn: () =>
       // Segment by segment: the id carries its vendor, `z-ai/glm-5.3`, and
       // the slash is the path's, not the id's to encode.
@@ -76,10 +96,12 @@ export function useCatalogModel(modelId: string | undefined) {
         `/catalog/models/${(modelId ?? "")
           .split("/")
           .map(encodeURIComponent)
-          .join("/")}`,
+          .join(
+            "/",
+          )}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ""}`,
       ),
     staleTime: 60_000,
-    enabled: modelId !== undefined,
+    enabled: modelId !== undefined && enabled,
   })
 }
 

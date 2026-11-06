@@ -31,11 +31,15 @@ services:
       # Managed Web Fetch is opt-in because it permits model-directed outbound
       # requests to public web destinations. An unset override defers to config.yml.
       - OTARI_WEB_FETCH_ENABLED=${OTARI_WEB_FETCH_ENABLED:-}
-      # In-network URL of the web-search backend — any HTTP service exposing
-      # a SearXNG-compatible /search?format=json endpoint. The bundled
-      # `searxng` profile container is the default; swap by changing this URL
-      # to point at any other backend.
-      - OTARI_WEB_SEARCH_URL=${OTARI_WEB_SEARCH_URL:-http://searxng:8080}
+      # Deprecated, with OTARI_WEB_SEARCH_ENGINES below: the SearXNG instance
+      # the model searches when no search tool is its default, the bundled
+      # `searxng` container (the `web-search` profile) unless set. To move
+      # off them, add a `searxng` search tool to config.yml with api_base
+      # http://searxng:8080, an engines option and a price_per_call, name it
+      # in web_search_default_tool, then set OTARI_WEB_SEARCH_URL= to an empty
+      # value in .env, which turns this default off. See
+      # docs/configuration.md.
+      - OTARI_WEB_SEARCH_URL=${OTARI_WEB_SEARCH_URL-http://searxng:8080}
       # A licensed search API Otari calls itself, which needs no container and
       # wins over the URL above when both are set. `tavily` or `brave`; the key
       # stays in this process and is never handed to a caller.
@@ -73,6 +77,8 @@ services:
       - MOJEEK_API_KEY=${MOJEEK_API_KEY:-}
       # DeepSeek's key serves `fetch_tools:` as well.
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - SERPLY_API_KEY=${SERPLY_API_KEY:-}
+      - SYNTHETIC_API_KEY=${SYNTHETIC_API_KEY:-}
       # And for fetch providers, under `fetch_tools:` as
       # `api_key: ${TABSTACK_API_KEY}`.
       - TABSTACK_API_KEY=${TABSTACK_API_KEY:-}
@@ -171,29 +177,29 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # Web-search backend — a SearXNG instance Otari dispatches `web_search`
-  # tool calls to. SearXNG is a metasearch front-end over many upstream
-  # engines; Otari's default engine list deliberately excludes Google,
-  # Bing, Yahoo and Brave (which forbid automated querying or sell a paid
-  # API) and uses duckduckgo/mojeek/qwant/wikipedia — the most defensible
-  # OSS combination. Operators who enable scraping-of-major-engines do so
-  # consciously and should review the upstream engines' Terms of Service.
+  # Web-search backend: a SearXNG instance for a `searxng` search tool, or
+  # for the deprecated OTARI_WEB_SEARCH_URL above. SearXNG is a metasearch
+  # front-end over many upstream engines. Otari's default engine list
+  # deliberately excludes Google, Bing, Yahoo and Brave (which forbid
+  # automated querying or sell a paid API) and uses
+  # duckduckgo/mojeek/qwant/wikipedia, the most defensible OSS combination.
+  # Operators who enable scraping-of-major-engines do so consciously and
+  # should review the upstream engines' Terms of Service.
   #
   # For commercial / production use, run a licensed API instead. Tavily and
   # Brave need no container at all: set OTARI_WEB_SEARCH_PROVIDER and
   # OTARI_WEB_SEARCH_PROVIDER_API_KEY and Otari calls them directly, leaving
-  # OTARI_WEB_SEARCH_URL unset. Any other HTTP service exposing a
-  # SearXNG-compatible /search?format=json shape is still a drop-in
-  # replacement via OTARI_WEB_SEARCH_URL.
+  # OTARI_WEB_SEARCH_URL empty. Any other service that answers SearXNG's
+  # search API (/search?format=json) can be a `searxng` search tool's api_base.
   #
   # Opt-in via the `web-search` compose profile so operators who don't use
   # the web_search tool aren't forced to pull this image. Bring it up with
   # `docker compose --profile web-search up`. When the searxng container is
-  # not running, Otari returns a clean 502 to any request that tries
-  # to dispatch `web_search`.
+  # not running, a search on it fails: the model gets a tool error, and
+  # POST /api/v1/search answers 502.
   searxng:
     profiles: ["web-search"]
-    image: docker.io/searxng/searxng:latest
+    image: docker.io/searxng/searxng:2026.11.2-cccbc9e15
     ports:
       # Bound to localhost only — like sandbox, this is internal infra. The
       # Otari reaches it via the Docker network at `searxng:8080`; the

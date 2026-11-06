@@ -24,6 +24,15 @@ function mockApi({ operator = false } = {}) {
     if (url.endsWith(`${API_ROOT}/organizations/me`)) {
       return json(organizationContext({ deployment_operator: operator }))
     }
+    if (operator && url.includes(`${API_ROOT}/search-tools?kind=fetch`)) {
+      return json({
+        stored: [],
+        config: [
+          { name: "builtin_fetch", kind: "fetch", provider: "builtin" },
+          { name: "tabstack-fetch", kind: "fetch", provider: "tabstack" },
+        ],
+      })
+    }
     if (operator && url.includes(`${API_ROOT}/search-tools`)) {
       return json({
         stored: [{ name: "news", kind: "search", provider: "exa" }],
@@ -48,7 +57,7 @@ function renderControl(initial: string[] | undefined) {
       <ToolScopeControl
         initial={initial}
         onChange={onChange}
-        description="Which search tools this key may run."
+        description="Which search and fetch tools this key may run."
         inheritLabel="Inherit owner access"
       />
     </QueryClientProvider>,
@@ -61,7 +70,7 @@ describe("ToolScopeControl", () => {
     vi.restoreAllMocks()
   })
 
-  it("offers an operator every tool by name, once each, and the star", async () => {
+  it("offers an operator each kind's tools in a picker of its own, once each, and the star", async () => {
     mockApi({ operator: true })
     const user = userEvent.setup()
     const onChange = renderControl(["news"])
@@ -72,15 +81,34 @@ describe("ToolScopeControl", () => {
       await screen.findByRole("option", { name: "deepseek" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("option", { name: "* · every search tool" }),
+      screen.getByRole("option", { name: "* · every search and fetch tool" }),
     ).toBeInTheDocument()
+    // A fetch tool is offered by the fetch picker alone.
+    expect(
+      screen.queryByRole("option", { name: "builtin_fetch" }),
+    ).not.toBeInTheDocument()
     // Already on the list, and listed once though stored and config both name it.
     expect(
       screen.queryByRole("option", { name: "news" }),
     ).not.toBeInTheDocument()
-
     await user.click(screen.getByRole("option", { name: "deepseek" }))
     expect(onChange).toHaveBeenLastCalledWith(["news", "deepseek"], true)
+
+    await user.type(screen.getByLabelText("Add a fetch tool"), "e")
+    expect(
+      await screen.findByRole("option", { name: "builtin_fetch" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: "tabstack-fetch" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: "deepseek" }),
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole("option", { name: "builtin_fetch" }))
+    expect(onChange).toHaveBeenLastCalledWith(
+      ["news", "deepseek", "builtin_fetch"],
+      true,
+    )
   })
 
   it("offers anyone else every tool or none, without reading the list", async () => {
@@ -93,7 +121,9 @@ describe("ToolScopeControl", () => {
     ).toBeInTheDocument()
     await user.type(screen.getByLabelText("Add a search tool"), "e")
     await user.click(
-      await screen.findByRole("option", { name: "* · every search tool" }),
+      await screen.findByRole("option", {
+        name: "* · every search and fetch tool",
+      }),
     )
     expect(onChange).toHaveBeenLastCalledWith(["news", "*"], true)
     expect(urls.some((url) => url.includes(`${API_ROOT}/search-tools`))).toBe(
@@ -116,24 +146,32 @@ describe("ToolScopeControl", () => {
     expect(onChange).toHaveBeenLastCalledWith(undefined, true)
   })
 
-  it("says blocking covers /v1/search, where the list is checked", async () => {
+  it("says blocking covers /v1/search and /v1/fetch, where the list is checked", async () => {
     mockApi({ operator: true })
     renderControl([])
 
     expect(
-      screen.getByText(/search tool on \/v1\/search until you change/),
+      screen.getByText(
+        /search and fetch tool on \/v1\/search and \/v1\/fetch until you change/,
+      ),
     ).toBeInTheDocument()
   })
 
   it("says the tools are loading rather than offering the star alone", async () => {
-    let release: (response: Response) => void = () => {}
+    // One pending answer per listing, the search tools' and the fetch tools'.
+    const pending: ((response: Response) => void)[] = []
+    const release = (body: unknown) => {
+      for (const resolve of pending.splice(0)) {
+        resolve(json(body))
+      }
+    }
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return json(organizationContext({ deployment_operator: true }))
       }
       return new Promise<Response>((resolve) => {
-        release = resolve
+        pending.push(resolve)
       })
     })
     const user = userEvent.setup()
@@ -144,11 +182,13 @@ describe("ToolScopeControl", () => {
       await screen.findByText("Loading the search tools…"),
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole("option", { name: "* · every search tool" }),
+      screen.queryByRole("option", { name: "* · every search and fetch tool" }),
     ).not.toBeInTheDocument()
-    release(json({ stored: [], config: [] }))
+    release({ stored: [], config: [] })
     expect(
-      await screen.findByRole("option", { name: "* · every search tool" }),
+      await screen.findByRole("option", {
+        name: "* · every search and fetch tool",
+      }),
     ).toBeInTheDocument()
   })
 })

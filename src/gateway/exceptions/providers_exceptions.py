@@ -81,6 +81,18 @@ class OrgProviderKeyAlreadyExistsError(TenancyConflictError):
         super().__init__(f"A '{provider}' key named '{name}' already exists in this organization")
 
 
+class OrgProviderKeyInvalidSlugError(TenancyValidationError):
+    """A slug that cannot name a key: malformed, a provider's name, or sent without a custom base URL."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class OrgProviderKeySlugTakenError(TenancyConflictError):
+    def __init__(self, slug: str):
+        super().__init__(f"Another key in this organization is already named '{slug}' in selectors")
+
+
 class OrgProviderKeyArchivedError(TenancyValidationError):
     """The key is archived, which refuses every mutation except restore."""
 
@@ -393,6 +405,21 @@ class HostedProviderUnsafeApiBaseError(TenancyValidationError):
         super().__init__(message)
 
 
+class WorkspaceHostedProviderNotFoundError(TenancyNotFoundError):
+    """A hosted provider the workspace's organization may not use, or that does not exist.
+
+    The two are one answer, so a name restricted to another organization reads
+    exactly like one that was never configured.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' not found")
+
+
+class WorkspaceHostedModelsInvalidError(TenancyValidationError):
+    """A model list a workspace cannot store for a hosted provider: empty, or naming models it does not serve."""
+
+
 __all__ = [
     "HostedCatalogEmptyError",
     "HostedModelAlreadyOfferedError",
@@ -427,5 +454,7 @@ __all__ = [
     "ProviderEndpointNotFoundError",
     "ProviderEndpointOwnerNotFoundError",
     "ProviderEndpointsDisabledError",
+    "WorkspaceHostedModelsInvalidError",
+    "WorkspaceHostedProviderNotFoundError",
     "WorkspaceProviderKeyOverrideConflictError",
 ]

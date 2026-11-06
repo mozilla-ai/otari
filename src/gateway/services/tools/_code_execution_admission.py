@@ -23,7 +23,6 @@ from gateway.services.code_execution import (
     gateway_container_value,
     requested_container,
 )
-from gateway.services.sandbox_backend import SERVED_TOOL_NAMES
 from gateway.services.tools import _code_execution_tool
 from gateway.services.tools._candidate_tools import ProviderToolDeclaration
 from gateway.services.tools._code_execution_declarations import (
@@ -34,6 +33,7 @@ from gateway.services.tools._code_execution_declarations import (
     parse_code_execution_header,
     resolve_code_executor_preference,
 )
+from gateway.services.tools._code_execution_policy import leaves_a_served_tool
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -307,8 +307,7 @@ class DeclaredCodeExecution:
                 sandbox_exec_timeout_s = code_execution_policy.exec_timeout_s
                 if code_execution_policy.tools is not None:
                     # An empty intersection is refused, because a tool with nothing to run fails silently.
-                    # It uses the same served set as the check on a policy write.
-                    if not code_execution_policy.tools & set(SERVED_TOOL_NAMES):
+                    if not leaves_a_served_tool(code_execution_policy.tools):
                         raise CodeExecutionRefusedError(SANDBOX_TOOLS_EXCLUDED_DETAIL)
                     sandbox_allowed_tools = code_execution_policy.tools
                 if code_execution_policy.image is not None:

@@ -1,6 +1,6 @@
 """The gateway survivals are scoped to a workspace (otari-ai#1643).
 
-Aliases, routing policies, routing memory, router preferences, files and batches
+Aliases, routing policies, files and batches
 stay in the gateway rather than moving to the platform, and each is now managed
 and resolved inside one workspace. ``user_id`` is untouched on every one of
 them: the workspace is a second axis, so a user who holds keys in two workspaces
@@ -328,70 +328,3 @@ def test_the_master_key_still_sees_every_workspaces_files(
 
     narrowed = client.get(f"{API_ROOT}/files?user=ada&workspace_id={platform}", headers=master_key_header).json()
     assert len(narrowed["data"]) == 1
-
-
-# ---------------------------------------------------------------------------
-# Routing memory and router preferences
-# ---------------------------------------------------------------------------
-
-
-def _rank(client: TestClient, headers: dict[str, str], **body: Any) -> Any:
-    return client.post(f"{API_ROOT}/routing/preferences/rank", json=body, headers=headers)
-
-
-def test_routing_memory_is_counted_per_workspace(
-    client: TestClient,
-    master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Warmth is per partition, and the partition now includes the workspace.
-
-    A total spanning workspaces would report a pool warm that no single request
-    ever votes over, because a decision loads one workspace's records.
-    """
-    from gateway.services.routing import knn
-
-    async def _embed(self: Any, text: str) -> list[float]:
-        return [1.0, 0.0]
-
-    monkeypatch.setattr(knn.KnnRoutingMemory, "_embed", _embed)
-
-    client.post(f"{API_ROOT}/users", json={"user_id": "ada"}, headers=master_key_header)
-    platform = _make_workspace(client, master_key_header, "Platform team")
-
-    written = _rank(
-        client,
-        master_key_header,
-        user_id="ada",
-        workspace_id=platform,
-        examples=[{"prompt": "sum this", "scores": {"openai:gpt-4o-mini": 1.0}}],
-    )
-    assert written.status_code == status.HTTP_200_OK, written.text
-
-    there = client.get(
-        f"{API_ROOT}/routing/status?user_id=ada&workspace_id={platform}", headers=master_key_header
-    ).json()
-    assert there["workspace_id"] == platform
-    assert there["default_pool"]["records"] == 1
-
-    # The default workspace was taught nothing, so its pool is empty even though
-    # the same user has an example elsewhere.
-    here = client.get(f"{API_ROOT}/routing/status?user_id=ada", headers=master_key_header).json()
-    assert here["default_pool"]["records"] == 0
-
-
-def test_teaching_a_workspace_that_does_not_exist_is_a_404(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
-    client.post(f"{API_ROOT}/users", json={"user_id": "ada"}, headers=master_key_header)
-
-    refused = _rank(
-        client,
-        master_key_header,
-        user_id="ada",
-        workspace_id=NOWHERE,
-        examples=[{"prompt": "sum this", "scores": {"openai:gpt-4o-mini": 1.0}}],
-    )
-
-    assert refused.status_code == status.HTTP_404_NOT_FOUND
-    assert "not found" in refused.json()["detail"]

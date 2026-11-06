@@ -29,8 +29,8 @@ from mcp.client.streamable_http import streamable_http_client
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
 from gateway.services.mcp_stateless import failure_class
-from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally
-from gateway.services.traces import RequestTrace
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
+from gateway.services.traces import RequestTrace, ToolSpans
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -139,6 +139,7 @@ class MCPClientPool:
         self._tally = tally
         # The request's trace, which records each connection and call. None outside a request.
         self._trace = trace
+        self._spans = ToolSpans(trace, "mcp")
         self._owner: asyncio.Task[None] | None = None
         self._release = asyncio.Event()
 
@@ -283,11 +284,11 @@ class MCPClientPool:
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
-            if self._trace is not None:
-                self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=False)
+            self._spans.record(started, ok=False, arguments=arguments, tool_name=name)
             raise
-        if self._trace is not None:
-            self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=not result.is_error)
+        self._spans.record(
+            started, ok=not result.is_error, arguments=arguments, result=_result_text(result), tool_name=name
+        )
         return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
@@ -305,7 +306,7 @@ class MCPClientPool:
             self._tally.record_failure(name)
             return MCPToolCallOutcome(
                 content=TOOL_BUDGET_EXCEEDED_TEXT,
-                activity_content=TOOL_BUDGET_EXCEEDED_TEXT.removeprefix("[tool error] "),
+                activity_content=TOOL_BUDGET_EXCEEDED_TEXT.removeprefix(f"{TOOL_ERROR_SENTINEL} "),
                 is_error=True,
             )
         try:
@@ -318,8 +319,7 @@ class MCPClientPool:
                 is_error=True,
                 transport_error=True,
             )
-        parts = [_render_content_block(block) for block in result.content]
-        flattened = "\n".join(p for p in parts if p)
+        flattened = _result_text(result)
         rendered = f"[tool error] {flattened}" if result.is_error else flattened
         if self._tally is not None:
             self._tally.record_result(name, rendered)
@@ -415,3 +415,8 @@ def _render_content_block(block: Any) -> str:
         uri = getattr(resource, "uri", None) if resource else None
         return f"[resource uri={uri or '?'}]"
     return f"[content type={btype}]"
+
+
+def _result_text(result: CallToolResult) -> str:
+    """An MCP result as the text the model reads, without the error marker the loop adds."""
+    return "\n".join(part for part in (_render_content_block(block) for block in result.content) if part)

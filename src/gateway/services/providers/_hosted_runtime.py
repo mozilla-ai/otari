@@ -18,6 +18,7 @@ from gateway.services.provider_kwargs import (
 from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_sources import HostedSources
+from gateway.services.providers._workspace_hosted_access import ensure_workspace_may_use_hosted
 
 
 def organization_to_serve(organization_id: uuid.UUID | None) -> uuid.UUID:
@@ -43,7 +44,15 @@ async def hosted_credential_for(
     provider: str,
     model: str | None,
 ) -> HostedCredential | None:
-    """The deployment-owned credential the port resolves for a request, a request with no organization included."""
+    """The deployment-owned credential the port resolves for a request, a request with no organization included.
+
+    The workspace's own rule is applied before the port is asked, because the
+    port decides for the organization alone.
+
+    Raises:
+        HostedAccessDeniedError: the workspace or the organization may not use the upstream.
+    """
+    ensure_workspace_may_use_hosted(workspace_id, provider, model)
     return await port.resolve_hosted_credential(
         organization_id=organization_to_serve(organization_id),
         workspace_id=workspace_id,

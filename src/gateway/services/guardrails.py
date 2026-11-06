@@ -35,7 +35,7 @@ import asyncio
 import logging
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 
@@ -45,6 +45,15 @@ from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT_S = 30.0
+
+UnavailableReason = Literal["not_configured", "evaluation_failed"]
+"""Why a guardrail could not run, in words safe to send back to the caller.
+
+``not_configured`` means no guardrails service was named for the profile.
+``evaluation_failed`` covers every other failure, and the log holds the detail.
+"""
+
+GuardrailStatus = Literal["evaluated", "inconclusive", "unavailable"]
 
 
 def _unevaluated_detail(profile: str) -> str:
@@ -68,11 +77,22 @@ class GuardrailsNotReachableError(RuntimeError):
     public error response covers exactly that. The one message that stays whole
     is the no-URL-configured case: it names an environment variable rather than
     an address, and it is the only one a reader can actually act on.
+
+    Neither message quotes what the endpoint sent back, because an answer can
+    echo the prompt. A bad answer is named by its HTTP status, its exception
+    class, or the type of the bad value.
     """
 
-    def __init__(self, message: str, *, public_detail: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        public_detail: str | None = None,
+        reason: UnavailableReason = "evaluation_failed",
+    ) -> None:
         super().__init__(message)
         self.public_detail = public_detail if public_detail is not None else message
+        self.reason: UnavailableReason = reason
 
 
 @dataclass
@@ -84,6 +104,15 @@ class GuardrailResult:
     valid: bool | None
     explanation: object | None = None
     score: object | None = None
+    unavailable: UnavailableReason | None = None
+    """Set when the check could not run and the request was served anyway."""
+
+    @property
+    def status(self) -> GuardrailStatus:
+        """Whether the check ran, ran without a verdict, or could not run."""
+        if self.unavailable is not None:
+            return "unavailable"
+        return "inconclusive" if self.valid is None else "evaluated"
 
     @property
     def flagged(self) -> bool:
@@ -167,11 +196,26 @@ async def _validate_one(
     try:
         response = await client.post(f"{base_url}/validate", json=payload, headers=headers)
         response.raise_for_status()
-        body = response.json()
-        result = body["result"]
-    except (httpx.HTTPError, KeyError, ValueError) as exc:
+    except httpx.HTTPStatusError as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} failed against {base_url}: HTTP {exc.response.status_code}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    except (httpx.ProtocolError, httpx.DecodingError) as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} failed against {base_url}: {type(exc).__name__}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    except (httpx.HTTPError, ValueError) as exc:
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} failed against {base_url}: {exc}",
+            public_detail=_unevaluated_detail(cfg.profile),
+        ) from exc
+    try:
+        result = response.json()["result"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} returned no readable 'result': {type(exc).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         ) from exc
 
@@ -181,7 +225,7 @@ async def _validate_one(
         result = result[0] if result else {}
     if not isinstance(result, dict):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}",
+            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {type(result).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         )
 
@@ -191,13 +235,13 @@ async def _validate_one(
     # explicit `valid: null` is a legitimate inconclusive verdict (not flagged).
     if "valid" not in result:
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}",
+            f"guardrail profile {cfg.profile!r} returned no 'valid' field",
             public_detail=_unevaluated_detail(cfg.profile),
         )
     valid = result["valid"]
     if valid is not None and not isinstance(valid, bool):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}",
+            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {type(valid).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         )
 
@@ -395,7 +439,8 @@ async def run_input_guardrails(
                     raise GuardrailsNotReachableError(
                         f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
                         "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
-                        "guardrail entry."
+                        "guardrail entry.",
+                        reason="not_configured",
                     )
                 else:
                     result = await _validate_one(
@@ -427,6 +472,7 @@ async def run_input_guardrails(
                         mode=cfg.mode,
                         valid=None,
                         explanation="guardrail service unavailable",
+                        unavailable=exc.reason,
                     )
                 )
                 continue

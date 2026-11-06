@@ -35,7 +35,7 @@ export interface PriceDraft {
 
 export const EMPTY_DRAFT: PriceDraft = {
   model: "",
-  unit: "tokens",
+  unit: "token",
   input: "",
   output: "",
   cacheRead: "",
@@ -57,15 +57,15 @@ export function draftFrom(model: HostedModel): PriceDraft {
     model: model.model,
     unit,
     input: asText(
-      input === null || input === undefined || unit === "tokens"
+      input === null || input === undefined || unit === "token"
         ? input
         : toEnteredRate(input, unit),
     ),
-    output: unit === "tokens" ? asText(model.output_price_per_million) : "",
+    output: unit === "token" ? asText(model.output_price_per_million) : "",
     cacheRead:
-      unit === "tokens" ? asText(model.cache_read_price_per_million) : "",
+      unit === "token" ? asText(model.cache_read_price_per_million) : "",
     cacheWrite:
-      unit === "tokens" ? asText(model.cache_write_price_per_million) : "",
+      unit === "token" ? asText(model.cache_write_price_per_million) : "",
   }
 }
 
@@ -100,7 +100,7 @@ export function readDraft(draft: PriceDraft): DraftReading {
     cacheWrite: parsePrice(draft.cacheWrite),
   }
   // A request or image price is one rate: the hidden boxes are not read.
-  if (draft.unit !== "tokens") {
+  if (draft.unit !== "token") {
     return {
       parsed,
       hasBasePair: parsed.input.value !== undefined,
@@ -138,7 +138,7 @@ function priceFields(draft: PriceDraft) {
   const { parsed } = readDraft(draft)
   // The fallbacks are unreachable behind `canSubmitDraft`, which required the pair.
   const input = parsed.input.value ?? 0
-  if (draft.unit !== "tokens") {
+  if (draft.unit !== "token") {
     return {
       input_price_per_million: toStoredRate(input, draft.unit),
       output_price_per_million: 0,

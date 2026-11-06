@@ -4,7 +4,7 @@ import type { ModelObject, OrganizationPricingOverride } from "@/client"
 import { isValidModelKey } from "@/features/models/modelKey"
 
 import {
-  deploymentManagedPrefixes,
+  deploymentManagedSelectors,
   findOverlapping,
   managedModelReason,
   overrideStatus,
@@ -29,7 +29,8 @@ function override(
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
     pricing_tiers: [],
-    unit: "tokens",
+    unit: "token",
+    rates: {},
     effective_from: new Date(NOW - HOUR).toISOString(),
     effective_to: null,
     created_at: new Date(NOW - HOUR).toISOString(),
@@ -238,7 +239,7 @@ describe("overrideStatus", () => {
   })
 })
 
-describe("deploymentManagedPrefixes", () => {
+describe("deploymentManagedSelectors", () => {
   function model(id: string, deployment_managed: boolean): ModelObject {
     return {
       id,
@@ -251,7 +252,7 @@ describe("deploymentManagedPrefixes", () => {
   }
 
   it("collects the instance prefixes the deployment holds the credential for", () => {
-    const prefixes = deploymentManagedPrefixes([
+    const prefixes = deploymentManagedSelectors([
       model("nebius_prod:llama-3", true),
       model("nebius_prod:llama-4", true),
       model("openai:gpt-4o", false),
@@ -260,8 +261,33 @@ describe("deploymentManagedPrefixes", () => {
     expect([...prefixes]).toEqual(["nebius_prod"])
   })
 
+  it("keeps only the deployment's own keys of a provider the organization also serves", () => {
+    // #2899: the deployment serving openai:gpt-4o said nothing about a model
+    // only the organization's own openai key serves.
+    const managed = deploymentManagedSelectors([
+      model("openai:gpt-4o", true),
+      model("openai:hf:Qwen/Qwen3.8-27B", false),
+    ])
+
+    expect([...managed]).toEqual(["openai:gpt-4o"])
+    expect(
+      managedModelReason({
+        modelKey: "openai:hf:Qwen/Qwen3.8-27B",
+        managed,
+        isDeploymentOperator: false,
+      }),
+    ).toBeUndefined()
+    expect(
+      managedModelReason({
+        modelKey: "openai:gpt-4o",
+        managed,
+        isDeploymentOperator: false,
+      }),
+    ).toMatch(/deployment's own credential/)
+  })
+
   it("is empty while the catalog has not arrived", () => {
-    expect(deploymentManagedPrefixes(undefined).size).toBe(0)
+    expect(deploymentManagedSelectors(undefined).size).toBe(0)
   })
 
   // A pricing-only model is listed under the key it is stored as, so a row that
@@ -269,7 +295,7 @@ describe("deploymentManagedPrefixes", () => {
   // the whole id as a prefix would leave the real one out of the set and offer a
   // control the gateway refuses.
   it("reads the prefix off a legacy slash-form catalog id", () => {
-    const prefixes = deploymentManagedPrefixes([
+    const prefixes = deploymentManagedSelectors([
       model("nebius_prod/llama-3", true),
     ])
 
@@ -277,7 +303,7 @@ describe("deploymentManagedPrefixes", () => {
     expect(
       managedModelReason({
         modelKey: "nebius_prod:llama-3",
-        managedPrefixes: prefixes,
+        managed: prefixes,
         isDeploymentOperator: false,
       }),
     ).toBeDefined()
@@ -285,13 +311,13 @@ describe("deploymentManagedPrefixes", () => {
 })
 
 describe("managedModelReason", () => {
-  const managedPrefixes = new Set(["nebius_prod"])
+  const managed = new Set(["nebius_prod"])
 
   it("refuses a model addressed through one of the deployment's instances", () => {
     expect(
       managedModelReason({
         modelKey: "nebius_prod:llama-3",
-        managedPrefixes,
+        managed,
         isDeploymentOperator: false,
       }),
     ).toMatch(/deployment's own providers/i)
@@ -303,7 +329,7 @@ describe("managedModelReason", () => {
     expect(
       managedModelReason({
         modelKey: "nebius_prod/llama-3",
-        managedPrefixes,
+        managed,
         isDeploymentOperator: false,
       }),
     ).toBeDefined()
@@ -313,7 +339,7 @@ describe("managedModelReason", () => {
     expect(
       managedModelReason({
         modelKey: "openai:gpt-4o",
-        managedPrefixes,
+        managed,
         isDeploymentOperator: false,
       }),
     ).toBeUndefined()
@@ -325,7 +351,7 @@ describe("managedModelReason", () => {
     expect(
       managedModelReason({
         modelKey: "nebius_prod:llama-3",
-        managedPrefixes,
+        managed,
         isDeploymentOperator: true,
       }),
     ).toBeUndefined()

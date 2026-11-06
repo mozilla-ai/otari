@@ -33,6 +33,12 @@ AnySearch.get_provider_metadata("fake")
   timeout, and never closes it or changes its settings. Without one, the provider opens a client
   with httpx's defaults and closes it in `aclose()`, which `async with` calls.
 
+Every request a provider sends carries `User-Agent: any-search/<version>`, the library's own
+version (`any_search.__version__`, which a change to the library bumps in the same PR), so a
+provider, or a proxy that allowlists outbound traffic, can tell the library's requests apart. A
+`client` that sets a `User-Agent` of its own keeps it: httpx's default is replaced, and a client
+that carries none is filled in.
+
 `search` takes two shared parameters, which every provider maps onto its own: `max_results` and
 `time_range` (`day`, `week`, `month` or `year`). Every other keyword is a native option, passed to
 the provider under its own name. An option the provider's metadata does not list raises
@@ -204,6 +210,105 @@ Mojeek's documentation lists `pdate` and `timestamp` on every result, but they c
 request (`timestamp` with `date=1`), so neither is required: the date is read from `pdate` when it
 is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
 behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
+
+## SearXNG
+
+`searxng` calls a [SearXNG](https://docs.searxng.org/dev/search_api.html) instance's search API,
+`GET /search` with `format=json`, at the instance's root URL, passed as `api_base` or read from
+`SEARXNG_BASE_URL`. It needs no key. The instance must list `json` under `search.formats` in its
+`settings.yml`; otherwise it answers 403. The query travels in the URL, which the log filter above
+keeps out of httpx's log; `method="post"` sends the same fields as form data, which keeps the
+query out of the instance's access log too. Any other `method` is refused before a request.
+
+| `SearchHit` | From SearXNG |
+|---|---|
+| `url` | `url`; a result without one is dropped |
+| `title` | `title`, empty when absent |
+| `snippet` | `content`, empty when absent; SearXNG returns no page text, so `text` is always `None` |
+| `published` | `publishedDate`, ISO 8601, often `null`; without a zone, UTC; in another form, `None`, and the value stays in `raw` |
+
+SearXNG reports no cost and has no count parameter: it answers one page of the merged results of
+its engines, which the adapter cuts to `max_results`, at most 100. `time_range` is sent as it is,
+since SearXNG takes `day`, `week`, `month` and `year`; an engine with no time filter is left out of
+a search that sets one. The other native options are SearXNG's own parameters, `engines`,
+`categories`, `language`, `safesearch` and `pageno`, and `method`; `--describe searxng` lists
+them. `engines` and `method` are operator-only. An option set to `None` is not sent.
+
+An engine that fails, by a timeout, a CAPTCHA or a suspension, is named in `unresponsive_engines`
+inside a 200. A search that leaves no usable hit while at least one engine failed is returned as
+`SearchResult.error`, tagged `engines_unresponsive`; with hits, the failures stay in `raw`. Any
+status from 400 raises `ProviderError`: a 403 tagged `forbidden`, which SearXNG answers when
+`json` is not enabled and which a proxy in front of it can answer too; a 400 whose `error` starts
+`Invalid value` or `Empty` tagged `invalid_parameter`; any other `http_error`. SearXNG's sentence
+never reaches the error.
+
+SearXNG's documentation describes none of its answer's fields, so only `results`, without which
+the adapter cannot answer, is required. `unresponsive_engines` must be a list when present. Each
+item read before the count is reached must have a `url` that is a string, `null` or absent, a
+`title` and a `content` that are strings or absent, and a `publishedDate` that, when it starts
+like an ISO 8601 date, is one; anything else raises `ProviderError` with the tag
+`unexpected_response`. A result whose `url` is `null`, absent, or not an http or https URL with a
+host, such as a torrent engine's `magnet:` link, is dropped, and the count is filled from the
+items after it. Infoboxes, answers and suggestions come in fields of their own, which the adapter
+does not read.
+
+## Serply
+
+`serply` calls Serply's [Google Search API](https://serply.io/docs/resources/google-search),
+`GET /v1/search`, with the key read from `SERPLY_API_KEY` when not passed. The key travels in the
+`X-Api-Key` header; the query travels in the URL, which the log filter above keeps out of httpx's
+log.
+
+| `SearchHit` | From Serply |
+|---|---|
+| `url`, `title` | `link`, `title` |
+| `snippet` | `description`; Serply returns no page text, so `text` is always `None` |
+| `published` | always `None`: Serply shows a result's date as display text in the language of the region that served the search, such as `May 27, 2026`, `17 hours ago` or `27.05.2026`, so it stays in `raw` |
+
+Serply reports no cost. `max_results` becomes `num`, at most 10, one page of Google's results;
+a page can hold one more than asked for, so the hits are cut to the count as well. `time_range`
+becomes Google's `tbs` window, `qdr:d`, `qdr:w`, `qdr:m` or `qdr:y`, and wins over the `tbs`
+option. The other native options are `gl`, `start`, `tbs` and `tbm` (`nws` for Google News),
+sent as query parameters, and `X-Proxy-Location` and `X-User-Agent`, sent as headers under those
+names; `--describe serply` lists them. An option set to `None` is not sent.
+
+Serply signals every failure with an HTTP status and a `detail` sentence in the body. Any status
+from 400 raises `ProviderError`, tagged `invalid_api_key` or `missing_api_key` from how the detail
+starts, else `http_error`; the detail itself never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `link`, `title` or `description`, or with any of these of the wrong type, raises
+`ProviderError` with the tag `unexpected_response`. A `link` that is not an http or https URL
+with a host, such as an opaque Google redirect token, which Serply sometimes returns in its place,
+is dropped rather than failing the search, and the count is filled from the items after it. Ads, the
+knowledge graph and Serply's other SERP features come in fields of their own, which the adapter
+does not read, so a field Serply adds breaks nothing.
+
+## Synthetic
+
+`synthetic` calls Synthetic's [search API](https://dev.synthetic.new/docs/synthetic/search),
+`POST /v2/search`, with the key read from `SYNTHETIC_API_KEY` when not passed. The key travels as
+a Bearer token in the `Authorization` header, and the query in the JSON body.
+
+| `SearchHit` | From Synthetic |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | always `""`: Synthetic returns page text and no snippet |
+| `text` | `text`, when present and not empty |
+| `published` | `published`, an ISO 8601 date-time; one without a zone is UTC |
+
+Synthetic reports no cost and takes nothing but the query: it has no native options, no result
+count and no recency filter. `max_results` cuts the hits it returns, at most 10, and `time_range`
+drops the hits dated before the range's first day, in UTC; a hit without a date is kept.
+
+Synthetic signals every failure with an HTTP status and an `error` sentence in the body. Any
+status from 400 raises `ProviderError`, tagged `invalid_api_key`, `missing_api_key` or, for a key whose
+account has no subscription, `subscription_required`, from how the sentence starts, else `http_error`; the sentence itself never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `url` or `title`, or with either of the wrong type, or with a `text` or `published` that is
+neither a string nor null, or a `published` that does not parse, raises `ProviderError` with the
+tag `unexpected_response`. Fields the adapter does not read are ignored.
 
 ## The fake provider
 

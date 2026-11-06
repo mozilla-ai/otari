@@ -13,7 +13,7 @@ one workspace at a time.
 import uuid
 from collections.abc import Collection, Sequence
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import ColumnElement, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -63,6 +63,12 @@ def resolve_active_key(candidates: Sequence[Candidate]) -> OrgProviderKey | None
             return key
 
     return enabled[0][0] if enabled else None
+
+
+def _same_prefix(provider: str, slug: str | None) -> ColumnElement[bool]:
+    """Keys a selector names together: one provider's keys without a slug, or the one key a slug names."""
+    named = col(OrgProviderKey.slug).is_(None) if slug is None else col(OrgProviderKey.slug) == slug
+    return (col(OrgProviderKey.provider) == provider) & named
 
 
 class OrgProviderKeyRepository(
@@ -122,6 +128,16 @@ class OrgProviderKeyRepository(
                 col(OrgProviderKey.organization_id) == organization_id,
                 col(OrgProviderKey.provider) == provider,
                 col(OrgProviderKey.name) == name,
+            )
+        )
+        return result.scalars().first()
+
+    async def get_by_org_slug(self, organization_id: uuid.UUID, slug: str) -> OrgProviderKey | None:
+        """The key ``slug`` names in this organization, archived or not."""
+        result = await self.db.execute(
+            select(OrgProviderKey).where(
+                col(OrgProviderKey.organization_id) == organization_id,
+                col(OrgProviderKey.slug) == slug,
             )
         )
         return result.scalars().first()
@@ -205,15 +221,19 @@ class OrgProviderKeyRepository(
         last4: str | None,
         api_base: str | None,
         client_args: dict[str, object] | None,
+        zero_data_retention: bool = False,
+        slug: str | None = None,
     ) -> OrgProviderKey:
         key = OrgProviderKey(
             organization_id=organization_id,
             provider=provider,
             name=name,
+            slug=slug,
             encrypted_api_key=encrypted_api_key,
             last4=last4,
             api_base=api_base,
             client_args=client_args,
+            zero_data_retention=zero_data_retention,
         )
         self.db.add(key)
         await self.db.flush()
@@ -248,7 +268,7 @@ class OrgProviderKeyRepository(
             update(OrgProviderKey)
             .where(
                 col(OrgProviderKey.organization_id) == key.organization_id,
-                col(OrgProviderKey.provider) == key.provider,
+                _same_prefix(key.provider, key.slug),
                 col(OrgProviderKey.id) != key.id,
                 col(OrgProviderKey.is_org_default).is_(True),
             )
@@ -332,6 +352,7 @@ class WorkspaceProviderKeyOverrideRepository:
         organization_id: uuid.UUID,
         provider: str,
         except_key_id: uuid.UUID,
+        slug: str | None = None,
     ) -> None:
         """Unset this workspace's pin on every *other* key of ``provider``, if any.
 
@@ -360,7 +381,7 @@ class WorkspaceProviderKeyOverrideRepository:
                 col(WorkspaceProviderKeyOverride.org_provider_key_id).in_(
                     select(col(OrgProviderKey.id)).where(
                         col(OrgProviderKey.organization_id) == organization_id,
-                        col(OrgProviderKey.provider) == provider,
+                        _same_prefix(provider, slug),
                     )
                 ),
                 col(WorkspaceProviderKeyOverride.is_default).is_(True),
@@ -375,8 +396,9 @@ class WorkspaceProviderKeyOverrideRepository:
         organization_id: uuid.UUID,
         provider: str,
         workspace_id: uuid.UUID,
+        slug: str | None = None,
     ) -> list[Candidate]:
-        """Every non-archived key of one provider in the organization, with this workspace's override.
+        """Every non-archived key a selector prefix names in the organization, with this workspace's override.
 
         Ordered oldest-first, which is the order `resolve_active_key`'s
         fallback tier requires.
@@ -390,7 +412,7 @@ class WorkspaceProviderKeyOverrideRepository:
             )
             .where(
                 col(OrgProviderKey.organization_id) == organization_id,
-                col(OrgProviderKey.provider) == provider,
+                _same_prefix(provider, slug),
                 col(OrgProviderKey.archived_at).is_(None),
             )
             .order_by(col(OrgProviderKey.created_at), col(OrgProviderKey.id))

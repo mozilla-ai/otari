@@ -29,6 +29,7 @@ OMITTABLE_FIELDS = {
         "name",
         "pricing",
         "supported_parameters",
+        "type",
     },
     "ModelPricingInfo": {
         "cache_read_price_per_million",

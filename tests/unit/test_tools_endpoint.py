@@ -71,9 +71,8 @@ def test_unconfigured_tools_are_listed_as_unavailable(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         tools = _tools(client)
 
-    assert tools["otari_web_search"]["available"] is False
-    assert tools["otari_web_fetch"]["available"] is False
-    assert tools["otari_code_execution"]["available"] is False
+    for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
+        assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (False, "not_configured")
 
 
 def test_configured_tools_report_available(tmp_path: Path) -> None:
@@ -85,9 +84,8 @@ def test_configured_tools_report_available(tmp_path: Path) -> None:
     ) as client:
         tools = _tools(client)
 
-    assert tools["otari_web_fetch"]["available"] is True
-    assert tools["otari_web_search"]["available"] is True
-    assert tools["otari_code_execution"]["available"] is True
+    for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
+        assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (True, None)
 
 
 def test_accepted_types_are_canonical_only_by_default(tmp_path: Path) -> None:
@@ -109,6 +107,14 @@ def test_interception_advertises_the_provider_named_keywords(tmp_path: Path) -> 
     ]
     # Code execution has no interception mode.
     assert tools["otari_code_execution"]["accepted_types"] == ["otari_code_execution"]
+
+
+def test_interception_advertises_nothing_extra_without_a_search(tmp_path: Path) -> None:
+    """Admission leaves a provider's own keywords to the provider when the deployment cannot search."""
+    with _client(tmp_path, web_search_intercept=True) as client:
+        tools = _tools(client)
+
+    assert tools["otari_web_search"]["accepted_types"] == ["otari_web_search"]
 
 
 def test_interception_from_env_is_reflected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -48,6 +48,11 @@ export function toPerCall(stored: number): number {
   return stored / PER_MILLION
 }
 
+/** Dollars per call as a price field holds them, never in exponent form. */
+export function perCallText(perCall: number): string {
+  return perCall.toFixed(12).replace(/\.?0+$/, "")
+}
+
 /**
  * A typed per-call price as the per-million value the API stores, or
  * `undefined` when it is not one.

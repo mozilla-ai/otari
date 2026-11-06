@@ -1,14 +1,24 @@
 """Tests for the POST /api/v1/audio/transcriptions and POST /api/v1/audio/speech endpoints."""
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Never
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.audio import Transcription
+from fastapi import Request
 from fastapi.testclient import TestClient
+from openai.types.audio.transcription import UsageDuration
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import (
+    API_ROOT,
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
+    USAGE_UNIT_HEADER,
+    USAGE_UNITS_HEADER,
+)
+from gateway.core.database import release_session
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
@@ -26,14 +36,73 @@ FAKE_AUDIO_BYTES = b"fake-audio-content-mp3"
 # === Transcription tests ===
 
 
-def test_transcription_requires_auth(client: TestClient) -> None:
+def test_transcription_requires_auth_before_reading_the_body(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """POST /api/v1/audio/transcriptions requires authentication."""
+
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the body was parsed before authentication")
+
+    monkeypatch.setattr(Request, "form", unread)
     resp = client.post(
         f"{API_ROOT}/audio/transcriptions",
         files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
         data={"model": "openai:whisper-1"},
     )
     assert resp.status_code == 401
+
+
+def test_transcription_body_over_the_route_limit_is_refused_before_parsing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gateway.api.routes.audio._MAX_AUDIO_UPLOAD_BYTES", 16)
+
+    def unread(self: Request, **_: object) -> Never:
+        raise AssertionError("the oversized body was parsed")
+
+    monkeypatch.setattr(Request, "form", unread)
+    response = client.post(
+        f"{API_ROOT}/audio/transcriptions",
+        headers=api_key_header,
+        files={"file": ("large.mp3", b"x" * (16 + 1024 * 1024 + 1), "audio/mpeg")},
+        data={"model": "openai:whisper-1"},
+    )
+    assert response.status_code == 413
+
+
+def test_transcription_frees_the_auth_connection_before_reading_the_body(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow client must not pin the connection authentication checked out."""
+    events: list[str] = []
+    release = release_session
+    form = Request.form
+
+    async def recording_release(session: AsyncSession) -> bool:
+        events.append("release")
+        return await release(session)
+
+    def recording_form(self: Request, **kwargs: Any) -> Any:
+        events.append("form")
+        return form(self, **kwargs)
+
+    monkeypatch.setattr("gateway.api.deps.release_session", recording_release)
+    monkeypatch.setattr(Request, "form", recording_form)
+    with patch(
+        "gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=_mock_transcription_response()
+    ):
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+            data={"model": "openai:whisper-1"},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200
+    assert events == ["release", "form"]
 
 
 def test_transcription_with_api_key(
@@ -205,6 +274,34 @@ def test_transcription_optional_fields(
     assert resp.status_code == 200
     call_kwargs = mock.call_args.kwargs
     assert extra_field in call_kwargs
+
+
+@pytest.mark.parametrize("extra_field", ["language", "prompt", "response_format", "temperature"])
+def test_transcription_empty_optional_field_uses_default(
+    client: TestClient, api_key_header: dict[str, str], extra_field: str
+) -> None:
+    with patch(
+        "gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=_mock_transcription_response()
+    ) as mock:
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+            data={"model": "openai:whisper-1", extra_field: ""},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert extra_field not in mock.call_args.kwargs
+
+
+def test_transcription_empty_model_is_missing(client: TestClient, api_key_header: dict[str, str]) -> None:
+    resp = client.post(
+        f"{API_ROOT}/audio/transcriptions",
+        files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+        data={"model": ""},
+        headers=api_key_header,
+    )
+    assert resp.status_code == 422
+    assert any(error["type"] == "missing" and error["loc"] == ["body", "model"] for error in resp.json()["detail"])
 
 
 # === Speech tests ===
@@ -398,9 +495,8 @@ def test_transcription_billing_meters_tracked_with_pricing(
 ) -> None:
     """POST /api/v1/audio/transcriptions records auditable charge lines alongside cost.
 
-    Audio bills per request like moderations (input_price_per_million holds the
-    per-million-request rate), so a priced model yields one request meter and one
-    charge line.
+    A per-request rate (input_price_per_million holds the per-million-request
+    rate) yields one request meter and one charge line.
     """
     client.post(
         f"{API_ROOT}/pricing",
@@ -408,6 +504,7 @@ def test_transcription_billing_meters_tracked_with_pricing(
             "model_key": "openai:whisper-1",
             "input_price_per_million": 2.0,
             "output_price_per_million": 0.0,
+            "unit": "request",
         },
         headers=master_key_header,
     )
@@ -442,7 +539,7 @@ def test_transcription_unpriced_records_no_charge_lines(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """An unpriced audio model is free by design, so it records no charge line."""
+    """An unpriced audio model is recorded with no cost: unknown, not free."""
     with patch(
         "gateway.api.routes.audio.atranscription",
         new_callable=AsyncMock,
@@ -462,7 +559,7 @@ def test_transcription_unpriced_records_no_charge_lines(
         headers=master_key_header,
     )
     latest = usage_resp.json()[0]
-    assert latest["cost"] == 0.0
+    assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
 
@@ -479,6 +576,7 @@ def test_speech_billing_meters_tracked_with_pricing(
             "model_key": "openai:tts-1",
             "input_price_per_million": 4.0,
             "output_price_per_million": 0.0,
+            "unit": "request",
         },
         headers=master_key_header,
     )
@@ -490,6 +588,11 @@ def test_speech_billing_meters_tracked_with_pricing(
             headers=api_key_header,
         )
     assert resp.status_code == 200
+    # The body is audio, so the settled cost rides the headers.
+    assert resp.headers[COST_USD_HEADER] == "0.000004"
+    assert resp.headers[PRICING_SOURCE_HEADER] == "deployment"
+    assert resp.headers[USAGE_UNIT_HEADER] == "requests"
+    assert resp.headers[USAGE_UNITS_HEADER] == "1"
 
     usage_resp = client.get(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/audio/speech", "status": "success"}, headers=master_key_header
@@ -505,12 +608,51 @@ def test_speech_billing_meters_tracked_with_pricing(
     ]
 
 
+def test_speech_at_a_character_rate_names_the_characters_billed_on_the_headers(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """The headers say what the usage row says: twelve characters at $15 per million."""
+    resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:tts-1",
+            "input_price_per_million": 15.0,
+            "output_price_per_million": 0.0,
+            "unit": "character",
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200, resp.text
+
+    with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
+        resp = client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello, world", "voice": "alloy"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.content == FAKE_AUDIO_BYTES
+    assert resp.headers[COST_USD_HEADER] == "0.000180"
+    assert resp.headers[PRICING_SOURCE_HEADER] == "deployment"
+    assert resp.headers[USAGE_UNIT_HEADER] == "characters"
+    assert resp.headers[USAGE_UNITS_HEADER] == "12"
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/audio/speech", "status": "success"}, headers=master_key_header
+    )
+    latest = usage_resp.json()[0]
+    assert latest["cost"] == pytest.approx(0.00018)
+    assert latest["billing_meters"] == {"characters": 12}
+
+
 def test_speech_unpriced_records_no_charge_lines(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """An unpriced speech model is free by design, so it records no charge line."""
+    """An unpriced speech model is recorded with no cost, unknown rather than free: there is no cost to report."""
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
         resp = client.post(
             f"{API_ROOT}/audio/speech",
@@ -518,31 +660,31 @@ def test_speech_unpriced_records_no_charge_lines(
             headers=api_key_header,
         )
     assert resp.status_code == 200
+    assert COST_USD_HEADER not in resp.headers
+    assert PRICING_SOURCE_HEADER not in resp.headers
+    assert USAGE_UNIT_HEADER not in resp.headers
 
     usage_resp = client.get(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/audio/speech", "status": "success"}, headers=master_key_header
     )
     latest = usage_resp.json()[0]
-    assert latest["cost"] == 0.0
+    assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
 
 
-def test_transcription_ignores_models_dev_defaults(
+def test_a_catalog_token_rate_prices_nothing_a_transcription_without_usage_reports(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """Default (models.dev) rates never price audio, even with default_pricing on.
+    """A catalog token rate reads as tokens, so a transcription that reports none is unpriced, never one request.
 
-    Those rates are USD per million tokens, but audio bills per request, so
-    honoring one would write a charge line at the wrong unit for a rate the
-    operator never configured. gpt-4o-transcribe is in the dataset, so it is the
-    case that would regress.
+    gpt-4o-transcribe is in the dataset per million tokens.
     """
     configure_default_pricing(True)
     try:
-        # Pin the premise: without a dataset entry to ignore, the assertions below
+        # Pin the premise: without a dataset entry, the assertions below
         # would pass for the wrong reason and stop guarding anything.
         assert default_model_pricing("openai", "gpt-4o-transcribe", datetime.now(UTC)) is not None
         with patch(
@@ -567,9 +709,46 @@ def test_transcription_ignores_models_dev_defaults(
     )
     latest = usage_resp.json()[0]
     assert latest["model"] == "gpt-4o-transcribe"
-    assert latest["cost"] == 0.0
+    assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
+
+
+def test_a_transcription_is_priced_per_minute_from_the_catalog(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """whisper-1 has no text price in the catalog, only audio input per minute, and that prices the length reported."""
+    configure_default_pricing(True)
+    try:
+        pricing = default_model_pricing("openai", "whisper-1", datetime.now(UTC))
+        assert pricing is not None and pricing.unit == "minute"
+        result = Transcription(text="Hello", usage=UsageDuration(seconds=90, type="duration"))
+        with patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=result):
+            resp = client.post(
+                f"{API_ROOT}/audio/transcriptions",
+                files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+                data={"model": "openai:whisper-1"},
+                headers=api_key_header,
+            )
+        assert resp.status_code == 200, resp.text
+    finally:
+        configure_default_pricing(False)
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage",
+        params={"endpoint": "/v1/audio/transcriptions", "status": "success"},
+        headers=master_key_header,
+    )
+    latest = usage_resp.json()[0]
+    assert latest["model"] == "whisper-1"
+    # A minute and a half at $0.006 a minute.
+    assert latest["cost"] == pytest.approx(0.009)
+    assert latest["billing_meters"] == {"minutes": 1.5}
+    assert latest["pricing_breakdown"] == [
+        {"meter": "minutes", "units": 1.5, "unit": "minute", "unit_rate": 0.006, "cost": pytest.approx(0.009)}
+    ]
 
 
 @pytest.mark.parametrize(("form", "expected_status"), [({"language": "en"}, 400), ({}, 502)])

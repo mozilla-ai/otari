@@ -4,18 +4,36 @@ import re
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Text, Uuid
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Connection,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Uuid,
+    event,
+    inspect,
+)
+from sqlalchemy.engine.interfaces import Dialect
+from sqlalchemy.orm import InstanceState, Mapped, Mapper, mapped_column
+from sqlalchemy.types import TypeDecorator
 
 from gateway.models.base import Base, UtcDateTime
-from gateway.models.money import UsdRate
-
-# The vocabulary of ``ModelPricing.unit`` and ``OrganizationModelPricing.unit``.
-# Every per-unit reader (``services/pricing_service`` helpers, the catalog) keys
-# on these spellings, and the request schemas validate against them.
-PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
+from gateway.models.money import UsdRate, to_usd_or_none
+from gateway.types.price_rates import (
+    RateColumns,
+    columns_from_rates,
+    dump_rates,
+    load_rates,
+    rates_from_columns,
+    rates_with_columns,
+)
+from gateway.types.price_unit import PriceUnit, current_unit_name
 
 # The counts an attempt reports in a unit other than tokens, keyed by meter. They
 # are the keys of ``billing_meters`` on the row a count settles.
@@ -102,6 +120,51 @@ class PricingSnapshotHistory(Base):
     snapshot: Mapped[str] = mapped_column(Text)
 
 
+class PriceUnitName(TypeDecorator[str]):
+    """``unit`` read in its current spelling, whatever a row written before the names changed says.
+
+    The migration that renamed the units rewrote every row, so this covers only
+    a row an older writer adds beside it, for the one release the retired names
+    are read. The rendered DDL is exactly ``impl``'s.
+    """
+
+    impl = String(16)
+    cache_ok = True
+
+    def process_result_value(self, value: str | None, dialect: Dialect) -> str | None:
+        return cast(str | None, current_unit_name(value))
+
+
+class PriceRatesDocument(TypeDecorator[dict[str, Any]]):
+    """A ``rates`` block as text, its numbers written exactly and read as ``Decimal``.
+
+    Not the engine's JSON type: that reads every number of every JSON column as
+    a float, and this column holds money. The encoding is
+    :mod:`gateway.types.price_rates`'s, so a row and a block read alike.
+    """
+
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value: dict[str, Any] | None, dialect: Dialect) -> str | None:
+        return None if value is None else dump_rates(value)
+
+    def process_result_value(self, value: str | None, dialect: Dialect) -> dict[str, Any] | None:
+        return None if value is None else load_rates(value)
+
+
+# The six columns ``rates`` is the truth of: a write that moves them and not
+# ``rates`` rewrites ``rates`` from them, and the reverse.
+RATE_COLUMNS = (
+    "input_price_per_million",
+    "output_price_per_million",
+    "cache_read_price_per_million",
+    "cache_write_price_per_million",
+    "pricing_tiers",
+    "unit",
+)
+
+
 class ModelPricing(Base):
     """Model pricing configuration."""
 
@@ -126,12 +189,16 @@ class ModelPricing(Base):
     # Ordered threshold rules. Each rule applies its supplied rates to the
     # entire request once ``total_input_tokens`` reaches ``min_input_tokens``.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    # What ``input_price_per_million`` is a rate per: ``tokens`` for a model,
-    # ``requests`` for a gateway-run tool, a moderation call or a completion model
-    # billed per call, ``images`` for
-    # image generation. The rate columns are shared by all three and a reader
-    # cannot tell which from the number, so the row says (``PRICING_UNITS``).
-    unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
+    # What ``input_price_per_million`` is a rate per: ``token`` for a model,
+    # ``request`` for a gateway-run tool, a moderation call or a completion model
+    # billed per call, ``image`` for image generation. The rate columns are
+    # shared by every unit and a reader cannot tell which from the number, so
+    # the row says (``gateway.types.price_unit.PriceUnit``).
+    unit: Mapped[PriceUnit] = mapped_column(PriceUnitName(), default="token", server_default="token")
+    # Every price of the row, as the models.dev ``cost`` block it is: the truth
+    # the six columns above are the text-token view of. A writer gives it, or
+    # the columns, and the other side is written from it before the flush.
+    rates: Mapped[dict[str, Any]] = mapped_column(PriceRatesDocument())
     # Which path wrote the row: ``config`` (the file's ``pricing:`` block),
     # ``api`` (``POST /v1/pricing``), ``migration``, or ``seed`` (a community
     # default stored on a hosted model's behalf). NULL on a row written before
@@ -156,6 +223,7 @@ class ModelPricing(Base):
             "cache_write_price_per_million": self.cache_write_price_per_million,
             "pricing_tiers": self.pricing_tiers,
             "unit": self.unit,
+            "rates": self.rates,
             "origin": self.origin,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -279,7 +347,8 @@ class OrganizationModelPricing(Base):
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # The same two columns ``ModelPricing`` carries, for the same reasons: an
     # override is read as a ``ModelPricing`` and has to say what it is per.
-    unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
+    unit: Mapped[PriceUnit] = mapped_column(PriceUnitName(), default="token", server_default="token")
+    rates: Mapped[dict[str, Any]] = mapped_column(PriceRatesDocument())
     origin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # ``UtcDateTime``, not ``DateTime(timezone=True)``, and this is the one place
     # in this file where that distinction is load-bearing. The flag is a no-op on
@@ -309,3 +378,56 @@ class OrganizationModelPricing(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+type PriceRow = ModelPricing | OrganizationModelPricing
+
+
+def rate_columns(row: PriceRow) -> RateColumns:
+    """The six columns of ``row`` as one value; a row built without them reads as a free token rate."""
+    return RateColumns(
+        unit=row.unit or "token",
+        input_price_per_million=to_usd_or_none(row.input_price_per_million) or Decimal(0),
+        output_price_per_million=to_usd_or_none(row.output_price_per_million) or Decimal(0),
+        cache_read_price_per_million=to_usd_or_none(row.cache_read_price_per_million),
+        cache_write_price_per_million=to_usd_or_none(row.cache_write_price_per_million),
+        pricing_tiers=tuple(row.pricing_tiers or ()),
+    )
+
+
+def rates_of(row: PriceRow) -> dict[str, Any]:
+    """``row``'s ``rates``, written from its columns for a transient row no flush has filled."""
+    return row.rates if row.rates is not None else rates_from_columns(rate_columns(row))
+
+
+def _apply_columns(row: PriceRow, columns: RateColumns) -> None:
+    row.unit = columns.unit
+    row.input_price_per_million = columns.input_price_per_million
+    row.output_price_per_million = columns.output_price_per_million
+    row.cache_read_price_per_million = columns.cache_read_price_per_million
+    row.cache_write_price_per_million = columns.cache_write_price_per_million
+    row.pricing_tiers = [dict(tier) for tier in columns.pricing_tiers]
+
+
+def _before_insert(mapper: Mapper[Any], connection: Connection, row: PriceRow) -> None:
+    """Fill the side a writer left out: ``rates`` from the columns, or the columns from ``rates``."""
+    if row.rates is None:
+        row.rates = rates_from_columns(rate_columns(row))
+    elif row.input_price_per_million is None and row.output_price_per_million is None:
+        _apply_columns(row, columns_from_rates(row.rates))
+
+
+def _before_update(mapper: Mapper[Any], connection: Connection, row: PriceRow) -> None:
+    """Keep the two sides one: the side a writer moved rewrites the other, and a writer that moved both is believed."""
+    attrs = cast(InstanceState[Any], inspect(row)).attrs
+    rates_moved = attrs.rates.history.has_changes()
+    columns_moved = any(attrs[name].history.has_changes() for name in RATE_COLUMNS)
+    if rates_moved and not columns_moved:
+        _apply_columns(row, columns_from_rates(row.rates))
+    elif columns_moved and not rates_moved:
+        row.rates = rates_with_columns(row.rates, rate_columns(row))
+
+
+for _table in (ModelPricing, OrganizationModelPricing):
+    event.listen(_table, "before_insert", _before_insert)
+    event.listen(_table, "before_update", _before_update)

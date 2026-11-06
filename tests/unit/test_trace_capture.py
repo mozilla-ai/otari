@@ -177,7 +177,7 @@ def test_a_span_that_cannot_be_built_is_dropped_never_raised() -> None:
 def test_a_tool_name_that_is_not_an_identifier_is_kept_out_of_the_span() -> None:
     trace = _trace()
 
-    trace.record_tool_call(tool_name="delete all the files", tool_type="mcp", started=_T0, ok=True)
+    trace.record_tool_call(tool_name="delete all the files", tool_type="mcp", started=_T0, ok=True, arguments=None)
 
     [span] = trace.spans
     assert (span.name, span.tool_name) == ("execute_tool", None)
@@ -187,7 +187,7 @@ def test_spans_past_the_cap_are_counted_not_kept() -> None:
     trace = _trace(max_spans=2)
 
     for _ in range(5):
-        trace.record_tool_call(tool_name="Bash", tool_type="mcp", started=_T0, ok=True)
+        trace.record_tool_call(tool_name="Bash", tool_type="mcp", started=_T0, ok=True, arguments=None)
 
     assert (len(trace.spans), trace.dropped) == (2, 3)
 

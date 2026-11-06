@@ -499,11 +499,13 @@ async def test_a_named_hosted_provider_is_dispatched_as_its_implementation_under
 
 
 @pytest.mark.asyncio
-async def test_a_multi_candidate_plan_asks_for_each_candidate_only_when_the_walk_reaches_it() -> None:
+@pytest.mark.parametrize("candidate_count", [1, 2])
+async def test_a_walk_asks_for_each_candidate_only_when_it_reaches_it(candidate_count: int) -> None:
     """A routed chain dispatches from the plan's own kwargs, so the port is asked per candidate, as it is sent."""
 
     class _Plan:
-        attempts = (_uncredentialed(), _uncredentialed())
+        attempts = (_uncredentialed(),) * candidate_count
+        automatic = object() if candidate_count == 1 else None
 
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())

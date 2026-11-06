@@ -10,6 +10,8 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey
 from gateway.repositories.base_repository import BaseRepository
 
+_NAMES_BATCH = 10_000
+
 
 class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
     """Query API keys.
@@ -59,6 +61,25 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         if by_operator:
             values["operator_disabled"] = True
         await self.db.execute(statement.values(**values))
+
+    async def names_by_id(
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID] | None
+    ) -> dict[str, str | None]:
+        """Each of these keys that still exists in these workspaces, or in any with ``None``, to its name.
+
+        Read in batches, so the ids never exceed a driver's bound-parameter limit.
+        """
+        ids = sorted(key_ids)
+        names: dict[str, str | None] = {}
+        in_workspaces = [] if workspace_ids is None else [APIKey.workspace_id.in_(sorted(workspace_ids))]
+        for start in range(0, len(ids), _NAMES_BATCH):
+            result = await self.db.execute(
+                select(APIKey.id, APIKey.key_name).where(
+                    APIKey.id.in_(ids[start : start + _NAMES_BATCH]), *in_workspaces
+                )
+            )
+            names.update({key_id: name for key_id, name in result.all()})
+        return names
 
     async def names_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name each key that starts its end users on ``budget_id`` by default, by its name or else its id."""

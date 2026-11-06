@@ -26,11 +26,18 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
+from pydantic import TypeAdapter
 
-from gateway.api.deps import FileServiceDep, get_config, verify_api_key_or_master_key
-from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.deps import (
+    FileServiceDep,
+    get_config,
+    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_for_upload,
+)
+from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import FilesDisabledError
 from gateway.models.api_keys import APIKey
@@ -42,6 +49,7 @@ from gateway.schemas.files import (
     OpenAIFileList,
     OpenAIFileObject,
 )
+from gateway.services.api_keys import resolve_user_id
 from gateway.services.files import (
     DEFAULT_LIST_LIMIT,
     MAX_LIST_LIMIT,
@@ -81,6 +89,20 @@ router = APIRouter(tags=["files"], dependencies=[Depends(_require_files_enabled)
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".
 _DEFAULT_PURPOSE = "user_data"
+_UPLOAD_FILE_ADAPTER: TypeAdapter[UploadFile] = TypeAdapter(UploadFile)
+_STRING_ADAPTER: TypeAdapter[str] = TypeAdapter(str)
+_OPTIONAL_STRING_ADAPTER: TypeAdapter[str | None] = TypeAdapter(str | None)
+
+_FILE_UPLOAD_SCHEMA = {
+    "title": "Body_files-create_file",
+    "type": "object",
+    "properties": {
+        "file": {"contentMediaType": "application/octet-stream", "title": "File", "type": "string"},
+        "purpose": {"default": _DEFAULT_PURPOSE, "title": "Purpose", "type": "string"},
+        "user": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "User"},
+    },
+    "required": ["file"],
+}
 
 # The most files ``ids[]`` may name in one page.
 _MAX_LIST_IDS = 100
@@ -188,30 +210,50 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
 
-@router.post("/files")
+@router.post(
+    "/files",
+    responses={
+        413: {"description": "The upload exceeds the configured maximum size."},
+        422: {
+            "description": "Validation Error",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},
+        },
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _FILE_UPLOAD_SCHEMA}},
+        }
+    },
+)
 async def create_file(
     raw_request: Request,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key_for_upload)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
-    file: UploadFile = File(...),
-    purpose: str = Form(_DEFAULT_PURPOSE),
-    user: str | None = Form(None),
 ) -> OpenAIFileObject | AnthropicFileMetadata:
     """Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers."""
-    record = await files.store(
-        NewFile(
-            user_id=_resolve_user(auth_result, user, config),
-            workspace_id=_request_workspace_id(auth_result),
-            filename=file.filename,
-            content_type=file.content_type,
-            purpose=purpose or _DEFAULT_PURPOSE,
-            chunks=_upload_chunks(file),
+    async with bounded_body(
+        raw_request,
+        config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
+        "File upload request exceeds the configured maximum size.",
+    ).form() as form:
+        file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
+        purpose = form_field(form, "purpose", _STRING_ADAPTER, default=_DEFAULT_PURPOSE)
+        user = form_field(form, "user", _OPTIONAL_STRING_ADAPTER)
+        record = await files.store(
+            NewFile(
+                user_id=_resolve_user(auth_result, user, config),
+                workspace_id=_request_workspace_id(auth_result),
+                filename=file.filename,
+                content_type=file.content_type,
+                purpose=purpose or _DEFAULT_PURPOSE,
+                chunks=_upload_chunks(file),
+            )
         )
-    )
-    if _dialect(raw_request) is FileDialect.ANTHROPIC:
-        return AnthropicFileMetadata.of(record)
-    return OpenAIFileObject.of(record)
+        if _dialect(raw_request) is FileDialect.ANTHROPIC:
+            return AnthropicFileMetadata.of(record)
+        return OpenAIFileObject.of(record)
 
 
 @router.get("/files")

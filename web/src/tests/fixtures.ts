@@ -35,6 +35,7 @@ import type {
   WorkspaceActivation,
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
+  WorkspaceHostedProvider,
   WorkspaceMcpServer,
   WorkspaceMcpServerHealth,
   WorkspaceMember,
@@ -136,7 +137,8 @@ export function pricingResponse(
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
     pricing_tiers: [],
-    unit: "tokens",
+    unit: "token",
+    rates: {},
     origin: "api",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -377,6 +379,7 @@ export function workspace(overrides: Partial<Workspace> = {}): Workspace {
     organization_id: ORGANIZATION_ID,
     created_by_user_id: null,
     trace_content_enabled: false,
+    trace_content_tool_output: true,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: null,
     ...overrides,
@@ -705,7 +708,8 @@ export function organizationPricingOverride(
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
     pricing_tiers: [],
-    unit: "tokens",
+    unit: "token",
+    rates: {},
     effective_from: "2026-01-01T00:00:00Z",
     effective_to: null,
     created_at: "2026-01-01T00:00:00Z",
@@ -735,7 +739,7 @@ export function orgProviderModel(
     cache_write_price_per_million: null,
     price_source: "defaults",
     pricing_id: null,
-    unit: "tokens",
+    unit: "token",
     enabled: true,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
@@ -757,6 +761,7 @@ export function orgProviderKey(
     // the server and only the tail of the key is ever published.
     last4: "abcd",
     is_org_default: false,
+    zero_data_retention: false,
     // The default is a key this deployment can actually read. A test wanting the
     // other case says so, because that is the state the dashboard has to show.
     usable: true,
@@ -786,6 +791,24 @@ export function workspaceProviderKeyOverride(
     usable: true,
     // Empty is the answer "every model this key serves", never "no model".
     allowed_models: [],
+    zero_data_retention: false,
+    ...overrides,
+  }
+}
+
+export function workspaceHostedProvider(
+  overrides: Partial<WorkspaceHostedProvider> = {},
+): WorkspaceHostedProvider {
+  return {
+    provider: "gemini",
+    // Full inheritance, which is every workspace's state until an admin
+    // changes it: on, every model, nothing stored.
+    enabled: true,
+    models: null,
+    customized: false,
+    served_models: ["gemini-2.5-flash", "gemini-2.5-pro"],
+    served_by_own_key: false,
+    zero_data_retention: false,
     ...overrides,
   }
 }
@@ -836,6 +859,8 @@ export function workspaceWebSearchConfig(
     allowed_domains: null,
     blocked_domains: null,
     provider_options: null,
+    search_executor: null,
+    fetch_executor: null,
     created_at: null,
     updated_at: null,
     ...overrides,

@@ -33,7 +33,8 @@ import { refreshOutcome } from "./refreshOutcome"
 // rate, which Refresh keeps current until someone sets one; Unpriced is a model
 // nothing prices, which arrives switched off. The switch is the row's off
 // button: a model is withheld rather than removed, so its row, its price and its
-// history stay where the operator can turn it back on.
+// history stay where the operator can turn it back on. Unavailable beside it
+// marks a model the gateway switched off because its provider refused to serve it.
 
 /** A rate cell. An absent rate is a dash, never a zero, which is a real price. */
 function rate(value: number | null | undefined) {
@@ -52,7 +53,7 @@ function rate(value: number | null | undefined) {
 function inputRate(row: HostedModel) {
   const unit = pricingUnitOf(row.unit)
   const value = row.input_price_per_million
-  if (unit === "tokens" || value === null || value === undefined) {
+  if (unit === "token" || value === null || value === undefined) {
     return rate(value)
   }
   return (
@@ -64,7 +65,7 @@ function inputRate(row: HostedModel) {
 
 /** A rate that only a token price carries, as a dash on any other unit. */
 function tokenRate(row: HostedModel, value: number | null | undefined) {
-  return rate(pricingUnitOf(row.unit) === "tokens" ? value : undefined)
+  return rate(pricingUnitOf(row.unit) === "token" ? value : undefined)
 }
 
 function PriceSourceBadge({ source }: { source: HostedModel["price_source"] }) {
@@ -137,17 +138,24 @@ export function HostedProviderModelsPanel({
       id: "enabled",
       header: "Serving",
       cell: (row) => (
-        <Toggle
-          isSelected={row.enabled}
-          // Only the row being written: one in-flight toggle must not freeze
-          // the rest of the table.
-          isDisabled={update.isPending && update.variables?.modelId === row.id}
-          label={`Serve ${row.model}`}
-          onChange={(enabled) => {
-            refresh.reset()
-            update.mutate({ modelId: row.id, body: { enabled } })
-          }}
-        />
+        <div className="flex items-center gap-3">
+          <Toggle
+            isSelected={row.enabled}
+            // Only the row being written: one in-flight toggle must not freeze
+            // the rest of the table.
+            isDisabled={
+              update.isPending && update.variables?.modelId === row.id
+            }
+            label={`Serve ${row.model}`}
+            onChange={(enabled) => {
+              refresh.reset()
+              update.mutate({ modelId: row.id, body: { enabled } })
+            }}
+          />
+          {row.disabled_reason === "unavailable" ? (
+            <Badge tone="warn">Unavailable</Badge>
+          ) : null}
+        </div>
       ),
     },
     {

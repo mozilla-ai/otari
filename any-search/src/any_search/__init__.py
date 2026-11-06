@@ -7,6 +7,10 @@ async with AnySearch.create("fake", timeout=15.0) as provider:
     result = await provider.search("latest stable python release", max_results=5)
 """
 
+# The library's own version, bumped in the PR that changes the library. Set
+# before the imports: ``_http`` reads it while this package is still importing.
+__version__ = "0.3.0"
+
 from any_search._api import DEFAULT_TIMEOUT, SHARED_PARAMETERS, AnySearch, asearch, shared_parameter_problems
 from any_search._errors import (
     AnySearchError,
@@ -36,4 +40,5 @@ __all__ = [
     "asearch",
     "install_log_filter",
     "shared_parameter_problems",
+    "__version__",
 ]

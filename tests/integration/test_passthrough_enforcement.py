@@ -85,6 +85,17 @@ def _send_transcription(
     )
 
 
+def _send_image_edit(
+    client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:gpt-image-1"
+) -> Response:
+    return client.post(
+        f"{API_ROOT}/images/edits",
+        files={"image": ("cat.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+        data={"model": model, "prompt": "make it green", "user": user_id},
+        headers=headers,
+    )
+
+
 def _send_speech(client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:tts-1") -> Response:
     return client.post(
         f"{API_ROOT}/audio/speech",
@@ -100,6 +111,7 @@ _BILLABLE_ROUTES: list[tuple[str, str, Callable[[TestClient, dict[str, str], str
     ("moderations", "gateway.api.routes.moderations.amoderation", _send_moderations),
     ("rerank", "gateway.api.routes.rerank.arerank", _send_rerank),
     ("images", "gateway.api.routes.images.aimage_generation", _send_images),
+    ("image_edits", "gateway.api.routes.images.aimage_edit", _send_image_edit),
     ("audio_transcription", "gateway.api.routes.audio.atranscription", _send_transcription),
     ("audio_speech", "gateway.api.routes.audio.aspeech", _send_speech),
 ]

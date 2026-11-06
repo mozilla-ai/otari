@@ -44,6 +44,7 @@ import { Route as OrganizationMembersRouteImport } from './routes/organization.m
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
 import { Route as OrganizationProviderKeysRouteImport } from './routes/organization.provider-keys'
 import { Route as OrganizationUsageRouteImport } from './routes/organization.usage'
+import { Route as OrganizationWebSearchKeysRouteImport } from './routes/organization.web-search-keys'
 import { Route as RoutingIndexRouteImport } from './routes/routing.index'
 import { Route as RoutingNameRouteImport } from './routes/routing.$name'
 import { Route as ToolsIndexRouteImport } from './routes/tools.index'
@@ -51,6 +52,8 @@ import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-exec
 import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
 import { Route as ToolsMcpServersRouteImport } from './routes/tools.mcp-servers'
 import { Route as ToolsWebSearchRouteImport } from './routes/tools.web-search'
+import { Route as WorkspacesIndexRouteImport } from './routes/workspaces.index'
+import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
@@ -227,6 +230,12 @@ const OrganizationUsageRoute = OrganizationUsageRouteImport.update({
   path: '/usage',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const OrganizationWebSearchKeysRoute =
+  OrganizationWebSearchKeysRouteImport.update({
+    id: '/web-search-keys',
+    path: '/web-search-keys',
+    getParentRoute: () => OrganizationRoute,
+  } as any)
 const RoutingIndexRoute = RoutingIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -262,6 +271,16 @@ const ToolsWebSearchRoute = ToolsWebSearchRouteImport.update({
   path: '/web-search',
   getParentRoute: () => ToolsRoute,
 } as any)
+const WorkspacesIndexRoute = WorkspacesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => WorkspacesRoute,
+} as any)
+const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
+  id: '/$workspaceId',
+  path: '/$workspaceId',
+  getParentRoute: () => WorkspacesRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/$': typeof SplatRoute
@@ -281,7 +300,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
-  '/workspaces': typeof WorkspacesRoute
+  '/workspaces': typeof WorkspacesRouteWithChildren
   '/requests': typeof OverviewRequestsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
@@ -296,15 +315,18 @@ export interface FileRoutesByFullPath {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
+  '/workspaces/': typeof WorkspacesIndexRoute
 }
 export interface FileRoutesByTo {
   '/$': typeof SplatRoute
@@ -319,7 +341,6 @@ export interface FileRoutesByTo {
   '/playground': typeof PlaygroundRoute
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
-  '/workspaces': typeof WorkspacesRoute
   '/requests': typeof OverviewRequestsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
@@ -334,16 +355,19 @@ export interface FileRoutesByTo {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/': typeof OverviewIndexRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
   '/routing': typeof RoutingIndexRoute
   '/tools': typeof ToolsIndexRoute
+  '/workspaces': typeof WorkspacesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -364,7 +388,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
-  '/workspaces': typeof WorkspacesRoute
+  '/workspaces': typeof WorkspacesRouteWithChildren
   '/_overview/requests': typeof OverviewRequestsRoute
   '/_overview/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
@@ -379,16 +403,19 @@ export interface FileRoutesById {
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/organization/usage': typeof OrganizationUsageRoute
+  '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/_overview/': typeof OverviewIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
+  '/workspaces/': typeof WorkspacesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -425,15 +452,18 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/organization/web-search-keys'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/workspaces/$workspaceId'
     | '/models/'
     | '/organization/'
     | '/routing/'
     | '/tools/'
+    | '/workspaces/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/$'
@@ -448,7 +478,6 @@ export interface FileRouteTypes {
     | '/playground'
     | '/settings'
     | '/usage'
-    | '/workspaces'
     | '/requests'
     | '/sessions'
     | '/admin/accounts'
@@ -463,16 +492,19 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/organization/web-search-keys'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/workspaces/$workspaceId'
     | '/'
     | '/models'
     | '/organization'
     | '/routing'
     | '/tools'
+    | '/workspaces'
   id:
     | '__root__'
     | '/$'
@@ -507,16 +539,19 @@ export interface FileRouteTypes {
     | '/organization/pricing'
     | '/organization/provider-keys'
     | '/organization/usage'
+    | '/organization/web-search-keys'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/workspaces/$workspaceId'
     | '/_overview/'
     | '/models/'
     | '/organization/'
     | '/routing/'
     | '/tools/'
+    | '/workspaces/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -537,7 +572,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
   UsageRoute: typeof UsageRoute
-  WorkspacesRoute: typeof WorkspacesRoute
+  WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AdminAccountsRoute: typeof AdminAccountsRoute
   AdminCodeExecutionRoute: typeof AdminCodeExecutionRoute
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
@@ -792,6 +827,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationUsageRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/organization/web-search-keys': {
+      id: '/organization/web-search-keys'
+      path: '/web-search-keys'
+      fullPath: '/organization/web-search-keys'
+      preLoaderRoute: typeof OrganizationWebSearchKeysRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
     '/routing/': {
       id: '/routing/'
       path: '/'
@@ -841,6 +883,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ToolsWebSearchRouteImport
       parentRoute: typeof ToolsRoute
     }
+    '/workspaces/': {
+      id: '/workspaces/'
+      path: '/'
+      fullPath: '/workspaces/'
+      preLoaderRoute: typeof WorkspacesIndexRouteImport
+      parentRoute: typeof WorkspacesRoute
+    }
+    '/workspaces/$workspaceId': {
+      id: '/workspaces/$workspaceId'
+      path: '/$workspaceId'
+      fullPath: '/workspaces/$workspaceId'
+      preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
+      parentRoute: typeof WorkspacesRoute
+    }
   }
 }
 
@@ -880,6 +936,7 @@ interface OrganizationRouteChildren {
   OrganizationPricingRoute: typeof OrganizationPricingRoute
   OrganizationProviderKeysRoute: typeof OrganizationProviderKeysRoute
   OrganizationUsageRoute: typeof OrganizationUsageRoute
+  OrganizationWebSearchKeysRoute: typeof OrganizationWebSearchKeysRoute
   OrganizationIndexRoute: typeof OrganizationIndexRoute
 }
 
@@ -890,6 +947,7 @@ const OrganizationRouteChildren: OrganizationRouteChildren = {
   OrganizationPricingRoute: OrganizationPricingRoute,
   OrganizationProviderKeysRoute: OrganizationProviderKeysRoute,
   OrganizationUsageRoute: OrganizationUsageRoute,
+  OrganizationWebSearchKeysRoute: OrganizationWebSearchKeysRoute,
   OrganizationIndexRoute: OrganizationIndexRoute,
 }
 
@@ -928,6 +986,20 @@ const ToolsRouteChildren: ToolsRouteChildren = {
 
 const ToolsRouteWithChildren = ToolsRoute._addFileChildren(ToolsRouteChildren)
 
+interface WorkspacesRouteChildren {
+  WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
+  WorkspacesIndexRoute: typeof WorkspacesIndexRoute
+}
+
+const WorkspacesRouteChildren: WorkspacesRouteChildren = {
+  WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,
+  WorkspacesIndexRoute: WorkspacesIndexRoute,
+}
+
+const WorkspacesRouteWithChildren = WorkspacesRoute._addFileChildren(
+  WorkspacesRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   SplatRoute: SplatRoute,
   OverviewRoute: OverviewRouteWithChildren,
@@ -946,7 +1018,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,
   UsageRoute: UsageRoute,
-  WorkspacesRoute: WorkspacesRoute,
+  WorkspacesRoute: WorkspacesRouteWithChildren,
   AdminAccountsRoute: AdminAccountsRoute,
   AdminCodeExecutionRoute: AdminCodeExecutionRoute,
   AdminHostedProvidersRoute: AdminHostedProvidersRoute,

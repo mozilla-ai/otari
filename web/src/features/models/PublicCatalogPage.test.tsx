@@ -61,6 +61,7 @@ const GLM_DETAIL: CatalogModelDetail = {
       provider_type: "nebius",
       credential: "deployment",
       discovered: true,
+      zero_data_retention: false,
       context_window: 200_000,
       max_output_tokens: 128_000,
       quantization: null,
@@ -70,7 +71,7 @@ const GLM_DETAIL: CatalogModelDetail = {
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
         pricing_tiers: [],
-        unit: "tokens",
+        unit: "token",
       },
       price_source: "defaults",
       price_reference: "nebius:GLM-5.3",
@@ -82,6 +83,7 @@ const GLM_DETAIL: CatalogModelDetail = {
       provider_type: "fireworks",
       credential: "deployment",
       discovered: true,
+      zero_data_retention: false,
       context_window: 131_072,
       max_output_tokens: 16_384,
       quantization: null,
@@ -167,6 +169,25 @@ describe("PublicCatalogPage", () => {
         String(url).includes(`${API_ROOT}/organizations/me`),
       ),
     ).toBe(false)
+  })
+
+  it("opens filtered on the list a link names", async () => {
+    const fetchMock = mockApi()
+    window.location.hash = "#/models?provider=mistral&provider=nebius&q=glm"
+    renderPage()
+
+    await screen.findByRole("list", { name: "Models" })
+    const requested = fetchMock.mock.calls
+      .map(([url]) => new URL(String(url), "http://localhost"))
+      .filter((url) => url.pathname.endsWith("/catalog/models"))
+    expect(requested.length).toBeGreaterThan(0)
+    for (const url of requested) {
+      expect(url.searchParams.getAll("provider")).toEqual(["mistral", "nebius"])
+      expect(url.searchParams.get("search")).toBe("glm")
+    }
+    expect(screen.getByRole("searchbox", { name: /search/i })).toHaveValue(
+      "glm",
+    )
   })
 
   it("shows a model's offerings without the links that need a session", async () => {

@@ -119,7 +119,7 @@ def test_a_rate_and_a_settled_cost_round_trip_as_the_same_decimal(test_db: Sessi
     test_db.commit()
     test_db.expunge_all()
 
-    stored = test_db.execute(select(ModelPricing)).scalars().one()
+    stored = test_db.execute(select(ModelPricing).where(ModelPricing.kind == "model")).scalars().one()
     settled = test_db.get(UsageLog, "settled-1")
 
     assert stored.input_price_per_million == Decimal("0.15")

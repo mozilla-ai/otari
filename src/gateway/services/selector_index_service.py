@@ -14,7 +14,6 @@ import asyncio
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Set
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,8 +51,10 @@ from gateway.services.pricing_service import (
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.tenancy.organization_model_access import (
     resolve_all_organizations_offered_keys,
+    resolve_all_organizations_slug_providers,
     workspace_organizations,
 )
+from gateway.types.models_dev import ModelsDevCatalog
 
 
 def split_offering_selector(obj: ModelObject) -> tuple[str, str]:
@@ -76,10 +77,19 @@ def real_offerings(merged: MergedCatalog) -> list[ModelObject]:
 
 
 def seed_for(
-    config: GatewayConfig, catalog: dict[str, Any] | None, selector: str, instance: str, model_id: str
+    config: GatewayConfig,
+    catalog: ModelsDevCatalog | None,
+    selector: str,
+    instance: str,
+    model_id: str,
+    slug_providers: Mapping[str, str] | None = None,
 ) -> tuple[OfferingSeed, ModelCatalogEntry | None, str]:
-    """One selector's identity seed, its models.dev entry, and the provider type behind the instance."""
-    provider_type = config.provider_instance_type(instance)
+    """One selector's identity seed, its models.dev entry, and the provider type behind the instance.
+
+    ``slug_providers`` maps the viewing organization's key slugs to their
+    provider, since a slug is no configured instance.
+    """
+    provider_type = (slug_providers or {}).get(instance) or config.provider_instance_type(instance)
     metadata = metadata_entry(catalog, provider_type, model_id)
     seed = OfferingSeed(
         selector=selector,
@@ -92,11 +102,14 @@ def seed_for(
 
 
 def offering_seed(
-    config: GatewayConfig, catalog: dict[str, Any] | None, obj: ModelObject
+    config: GatewayConfig,
+    catalog: ModelsDevCatalog | None,
+    obj: ModelObject,
+    slug_providers: Mapping[str, str] | None = None,
 ) -> tuple[OfferingSeed, ModelCatalogEntry | None, str, str, str]:
     """One offering's identity seed, with the facts the seed was read from."""
     instance, model_id = split_offering_selector(obj)
-    seed, metadata, provider_type = seed_for(config, catalog, obj.id, instance, model_id)
+    seed, metadata, provider_type = seed_for(config, catalog, obj.id, instance, model_id, slug_providers)
     return seed, metadata, instance, model_id, provider_type
 
 
@@ -112,7 +125,7 @@ def answered_by_listing(model_id: str, aliases: Mapping[str, str]) -> bool:
 
 def models_by_identity(
     config: GatewayConfig,
-    catalog: dict[str, Any] | None,
+    catalog: ModelsDevCatalog | None,
     listed: Iterable[ModelObject],
     *,
     organization_id: uuid.UUID | None = None,
@@ -206,7 +219,7 @@ def _organization_rate(
 async def _organization_views(
     db: AsyncSession,
     config: GatewayConfig,
-    catalog: dict[str, Any] | None,
+    catalog: ModelsDevCatalog | None,
     rows: list[OfferingRow],
     seeds: list[OfferingSeed],
 ) -> dict[uuid.UUID, OrganizationSelectors]:
@@ -220,6 +233,7 @@ async def _organization_views(
     offered = await resolve_all_organizations_offered_keys(db)
     if not offered:
         return {}
+    slug_providers = await resolve_all_organizations_slug_providers(db)
     as_of = normalize_effective_at(None)
     deployment_rates = {row.selector: row.input_rate for row in rows}
     deployment_full = frozenset(deployment_rates)
@@ -228,7 +242,9 @@ async def _organization_views(
         own_seeds: list[tuple[OfferingSeed, str]] = []
         for selector in sorted(keys - deployment_full):
             instance, _separator, model_id = selector.partition(":")
-            seed, _metadata, _provider_type = seed_for(config, catalog, selector, instance, model_id)
+            seed, _metadata, _provider_type = seed_for(
+                config, catalog, selector, instance, model_id, slug_providers.get(organization_id)
+            )
             own_seeds.append((seed, instance))
         union = group_offerings([*seeds, *(seed for seed, _instance in own_seeds)])
         touched = {identity for identity in union.values() if any(selector in keys for selector in identity.selectors)}

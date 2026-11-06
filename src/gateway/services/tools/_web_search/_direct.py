@@ -12,12 +12,10 @@ its own allowlist, budget and usage steps.
   with that key's provider and options, under the rate key
   ``otari:web_search``. The count is capped at the policy's ``max_results``;
   the policy's provider options are not applied.
-- :func:`refuse_unpriced_direct_search` raises
-  :class:`DirectSearchPricingRequiredError` when ``require_pricing`` is on,
-  the key is not exempt from budgets, and no pricing row prices the call.
+- :func:`unpriced_direct_search_detail` names the row ``require_pricing``
+  needs, for the 402 a direct tool call answers when none prices it.
 - :func:`run_direct_search` calls the provider through any-search, or through
-  the SearXNG client for a ``searxng`` instance and the Tavily or Brave client
-  for an organization key on those providers.
+  the Tavily or Brave client for an organization key on those providers.
 
 Whichever key serves the call, the instance supplies the allowlist entry, the
 rate-limit rules, the timeout, the usage row's names and the response's
@@ -32,8 +30,10 @@ import httpx
 import any_search
 from gateway.core.config import API_ROOT
 from gateway.core.settings.tools import (
+    BUILTIN_FETCH,
     NO_SEARCH_DEFAULT,
     ToolInstance,
+    ToolKind,
     ToolSettings,
     configured_search_default,
     effective_search_instances,
@@ -41,7 +41,6 @@ from gateway.core.settings.tools import (
 from gateway.exceptions.tools_exceptions import (
     DirectSearchFailedError,
     DirectSearchFieldRefusedError,
-    DirectSearchPricingRequiredError,
     SearchToolMisconfiguredError,
     SearchToolSelectionError,
 )
@@ -116,6 +115,17 @@ def pick_direct_search_instance(config: ToolSettings, name: str | None) -> ToolI
 
 def _requires_key(provider: str) -> bool:
     return any_search.AnySearch.get_provider_metadata(provider).requires_api_key
+
+
+def unnamed_direct_search_tool(config: ToolSettings) -> str | None:
+    """The search instance a direct search that names none runs on, or ``None`` when that search is refused.
+
+    It is refused when there is no instance to pick, or when the one picked cannot run.
+    """
+    try:
+        return pick_direct_search_instance(config, None).name
+    except (SearchToolSelectionError, SearchToolMisconfiguredError):
+        return None
 
 
 def _default_instance(config: ToolSettings, instances: dict[str, ToolInstance]) -> str:
@@ -193,35 +203,25 @@ def resolve_direct_search(
     )
 
 
-def refuse_unpriced_direct_search(
-    search: DirectSearch, *, priced: bool, require_pricing: bool, budget_exempt: bool
-) -> None:
-    """Refuse a direct search that ``require_pricing`` cannot bill.
+def unpriced_direct_search_detail(search: DirectSearch) -> str:
+    """The 402's message for a search ``require_pricing`` cannot bill: the row to add, and where.
 
-    ``priced`` says one of the call's rate keys found a pricing row. For an
-    instance's own price, or the ``<provider>:<instance>`` row it was priced
-    under before it had a kind, only the operator's price or override counts,
-    since the deployment pays for the call; for ``otari:web_search``,
-    the organization's own override counts too. The search is refused when
-    ``require_pricing`` is on and nothing priced it, even if the provider
-    reports its own cost; a zero rate is a price. Two calls pass unpriced: one
-    on a key exempt from budgets, which is never debited, and one with no rate
-    keys, which this gateway does not settle. Raises :class:`DirectSearchPricingRequiredError`, whose message
-    names the row to add.
+    For an instance's own price, or the ``<provider>:<instance>`` row it was
+    priced under before it had a kind, only the operator's price or override
+    counts, since the deployment pays for the call; for ``otari:web_search``,
+    the organization's own override counts too.
     """
-    rate_keys = search.resolved.rate_keys
-    if priced or not require_pricing or budget_exempt or not rate_keys:
-        return
-    raise DirectSearchPricingRequiredError(
-        _unpriced_detail(search.instance.name, rate_keys[0], organization_key=search.resolved.on_credential)
+    return direct_unpriced_detail(
+        "search", search.instance.name, search.resolved.rate_keys[0], organization_key=search.resolved.on_credential
     )
 
 
-def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
-    """The 402's message: the price ``rate_key`` names for a search on ``tool``, and where to set it.
+def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
+    """The 402's message: the price ``rate_key`` names for a ``kind`` call on ``tool``, and where to set it.
 
     Both can be set on the dashboard's Web search pricing page or through the
-    API, and an instance declared in the configuration file by its ``price_per_call``.
+    API, and an instance declared in the configuration file by its
+    ``price_per_call``, which ``builtin_fetch`` has no entry for.
     """
     if organization_key:
         missing = f"is priced at {describe_rate_key(rate_key)}, which has no pricing"
@@ -232,27 +232,29 @@ def _unpriced_detail(tool: str, rate_key: RateKey, *, organization_key: bool) ->
     else:
         # The deployment pays for the call, so an organization's own override does not count.
         missing = "has no price the deployment's operator set"
+        in_config = (
+            "" if tool == BUILTIN_FETCH else ", or with price_per_call on its entry if it is declared in config.yml"
+        )
         how = (
             f"Set one on the dashboard's Web search pricing page, with POST {API_ROOT}/pricing using kind "
-            "'search' and the tool's name as model_key, or with price_per_call on its entry if it is declared "
-            "in config.yml"
+            f"'{kind}' and the tool's name as model_key{in_config}"
         )
+    plural = "searches" if kind == "search" else "fetches"
     return (
-        f"A search on '{tool}' {missing}, and require_pricing is on, so it is not run. "
-        f"{how}; a zero rate is valid. Or set require_pricing to false to serve searches unpriced."
+        f"A {kind} on '{tool}' {missing}, and require_pricing is on, so it is not run. "
+        f"{how}; a zero rate is valid. Or set require_pricing to false to serve {plural} unpriced."
     )
 
 
 async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     """Run a direct search through the app's web provider client.
 
-    The call runs on any-search for a library-backed provider, on the SearXNG
-    client for a ``searxng`` instance, and on the Tavily or Brave client for an
+    The call runs on any-search, or on the Tavily or Brave client for an
     organization key on those providers. Raises :class:`DirectSearchFailedError`
     when the provider fails the call, an error inside a successful answer
     included. Its message, for the usage row and the log, holds only the
-    failure's safe fields, since the SearXNG, Tavily and Brave clients' own text
-    can quote the upstream body or a URL carrying the query.
+    failure's safe fields, since the Tavily and Brave clients' own text can
+    quote the upstream body.
     """
     # Imported here: the old clients' module imports this package's root.
     from gateway.services.search_backend import SearchProviderError
@@ -298,14 +300,12 @@ async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> Dir
 
 async def _on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     # Imported here, as in run_direct_search; looked up on each call, so a test that stubs a client still reaches it.
-    from gateway.services.search_backend import run_keyed_search, run_search, search_tool
+    from gateway.services.search_backend import run_keyed_search
 
-    if search.credential is not None:
-        outcome = await run_keyed_search(
-            search.credential, search.query, timeout_s=search.resolved.timeout, client=client
-        )
-    else:
-        outcome = await run_search(search_tool(search.resolved), search.query, client=client)
+    if search.credential is None:
+        # Unreachable: only an organization key on Tavily or Brave runs on the old client.
+        raise SearchToolMisconfiguredError(search.instance.name)
+    outcome = await run_keyed_search(search.credential, search.query, timeout_s=search.resolved.timeout, client=client)
     return DirectSearchResult(
         response=SearchResponse(
             search_tool=search.instance.name,

@@ -275,3 +275,92 @@ class CountryDatabaseStatus(BaseModel):
     client_country_database_set: bool = Field(
         description="Whether `client_country_database` names a file. That file is read, and a stored one is not."
     )
+
+
+class ImageEditForm(BaseModel):
+    """The text fields of an image edit request.
+
+    Declared by hand: ``derive_request_base`` cannot build a model from
+    ``ImageEditParams``, whose ``image`` is a file type pydantic has no schema
+    for. ``test_edit_form_accepts_every_image_edit_param`` fails when any-llm
+    adds a field the edit route does not accept. The files are read separately.
+    """
+
+    model: str
+    prompt: str
+    n: int | None = Field(default=None, ge=1)
+    size: str | None = None
+    quality: str | None = None
+    # any-llm types this as a ``Literal['url', 'b64_json']``; keep the permissive
+    # ``str`` the generation route accepts.
+    response_format: str | None = None
+    user: str | None = None
+
+
+class VideoGenerationRequest(BaseModel):
+    """Start a video generation job.
+
+    The fields are any-llm's ``VideoGenerationParams``, its ``model_id`` as
+    ``model``; a field any-llm adds fails a test until the route accepts it.
+    ``seconds`` is the length asked for, which the provider may round.
+    """
+
+    model: str
+    prompt: str
+    # An hour is far above any provider's longest video, and keeps the estimate's arithmetic in range.
+    seconds: int | None = Field(default=None, ge=1, le=3600)
+    size: str | None = None
+    resolution: str | None = None
+    aspect_ratio: str | None = None
+    seed: int | None = None
+    negative_prompt: str | None = None
+    reference_images: list[str] | None = None
+    reference_audios: list[str] | None = None
+    first_frame: str | None = None
+    last_frame: str | None = None
+    user: str | None = None
+
+
+VideoJobStatus = Literal["queued", "in_progress", "completed", "failed"]
+
+
+class VideoError(BaseModel):
+    """Why a video job failed, in the provider's words."""
+
+    message: str
+    code: str | None = None
+
+
+class VideoJobResponse(BaseModel):
+    """A video generation job as the provider reports it, in the shape of OpenAI's video object."""
+
+    id: str
+    object: Literal["video"] = "video"
+    model: str
+    provider: str
+    status: VideoJobStatus
+    created_at: int | None = None
+    completed_at: int | None = None
+    progress: int | None = None
+    seconds: int | None = None
+    size: str | None = None
+    error: VideoError | None = None
+
+
+class VideoJobSummary(BaseModel):
+    """One job the gateway started, from its own records: what it knows without asking the provider."""
+
+    id: str
+    object: Literal["video"] = "video"
+    model: str
+    provider: str
+    created_at: datetime
+    seconds: int | None = Field(description="The length the request asked for, in seconds, when it named one.")
+    billed: bool = Field(description="Whether a retrieval has found the job completed and billed it.")
+
+
+class VideoJobList(BaseModel):
+    """The caller's video jobs, newest first."""
+
+    object: Literal["list"] = "list"
+    data: list[VideoJobSummary]

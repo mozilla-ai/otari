@@ -7,8 +7,7 @@ row and wrong on the budget is still a billing bug.
 """
 
 import time
-from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Generator
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -26,9 +25,8 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
-from gateway.services.budgets import reserve_budget
 
-from .conftest import build_test_client
+from .conftest import build_test_client, held_reservations
 
 USER_ID = "passthrough-pricing-user"
 
@@ -42,6 +40,11 @@ def _price(client: TestClient, headers: dict[str, str], model: str, *, unit: str
     assert response.status_code == 200, response.text
 
 
+def _price_rates(client: TestClient, headers: dict[str, str], model: str, rates: dict[str, Any]) -> None:
+    response = client.post(f"{API_ROOT}/pricing", json={"model_key": model, "rates": rates}, headers=headers)
+    assert response.status_code == 200, response.text
+
+
 def _user_key(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
     budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 100.0}, headers=headers)
     assert budget.status_code == 200, budget.text
@@ -52,19 +55,6 @@ def _user_key(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
     key = client.post(f"{API_ROOT}/keys", json={"key_name": "pricing", "user_id": USER_ID}, headers=headers)
     assert key.status_code == 200, key.text
     return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
-
-
-@contextmanager
-def _held() -> Iterator[list[Decimal]]:
-    """Every amount the request reserved before calling the provider."""
-    held: list[Decimal] = []
-
-    async def capture(*args: Any, **kwargs: Any) -> Any:
-        held.append(Decimal(str(args[2])))
-        return await reserve_budget(*args, **kwargs)
-
-    with patch("gateway.api.routes._passthrough.reserve_budget", side_effect=capture):
-        yield held
 
 
 def _row(make_session: Callable[[], Session], *, timeout: float = 3.0) -> UsageLog:
@@ -91,23 +81,99 @@ def _images(n: int, usage: ImageUsage | None = None) -> ImagesResponse:
     return ImagesResponse(created=0, data=[Image(url=f"https://example.com/{i}.png") for i in range(n)], usage=usage)
 
 
-def _generate(client: TestClient, headers: dict[str, str], result: ImagesResponse, *, n: int) -> Any:
+def _generate(
+    client: TestClient, headers: dict[str, str], result: ImagesResponse, *, n: int, size: str | None = None
+) -> Any:
+    body: dict[str, Any] = {"model": "openai:dall-e-3", "prompt": "a cat", "n": n}
+    if size is not None:
+        body["size"] = size
     with patch("gateway.api.routes.images.aimage_generation", new=AsyncMock(return_value=result)):
+        return client.post(f"{API_ROOT}/images/generations", json=body, headers=headers)
+
+
+def test_a_megapixel_rate_holds_and_settles_the_pixels_of_the_size_asked_for(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Three 1024x1024 images held, two settled, each 1.048576 megapixels at $0.05."""
+    _price_rates(
+        client, master_key_header, "openai:dall-e-3", {"image": {"output": {"price": 0.05, "unit": "megapixel"}}}
+    )
+    headers = _user_key(client, master_key_header)
+
+    with held_reservations() as held:
+        response = _generate(client, headers, _images(2), n=3, size="1024x1024")
+
+    assert response.status_code == 200, response.text
+    assert held == [Decimal("0.157286")]
+    row = _row(db_session_factory)
+    assert row.cost == Decimal("0.104858")
+    assert row.billing_meters == {"megapixels": 2.097152}
+    assert row.pricing_breakdown == [
+        {"meter": "megapixels", "units": 2.097152, "unit": "megapixel", "unit_rate": 0.05, "cost": 0.1048576}
+    ]
+    _settled(client, master_key_header, 0.104858)
+
+
+def test_a_megapixel_rate_prices_nothing_an_image_of_no_stated_size(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """A size the request does not name measures no pixels, so the row keeps no cost rather than a guess."""
+    _price_rates(
+        client, master_key_header, "openai:dall-e-3", {"image": {"output": {"price": 0.05, "unit": "megapixel"}}}
+    )
+    headers = _user_key(client, master_key_header)
+
+    with held_reservations() as held:
+        response = _generate(client, headers, _images(1), n=1, size="auto")
+
+    assert response.status_code == 200, response.text
+    assert held == [Decimal(0)]
+    assert _row(db_session_factory).cost is None
+    _settled(client, master_key_header, 0.0)
+
+
+def _speak(client: TestClient, headers: dict[str, str], text: str) -> Any:
+    with patch("gateway.api.routes.audio.aspeech", new=AsyncMock(return_value=b"audio")):
         return client.post(
-            f"{API_ROOT}/images/generations",
-            json={"model": "openai:dall-e-3", "prompt": "a cat", "n": n},
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": text, "voice": "alloy"},
             headers=headers,
         )
+
+
+def test_a_character_rate_holds_and_settles_the_characters_spoken(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """Eleven characters at $15 per million, held before the call and settled after it."""
+    _price_rates(client, master_key_header, "openai:tts-1", {"text": {"input": {"price": 15, "unit": "character"}}})
+    headers = _user_key(client, master_key_header)
+
+    with held_reservations() as held:
+        response = _speak(client, headers, "Hello world")
+
+    assert response.status_code == 200, response.text
+    assert held == [Decimal("0.000165")]
+    assert response.headers["Otari-Cost-USD"] == "0.000165"
+    assert response.headers["Otari-Pricing-Source"] == "deployment"
+    assert response.headers["Otari-Usage-Unit"] == "characters"
+    assert response.headers["Otari-Usage-Units"] == "11"
+    row = _row(db_session_factory)
+    assert row.cost == Decimal("0.000165")
+    assert row.billing_meters == {"characters": 11}
+    assert row.pricing_breakdown == [
+        {"meter": "characters", "units": 11, "unit": "character", "rate_per_million": 15.0, "cost": 0.000165}
+    ]
+    _settled(client, master_key_header, 0.000165)
 
 
 def test_an_images_rate_holds_the_requested_images_and_settles_the_returned_ones(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     # $0.04 an image, per million images: what the dashboard stores for $40 per 1,000.
-    _price(client, master_key_header, "openai:dall-e-3", unit="images", rate=40000.0)
+    _price(client, master_key_header, "openai:dall-e-3", unit="image", rate=40000.0)
     headers = _user_key(client, master_key_header)
 
-    with _held() as held:
+    with held_reservations() as held:
         response = _generate(client, headers, _images(2), n=3)
 
     assert response.status_code == 200, response.text
@@ -116,15 +182,17 @@ def test_an_images_rate_holds_the_requested_images_and_settles_the_returned_ones
     assert row.cost == Decimal("0.08")
     assert row.pricing_source == "deployment"
     assert row.billing_meters == {"images": 2}
-    assert row.pricing_breakdown == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": 0.08}]
+    assert row.pricing_breakdown == [{"meter": "images", "units": 2, "unit": "image", "unit_rate": 0.04, "cost": 0.08}]
+    # The response carries what the row records, as a completion's usage does.
+    assert response.json()["usage"] == {"cost_usd": f"{row.cost:.6f}", "pricing_source": row.pricing_source}
     _settled(client, master_key_header, 0.08)
 
 
-def test_a_token_rate_on_images_keeps_its_per_image_reading_and_records_the_tokens(
+def test_a_token_rate_on_images_prices_the_tokens_it_reports(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    """The legacy reading: the money a configuration produced before the rate's unit decided."""
-    _price(client, master_key_header, "openai:dall-e-3", unit="tokens", rate=0.04)
+    """A token rate reads as tokens on every endpoint: nothing is held by count, and the tokens settle."""
+    _price(client, master_key_header, "openai:dall-e-3", unit="token", rate=0.04)
     headers = _user_key(client, master_key_header)
     usage = ImageUsage(
         input_tokens=50,
@@ -133,26 +201,32 @@ def test_a_token_rate_on_images_keeps_its_per_image_reading_and_records_the_toke
         input_tokens_details=UsageInputTokensDetails(image_tokens=0, text_tokens=50),
     )
 
-    with _held() as held:
+    with held_reservations() as held:
         response = _generate(client, headers, _images(1, usage), n=1)
 
     assert response.status_code == 200, response.text
-    assert held == [Decimal("0.04")]
+    assert held == [Decimal(0)]
     row = _row(db_session_factory)
-    assert row.cost == Decimal("0.04")
-    assert row.billing_meters == {"images": 1}
+    assert row.cost == Decimal("0.000002")
+    assert row.billing_meters is not None and row.billing_meters["total_input_tokens"] == 50
     assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (50, 4160, 4210)
-    _settled(client, master_key_header, 0.04)
+    # The provider's token counts stay on ``usage``, with the settled cost beside them.
+    assert response.json()["usage"] == {
+        **usage.model_dump(),
+        "cost_usd": f"{row.cost:.6f}",
+        "pricing_source": row.pricing_source,
+    }
+    _settled(client, master_key_header, 0.000002)
 
 
 def test_a_requests_rate_on_images_bills_one_request_not_its_rate_per_image(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     """A per-request price read as dollars per image billed a million times too much."""
-    _price(client, master_key_header, "openai:dall-e-3", unit="requests", rate=2000.0)
+    _price(client, master_key_header, "openai:dall-e-3", unit="request", rate=2000.0)
     headers = _user_key(client, master_key_header)
 
-    with _held() as held:
+    with held_reservations() as held:
         response = _generate(client, headers, _images(2), n=2)
 
     assert response.status_code == 200, response.text
@@ -175,7 +249,7 @@ def _rerank(client: TestClient, headers: dict[str, str], result: RerankResponse,
 def test_rerank_holds_the_search_units_its_documents_imply_and_settles_the_billed_ones(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    _price(client, master_key_header, "cohere:rerank-v3.5", unit="requests", rate=2000.0)
+    _price(client, master_key_header, "cohere:rerank-v3.5", unit="request", rate=2000.0)
     headers = _user_key(client, master_key_header)
     result = RerankResponse(
         id="r",
@@ -184,7 +258,7 @@ def test_rerank_holds_the_search_units_its_documents_imply_and_settles_the_bille
         meta=RerankMeta(billed_units={"search_units": 3}),
     )
 
-    with _held() as held:
+    with held_reservations() as held:
         response = _rerank(client, headers, result, ["short document"] * 250)
 
     assert response.status_code == 200, response.text
@@ -212,7 +286,7 @@ def test_a_requests_rate_on_embeddings_bills_one_request_not_the_tokens(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     """A per-call price multiplied by the token count billed a thousand calls for one."""
-    _price(client, master_key_header, "openai:text-embedding-3-small", unit="requests", rate=5000.0)
+    _price(client, master_key_header, "openai:text-embedding-3-small", unit="request", rate=5000.0)
     headers = _user_key(client, master_key_header)
 
     response = _embed(client, headers)
@@ -236,31 +310,32 @@ def _transcribe(client: TestClient, headers: dict[str, str]) -> Any:
         )
 
 
-def test_an_unpriced_transcription_is_recorded_free(
+def test_an_unpriced_transcription_is_recorded_with_no_cost(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
+    """A missing cost is unknown, not free, so the row keeps none and the needs-pricing view lists it."""
     headers = _user_key(client, master_key_header)
 
     response = _transcribe(client, headers)
 
     assert response.status_code == 200, response.text
     row = _row(db_session_factory)
-    assert row.cost == Decimal(0)
+    assert row.cost is None
     assert row.billing_meters is None
     _settled(client, master_key_header, 0.0)
 
 
-def test_an_images_rate_on_a_per_request_endpoint_settles_free_rather_than_per_image(
+def test_an_images_rate_on_a_per_request_endpoint_settles_unpriced_rather_than_per_image(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    """The rate cannot price a request, and this endpoint's unpriced is free: never the rate read per image."""
-    _price(client, master_key_header, "openai:whisper-1", unit="images", rate=0.5)
+    """The rate cannot price a request, so the row keeps no cost: never the rate read per image."""
+    _price(client, master_key_header, "openai:whisper-1", unit="image", rate=0.5)
     headers = _user_key(client, master_key_header)
 
     response = _transcribe(client, headers)
 
     assert response.status_code == 200, response.text
-    assert _row(db_session_factory).cost == Decimal(0)
+    assert _row(db_session_factory).cost is None
     _settled(client, master_key_header, 0.0)
 
 
@@ -284,7 +359,7 @@ def strict_client(postgres_url: str) -> Generator[TestClient]:
 def test_require_pricing_refuses_a_rate_the_endpoint_cannot_settle(strict_client: TestClient) -> None:
     """An images rate on embeddings would settle unpriced; it is refused before the provider is called."""
     master = {API_KEY_HEADER: "Bearer test-master-key"}
-    _price(strict_client, master, "openai:text-embedding-3-small", unit="images", rate=0.04)
+    _price(strict_client, master, "openai:text-embedding-3-small", unit="image", rate=0.04)
     headers = _user_key(strict_client, master)
     provider = AsyncMock()
 
@@ -298,9 +373,85 @@ def test_require_pricing_refuses_a_rate_the_endpoint_cannot_settle(strict_client
     _settled(strict_client, master, 0.0)
 
 
+def test_require_pricing_refuses_a_measured_unit_the_request_cannot_measure(strict_client: TestClient) -> None:
+    """A per-megapixel rate cannot price an image of no stated size, so the request is refused before the call."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price_rates(strict_client, master, "openai:dall-e-3", {"image": {"output": {"price": 0.05, "unit": "megapixel"}}})
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock()
+
+    with patch("gateway.api.routes.images.aimage_generation", new=provider):
+        refused = strict_client.post(
+            f"{API_ROOT}/images/generations",
+            json={"model": "openai:dall-e-3", "prompt": "a cat", "size": "auto"},
+            headers=headers,
+        )
+    assert refused.status_code == 402, refused.text
+    provider.assert_not_called()
+
+    response = _generate(strict_client, headers, _images(1), n=1, size="1024x1024")
+    assert response.status_code == 200, response.text
+    _settled(strict_client, master, 0.052429)
+
+
+def test_require_pricing_refuses_an_unpriced_speech_model(strict_client: TestClient) -> None:
+    """Speech is no longer served without a rate: an unpriced model is refused before the provider is called."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock(return_value=b"audio")
+
+    with patch("gateway.api.routes.audio.aspeech", new=provider):
+        response = strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    assert response.headers["Otari-Error-Code"] == "pricing_required"
+    provider.assert_not_called()
+    _settled(strict_client, master, 0.0)
+
+
+def test_require_pricing_refuses_a_token_rate_on_speech(strict_client: TestClient) -> None:
+    """The audio reports no tokens, so a token rate would settle unpriced; it is refused instead."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price(strict_client, master, "openai:tts-1", unit="token", rate=0.6)
+    headers = _user_key(strict_client, master)
+    provider = AsyncMock(return_value=b"audio")
+
+    with patch("gateway.api.routes.audio.aspeech", new=provider):
+        response = strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": "openai:tts-1", "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    detail = response.json()["detail"]
+    assert detail.startswith("Model 'openai:tts-1' is priced per token, which this request cannot be billed on")
+    assert "price it per character or per request" in detail
+    assert "No pricing is configured" not in detail
+    provider.assert_not_called()
+    _settled(strict_client, master, 0.0)
+
+
+def test_require_pricing_admits_a_character_rate_on_speech(strict_client: TestClient) -> None:
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price(strict_client, master, "openai:tts-1", unit="character", rate=15.0)
+    headers = _user_key(strict_client, master)
+
+    response = _speak(strict_client, headers, "Hello world")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["Otari-Cost-USD"] == "0.000165"
+    assert response.headers["Otari-Usage-Units"] == "11"
+    _settled(strict_client, master, 0.000165)
+
+
 def test_require_pricing_admits_a_rate_the_endpoint_can_settle(strict_client: TestClient) -> None:
     master = {API_KEY_HEADER: "Bearer test-master-key"}
-    _price(strict_client, master, "openai:text-embedding-3-small", unit="tokens", rate=2.0)
+    _price(strict_client, master, "openai:text-embedding-3-small", unit="token", rate=2.0)
     headers = _user_key(strict_client, master)
 
     response = _embed(strict_client, headers)

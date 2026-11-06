@@ -11,7 +11,7 @@ unchanged, cache usage reaching the client).
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -684,16 +684,17 @@ def test_code_execution_dispatches_through_sandbox_backend(
 
 
 @pytest.mark.parametrize("tool_type", ["otari_web_search", "otari_web_fetch"])
-def test_managed_web_tool_dispatches_through_web_retrieval_backend(
+def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
     tool_type: str,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    """Managed web declarations route through the shared backend."""
+    """Managed web declarations route through the gateway's web backend."""
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    serve_search_on_fake()
 
     pool_seen: list[Any] = []
 
@@ -703,17 +704,16 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
         pool_seen.append(pool)
         return _text_response("via-web-search-loop")
 
-    fake_backend = AsyncMock()
-    fake_backend.purpose_hints = lambda: []
+    search_backend, fetch_backend = AsyncMock(), AsyncMock()
+    search_backend.purpose_hints = fetch_backend.purpose_hints = lambda: []
 
-    fake_builder_result = AsyncMock(
-        __aenter__=AsyncMock(return_value=fake_backend),
-        __aexit__=AsyncMock(return_value=None),
-    )
+    def opened(backend: Any) -> Any:
+        return AsyncMock(__aenter__=AsyncMock(return_value=backend), __aexit__=AsyncMock(return_value=None))
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[opened(search_backend)]),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=opened(fetch_backend)),
     ):
         resp = client.post(
             f"{API_ROOT}/messages",
@@ -728,7 +728,9 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
 
     assert resp.status_code == 200
     assert resp.json()["content"][0]["text"] == "via-web-search-loop"
-    assert pool_seen == [fake_backend], "loop didn't receive the WebSearchBackend"
+    # The search runs on its instance's backend, and a fetch alone on the shared one.
+    served = search_backend if tool_type == "otari_web_search" else fetch_backend
+    assert pool_seen == [served], "loop didn't receive the web backend"
 
 
 # ---------- provider-named keyword passthrough ----------
@@ -1644,11 +1646,12 @@ def test_intercept_routes_provider_keywords_to_the_gateway_backend(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     tool_entry: dict[str, Any],
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """With interception on, a provider-named declaration reaches WebSearchBackend
     instead of being forwarded, so a client that cannot say ``otari_web_search``
     still gets the gateway's search."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    serve_search_on_fake()
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
 
     pool_seen: list[Any] = []
@@ -1675,7 +1678,7 @@ def test_intercept_routes_provider_keywords_to_the_gateway_backend(
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[fake_builder_result]),
     ):
         resp = client.post(
             f"{API_ROOT}/messages",
@@ -1707,10 +1710,11 @@ def test_intercept_emits_native_blocks_only_for_a_native_declaration(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A dated keyword opts into native server-tool blocks; the bare short form and
     the canonical otari type do not."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    serve_search_on_fake()
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
 
     seen: list[frozenset[str]] = []
@@ -1731,7 +1735,7 @@ def test_intercept_emits_native_blocks_only_for_a_native_declaration(
     def post(tool_entry: dict[str, Any]) -> None:
         with (
             patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-            patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+            patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[fake_builder_result]),
         ):
             resp = client.post(
                 f"{API_ROOT}/messages",
@@ -1786,10 +1790,11 @@ def test_auto_claims_a_search_keyword_the_provider_cannot_run_with_native_blocks
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """With `Otari-Web-Search: auto`, a dated keyword sent for a model whose provider
     has no search runs on the gateway backend and still answers in Anthropic's blocks."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    serve_search_on_fake()
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
     seen: list[tuple[Any, frozenset[str]]] = []
 
@@ -1812,7 +1817,7 @@ def test_auto_claims_a_search_keyword_the_provider_cannot_run_with_native_blocks
     )
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[fake_builder_result]),
     ):
         resp = client.post(
             f"{API_ROOT}/messages",
@@ -1982,10 +1987,11 @@ def test_intercept_retargets_a_forced_tool_choice(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A tool_choice forcing the caller's own name must be repointed at the
     backend's tool, or the provider is asked to force a tool it never received."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    serve_search_on_fake()
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
 
     seen: list[Any] = []
@@ -2005,7 +2011,7 @@ def test_intercept_retargets_a_forced_tool_choice(
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[fake_builder_result]),
     ):
         resp = client.post(
             f"{API_ROOT}/messages",

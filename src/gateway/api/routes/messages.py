@@ -36,7 +36,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.error_body import BodyHTTPException
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
+from gateway.api.routes._helpers import latest_user_text, routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
     container_copies_step,
@@ -1018,9 +1018,8 @@ async def create_message(
             ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
-            routing_signal=lambda: routing_signal_from_messages(
-                request.messages, raw_request, has_tools=bool(request.tools)
-            ),
+            streaming=bool(request.stream),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             tools=request.tools,
             code_execution_policies=tool_ports.code_execution_policy,

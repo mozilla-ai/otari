@@ -34,7 +34,7 @@ exploit traffic against any mozilla.ai-operated infrastructure.
 
 ## Scope Notes for Operators
 
-otari is a self-hosted LLM gateway; several controls are configuration-dependent:
+otari is a self-hosted AI gateway; several controls are configuration-dependent:
 
 - **Pricing is required by default.** `require_pricing` defaults to `true`:
   requests for models with no configured pricing are rejected (HTTP 402) so an

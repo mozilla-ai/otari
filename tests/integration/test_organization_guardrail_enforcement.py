@@ -324,7 +324,9 @@ def test_a_monitor_entry_annotates_the_response_and_serves_it(
 
     assert response.status_code == 200
     summary = json.loads(response.headers["Otari-Guardrails"])
-    assert summary == [{"profile": "prompt-injection", "mode": "monitor", "valid": False, "score": None}]
+    assert summary == [
+        {"profile": "prompt-injection", "mode": "monitor", "valid": False, "score": None, "status": "evaluated"}
+    ]
 
 
 def test_a_caller_cannot_weaken_the_organizations_entry(
@@ -643,7 +645,9 @@ def test_a_monitor_mandate_on_a_definition_annotates_the_response(
 
     assert response.status_code == 200
     summary = json.loads(response.headers["Otari-Guardrails"])
-    assert summary == [{"profile": "prompt-injection", "mode": "monitor", "valid": False, "score": None}]
+    assert summary == [
+        {"profile": "prompt-injection", "mode": "monitor", "valid": False, "score": None, "status": "evaluated"}
+    ]
 
 
 def test_a_definition_this_worker_does_not_hold_fails_closed(

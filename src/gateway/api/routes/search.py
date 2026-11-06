@@ -16,24 +16,15 @@ rather than the multi-query array, and the filters with no field below
 are called out in ``docs/api-reference.md`` so a migrating caller can check for
 them.
 
-Which tool, which key and which count a request gets, and the call itself, on
-any-search or on an old client until any-search has the provider's adapter, are
+Which tool, which key and which count a request gets, and the call itself, are
 the tools services' (:func:`gateway.services.tools.resolve_direct_search` and
-:func:`gateway.services.tools.run_direct_search`); this module reads the
-request and its dependencies, gates, bills and logs.
+:func:`gateway.services.tools.run_direct_search`); the gates, the billing and
+the usage row are :class:`gateway.services.tools.DirectToolService`'s.
 
 Both the body-selected (``POST /api/v1/search``) and path-selected
 (``POST /api/v1/search/{search_tool_name}``) forms log ``endpoint="/v1/search"``,
 a frozen label rather than a path, so one Activity filter covers every search
 regardless of how the tool was named.
-
-A request the gateway itself turns away (an unknown or ambiguous tool name, a
-workspace that has web search switched off, a tool the caller's key may not use,
-an option the provider does not take) writes a usage row too, through the shared
-:func:`gateway.api.routes._pipeline.log_gateway_rejection` the pass-through
-routes use: refused traffic is dropped traffic, and it should be visible in
-Activity and countable as a failure rather than invisible outside the caller's
-own logs.
 
 Billing: search is priced per request, not per token, so a usage row carries
 zero tokens and a cost taken from the provider's own reported charge when it
@@ -48,92 +39,18 @@ refused with a 402 after the budget checks, even from a provider that reports
 its own cost; a key exempt from budgets is still served.
 """
 
-import time
-import uuid
-from datetime import UTC, datetime
-from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, Path, Request, Response
 
-from gateway.api.deps import (
-    BillingPortDep,
-    WebProviderClientDep,
-    WorkspaceWebSearchPoliciesDep,
-    get_api_key_service,
-    get_budget_service,
-    get_config,
-    get_db,
-    get_log_writer,
-    verify_api_key_or_master_key,
-)
-from gateway.api.request_id import set_request_id
-from gateway.api.routes._passthrough import (
-    PASSTHROUGH_PROVIDER_ERROR_DETAIL,
-    resolve_passthrough_user_id,
-)
-from gateway.api.routes._pipeline import (
-    FUNDS_CHECK_UNAVAILABLE_DETAIL,
-    _elapsed_ms,
-    _names_end_user,
-    failure_status_code,
-    log_gateway_rejection,
-    rate_limit_headers,
-)
-from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
-from gateway.core.database import release_session
-from gateway.core.error_codes import INSUFFICIENT_FUNDS, error_headers
-from gateway.core.metered_pricing import quantize_cost
-from gateway.exceptions.tools_exceptions import (
-    DirectSearchFailedError,
-    DirectSearchFieldRefusedError,
-    DirectSearchPricingRequiredError,
-    SearchToolMisconfiguredError,
-    SearchToolNotFoundError,
-    SearchToolSelectionError,
-    WebSearchCredentialRefusedError,
-    WebSearchNotEnabledError,
-    WebSearchOptionRefusedError,
-    WebSearchPolicyResolutionFailedError,
-)
-from gateway.inflight import track_request
-from gateway.log_config import logger
+from gateway.api.deps import DirectToolServiceDep, verify_api_key_or_master_key
+from gateway.api.routes._helpers import answer_direct_tool_call
 from gateway.models.api_keys import APIKey
-from gateway.models.tools import WebTool
-from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
-from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
 from gateway.schemas.tools import SearchRequest, SearchResponse
-from gateway.services.api_keys import ApiKeyService
-from gateway.services.budgets import (
-    BudgetScopeRequest,
-    BudgetService,
-    reconcile_reservation,
-    refund_reservation,
-    reserve_budget,
-)
-from gateway.services.inference import DeploymentCharge, admit_deployment_paid, describe_port_error
-from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import resolve_tool_rate
-from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
-from gateway.services.tools import (
-    pick_direct_search_instance,
-    refuse_unpriced_direct_search,
-    resolve_direct_search,
-    run_direct_search,
-)
-from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
 
 SEARCH_ENDPOINT = "/v1/search"
-
-# Stands in for the usage row's model when the request named no tool that could
-# be resolved (unknown name, or none given with several configured). The column
-# is not nullable, and "unknown" reads better in Activity than an empty string.
-_UNRESOLVED_TOOL = "unknown"
 
 
 @router.post("/search")
@@ -142,14 +59,7 @@ async def create_search(
     response: Response,
     request: SearchRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    budget_service: Annotated[BudgetService, Depends(get_budget_service)],
-    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
-    web_search_policy: WorkspaceWebSearchPoliciesDep,
-    web_provider_client: WebProviderClientDep,
-    billing: BillingPortDep,
+    service: DirectToolServiceDep,
 ) -> SearchResponse:
     """Run a search against a configured search tool.
 
@@ -176,14 +86,7 @@ async def create_search(
         request=request,
         tool_name=request.search_tool_name,
         auth_result=auth_result,
-        db=db,
-        config=config,
-        log_writer=log_writer,
-        budget_service=budget_service,
-        api_keys=api_keys,
-        web_search_policy=web_search_policy,
-        web_provider_client=web_provider_client,
-        billing=billing,
+        service=service,
     )
 
 
@@ -194,14 +97,7 @@ async def create_search_for_tool(
     request: SearchRequest,
     search_tool_name: Annotated[str, Path(description="Configured search tool to run against")],
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    budget_service: Annotated[BudgetService, Depends(get_budget_service)],
-    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
-    web_search_policy: WorkspaceWebSearchPoliciesDep,
-    web_provider_client: WebProviderClientDep,
-    billing: BillingPortDep,
+    service: DirectToolServiceDep,
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
 
@@ -227,14 +123,7 @@ async def create_search_for_tool(
         request=request,
         tool_name=search_tool_name,
         auth_result=auth_result,
-        db=db,
-        config=config,
-        log_writer=log_writer,
-        budget_service=budget_service,
-        api_keys=api_keys,
-        web_search_policy=web_search_policy,
-        web_provider_client=web_provider_client,
-        billing=billing,
+        service=service,
     )
 
 
@@ -245,337 +134,12 @@ async def _dispatch_search(
     request: SearchRequest,
     tool_name: str | None,
     auth_result: tuple[APIKey | None, bool],
-    db: AsyncSession,
-    config: GatewayConfig,
-    log_writer: LogWriter,
-    budget_service: BudgetService,
-    api_keys: ApiKeyService,
-    web_search_policy: WorkspaceWebSearchPolicies,
-    web_provider_client: httpx.AsyncClient,
-    billing: BillingPort,
+    service: DirectToolServiceDep,
 ) -> SearchResponse:
-    """Run the search request scaffold: reserve, call, log, settle.
-
-    The shape mirrors :func:`gateway.api.routes._passthrough.run_passthrough`,
-    which cannot be reused directly: it resolves the request's model against
-    the any-llm provider instances, and a search tool is neither a model nor an
-    any-llm provider.
-    """
-    # The session the policy reads on too, so one release before the provider call
-    # frees the request's one connection.
-    started_at = time.monotonic()
-    request_id = str(uuid.uuid4())
-    set_request_id(raw_request, response, request_id)
-    api_key, _ = auth_result
-    api_key_id = api_key.id if api_key else None
-    # A key flagged exclude_from_budget logs cost but is never reserved or folded
-    # into users.spend, matching every other billed endpoint.
-    budget_exempt = api_key is not None and api_key.exclude_from_budget
-
-    if api_key is not None and request.user and _names_end_user(api_key, request.user):
-        # As on chat: the owner's own rpm is checked before an end user is created for it.
-        rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
-        end_user = await budget_service.resolve_end_user(
-            api_key=api_key,
-            external_id=request.user,
-            requested_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
-        )
-        user_id = end_user.user_id
-        if end_user.budget_id is not None:
-            response.headers[END_USER_BUDGET_HEADER] = end_user.budget_id
-    else:
-        user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
-        rate_limit_info = await check_rate_limit(raw_request, user_id)
-
-    async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
-        """Record a search the gateway itself refused.
-
-        The shared writer owns the row shape (``status="error"``, no cost,
-        ``counts_toward_budget`` pinned True) and swallows a writer failure, so a
-        sick log writer cannot turn this route's 400 or 403 into a 500.
-        ``status_code`` is the status this refusal returns, which the row keeps so
-        the failure taxonomy can tell a refusal from a provider fault.
-        """
-        await log_gateway_rejection(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            user_id=user_id,
-            model=row_model,
-            provider=row_provider,
-            endpoint=SEARCH_ENDPOINT,
-            detail=detail,
-            status_code=status_code,
-            started_at=started_at,
-            request_id=request_id,
-        )
-
-    # Picked before any reservation is taken, so an unknown tool costs the
-    # caller nothing to be told about. The refusal is still logged: a request
-    # the gateway turned away is dropped traffic, and it belongs in Activity and
-    # in the failure count rather than reaching the operator as a complaint.
-    try:
-        tool = pick_direct_search_instance(config, tool_name)
-    except (SearchToolSelectionError, SearchToolMisconfiguredError) as exc:
-        # No tool was resolved, so there is no provider to attribute the row to
-        # and the name is whatever the caller asked for, matching how the
-        # pass-through routes log a selector that did not resolve.
-        await log_rejection(
-            exc.message,
-            row_model=tool_name or _UNRESOLVED_TOOL,
-            row_provider=None,
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
-
-    # Resolved before the gates below rather than beside the usage row further
-    # down, because the first of them is a question about the workspace.
-    usage_workspace_id = await workspace_for_key_id(db, api_key_id)
-
-    # The workspace's web search policy, read as the in-loop tool reads it. A
-    # workspace that has turned web search off has turned it off: leaving this
-    # endpoint open would leave the switch bypassable by any key in that
-    # workspace, which is a policy that fails open. Of the rest, only the result
-    # ceiling and the organization key apply here.
-    try:
-        policy = await web_search_policy.resolve(usage_workspace_id, [WebTool.SEARCH])
-    except WebSearchPolicyResolutionFailedError as exc:
-        await log_rejection(
-            exc.message,
-            row_model=tool.name,
-            row_provider=tool.provider,
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.message) from exc
-    if policy is not None and not policy.enabled:
-        refusal = WebSearchNotEnabledError()
-        await log_rejection(
-            refusal.message,
-            row_model=tool.name,
-            row_provider=tool.provider,
-            status_code=status.HTTP_403_FORBIDDEN,
-        )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal.message)
-
-    # A workspace whose organization brought its own search key searches with it on a
-    # call that names no tool, so its own account pays. The tool is still what the
-    # request is allowlisted, rate-limited and timed out as.
-    try:
-        search = resolve_direct_search(config, tool, policy, request, named=tool_name is not None)
-    except (
-        WebSearchOptionRefusedError,
-        DirectSearchFieldRefusedError,
-        WebSearchCredentialRefusedError,
-        # The tool was removed or changed by another writer since it was picked.
-        SearchToolNotFoundError,
-        SearchToolMisconfiguredError,
-    ) as exc:
-        await log_rejection(exc.message, row_model=tool.name, row_provider=tool.provider, status_code=exc.status_code)
-        # A 5xx names no credential state to the caller, as the tenancy error handler does.
-        detail = PASSTHROUGH_PROVIDER_ERROR_DETAIL if exc.status_code >= 500 else exc.message
-        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
-
-    # Tool access control (per-key), by the tool's name. A key with no list of its
-    # own inherits its user's, and a key restricted to models must be granted the
-    # tool, which is the fail-closed side to be on for a spend surface.
-    not_allowed_detail = await api_keys.search_tool_refusal(config, api_key, provider=tool.provider, tool=tool.name)
-    if not_allowed_detail is not None:
-        await log_rejection(
-            not_allowed_detail,
-            row_model=tool.name,
-            row_provider=tool.provider,
-            status_code=status.HTTP_403_FORBIDDEN,
-        )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
-
-    # The rate the reservation holds and the settlement falls back to: the
-    # instance's own row, under its new key or its old one, or ``otari:web_search``
-    # for an organization key (design L). Whose account runs the search decides
-    # whose overrides count, and whether the organization's funds pay for it.
-    deployment_paid = not search.resolved.on_credential
-    organization_id = await organization_for_key_id(db, api_key_id)
-    rate = await resolve_tool_rate(
-        db,
-        search.resolved.rate_keys,
-        label=search.resolved.label,
-        deployment_paid=deployment_paid,
-        organization_id=organization_id,
-    )
-    unit_rate = rate.unit_rate if rate is not None else Decimal(0)
-    # After the gates above, so a search they refuse is counted by no rule, and
-    # before the reservation, so one the rules refuse holds no budget to refund.
-    rate_limit_grant = await admit_rate_limit_rules(
+    return await answer_direct_tool_call(
         raw_request,
-        key_id=api_key_id,
-        user_id=user_id,
-        estimated_tokens=0,
-        budget_limits=None
-        if budget_exempt
-        else await budget_service.minute_limits(user_id, strategy=config.budget_strategy),
+        response,
+        auth_result=auth_result,
+        user=request.user,
+        run=lambda caller: service.search(request, caller=caller, tool_name=tool_name, endpoint=SEARCH_ENDPOINT),
     )
-    if rate_limit_grant is not None:
-        # A `per: model` rule names a search tool by its pricing key, <provider>:<tool>.
-        await rate_limit_grant.admit_model(tool.provider, tool.name)
-    reservation = await reserve_budget(
-        db,
-        user_id,
-        unit_rate,
-        # Deliberately not the pricing key: ``model`` exists only to drive
-        # reserve_budget's free-model shortcut, which splits the string through
-        # any-llm. A search tool is not an any-llm model, so passing it logs a
-        # warning on every request, and for a tool whose name did happen to be an
-        # any-llm provider the shortcut would run an unguarded default-pricing
-        # lookup on the tool name and could skip the reservation outright.
-        model=None,
-        strategy=config.budget_strategy,
-        counts_toward_budget=not budget_exempt,
-        # A search tool is not a model, but it is billed to a workspace like one,
-        # so the scope carries the tool's provider as the narrowing axis.
-        scope=BudgetScopeRequest(api_key=api_key, provider_instance=tool.provider),
-    )
-
-    async def refused_after_reservation(
-        detail: str, status_code: int, headers: dict[str, str] | None = None
-    ) -> HTTPException:
-        """Refund the reservation, log the refusal against the tool, and return the error to raise."""
-        await refund_reservation(db, reservation)
-        await log_rejection(detail, row_model=tool.name, row_provider=tool.provider, status_code=status_code)
-        return HTTPException(status_code=status_code, detail=detail, headers=headers)
-
-    # After the budget checks, so a missing or exhausted budget answers first.
-    try:
-        refuse_unpriced_direct_search(
-            search, priced=rate is not None, require_pricing=config.require_pricing, budget_exempt=budget_exempt
-        )
-    except DirectSearchPricingRequiredError as exc:
-        # The rejection row shows an operator the searches require_pricing turns away.
-        raise await refused_after_reservation(exc.message, exc.status_code, error_headers(exc.error_code)) from exc
-    # Last, so a refusal above answers before the organization's funds are read.
-    funding: DeploymentCharge | None = None
-    if deployment_paid:
-        try:
-            funding = await admit_deployment_paid(
-                billing,
-                deployment_paid=True,
-                organization_id=organization_id,
-                api_key_id=api_key_id,
-                user_id=user_id,
-                request_id=request_id,
-            )
-        except InsufficientFundsError as exc:
-            raise await refused_after_reservation(
-                exc.public_message, status.HTTP_402_PAYMENT_REQUIRED, error_headers(INSUFFICIENT_FUNDS)
-            ) from exc
-        except Exception as exc:
-            logger.error(
-                "BillingPort failed to admit a deployment-paid search: organization=%s request_id=%s: %s",
-                organization_id,
-                request_id,
-                describe_port_error(exc),
-            )
-            # Ends the transaction the port may have left failed, rolling it back
-            # when it cannot commit, so the refund below has a usable session.
-            await release_session(db)
-            raise await refused_after_reservation(
-                FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE
-            ) from exc
-
-    def usage_row(**overrides: Any) -> UsageLog:
-        """Build the row for a search that reached the provider.
-
-        Unlike a refusal row, this one carries a cost and so honors the key's
-        ``exclude_from_budget`` flag.
-        """
-        return UsageLog(
-            id=str(uuid.uuid4()),
-            workspace_id=usage_workspace_id,
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=tool.name,
-            provider=tool.provider,
-            endpoint=SEARCH_ENDPOINT,
-            latency_ms=_elapsed_ms(started_at),
-            counts_toward_budget=not budget_exempt,
-            request_group_id=request_id,
-            **overrides,
-        )
-
-    # Every gate has passed and the search provider is about to be called, so the
-    # request is genuinely in flight from here until its response has been sent.
-    # Registered for the same reason as on the chat and pass-through paths, and a
-    # dropped search cannot be seen settling in Activity either. The entry is
-    # dropped by InFlightMiddleware, not here.
-    track_request(
-        raw_request,
-        endpoint=SEARCH_ENDPOINT,
-        # The same pair the usage row carries for search: the tool name and its
-        # provider, so a search does not appear to change model when it settles.
-        model=tool.name,
-        provider=tool.provider,
-        user_id=user_id,
-        api_key_id=api_key_id,
-    )
-    # The policy read on this same session, so this frees the request's one
-    # connection before the provider call; settlement checks one back out. The
-    # commit also lands any credit the funding gate granted, so a search whose
-    # admission did not commit is not served on it.
-    if not await release_session(db) and funding is not None:
-        logger.error(
-            "Could not commit a deployment-paid search admission: organization=%s request_id=%s",
-            organization_id,
-            request_id,
-        )
-        raise await refused_after_reservation(FUNDS_CHECK_UNAVAILABLE_DETAIL, status.HTTP_503_SERVICE_UNAVAILABLE)
-
-    try:
-        result = await run_direct_search(search, web_provider_client)
-    except Exception as exc:
-        if isinstance(exc, DirectSearchFailedError):
-            # The failure's safe fields ride as headers (decision 67); the detail stays generic.
-            failed, row_status, headers = exc.message, exc.upstream_status or status.HTTP_502_BAD_GATEWAY, exc.headers
-        else:
-            # Raised by something other than the provider, and named by its type alone,
-            # since an adapter's exception text could carry the query.
-            failed, row_status, headers = type(exc).__name__, failure_status_code(exc), None
-        await log_writer.put(usage_row(status="error", error_message=failed, status_code=row_status))
-        await refund_reservation(db, reservation)
-        logger.error("Search failed for tool '%s' (%s): %s", tool.name, search.resolved.provider, failed)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL, headers=headers
-        ) from exc
-    except BaseException:
-        # A cancelled request, its client gone, is refunded all the same.
-        await refund_reservation(db, reservation)
-        raise
-
-    # The provider's own charge is the true cost; the configured flat rate is
-    # the fallback for a provider that reports none.
-    # Rounded once, here, so the row and the reconciled spend agree.
-    cost = quantize_cost(result.cost if result.cost is not None else unit_rate)
-    await log_writer.put(
-        usage_row(
-            status="success",
-            # Search bills per request; there are no tokens to report, and a
-            # zero is truthful where a null would read as "unknown".
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0,
-            cost=cost,
-        )
-    )
-    if funding is not None:
-        await funding.settle(
-            cost,
-            model=tool.name,
-            description=f"{tool.provider}:{tool.name}",
-            expects_cost=False,
-            savepoint=db.begin_nested,
-        )
-    await reconcile_reservation(db, reservation, cost)
-
-    if rate_limit_info:
-        for header, value in rate_limit_headers(rate_limit_info).items():
-            response.headers[header] = value
-
-    return result.response

@@ -6,11 +6,12 @@ the services that build those entries. ``PricedKind`` carries the rules a price
 row's kind adds, for the deployment's and the organizations' request bodies.
 """
 
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel, Field, model_validator
 
 from gateway.models.pricing import MODEL_KIND, PricingKind, is_tool_price_key
+from gateway.types.price_unit import PriceUnit
 
 PRICING_KIND_DESCRIPTION = (
     "What the row prices: 'model' (the default), or 'search' or 'fetch' for a search or fetch instance, "
@@ -22,14 +23,14 @@ class PricedKind(BaseModel):
     """A price request's ``kind``, mixed into a body that has a ``model_key`` and a ``unit``.
 
     A search or fetch price is keyed by the instance's name and is per call, so
-    its unit defaults to ``requests`` and may be nothing else.
+    its unit defaults to ``request`` and may be nothing else.
     """
 
     kind: PricingKind | None = Field(default=None, description=PRICING_KIND_DESCRIPTION)
 
     if TYPE_CHECKING:
         model_key: str
-        unit: Literal["tokens", "requests", "images"]
+        unit: PriceUnit
 
     @property
     def row_kind(self) -> PricingKind:
@@ -38,15 +39,15 @@ class PricedKind(BaseModel):
 
     @model_validator(mode="after")
     def validate_tool_kind(self) -> Self:
-        """Hold a search or fetch price to a bare instance name and a per-call unit, ``requests`` by default."""
+        """Hold a search or fetch price to a bare instance name and a per-call unit, ``request`` by default."""
         if self.row_kind == MODEL_KIND:
             return self
         if not is_tool_price_key(self.model_key):
             raise ValueError(f"a {self.kind} price is keyed by the instance's name, with no ':' or '/'")
         if "unit" not in self.model_fields_set:
-            self.unit = "requests"
-        elif self.unit != "requests":
-            raise ValueError(f"a {self.kind} price is per call, so its unit is 'requests'")
+            self.unit = "request"
+        elif self.unit != "request":
+            raise ValueError(f"a {self.kind} price is per call, so its unit is 'request'")
         return self
 
 

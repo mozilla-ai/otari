@@ -1,6 +1,6 @@
 # Deploy and Host Otari on Railway
 
-[Otari](https://github.com/mozilla-ai/otari) is an open-source, OpenAI-compatible LLM gateway you run yourself. Put one endpoint in front of providers like OpenAI, Anthropic, Mistral, and Gemini, then issue virtual API keys, enforce budgets, and track usage and cost in one place. It speaks the OpenAI Chat Completions and Responses APIs plus the Anthropic Messages API.
+[Otari](https://github.com/mozilla-ai/otari) is an open-source, OpenAI-compatible AI gateway you run yourself. Put one endpoint in front of providers like OpenAI, Anthropic, Mistral, and Gemini, then issue virtual API keys, enforce budgets, and track usage and cost in one place. It speaks the OpenAI Chat Completions and Responses APIs plus the Anthropic Messages API.
 
 ## About Hosting Otari
 

@@ -34,7 +34,7 @@ Rates are USD per million tokens. A rate of ``None`` means that meter is not
 priced separately, so its tokens stay in the fresh-input bucket and bill at the
 input rate: an absent cache rate is never a discount.
 
-A rate row whose ``unit`` is ``requests`` is the exception: its
+A rate row whose ``unit`` is ``request`` is the exception: its
 ``input_price_per_million`` is USD per million requests, and a request costs
 that divided by a million whatever tokens it reported (:func:`price_request`).
 
@@ -47,6 +47,7 @@ mozilla-ai/otari-ai), which is where the two conventions were reconciled;
 mozilla-ai/otari#661.
 """
 
+import re
 import typing
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
@@ -60,6 +61,8 @@ from gateway.core.usage import (
     cache_write_tokens_of,
 )
 from gateway.log_config import logger
+from gateway.types.models_dev import ModelsDevPricing, ModelsDevUnitPrice
+from gateway.types.price_unit import PRICE_PER, PriceUnit, current_unit_name, models_dev_unit
 
 RATE_FIELDS: tuple[str, ...] = (
     "input_price_per_million",
@@ -298,20 +301,33 @@ def _applicable_tier(
     return max(reached, key=lambda item: item[0])[1]
 
 
+_BEDROCK_VERSION_SUFFIX = re.compile(r"[0-9]+(?::|$)")
+
+
 def _is_claude(pricing: typing.Any) -> bool:
     """Whether ``pricing`` prices an Anthropic Claude model, on whichever provider serves it.
 
-    Read from the model half of ``model_key``, because the provider half names
+    Read from the model half of ``model_key`` (the whole key when it has no
+    provider, see below), because the provider half names
     an instance rather than a vendor, and an Anthropic-compatible endpoint can
     serve another vendor's model. ``anthropic:claude-haiku-5-5``,
     ``bedrock:us.anthropic.claude-haiku-5-5`` and
     ``vertexaianthropic:claude-haiku-5-5@default`` all qualify.
+
+    A key without a provider is the bare model id, and some model ids carry a
+    colon of their own: a Bedrock id ends in a ``:<n>`` version and
+    can carry a context-window suffix after it, as in
+    ``us.anthropic.claude-haiku-5-5-v1:0`` or ``anthropic.claude-3-sonnet-20240229-v1:0:200k``.
+    When what follows the first colon starts with ASCII digits and then ends or
+    meets another colon, it is that version, not a model, so the whole key is the model.
     """
     model_key = getattr(pricing, "model_key", None)
     if not isinstance(model_key, str):
         return False
-    provider, separator, model = model_key.partition(":")
-    return "claude" in (model if separator else provider).lower()
+    _, separator, model = model_key.partition(":")
+    if not separator or _BEDROCK_VERSION_SUFFIX.match(model):
+        return "claude" in model_key.lower()
+    return "claude" in model.lower()
 
 
 def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
@@ -352,8 +368,8 @@ def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
     )
 
 
-def meter_cost(tokens: int, rate: Decimal) -> Decimal:
-    """USD for ``tokens`` tokens at a per-million rate, exactly.
+def meter_cost(tokens: int | Decimal, rate: Decimal) -> Decimal:
+    """USD for ``tokens`` tokens, or units of whatever a column is per million of, at a per-million rate, exactly.
 
     The multiplication happens before the division so the only inexact step
     would be a product wider than the decimal context, and dividing by a power
@@ -366,16 +382,17 @@ def _charge_line(meter: str, units: int, rate: Decimal, cost: Decimal) -> Charge
     return {"meter": meter, "units": units, "rate_per_million": float(rate), "cost": float(cost)}
 
 
-REQUESTS_UNIT = "requests"
+REQUESTS_UNIT: PriceUnit = "request"
 
 
 def priced_per_request(pricing: typing.Any) -> bool:
     """Whether ``pricing`` charges a flat amount per request rather than per token.
 
     A rate object without a ``unit`` (a transient row built for manual
-    repricing, a test double) reads as token pricing.
+    repricing, a test double) reads as token pricing. A retired spelling of
+    the unit reads as the current one.
     """
-    return getattr(pricing, "unit", None) == REQUESTS_UNIT
+    return current_unit_name(getattr(pricing, "unit", None)) == REQUESTS_UNIT
 
 
 def request_cost(pricing: typing.Any) -> Decimal:
@@ -407,6 +424,166 @@ def price_request(pricing: typing.Any) -> tuple[Decimal, dict[str, int], list[Ch
     """
     cost = quantize_cost(request_cost(pricing))
     return cost, {"requests": 1}, [request_charge_line(cost)] if cost else []
+
+
+PriceKind = typing.Literal["price", "reasoning", "cache_read", "cache_write", "cache_storage"]
+"""Which price of one slot a meter reads: the base price, or its reasoning, cache read, write or storage price."""
+
+Direction = typing.Literal["input", "output"]
+
+
+@dataclass(frozen=True)
+class UnitRate:
+    """One published price: USD per ``PRICE_PER[unit]`` of ``unit``."""
+
+    unit: PriceUnit
+    price: Decimal
+
+    def cost(self, quantity: int | Decimal) -> Decimal:
+        """USD for ``quantity`` of the unit, exactly."""
+        return unit_cost(quantity, self.unit, self.price)
+
+    def charge_line(self, meter: str, quantity: int | Decimal, cost: Decimal) -> ChargeLine:
+        """The line explaining ``cost`` for ``quantity`` at this rate.
+
+        A unit priced per million carries ``rate_per_million``, as a token line
+        does; any other carries ``unit_rate``, USD per one of the unit, as a
+        request line does. ``unit`` names which.
+        """
+        units = int(quantity) if Decimal(quantity) == int(quantity) else float(quantity)
+        line: ChargeLine = {"meter": meter, "units": units, "unit": self.unit}
+        if PRICE_PER[self.unit] == TOKENS_PER_PRICING_UNIT:
+            line["rate_per_million"] = float(self.price)
+        else:
+            line["unit_rate"] = float(self.price / Decimal(PRICE_PER[self.unit]))
+        line["cost"] = float(cost)
+        return line
+
+
+@dataclass(frozen=True)
+class UnitCharge:
+    """What a quantity costs at one price: the exact amount, and the line that explains it when there is one."""
+
+    cost: Decimal
+    lines: list[ChargeLine]
+
+
+def _quantity(value: int | Decimal) -> Decimal:
+    quantity = Decimal(value)
+    if not quantity.is_finite() or quantity < 0:
+        raise ValueError(f"a quantity to price must be a finite non-negative number, not {value}")
+    return quantity
+
+
+def _estimated(value: int | Decimal) -> Decimal:
+    """An estimated quantity, clamped at zero as a token count is, so a hostile value cannot hold a credit."""
+    quantity = Decimal(value)
+    if not quantity.is_finite():
+        raise ValueError(f"an estimated quantity must be a finite number, not {value}")
+    return max(quantity, Decimal(0))
+
+
+def unit_cost(quantity: int | Decimal, unit: PriceUnit, price: Decimal) -> Decimal:
+    """USD for ``quantity`` of ``unit`` at a published price, exactly.
+
+    A published price is per ``PRICE_PER[unit]`` of the unit: per million
+    tokens or characters, per thousand searches, per one image, megapixel,
+    second or minute. ``quantity`` may be fractional, as seconds and megapixels
+    are, and must be finite and non-negative.
+    """
+    return (_quantity(quantity) * price) / Decimal(PRICE_PER[unit])
+
+
+def slot_price(pricing: ModelsDevPricing, modality: str, direction: Direction) -> ModelsDevUnitPrice | None:
+    """The price a cost block gives ``modality`` in ``direction``, or ``None`` where it gives none."""
+    prices = pricing.modalities.get(modality)
+    if prices is None:
+        return None
+    return prices.input if direction == "input" else prices.output
+
+
+def unit_rate(
+    price: ModelsDevUnitPrice, kind: PriceKind = "price", *, cache_write_ttl: str | None = None
+) -> UnitRate | None:
+    """The rate ``kind`` of one slot prices at, or ``None`` when it prices nothing there.
+
+    A slot in a unit no meter knows prices nothing, whatever it says: a new unit
+    upstream is named in the catalog's issues and never billed as tokens. A
+    cache write on a TTL the slot does not price bills as a plain write. A value
+    that is not a believable price reads as absent.
+    """
+    unit = models_dev_unit(price.unit)
+    if unit is None:
+        return None
+    cache = price.cache
+    value: object
+    if kind == "price":
+        value = price.price
+    elif kind == "reasoning":
+        value = price.reasoning
+    elif cache is None:
+        value = None
+    elif kind == "cache_read":
+        value = cache.read
+    elif kind == "cache_storage":
+        value = cache.storage
+    else:
+        # A TTL price that is no believable price reads as absent, so the TTL bills as a plain write.
+        listed = next((write for ttl, write in cache.write_ttls if ttl == cache_write_ttl), None)
+        value = listed if to_decimal(listed) is not None else cache.write
+    rate = to_decimal(value)
+    return None if rate is None else UnitRate(unit, rate)
+
+
+def web_search_rate(pricing: ModelsDevPricing) -> UnitRate | None:
+    """The rate a cost block prices a web search at, USD per thousand searches, or ``None``."""
+    if pricing.web_search is None:
+        return None
+    rate = to_decimal(pricing.web_search.price)
+    return None if rate is None else UnitRate("web_search", rate)
+
+
+def charge_unit(rate: UnitRate, meter: str, quantity: int | Decimal) -> UnitCharge:
+    """``quantity`` of the unit at ``rate``, exactly, with a line under ``meter`` when there is something to explain.
+
+    Not rounded: a caller that prices several meters into one row sums the
+    exact amounts and applies :func:`quantize_cost` once.
+    """
+    quantity = _quantity(quantity)
+    cost = rate.cost(quantity)
+    return UnitCharge(cost, [rate.charge_line(meter, quantity, cost)] if quantity else [])
+
+
+def charge_unit_price(
+    price: ModelsDevUnitPrice,
+    quantity: int | Decimal,
+    *,
+    meter: str,
+    kind: PriceKind = "price",
+    cache_write_ttl: str | None = None,
+) -> UnitCharge | None:
+    """``quantity`` at the ``kind`` price of one slot, or ``None`` when the slot prices nothing there."""
+    rate = unit_rate(price, kind, cache_write_ttl=cache_write_ttl)
+    return None if rate is None else charge_unit(rate, meter, quantity)
+
+
+def estimate_unit_cost(
+    price: ModelsDevUnitPrice, quantity: int | Decimal, *, cache_write_ttl: str | None = None
+) -> Decimal:
+    """Conservatively price ``quantity`` of one slot's unit before usage is known.
+
+    Every unit could bill at the base price, the reasoning price, a cache read
+    or a cache write on the requested TTL, so the bound is the quantity at the
+    dearest of them. A slot that prices nothing estimates nothing.
+    """
+    kinds: tuple[PriceKind, ...] = ("price", "reasoning", "cache_read")
+    if cache_write_ttl is not None:
+        kinds = (*kinds, "cache_write")
+    rates = [rate for kind in kinds if (rate := unit_rate(price, kind, cache_write_ttl=cache_write_ttl)) is not None]
+    if not rates:
+        return Decimal(0)
+    dearest = max(rates, key=lambda rate: rate.price)
+    return quantize_cost(dearest.cost(_estimated(quantity)))
 
 
 def _price_meters(
@@ -529,6 +706,7 @@ def estimate_metered_cost(
     estimated_input_tokens: int,
     estimated_output_tokens: int,
     cache_write_ttl: typing.Literal["5m", "1h"] | None = None,
+    estimated_units: int | Decimal | None = None,
 ) -> Decimal:
     """Conservatively price a request before provider usage is available.
 
@@ -547,11 +725,30 @@ def estimate_metered_cost(
     actual usage on completion.
 
     A rate priced per request is estimated at exactly one request, which is
-    what it settles at.
+    what it settles at. A rate in any other unit than tokens is estimated at
+    ``estimated_units`` of it, at the dearest rate the row holds for the unit,
+    the output rate included since one quantity cannot say which side it is on,
+    so a reservation is never zero for a priced model. A caller that gives no
+    quantity gets the token estimate.
     """
     if priced_per_request(pricing):
         return quantize_cost(request_cost(pricing))
     input_tokens = max(estimated_input_tokens, 0)
+    unit = current_unit_name(getattr(pricing, "unit", None)) or "token"
+    if unit != "token" and estimated_units is not None:
+        rates = effective_rates(pricing, input_tokens)
+        per_unit = [
+            rates.input_price_per_million,
+            rates.output_price_per_million,
+            rates.cache_read_price_per_million,
+        ]
+        if cache_write_ttl is not None:
+            per_unit.append(rates.cache_write_price_per_million)
+        if cache_write_ttl == "1h":
+            per_unit.append(rates.cache_write_1h_price_per_million)
+        return quantize_cost(
+            meter_cost(_estimated(estimated_units), max(rate for rate in per_unit if rate is not None))
+        )
     output_tokens = max(estimated_output_tokens, 0)
     rates = effective_rates(pricing, input_tokens)
 

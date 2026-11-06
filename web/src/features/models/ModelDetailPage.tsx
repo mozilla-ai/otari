@@ -9,7 +9,6 @@ import type { CatalogOffering } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Badge } from "@/design-system/indicators/Badge"
 import { Dot } from "@/design-system/indicators/Dot"
@@ -45,6 +44,7 @@ import {
   formatReleaseDate,
 } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { providerModelId } from "./modelKey"
 
@@ -103,50 +103,25 @@ function rate(value: number | null | undefined): string {
   return value == null ? "—" : formatRate(value)
 }
 
-// How far the metered rate may sit from the provider's published list price
-// before the row says so. The listed price is the live models.dev catalog's and
-// the default is billed from the accepted snapshot, so a hair's width of
-// disagreement is rounding; a real gap is a stale stored price, a deliberate
-// markup or a snapshot update awaiting review, and each is worth a glance.
-const LIST_PRICE_TOLERANCE = 0.02
-
-/** The provider's list price, where it disagrees with what is metered. */
-export function listPriceNote(
-  metered: number | null | undefined,
-  listed: number | null | undefined,
-): string | null {
-  if (metered == null || listed == null || listed <= 0) return null
-  if (Math.abs(metered - listed) / listed <= LIST_PRICE_TOLERANCE) return null
-  return `list ${formatRate(listed)}`
-}
-
 function RateCell({
   metered,
-  listed,
   unit,
   tokenOnly = false,
 }: {
   metered: number | null | undefined
-  listed: number | null | undefined
   /** What the offering's price is per; a non-token rate names its unit. */
   unit: PricingUnit
   /** A rate only a token price has (output), shown as a dash on any other unit. */
   tokenOnly?: boolean
 }) {
-  if (unit !== "tokens") {
+  if (unit !== "token") {
     return (
       <span className="text-mono-caption">
         {tokenOnly || metered == null ? "—" : formatPricedRate(metered, unit)}
       </span>
     )
   }
-  const note = listPriceNote(metered, listed)
-  return (
-    <span className="flex flex-col items-end">
-      <span className="text-mono-caption">{rate(metered)}</span>
-      {note ? <span className="text-caption text-subtle">{note}</span> : null}
-    </span>
-  )
+  return <span className="text-mono-caption">{rate(metered)}</span>
 }
 
 function percent(value: number | null): string {
@@ -244,6 +219,7 @@ function offeringColumns({
                   ? `${providerDisplayName(row.provider_type)} · `
                   : ""}
                 {credentialLabel(row.credential)}
+                {row.zero_data_retention ? " · Zero data retention" : ""}
                 {row.quantization ? ` · ${row.quantization}` : ""}
               </span>
             </span>
@@ -262,7 +238,6 @@ function offeringColumns({
       cell: (row) => (
         <RateCell
           metered={row.input}
-          listed={row.offering.metadata_input_price_per_million}
           unit={pricingUnitOf(row.offering.pricing?.unit)}
         />
       ),
@@ -275,7 +250,6 @@ function offeringColumns({
       cell: (row) => (
         <RateCell
           metered={row.output}
-          listed={row.offering.metadata_output_price_per_million}
           unit={pricingUnitOf(row.offering.pricing?.unit)}
           tokenOnly
         />
@@ -402,7 +376,13 @@ export function ModelDetailView({
   // organization's owner, and excluding them would leave the one caller who can
   // set a rate without the link to set it.
   const canOverride = !publicView && canManage(organization.data)
-  const selected = useCatalogModel(modelId)
+  // The offerings the selected workspace may call, as the list beside it shows.
+  const workspace = useSelectedWorkspace()
+  const selected = useCatalogModel(
+    modelId,
+    workspace.selected?.workspace_id ?? "",
+    workspace.isSettled,
+  )
   const [quantization, setQuantization] = useState("all")
   const [useModel, setUseModel] = useState(false)
   const [sort, setSort] = useState<{
@@ -446,17 +426,6 @@ export function ModelDetailView({
   // reads as unknown rather than as five refusals.
   const hasCapabilities = CAPABILITY_LABELS.some(
     ({ key }) => model.capabilities[key],
-  )
-  const listPriceDiffers = model.offerings.some(
-    (model) =>
-      listPriceNote(
-        model.pricing?.input_price_per_million,
-        model.metadata_input_price_per_million,
-      ) !== null ||
-      listPriceNote(
-        model.pricing?.output_price_per_million,
-        model.metadata_output_price_per_million,
-      ) !== null,
   )
   const modalities = (list: string[]) =>
     list.length === 0
@@ -670,14 +639,6 @@ export function ModelDetailView({
               unpriced.
               {isOperator ? " Both switches live on Settings." : ""}
             </p>
-          ) : null}
-          {listPriceDiffers ? (
-            <InfoBanner>
-              Where a rate differs from the price the provider publishes, that
-              price is shown beside it marked <em>list</em>. What is metered
-              here is the rate shown; the list price is what the provider would
-              charge you directly.
-            </InfoBanner>
           ) : null}
         </section>
       </div>

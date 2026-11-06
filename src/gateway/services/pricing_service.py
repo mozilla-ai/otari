@@ -1,5 +1,6 @@
 """Shared pricing lookup utilities."""
 
+import time
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -21,20 +22,28 @@ from gateway.models.pricing import (
     PricingKind,
 )
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
+from gateway.repositories.pricing import (
+    OrganizationModelPricingRepository,
+    pending_price_writes,
+    price_write_generation,
+)
 from gateway.services.pricing import (
     PROVIDER_TOOL_LIST_PRICES,
     ModelsDevPrice,
+    ModelSearchRate,
     ToolCharges,
     ToolRate,
     ToolRateLookup,
     active_timeline,
     billed_search_units,
     charge_tool_calls,
+    has_completion_meter,
     paid_by_the_deployment,
     request_rate,
     resolve_as_of,
     tool_rate_lookup,
 )
+from gateway.types.models_dev import pricing_document
 from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER as GATEWAY_TOOL_PRICING_PROVIDER,
 )
@@ -42,6 +51,7 @@ from gateway.types.tool_charges import (
     InstanceRateKey,
     LabelCalls,
     RateKey,
+    is_provider_web_search_key,
 )
 from gateway.types.tool_charges import (
     gateway_tool_pricing_key as gateway_tool_pricing_key,
@@ -197,24 +207,41 @@ def default_pricing_match(
 ) -> tuple[ModelPricing, str] | None:
     """:func:`default_model_pricing` with the reference of the entry that answered, from one resolution."""
     entry = _resolve_default(provider, model, as_of, implementation)
-    if entry is None or entry.input is None or entry.output is None:
+    if entry is None:
         return None
-
     model_key = f"{provider}:{model}" if provider else model
+    rates = None if entry.pricing is None else pricing_document(entry.pricing)
+    if entry.input is not None and entry.output is not None:
+        pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=as_of,
+            input_price_per_million=entry.input,
+            output_price_per_million=entry.output,
+            cache_read_price_per_million=entry.cache_read,
+            cache_write_price_per_million=entry.cache_write,
+            pricing_tiers=entry.pricing_tiers(),
+            rates=rates,
+        )
+    elif (columns := entry.slot_columns) is not None:
+        # A model with no text price, priced in the one slot its block gives: per minute of audio, per character.
+        pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=as_of,
+            input_price_per_million=columns.input_price_per_million,
+            output_price_per_million=columns.output_price_per_million,
+            cache_read_price_per_million=columns.cache_read_price_per_million,
+            cache_write_price_per_million=columns.cache_write_price_per_million,
+            pricing_tiers=[dict(tier) for tier in columns.pricing_tiers],
+            unit=columns.unit,
+            rates=rates,
+        )
+    else:
+        return None
     logger.debug(
         "Using models.dev default pricing for '%s' (matched %s)",
         # codeql[py/clear-text-logging-sensitive-data]
         model_key,
         entry.reference,
-    )
-    pricing = ModelPricing(
-        model_key=model_key,
-        effective_at=as_of,
-        input_price_per_million=entry.input,
-        output_price_per_million=entry.output,
-        cache_read_price_per_million=entry.cache_read,
-        cache_write_price_per_million=entry.cache_write,
-        pricing_tiers=entry.pricing_tiers(),
     )
     return pricing, entry.reference
 
@@ -245,7 +272,8 @@ def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricin
         cache_read_price_per_million=override.cache_read_price_per_million,
         cache_write_price_per_million=override.cache_write_price_per_million,
         pricing_tiers=override.pricing_tiers or [],
-        unit=override.unit or "tokens",
+        unit=override.unit or "token",
+        rates=override.rates,
     )
 
 
@@ -708,17 +736,10 @@ async def find_model_pricing(
     one. Request-path callers pass it, resolved from the authenticating key by
     ``services.workspace_scope.organization_for_key_id``, never from a header.
 
-    ``use_defaults=False`` skips that fallback for any caller whose billable unit
-    is not a token, because every dataset rate is quoted per million *tokens*.
-    Two kinds of caller need it. A key that is not a model at all (a search tool,
-    a gateway-run tool): the models.dev lookup falls back to a provider-agnostic
-    match on the bare name, so a tool an operator happened to name after a real
-    model would pick up that model's rate. And a real model billed under a
-    non-token unit (audio and moderations per request, images per image):
-    ``gpt-4o-transcribe`` and ``gpt-image-1`` are both in the dataset, and their
-    per-million-token rates, read under :func:`flat_request_cost` or
-    :func:`per_image_cost`, become a per-request or per-image rate, writing a
-    charge line at the wrong unit for a rate nobody configured.
+    ``use_defaults=False`` skips that fallback for a key that is not a model at
+    all (a search tool, a gateway-run tool): the models.dev lookup falls back to
+    a provider-agnostic match on the bare name, so a tool an operator happened
+    to name after a real model would pick up that model's rate.
     """
 
     resolved = await resolve_model_pricing(
@@ -770,6 +791,63 @@ def pricing_provenance(resolved: ResolvedPricing) -> PricingProvenance:
     return PricingProvenance(resolved.source, reference, resolved.effective_at)
 
 
+# The stored half of :func:`resolve_model_pricing` at the current time, per
+# organization, model key and payer, so a request does not read two price rows
+# that change a few times a day. A miss is cached too; the models.dev fallback
+# behind it is in memory and always resolved fresh.
+#
+# A write takes effect at once in the process that made it: the pricing
+# repository counts every flush, commit and rollback of a price change, and a
+# new count drops the cache. A session holding an uncommitted price change
+# neither reads nor fills it, so its own write is what it sees and nobody else
+# does. Other workers and replicas pick a change up within
+# PRICING_CACHE_TTL_SECONDS, the window the alias and routing policy caches
+# already have, and so does a rate scheduled to start or end in the future.
+PRICING_CACHE_TTL_SECONDS = 30.0
+_PRICING_CACHE_MAX_ENTRIES = 10_000
+
+_stored_prices: dict[tuple[uuid.UUID | None, str, bool], tuple[float, ResolvedPricing | None]] = {}
+_stored_prices_generation = price_write_generation()
+
+
+def reset_pricing_cache() -> None:
+    """Drop every cached stored rate."""
+    _stored_prices.clear()
+
+
+def _cached_stored_pricing(key: tuple[uuid.UUID | None, str, bool]) -> tuple[bool, ResolvedPricing | None]:
+    """Whether ``key`` has an entry from the last TTL with no price write since, and that entry."""
+    global _stored_prices_generation
+    generation = price_write_generation()
+    if generation != _stored_prices_generation:
+        _stored_prices.clear()
+        _stored_prices_generation = generation
+    cached = _stored_prices.get(key)
+    if cached is None or cached[0] <= time.monotonic():
+        return False, None
+    return True, cached[1]
+
+
+def _cache_stored_pricing(
+    key: tuple[uuid.UUID | None, str, bool], resolved: ResolvedPricing | None, *, read_at_generation: int
+) -> ResolvedPricing | None:
+    """Keep ``resolved`` for the TTL unless a price write landed while it was read, and return what callers get."""
+    if resolved is not None and resolved.source == "deployment":
+        resolved = resolved._replace(pricing=_transient_copy(resolved.pricing))
+    if read_at_generation == price_write_generation():
+        if len(_stored_prices) >= _PRICING_CACHE_MAX_ENTRIES:
+            _stored_prices.clear()
+        _stored_prices[key] = (time.monotonic() + PRICING_CACHE_TTL_SECONDS, resolved)
+    return resolved
+
+
+def _transient_copy(row: ModelPricing) -> ModelPricing:
+    """``row`` as an object no session holds, so requests can share it."""
+    return ModelPricing(
+        **{attribute.key: getattr(row, attribute.key) for attribute in inspect(ModelPricing).column_attrs}
+    )
+
+
 async def resolve_model_pricing(
     db: AsyncSession,
     provider: str | None,
@@ -787,28 +865,36 @@ async def resolve_model_pricing(
     that override: one the organization wrote, whether under a provider key it
     has since archived or before the deployment served the model, would let a
     tenant name the deployment's cost basis, down to zero.
+
+    Without ``as_of``, the stored rates come from the process cache above, so a
+    write elsewhere reaches this process within ``PRICING_CACHE_TTL_SECONDS``.
     """
     lookup_time = normalize_effective_at(as_of)
     model_key = f"{provider}:{model}" if provider else model
-    key_forms = pricing_key_forms(model_key)
-    legacy_keys = key_forms[1:]
+    cache_key = (organization_id, model_key, deployment_paid)
+    use_cache = as_of is None and not pending_price_writes(db)
 
-    if organization_id is not None:
-        override = await _find_organization_override(
-            db, organization_id, key_forms, lookup_time, operator_set_only=deployment_paid
-        )
-        if override is not None:
-            pricing = override_as_model_pricing(override)
-            return ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
-
-    stored = await _find_by_model_key(db, model_key, lookup_time)
-
-    for legacy_key in legacy_keys:
-        if stored is not None:
-            break
-        stored = await _find_by_model_key(db, legacy_key, lookup_time)
+    hit, stored = _cached_stored_pricing(cache_key) if use_cache else (False, None)
+    if not hit:
+        generation = price_write_generation()
+        key_forms = pricing_key_forms(model_key)
+        if organization_id is not None:
+            override = await _find_organization_override(
+                db, organization_id, key_forms, lookup_time, operator_set_only=deployment_paid
+            )
+            if override is not None:
+                pricing = override_as_model_pricing(override)
+                stored = ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
+        for key in key_forms:
+            if stored is not None:
+                break
+            row = await _find_by_model_key(db, key, lookup_time)
+            if row is not None:
+                stored = ResolvedPricing(row, "deployment", row.model_key, normalize_effective_at(row.effective_at))
+        if use_cache:
+            stored = _cache_stored_pricing(cache_key, stored, read_at_generation=generation)
     if stored is not None:
-        return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
+        return stored
 
     if use_defaults and default_pricing_enabled():
         matched = default_pricing_match(provider, model, lookup_time)
@@ -862,9 +948,66 @@ class RequestPrices:
     is in flight applies from the next request on.
     """
 
-    def __init__(self, organization_id: uuid.UUID | None) -> None:
+    def __init__(self, organization_id: uuid.UUID | None, repository: OrganizationModelPricingRepository) -> None:
+        """Bind the request pricing cache to its organization and injected repository."""
         self.organization_id = organization_id
+        self._repository = repository
         self._resolved: dict[tuple[str | None, str, bool], ResolvedPricing | None] = {}
+
+    async def estimate_candidates(
+        self,
+        candidates: Sequence[tuple[str, str]],
+        estimate: Callable[[ModelPricing], Decimal],
+    ) -> dict[str, Decimal | None]:
+        """Estimate each candidate at this request's rates, retaining unknown prices.
+
+        A rate in a unit no completion meter reads is an unknown price too: it
+        would estimate at nothing, and an estimate of nothing ranks as the
+        cheapest candidate, which the pricing gate then refuses.
+        """
+        await self.prime(candidates)
+        costs: dict[str, Decimal | None] = {}
+        for provider, model in candidates:
+            resolved = self._resolved[provider, model, False]
+            priced = resolved is not None and has_completion_meter(resolved.pricing)
+            costs[f"{provider}:{model}"] = estimate(resolved.pricing) if priced and resolved is not None else None
+        return costs
+
+    async def prime(self, candidates: Sequence[tuple[str, str]]) -> None:
+        """Resolve a catalog's locally credentialed candidates in two batched reads.
+
+        Same precedence and provenance as resolve_model_pricing. These entries
+        never populate the separate deployment-paid cache.
+        """
+        pending = [
+            (provider, model) for provider, model in candidates if (provider, model, False) not in self._resolved
+        ]
+        if not pending:
+            return
+        now = normalize_effective_at(None)
+        forms = {(provider, model): pricing_key_forms(f"{provider}:{model}") for provider, model in pending}
+        keys = {key for values in forms.values() for key in values}
+        overrides = (
+            await self._repository.applicable_rows(self.organization_id, keys, now) if self.organization_id else {}
+        )
+        stored = await self._repository.deployment_rows(keys, now)
+        for provider, model in pending:
+            candidates_keys = forms[provider, model]
+            override = next((overrides[key] for key in candidates_keys if key in overrides), None)
+            row = next((stored[key] for key in candidates_keys if key in stored), None)
+            resolved: ResolvedPricing | None = None
+            if override is not None:
+                price = override_as_model_pricing(override)
+                resolved = ResolvedPricing(price, "organization", str(override.id), price.effective_at)
+            elif row is not None:
+                resolved = ResolvedPricing(row, "deployment", row.model_key, normalize_effective_at(row.effective_at))
+            elif default_pricing_enabled():
+                matched = default_pricing_match(provider, model, now)
+                if matched is not None:
+                    resolved = ResolvedPricing(matched[0], "defaults", matched[1])
+            if resolved is not None:
+                _detach(resolved.pricing)
+            self._resolved[provider, model, False] = resolved
 
     async def resolve(
         self, db: AsyncSession, provider: str | None, model: str, *, deployment_paid: bool = False
@@ -889,15 +1032,20 @@ async def price_tool_calls(
     *,
     as_of: datetime | None = None,
     organization_id: uuid.UUID | None = None,
+    model_search_rate: ModelSearchRate | None = None,
 ) -> ToolCharges:
     """Price a request's successful gateway-run tool calls, per tool and label.
 
     The charge rule is :func:`gateway.services.pricing.charge_tool_calls`; this
     looks up the rates it needs, only for the labels with a call that reported
-    no cost.
+    no cost. ``model_search_rate`` is what the request's model prices a search
+    its provider ran at, read after the operator's rows and before the
+    provider's list price.
     """
     lookups = {lookup for entry in calls if (lookup := tool_rate_lookup(entry)) is not None}
-    rates = await _tool_rates(db, lookups, as_of=as_of, organization_id=organization_id)
+    rates = await _tool_rates(
+        db, lookups, as_of=as_of, organization_id=organization_id, model_search_rate=model_search_rate
+    )
     return charge_tool_calls(calls, rates)
 
 
@@ -927,6 +1075,7 @@ async def _tool_rates(
     *,
     as_of: datetime | None,
     organization_id: uuid.UUID | None,
+    model_search_rate: ModelSearchRate | None = None,
 ) -> dict[ToolRateLookup, ToolRate | None]:
     """The rate each lookup resolves to: its first rate key with a pricing row.
 
@@ -951,7 +1100,9 @@ async def _tool_rates(
     forms = {form for lookup in lookups for rate_key in lookup.rate_keys for form in _rate_key_forms(rate_key)}
     overrides = await _tool_override_indexes(db, organization_id, forms) if organization_id is not None else {}
     deployment = await _deployment_rates(db, forms, lookup_time)
-    return {lookup: _first_tool_rate(lookup, overrides, deployment, lookup_time) for lookup in lookups}
+    return {
+        lookup: _first_tool_rate(lookup, overrides, deployment, lookup_time, model_search_rate) for lookup in lookups
+    }
 
 
 def _rate_key_forms(rate_key: RateKey) -> list[tuple[PricingKind, str]]:
@@ -1007,16 +1158,23 @@ async def _deployment_rates(
     return found
 
 
+def _is_old_key(rate_key: RateKey, kind: str) -> bool:
+    """Whether a row of ``kind`` that spells ``rate_key`` is an instance's old model-kind key."""
+    return isinstance(rate_key, InstanceRateKey) and kind == MODEL_KIND
+
+
 def _first_tool_rate(
     lookup: ToolRateLookup,
     overrides: Mapping[str, dict[str, list[OverridePeriod]]],
     deployment: Mapping[tuple[str, str], ModelPricing],
     as_of: datetime,
+    model_search_rate: ModelSearchRate | None = None,
 ) -> ToolRate | None:
     """The first of ``lookup``'s rate keys that has a price, its overrides in every spelling ahead of its row.
 
-    The provider's list price applies only when no key has one and default
-    pricing is on.
+    A search the model's provider ran is priced at the model's own search rate
+    when no key has a row, and the provider's list price applies only after
+    that, with default pricing on.
     """
     for rate_key in lookup.rate_keys:
         forms = _rate_key_forms(rate_key)
@@ -1025,10 +1183,16 @@ def _first_tool_rate(
                 overrides.get(kind, {}), [key], as_of, deployment_paid=lookup.operator_set_only
             )
             if override is not None:
-                return ToolRate(rate_key, flat_request_cost(override), "organization")
-        stored = next((deployment[form] for form in forms if form in deployment), None)
-        if stored is not None:
-            return ToolRate(rate_key, flat_request_cost(stored), "deployment")
+                return ToolRate(
+                    rate_key, flat_request_cost(override), "organization", old_key=_is_old_key(rate_key, kind)
+                )
+        form = next((form for form in forms if form in deployment), None)
+        if form is not None:
+            return ToolRate(
+                rate_key, flat_request_cost(deployment[form]), "deployment", old_key=_is_old_key(rate_key, form[0])
+            )
+    if model_search_rate is not None and any(is_provider_web_search_key(key) for key in lookup.rate_keys):
+        return ToolRate(lookup.rate_keys[0], model_search_rate.unit_rate, model_search_rate.source)
     if default_pricing_enabled():
         for rate_key in lookup.rate_keys:
             list_price = PROVIDER_TOOL_LIST_PRICES.get(rate_key) if isinstance(rate_key, str) else None
@@ -1046,12 +1210,23 @@ def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricin
     user, a blocked user, or an exhausted budget (404/403) take precedence over
     the missing-pricing rejection (402) — and refund the reservation before
     raising. When ``require_pricing`` is False, the legacy behavior is preserved
-    (the request is served and logged without cost).
+    (the request is served and logged without cost). A rate in a unit no
+    completion meter reads yet (``second``, ``minute``) is missing in the same
+    sense: it cannot bill the request either.
     """
-    return pricing is None and require_pricing
+    return require_pricing and not has_completion_meter(pricing)
 
 
-def no_pricing_error_detail(model: str) -> str:
+def unbillable_rate_detail(model: str, *, unit: str, bills: str) -> str:
+    """The 402 body for a model whose rate is in a unit the endpoint cannot bill on: the unit, and what it bills."""
+    return (
+        f"Model '{model}' is priced per {unit}, which this request cannot be billed on, and require_pricing is on, "
+        f"so it cannot be served. This endpoint bills {bills} (POST {API_ROOT}/pricing, or the pricing section "
+        "of config.yml)."
+    )
+
+
+def no_pricing_error_detail(model: str, *, unit: str | None = None) -> str:
     """The 402 body for an unpriced model: what went wrong, why, and how to fix it.
 
     A new operator adding a provider in the dashboard hits this on their first
@@ -1060,6 +1235,12 @@ def no_pricing_error_detail(model: str) -> str:
     bundled price list missed the name, most often because it is misspelled, so
     that is named first and enabling the fallback is not offered again.
     """
+    if unit is not None:
+        return (
+            f"Model '{model}' is priced per {unit}, which no completion meter reads yet, and require_pricing is on, "
+            f"so it cannot be billed. Price it in tokens or per request (POST {API_ROOT}/pricing, or the pricing "
+            "section of config.yml)."
+        )
     cause = f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
     if default_pricing_enabled():
         return (

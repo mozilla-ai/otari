@@ -17,19 +17,21 @@ export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
-Accounts in otari.ai's EU region set `ANTHROPIC_BASE_URL="https://eu.api.otari.ai/api"` instead: `api.otari.ai` answers an EU key with `421 Misdirected Request`, naming the host to use.
+Accounts in otari.ai's EU region set
+`ANTHROPIC_BASE_URL="https://eu.api.otari.ai/api"` instead: `api.otari.ai`
+answers an EU key with `421 Misdirected Request`, naming the host to use.
 
-Claude Code puts a telemetry value in `metadata.user_id`; the next section
-says how a key accepts it.
+Claude Code puts a telemetry value in `metadata.user_id`, which is not an
+Otari user, so a key left on the default can refuse its requests with `403`.
+Create the key on the dashboard's **API keys** page and, under **Advanced**, set
+"Mismatched `user` field" to **Always accept** (an existing key takes the same
+choice on its edit form). Spend still binds to the key's user; see
+[Mismatched `user` fields](api-keys.md#mismatched-user-fields).
 
 ### On your own gateway
 
-Claude Code sends a telemetry value in `metadata.user_id`. It is not an
-Otari user ID, so create or update its API key with
-`reject_user_mismatch: false`, or pick **Always accept** for "Mismatched `user`
-field" under the dashboard key form's **Advanced** section. Spend still binds
-to the key's user; see
-[Mismatched `user` fields](access-control.md#mismatched-user-fields).
+The same `metadata.user_id` applies. Pick **Always accept** in the key form as
+above, or create the key with `reject_user_mismatch: false`:
 
 ```bash
 curl "$OTARI_URL/api/v1/keys" \
@@ -92,6 +94,25 @@ export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Conversation-Id: bug-fix-1234\nOtari-Tag
 It takes the place of Claude Code's own session id for grouping. See
 [Sessions from your own agent](traces.md#sessions-from-your-own-agent).
 
+A routed session can also keep what it was about: the prompt that opened each
+turn and each tool call's arguments, and what each tool returned where the
+deployment and the workspace keep tool output. The deployment and the workspace have to keep
+content, and Claude Code asks with a header:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS="Otari-Trace-Content: keep"
+```
+
+`ANTHROPIC_CUSTOM_HEADERS` holds every header Claude Code adds, so setting it
+again replaces the first value. To send this header and
+[`Otari-Tags`](#tag-claude-code-traffic) together, put one per line:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS=$'Otari-Trace-Content: keep\nOtari-Tags: agent=bug-fix'
+```
+
+See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
+
 ## Budgets
 
 A request a budget refuses answers `403` with `Otari-Error-Code: budget_exceeded`.
@@ -125,9 +146,10 @@ no Anthropic Messages API of its own, so Anthropic's server-side context editing
 never runs there; Claude Code's own compaction still does.
 Test the actual agent workflow before making one a default.
 
-### OpenAI models
+### OpenAI models on your own gateway
 
-By default an OpenAI model is served as a chat completion, which has no way to
+This is a self-hosting setting, made in the gateway's
+[configuration](configuration.md). By default an OpenAI model is served as a chat completion, which has no way to
 send a reasoning model's reasoning back, so each turn of an agent loop starts
 its reasoning over, and models OpenAI serves only on the Responses API (the
 codex and pro variants) are out of reach. Set `messages_api: responses` on the
@@ -147,71 +169,29 @@ for how fields translate.
 
 ## Let Otari choose a subagent's model
 
-Switching the model inside a running Claude Code conversation cold-starts its
-prompt cache. A new subagent has no cache yet, so the moment it is spawned is
-where a cheaper model is free. Claude Code can ask Otari at that moment, even
-when its own requests go to Anthropic directly.
+Install the `otari-router` plugin to have Otari pick the model each new Claude
+Code subagent starts on. Switching models inside a running conversation
+cold-starts its prompt cache, but a new subagent has no cache yet, so its spawn
+is where a cheaper model costs nothing in cache misses. The plugin asks Otari at
+that moment, even when Claude Code's own requests go to Anthropic directly, and
+each recommendation is one decision call billed to your key. The request and
+response are in the
+[API reference](api-reference.md#routing-recommendations), and how Otari
+decides is in [Agent model recommendations](routing.md#agent-model-recommendations).
 
-`POST /api/v1/routing/recommend` takes the facts a harness holds at spawn
-time and recommends the model to start the subagent on. Otari puts one choice
-question to a decision model, such as TypeSafe's Jev: given the subagent
-type, the task and the parent's model, which is the cheapest candidate that
-would do the task well? The candidate it picks is the recommendation. Any
-active API key may ask. The decision call is billed to the caller and recorded
-in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
-the harness acts on the answer with its own provider credentials.
-
-Who answers is the deployment's choice. An operator stores one or more
-decision models on the **Subagent router** page of the deployment view, each
-with its key and a price per million tokens, and switches one on; a
-recommendation is then charged to the caller at that price (see
-[Subagent routers](routing.md#subagent-routers)). The router may be a local
-model, and both prices at 0 make it free. On otari.ai that router is managed
-for you.
-
-With no router stored, or every stored router switched off, the route answers
-400 and the plugin falls back to the model the subagent would have had
-anyway.
-
-```bash
-curl "$OTARI_URL/api/v1/routing/recommend" \
-  -H "Authorization: Bearer $OTARI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "harness": "claude-code",
-    "session_id": "bf05abe2-5ff2-4eb0-8459-ab578d5c9468",
-    "tool_use_id": "toolu_01Ab3dEfGh",
-    "agent_type": "Explore",
-    "description": "Find the budget reservation code",
-    "prompt": "Find where budgets are reserved before dispatch.",
-    "parent_model": "claude-opus-5",
-    "requested_model": null
-  }'
-```
-
-```json
-{
-  "model": "haiku",
-  "reason": "haiku with 81%",
-  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
-}
-```
-
-`model` is one of the `agent_recommender_candidates`, Claude Code's `haiku`,
-`sonnet` and `opus` aliases by default, because Claude Code sends the
-subagent's requests to Anthropic itself and resolves the alias on its side.
-`harness` is `claude-code` or `pi`, and it picks the list: a pi request
-sends its own `candidates`, Otari model ids with what each is for, and a
-Claude Code request may not send any (see
-[Agent model recommendations](configuration.md#agent-model-recommendations)).
-The caller's own `requested_model` is received as a fact but kept out of the
-question, so the orchestrator's guess cannot pull the answer toward itself.
-The task reaches the decision model shortened to its first 32,000 characters.
+On a gateway you run, an operator stores one or more decision models on the
+**Subagent router** page of the deployment view, each with its key and a price
+per million tokens, and switches one on; a recommendation is charged to the
+caller at that price (see [Subagent routers](routing.md#subagent-routers)). The
+router may be a local model, and both prices at 0 make it free. With no router
+stored, or every stored router switched off, the route answers `400` and every
+subagent starts on the model it would have had anyway. On otari.ai a managed
+router answers, with nothing to configure.
 
 ### Install the plugin
 
-The Claude Code side is the `otari-router` plugin, which this repository
-publishes as a plugin marketplace. In a Claude Code session:
+The plugin ships from this repository's plugin marketplace. In a Claude Code
+session:
 
 ```
 /plugin marketplace add mozilla-ai/otari
@@ -221,20 +201,18 @@ publishes as a plugin marketplace. In a Claude Code session:
 The install asks for the gateway URL and an API key. Both are required; the
 key goes to Claude Code's secure storage, never to a settings file. The URL
 must be `https` unless the gateway runs on the same machine, since the key
-travels in a header. The plugin is
-active from then on, in that session and
-every one after. The
+travels in a header. The plugin is active
+from then on, in that session and every one after. The
 [plugin's README](../plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
-The plugin hooks `agent.spawn`, sends the request above, and passes the
-answer on with `next({ ...e, model })`. A settings-file hook cannot do this:
-`SubagentStart` only adds context. A fork always inherits its parent's model,
-so the plugin does not ask about one. Each spawn leaves a dim line in the
-transcript naming the model Otari chose and why, and each finished subagent
-one with the model it ran on and its token counts. When Otari does not
-answer, the subagent starts on the model it would have had anyway, and the
-line says so.
+Once it is installed, each spawn leaves a dim line in the transcript naming the
+model Otari chose and why, and each finished subagent one with the model it ran
+on and its token counts. When Otari does not answer, the subagent starts on the
+model it would have had anyway, and the line says so. A fork always inherits
+its parent's model, so the plugin does not ask about one. The plugin hooks
+`agent.spawn` and passes the answer on with `next({ ...e, model })`; a
+settings-file hook cannot do this, because `SubagentStart` only adds context.
 
 ## Send Claude Code sessions to Otari
 
@@ -244,18 +222,26 @@ their cost, and each [agent guardrail](agent-guardrails.md) check the hook made
 on the way. Claude Code exports its own spans and usage over OpenTelemetry, and
 `otari hook` reports its checks to the same session.
 
-You need:
+This works on a gateway you run, not on otari.ai today. The spans, the usage and
+the hook's reports all need a budget-exempt API key, since what Claude Code
+reports is imported, never charged, and only the deployment's operator creates
+one: with **Exempt from budget** in the deployment view's key form, or
+`exclude_from_budget: true` on `POST /api/v1/keys`. A key from otari.ai's
+**API keys** page is always budget-enforced, so otari.ai refuses the usage and
+keeps none of the spans or gate reports. To see Claude Code sessions on
+otari.ai, [route them through Otari](#route-claude-code-through-otari) instead.
 
-- an Otari deployment that records traces (`OTARI_TRACE_CAPTURE_ENABLED`, on by
-  default);
-- an API key created with `exclude_from_budget: true`, since what Claude Code
-  reports is imported, never charged;
+On your own gateway you need:
+
+- traces recorded (`OTARI_TRACE_CAPTURE_ENABLED`, on by default);
+- a budget-exempt API key, as above;
 - for the guardrail checks, the hook registered (`otari hook setup`, or once in
   `~/.claude/settings.json` for every repository; see
   [Agent guardrails](agent-guardrails.md)).
 
 Put the variables in the `env` block of `~/.claude/settings.json`, so they apply
-to every session and reach the hook:
+to every session and reach the hook. Use your gateway's URL in place of
+`http://localhost:8000`:
 
 ```json
 {
@@ -265,9 +251,9 @@ to every session and reach the hook:
     "OTEL_TRACES_EXPORTER": "otlp",
     "OTEL_LOGS_EXPORTER": "otlp",
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otari.example.com/otlp",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:8000/otlp",
     "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer tk-your-import-key",
-    "OTARI_URL": "https://otari.example.com",
+    "OTARI_URL": "http://localhost:8000",
     "OTARI_API_KEY": "tk-your-import-key"
   }
 }
@@ -315,25 +301,32 @@ To keep them, the deployment needs `OTARI_TRACE_CONTENT_ENABLED=true` and
 ```
 
 See [Keeping what a span was about](traces.md#keeping-what-a-span-was-about).
-Do not both [route](#route-claude-code-through-otari) and export one session,
-or its cost appears twice.
+Do not both [route](#route-claude-code-through-otari) and export one session.
+Requests routed with Claude Code's own session id and spans exported under the
+same id, by the same person in the same workspace, land on one trace, so each
+turn and its cost appear twice. A request that sends `Otari-Conversation-Id`
+names a session of its own and joins neither. `otari hook` is the exception:
+its gates open no turn and carry no cost, so a routed session can report them.
 
 ## Import Claude Code usage without routing
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
 sessions that do not already route through Otari. It is the usage part of
 [sending sessions to Otari](#send-claude-code-sessions-to-otari), without the
-session's turns and tools. Send it to any Otari deployment.
+session's turns and tools, and has the same limit: it needs a budget-exempt API
+key, which only a deployment's operator creates, so it works on a gateway you
+run and not on otari.ai today.
 
-Create a dedicated API key with `exclude_from_budget: true`, then configure the
-logs exporter. The optional metrics exporter adds content-free outcome counters.
+Have the operator create a dedicated budget-exempt key, then configure the logs
+exporter, with your gateway's URL in place of `http://localhost:8000`. The
+optional metrics exporter adds content-free outcome counters.
 
 ```bash
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
 export OTEL_LOGS_EXPORTER=otlp
 export OTEL_METRICS_EXPORTER=otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:8000/otlp"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer tk-your-import-key"
 claude
 ```
@@ -352,11 +345,13 @@ idempotency, and pricing behavior.
 The exporter above carries sessions that run after it is configured. Everything
 Claude Code did before that is already on disk, one JSONL transcript per session
 under `~/.claude/projects`. `otari import claude-code` reads those transcripts and
-posts them to the same import endpoint. The command installs on its own, without
-the server: `brew install mozilla-ai/tap/otari`.
+posts them to the same import endpoint, so it has the same limit: it works on a
+gateway you run, with a budget-exempt key or the master key, and not on otari.ai
+today. The command installs on its own, without the server:
+`brew install mozilla-ai/tap/otari`.
 
 ```bash
-export OTARI_URL="https://otari.example.com"
+export OTARI_URL="http://localhost:8000"   # your gateway's URL
 
 # Preview what is on disk. No credential needed: a dry run sends nothing.
 otari import claude-code --dry-run
@@ -367,8 +362,7 @@ export OTARI_API_KEY="tk-your-import-key"
 otari import claude-code
 ```
 
-The key must be budget-exempt (`exclude_from_budget: true`), the same requirement
-every import has.
+The key must be budget-exempt, the same requirement every import has.
 
 The master key works too, and it is the only credential that can import on behalf
 of somebody else. It requires `--user-id`, and that user must already exist

@@ -24,7 +24,7 @@ from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
-from gateway.api.deps import get_api_key_service
+from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
@@ -105,6 +105,7 @@ from gateway.services.tenancy.workspace_activation_service import (
 )
 
 from .tenancy_helpers import (
+    NO_BLOCKED_ADDRESSES,
     NO_MAIL_LIMIT,
     NO_TERMS,
     MembershipWrites,
@@ -323,6 +324,7 @@ async def test_concurrent_member_adds_create_one_identity(
         ).create_active_organization_member_for_user(
             user=user,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -345,6 +347,7 @@ async def test_concurrent_workspace_member_adds_conflict(
     added = await service.create_active_organization_member_for_user(
         user=owner_row,
         request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     workspace_service = WorkspaceService(async_db, **membership_writes(async_db))
     workspace = await workspace_service.create_workspace(
@@ -676,6 +679,7 @@ def _budget_service(db: AsyncSession, organizations: OrganizationService | None 
         organizations,
         get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
+        users=get_user_access(uow),
     )
 
 
@@ -931,6 +935,7 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
     ).create_active_organization_member_for_user(
         user=owner_row,
         request=ActiveOrganizationMemberCreateRequest(email="grace@example.com"),
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert added.organization_member_id is not None
     assert added.user_id is not None
@@ -950,6 +955,7 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
             request=InviteOrganizationMemberRequest(email="grace@example.com"),
             config=config,
             mail_limit=NO_MAIL_LIMIT,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -991,6 +997,7 @@ async def test_organizations_inviting_one_new_address_at_once_all_succeed(
                     request=InviteOrganizationMemberRequest(email="nova@example.com"),
                     config=GatewayConfig(),
                     mail_limit=NO_MAIL_LIMIT,
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1034,13 +1041,16 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
         ),
         config=config,
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
 
     async def attempt(session: AsyncSession) -> object:
         return await OrganizationService(session, **membership_writes(session)).accept_invitation(
-            token, claims=NO_TERMS
+            token,
+            claims=NO_TERMS,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -1089,6 +1099,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         # No mail for the invite itself, so the link comes back to share.
         config=GatewayConfig(),
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1097,7 +1108,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         async with sessions() as session:
             try:
                 return await claim_writes(session)["organizations"].accept_invitation(
-                    token, claims=NO_TERMS, password="accepted-password"
+                    token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES, password="accepted-password"
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1111,6 +1122,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
                     background_tasks=BackgroundTasks(),
                     email="iris@example.com",
                     password=f"signup-password-{index}",
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1161,6 +1173,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
         request=InviteOrganizationMemberRequest(email="iris@example.com"),
         config=GatewayConfig(),
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1185,6 +1198,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
                     background_tasks=BackgroundTasks(),
                     email="iris@example.com",
                     password="signup-password",
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1194,7 +1208,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
         async with sessions() as session:
             try:
                 return await claim_writes(session)["organizations"].accept_invitation(
-                    token, claims=NO_TERMS, password="accepted-password"
+                    token, claims=NO_TERMS, blocked_addresses=NO_BLOCKED_ADDRESSES, password="accepted-password"
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -1228,6 +1242,7 @@ async def test_a_revocation_waits_for_the_transaction_a_live_membership_check_ad
         request=InviteOrganizationMemberRequest(email="juno@example.com"),
         config=GatewayConfig(),
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.invitation_id is not None
     membership = await OrganizationMemberRepository(async_db).get(invited.organization_member_id)
@@ -1282,6 +1297,7 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
             background_tasks=BackgroundTasks(),
             email="nova@example.com",
             password="signup-password",
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
             **claim_writes(session),
         )
 
@@ -1377,6 +1393,7 @@ async def test_concurrent_open_signup_claims_of_an_unwanted_identity_found_one_o
             background_tasks=BackgroundTasks(),
             email="nova@example.com",
             password="signup-password",
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
             **claim_writes(session),
         )
 
@@ -1477,6 +1494,7 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
         request=InviteOrganizationMemberRequest(email="ivy@example.com"),
         config=GatewayConfig(),
         mail_limit=NO_MAIL_LIMIT,
+        blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
     assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
@@ -1484,7 +1502,9 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
 
     async def accept(session: AsyncSession) -> object:
         return await OrganizationService(session, **membership_writes(session)).accept_invitation(
-            token, claims=NO_TERMS
+            token,
+            claims=NO_TERMS,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     async def revoke(session: AsyncSession) -> object:
@@ -1560,6 +1580,7 @@ async def test_concurrent_verifications_of_one_token_verify_exactly_once(
             token=token,
             password="vera-password",
             open_signup=True,
+            blocked_addresses=NO_BLOCKED_ADDRESSES,
         )
 
     outcomes = await _race(sessions, attempt)
@@ -1611,6 +1632,7 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
                     organizations=claim_writes(session)["organizations"],
                     token=token,
                     new_password=f"racer-password-{index}",
+                    blocked_addresses=NO_BLOCKED_ADDRESSES,
                 )
                 return index
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion

@@ -42,14 +42,24 @@ def provider_web_search_label(provider: str) -> str:
     return f"{provider}:{PROVIDER_WEB_SEARCH_TOOL}"
 
 
+def is_provider_web_search_key(rate_key: "RateKey") -> bool:
+    """Whether ``rate_key`` is the row of searches a model's provider ran itself, never the gateway's own."""
+    return (
+        isinstance(rate_key, str)
+        and rate_key.endswith(f":{PROVIDER_WEB_SEARCH_TOOL}")
+        and not rate_key.startswith(f"{GATEWAY_TOOL_PRICING_PROVIDER}:")
+    )
+
+
 def gateway_tool_pricing_key(tool: str) -> str:
     """The ``ModelPricing.model_key`` an operator prices a gateway-run tool under.
 
     ``model_key`` is a free-form ``provider:model`` string, so a tool the gateway
     runs itself is priced as ``otari:<tool>`` (for example ``otari:web_search``).
-    A direct search on a configured tool is priced under that tool's own search
-    row instead, and under this key only a search a workspace's organization key
-    served, whose provider the deployment cannot price.
+    A search or fetch on a configured tool, in the loop or direct, is priced under
+    that tool's own row. This key prices a web tool's call that a workspace's
+    organization key served, whose provider the deployment cannot price, or that
+    the older backend ran.
     """
     return f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}"
 
@@ -92,8 +102,7 @@ class LabelCalls:
     that may price them, first match winning. ``None`` for either means the
     tool's own ``otari:<tool>`` row; an empty ``rate_keys`` prices nothing.
     ``reported_cost`` sums the costs providers reported, over ``calls`` minus
-    ``unreported_calls``, and ``enrichment_cost`` what a search's enrichment
-    fetches reported. ``deployment_paid`` says whose account ran the calls when the
+    ``unreported_calls``. ``deployment_paid`` says whose account ran the calls when the
     label cannot: ``None`` reads it off the label.
     """
 
@@ -103,5 +112,4 @@ class LabelCalls:
     calls: int
     unreported_calls: int
     reported_cost: Decimal
-    enrichment_cost: Decimal
     deployment_paid: bool | None = None

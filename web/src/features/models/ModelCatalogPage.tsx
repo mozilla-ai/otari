@@ -64,6 +64,7 @@ import {
 } from "@/shared/helpers/format"
 import type { DashboardSearch } from "@/shared/helpers/search"
 import { useUrlState } from "@/shared/helpers/urlState"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 
 // The catalog, grouped by model: a rail of filters on the left, and on the
@@ -345,6 +346,17 @@ function FilterRail({
           options={PRICING_OPTIONS}
         />
       </FilterGroup>
+      <FilterGroup
+        label="Data retention"
+        count={filters.zeroDataRetention ? 1 : 0}
+      >
+        <Checkbox
+          isSelected={filters.zeroDataRetention}
+          onChange={(isOn) => set("zeroDataRetention", isOn)}
+        >
+          Zero data retention only
+        </Checkbox>
+      </FilterGroup>
       <FilterGroup label="Source" count={filters.source !== "all" ? 1 : 0}>
         <RadioList
           name="Source"
@@ -366,6 +378,11 @@ function FilterRail({
       </FilterGroup>
     </div>
   )
+}
+
+/** Whether any provider offering `model` is declared to keep no data. */
+function hasZeroDataRetention(model: CatalogModelSummary): boolean {
+  return (model.zero_data_retention_providers?.length ?? 0) > 0
 }
 
 /** A separator between the facts on a card's last line. */
@@ -400,6 +417,9 @@ function ModelCard({
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className={titleClass}>{title}</span>
           {model.open_weights ? <Badge tone="muted">Open weights</Badge> : null}
+          {hasZeroDataRetention(model) ? (
+            <Badge tone="muted">Zero data retention</Badge>
+          ) : null}
           {model.deprecated ? <Badge tone="warn">Deprecated</Badge> : null}
         </div>
         <span className="shrink-0 text-caption">{providers}</span>
@@ -493,6 +513,7 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
               {row.provider_count === 1
                 ? "1 provider"
                 : `${row.provider_count} providers`}
+              {hasZeroDataRetention(row) ? " · Zero data retention" : ""}
             </span>
           </span>
         </div>
@@ -616,14 +637,22 @@ export function ModelCatalogView({
     SORT_OPTIONS.find((option) => option.value === sort) ?? SORT_OPTIONS[0]
   const ordering = view === "table" ? tableSort : sortChoice
   const search = useDebounced(filters.query, 200)
+  // What the selected workspace may call, its own disabled providers and model
+  // lists applied, rather than everything the organization reaches. Held until
+  // the selection is known, so the page never shows the wider list first.
+  const workspace = useSelectedWorkspace()
   const catalog = useCatalog(
-    catalogRequest(
-      { ...filters, query: search },
-      ordering.column,
-      ordering.direction,
-      page,
-      pageSize,
-    ),
+    {
+      ...catalogRequest(
+        { ...filters, query: search },
+        ordering.column,
+        ordering.direction,
+        page,
+        pageSize,
+      ),
+      workspace_id: workspace.selected?.workspace_id,
+    },
+    workspace.isSettled,
   )
   const pageRows = catalog.data?.models ?? []
   const count = catalog.data?.count ?? 0

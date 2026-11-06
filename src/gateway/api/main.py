@@ -18,12 +18,15 @@ from gateway.api.routes import (
     batches,
     bootstrap,
     budgets,
+    calling_key,
     catalog,
     chat,
+    code_execution,
     country_database,
     decisions,
     embeddings,
     end_users,
+    fetch,
     files,
     health,
     hook_guardrails,
@@ -59,7 +62,6 @@ from gateway.api.routes import (
     responses,
     retired_root,
     routing,
-    routing_memory,
     scoped_budgets,
     search,
     search_tools,
@@ -68,9 +70,11 @@ from gateway.api.routes import (
     tools,
     usage,
     users,
+    videos,
     web_search_keys,
     workspace_activation,
     workspace_code_execution_policy,
+    workspace_hosted_providers,
     workspace_mcp_servers,
     workspace_member_budget_policies,
     workspace_web_search,
@@ -150,7 +154,10 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # since the harness dispatches the subagent to its own provider.
     agent_routing.router,
     search.router,
+    fetch.router,
+    code_execution.router,
     batches.router,
+    videos.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
     # otherwise sit behind the catalog router's {model_id:path} catch-all.
@@ -208,13 +215,14 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     web_search_keys.workspace_router,
     org_provider_keys.org_router,
     org_provider_keys.workspace_router,
+    workspace_hosted_providers.router,
+    workspace_hosted_providers.policy_router,
     budgets.router,
     scoped_budgets.router,
     overview.router,
     aliases.router,
     provider_endpoints.router,
     routing.router,
-    routing_memory.router,
     # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     pricing.operator_router,
@@ -224,6 +232,8 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # mounted on their own router.
     usage.operator_router,
     usage.key_router,
+    # The calling API key's own usage and budget, answered for that key alone.
+    calling_key.router,
     agent_telemetry.router,
     settings.router,
     rate_limits.router,

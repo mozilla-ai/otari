@@ -441,7 +441,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
     "gateway/services/pricing_service.py",
-    "gateway/services/routing/knn.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tenancy/authorization.py",
@@ -482,6 +481,7 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/budgets.py",
     "gateway/api/routes/catalog.py",
     "gateway/api/routes/chat.py",
+    "gateway/api/routes/code_execution.py",
     "gateway/api/routes/embeddings.py",
     "gateway/api/routes/health.py",
     "gateway/api/routes/hooks.py",
@@ -502,9 +502,7 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/rerank.py",
     "gateway/api/routes/responses.py",
     "gateway/api/routes/routing.py",
-    "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
-    "gateway/api/routes/search.py",
     "gateway/api/routes/settings.py",
     "gateway/api/routes/tool_settings.py",
     "gateway/api/routes/usage.py",
@@ -599,7 +597,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/pricing.py",
     "gateway/api/routes/routing.py",
-    "gateway/api/routes/routing_memory.py",
     "gateway/api/routes/scoped_budgets.py",
     "gateway/api/routes/settings.py",
     "gateway/api/routes/tool_settings.py",
@@ -618,7 +615,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/playground_service.py",
     "gateway/services/pricing_init_service.py",
     "gateway/services/pricing_refresh_service.py",
-    "gateway/services/routing/knn.py",
     "gateway/services/tenancy/deployment_user_service.py",
     "gateway/services/tenancy/org_provider_key_service.py",
     "gateway/services/tenancy/organization_domain_service.py",
@@ -1341,9 +1337,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
-            "gateway/api/routes/organization_usage.py",
             "gateway/api/routes/scoped_budgets.py",
-            "gateway/api/routes/usage.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/overview/overview_repository.py",
             "gateway/repositories/users_repository.py",
@@ -1425,6 +1419,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": None,
         "baseline": ("gateway/services/tenancy/organization_guardrail_service.py",),
     },
+    "gateway.models.identity.BlockedEmail": {
+        "repository": "gateway/repositories/identity/blocked_email_repository.py",
+        "baseline": (),
+    },
     "gateway.models.identity.OAuthIdentityLink": {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
         "baseline": (),
@@ -1439,6 +1437,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.inference.StoredCountryDatabase": {
         "repository": "gateway/repositories/inference/country_database_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.inference.VideoJobRecord": {
+        "repository": "gateway/repositories/inference/video_job_repository.py",
         "baseline": (),
     },
     "gateway.models.platform.RuntimeSetting": {
@@ -1563,6 +1565,14 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/providers/provider_endpoint_repository.py",
         "baseline": (),
     },
+    "gateway.models.providers.WorkspaceHostedProviderAccess": {
+        "repository": "gateway/repositories/providers/workspace_hosted_access_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.providers.WorkspaceProviderPolicy": {
+        "repository": "gateway/repositories/providers/workspace_hosted_access_repository.py",
+        "baseline": (),
+    },
     "gateway.models.rate_limits.StoredRateLimitRule": {
         "repository": "gateway/repositories/rate_limits/rate_limit_rule_repository.py",
         "baseline": ("gateway/services/rate_limits/_service.py",),
@@ -1570,17 +1580,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.routing.AgentRecommender": {
         "repository": "gateway/repositories/routing/agent_recommender_repository.py",
         "baseline": (),
-    },
-    "gateway.models.routing.RouterPreference": {
-        "repository": None,
-        "baseline": ("gateway/api/routes/routing_memory.py",),
-    },
-    "gateway.models.routing.RoutingMemory": {
-        "repository": None,
-        "baseline": (
-            "gateway/api/routes/routing_memory.py",
-            "gateway/services/routing/knn.py",
-        ),
     },
     "gateway.models.routing.RoutingPolicy": {
         "repository": None,
@@ -1759,9 +1758,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/agent_telemetry.py",
             "gateway/api/routes/batches.py",
             "gateway/api/routes/catalog.py",
-            "gateway/api/routes/organization_usage.py",
-            "gateway/api/routes/search.py",
-            "gateway/api/routes/usage.py",
+            "gateway/api/routes/code_execution.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/users_repository.py",
             "gateway/services/external_usage_service.py",
@@ -1775,8 +1772,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/budgets.py",
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
-            "gateway/api/routes/organization_usage.py",
-            "gateway/api/routes/usage.py",
             "gateway/api/routes/users.py",
             "gateway/repositories/budgets/budget_repository.py",
             "gateway/repositories/budgets/end_user_repository.py",

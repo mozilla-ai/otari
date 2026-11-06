@@ -22,17 +22,14 @@ import uuid
 from collections import Counter
 
 import pytest
-from fastapi import HTTPException
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig
-from gateway.models.routing import PolicySpec, RoutingConfig
+from gateway.models.routing import PolicySpec
 from gateway.services.routing.backends import (
     WEIGHTED_BACKEND,
     RoutingContext,
     backend_is_weighted,
-    backend_pool_is_teachable,
-    backend_requires_pricing,
     get_router_backend,
 )
 from gateway.services.routing.compiler import compile_policy
@@ -117,14 +114,14 @@ def test_a_weighted_entry_requires_weights() -> None:
 
 
 def test_weights_are_refused_on_any_other_entry() -> None:
-    # A weight map on a knn entry or a static target reads as a traffic split and
+    # A weight map on another router's entry or a static target reads as a traffic split and
     # would silently do nothing.
     with pytest.raises(ValidationError, match="only applies to a `router: weighted` entry"):
         PolicySpec.model_validate(
             {
                 "select": [
                     {
-                        "router": "knn",
+                        "router": "priority",
                         "candidates": ["openai:gpt-5", "openai:gpt-5-mini"],
                         "weights": {"openai:gpt-5": 1},
                     },
@@ -296,66 +293,10 @@ def test_a_weighted_decision_is_not_logged_per_request() -> None:
     assert decision.log_decision is False
 
 
-def test_a_weighted_policy_is_not_a_consumer_of_routing_memory() -> None:
-    # A weighted policy names a router, but it reads no examples, so the routing
-    # memory surfaces must not claim it. `/api/v1/routing/status` would report it under
-    # a warmth it never uses, and `rank` would let its pool decide which score keys
-    # a user may teach, refusing the examples a learned policy is being prepared with.
-    from gateway.api.routes.routing_memory import ScoredExample, _learned_policies, _validated_scores
-
-    weighted_config = GatewayConfig(
-        master_key="test-master-key",
-        model_discovery=False,
-        providers={"openai": {"api_key": "sk-openai"}, "anthropic": {"api_key": "sk-anthropic"}},
-        routing=RoutingConfig(policies={"balanced": _spec({"openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30})}),
-    )
-    assert not backend_pool_is_teachable(WEIGHTED_BACKEND)
-    assert not backend_pool_is_teachable(" Weighted ")
-    assert _learned_policies(weighted_config, "alice", _WORKSPACE) == []
-    assert _validated_scores(
-        weighted_config, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})], _WORKSPACE
-    ) == {"openai:gpt-5-mini": "openai:gpt-5-mini"}
-
-
-def test_a_noop_placeholder_pool_is_still_teachable() -> None:
-    # `noop` exists to hold a policy's shape while its pool is being taught, so its
-    # candidates are the very ones an operator is seeding. Excluding it alongside
-    # `weighted` would drop the typo guard and hide the pool's warmth for exactly
-    # the workflow the backend was added for.
-    from gateway.api.routes.routing_memory import ScoredExample, _learned_policies, _validated_scores
-
-    placeholder = PolicySpec.model_validate(
-        {
-            "select": [
-                {"router": "noop", "candidates": ["openai:gpt-5", "openai:gpt-5-mini"]},
-                {"default": "openai:gpt-5"},
-            ]
-        }
-    )
-    cfg = GatewayConfig(
-        master_key="test-master-key",
-        model_discovery=False,
-        providers={"openai": {"api_key": "sk-openai"}},
-        routing=RoutingConfig(policies={"warming": placeholder}),
-    )
-    assert backend_pool_is_teachable("noop")
-    assert backend_pool_is_teachable("some-future-backend")
-    assert [policy.name for policy in _learned_policies(cfg, "alice", _WORKSPACE)] == ["warming"]
-    assert _validated_scores(
-        cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})], _WORKSPACE
-    ) == {"openai:gpt-5-mini": "openai:gpt-5-mini"}
-    with pytest.raises(HTTPException, match="do not name a model"):
-        _validated_scores(cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-4o": 1.0})], _WORKSPACE)
-
-
-def test_the_backend_is_registered_and_needs_no_pricing(config: GatewayConfig) -> None:
-    assert isinstance(get_router_backend(config, WEIGHTED_BACKEND), WeightedRouterBackend)
-    assert isinstance(get_router_backend(config, " Weighted "), WeightedRouterBackend)
+def test_the_backend_is_registered() -> None:
+    assert isinstance(get_router_backend(WEIGHTED_BACKEND), WeightedRouterBackend)
+    assert isinstance(get_router_backend(" Weighted "), WeightedRouterBackend)
     assert backend_is_weighted(" WEIGHTED ")
-    # The weighted router reads no prices, so demanding them would refuse a working
-    # policy. Only the learned router scores cost.
-    assert not backend_requires_pricing(WEIGHTED_BACKEND)
-    assert backend_requires_pricing("knn")
 
 
 # -- the request path ------------------------------------------------------
@@ -373,7 +314,7 @@ def test_the_ordering_becomes_the_plan_ahead_of_on_failure(config: GatewayConfig
             policy_name="balanced",
             user_id="alice",
             allowlist=None,
-            signal=RoutingSignal(task_signal="hi", trace_signal="hi", trace_anchor="hi"),
+            signal=RoutingSignal(),
         )
     )
     assert ordering is not None
@@ -417,7 +358,7 @@ def test_a_filtered_pool_only_ranks_what_the_caller_may_use(config: GatewayConfi
             policy_name="balanced",
             user_id="alice",
             allowlist=["anthropic:*"],
-            signal=RoutingSignal(task_signal="hi", trace_signal="hi", trace_anchor="hi"),
+            signal=RoutingSignal(),
         )
     )
     assert ordering is not None
@@ -490,8 +431,8 @@ def test_explain_names_every_candidate_when_the_whole_split_is_filtered_out(
     ]
 
 
-def test_explain_declines_for_a_router_that_needs_a_request(config: GatewayConfig) -> None:
-    knn = PolicySpec.model_validate(
+def test_explain_declines_for_a_router_this_build_does_not_have(config: GatewayConfig) -> None:
+    retired = PolicySpec.model_validate(
         {
             "select": [
                 {"router": "knn", "candidates": ["openai:gpt-5", "openai:gpt-5-mini"]},
@@ -499,7 +440,7 @@ def test_explain_declines_for_a_router_that_needs_a_request(config: GatewayConfi
             ]
         }
     )
-    assert explain_router_ordering(config, knn) == (None, [])
+    assert explain_router_ordering(config, retired) == (None, [])
 
 
 def test_describe_split_and_explain_ordering_agree() -> None:
