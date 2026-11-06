@@ -17,6 +17,9 @@ MAX_SUBJECT_LENGTH = 255
 MAX_BLOCK_REASON_LENGTH = 500
 
 OIDC_PROVIDER_PREFIX = "oidc:"
+# The longest issuer whose prefixed provider value still fits, so a stored connection can always
+# name its provider.
+MAX_OIDC_ISSUER_LENGTH = MAX_PROVIDER_LENGTH - len(OIDC_PROVIDER_PREFIX)
 
 
 class EmailAssertion(StrEnum):

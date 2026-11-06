@@ -14273,7 +14273,7 @@
           },
           "issuer": {
             "description": "The identity provider's issuer URL, as the organization's own claim.",
-            "maxLength": 255,
+            "maxLength": 250,
             "title": "Issuer",
             "type": "string"
           }
