@@ -165,6 +165,20 @@ class OIDCConnectionPublic(BaseModel):
     )
 
 
+class OrganizationSsoPublic(BaseModel):
+    """An organization's own OIDC connection, and what to register at the provider."""
+
+    redirect_uri: str = Field(
+        description=(
+            "This deployment's fixed callback path. Register it at the identity provider, "
+            "whether or not a connection is saved yet."
+        )
+    )
+    connection: OIDCConnectionPublic | None = Field(
+        description="The organization's own connection, or null until one is saved."
+    )
+
+
 __all__ = [
     "BlockedEmailCreateRequest",
     "BlockedEmailCreatedPublic",
@@ -175,5 +189,6 @@ __all__ = [
     "OIDCConnectionDomain",
     "OIDCConnectionPublic",
     "OIDCConnectionRequest",
+    "OrganizationSsoPublic",
     "PasswordLinkPublic",
 ]

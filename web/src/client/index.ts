@@ -360,6 +360,17 @@ export type CreateOrganizationDomainRequest =
 export type UpdateOrganizationDomainRequest =
   Schemas["OrganizationDomainUpdateRequest"]
 
+// An organization's own bring-your-own OIDC sign-in connection. `connection`
+// is null until the organization saves one, while `redirect_uri` is always
+// present: an admin needs it to register at their provider before that.
+// `OidcConnection.domains` carries the same email-domain claims the Email
+// domains page manages, each with the DNS proof expiry that gates sign-in
+// through this connection.
+export type OrganizationSso = Schemas["OrganizationSsoPublic"]
+export type OidcConnection = Schemas["OIDCConnectionPublic"]
+export type OidcConnectionDomain = Schemas["OIDCConnectionDomain"]
+export type OidcConnectionRequest = Schemas["OIDCConnectionRequest"]
+
 // The providers this deployment serves on its own keys, for a request that
 // brings no credential of its own. Deployment-wide and operator-only, and keyed
 // on the provider (one row each), so every path names the provider rather than

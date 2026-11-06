@@ -21,11 +21,13 @@ import type {
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
   OfferOrgProviderModelRequest,
+  OidcConnectionRequest,
   Organization,
   OrganizationContext,
   OrganizationDomain,
   OrganizationMember,
   OrganizationMembers,
+  OrganizationSso,
   OrgProviderAvailableModels,
   OrgProviderKey,
   OrgProviderModel,
@@ -51,6 +53,7 @@ import {
   ORGANIZATION_PROVIDER_AVAILABLE_MODELS,
   ORGANIZATION_PROVIDER_KEYS,
   ORGANIZATION_PROVIDER_MODELS,
+  ORGANIZATION_SSO,
   ORGANIZATIONS,
   WORKSPACES,
 } from "@/shared/api/queryKeys"
@@ -877,6 +880,62 @@ export function useDeleteOrganizationDomain() {
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateOrganizationDomains(queryClient),
+  })
+}
+
+// An organization's own bring-your-own OIDC connection, for signing in through
+// an identity provider the organization administers rather than Otari's own
+// sign-in methods. `redirect_uri` is served alongside the connection, so the
+// one read also tells an admin what to register before saving anything.
+//
+// There is no partial update: saving replaces the whole connection, so the
+// client secret is required on every save, including one that changes nothing
+// else about it.
+
+export function useOrganizationSso(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_SSO],
+    queryFn: () => apiFetch<OrganizationSso>("/organizations/me/sso"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+function invalidateOrganizationSso(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO] })
+}
+
+export function useSaveOrganizationSso() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: OidcConnectionRequest) =>
+      apiFetch<OrganizationSso>("/organizations/me/sso", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationSso(queryClient),
+  })
+}
+
+export function useTestOrganizationSso() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<OrganizationSso>("/organizations/me/sso/test", {
+        method: "POST",
+      }),
+    onSuccess: () => invalidateOrganizationSso(queryClient),
+  })
+}
+
+export function useDeleteOrganizationSso() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<void>("/organizations/me/sso", { method: "DELETE" }),
+    onSuccess: () => invalidateOrganizationSso(queryClient),
   })
 }
 
