@@ -39,7 +39,7 @@ from gateway.schemas.identity import (
 from gateway.services.identity._connection_clients import client_for, pending_flow_provider
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
 from gateway.services.identity._enforcement import (
-    linked_providers_for_organization,
+    has_link_to_organization,
     sso_enforcement_blocks_any_membership,
 )
 from gateway.services.identity._membership import organization_for_email_domain
@@ -492,7 +492,7 @@ class OIDCConnectionService:
             if sso_blocks_membership(
                 organization=organization,
                 user=identity,
-                linked_providers=frozenset({provider}) if identity.id in linked_ids else frozenset(),
+                is_linked=identity.id in linked_ids,
             )
         }
         if blocked_ids:
@@ -522,9 +522,7 @@ class OIDCConnectionService:
                 and sso_blocks_membership(
                     organization=organization,
                     user=identity,
-                    linked_providers=(
-                        frozenset({provider}) if provider is not None and identity.id in linked_ids else frozenset()
-                    ),
+                    is_linked=provider is not None and identity.id in linked_ids,
                 )
             }
             if refused:
@@ -533,10 +531,10 @@ class OIDCConnectionService:
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
         """Whether ``organization``'s own SSO enforcement refuses ``user`` from acting in it."""
         async with self._uow:
-            linked = await linked_providers_for_organization(
+            linked = await has_link_to_organization(
                 organization, user.id, connections=self._connections, links=self._links
             )
-        return sso_blocks_membership(organization=organization, user=user, linked_providers=linked)
+        return sso_blocks_membership(organization=organization, user=user, is_linked=linked)
 
     async def blocks_any_membership(self, *, user: User) -> bool:
         """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""

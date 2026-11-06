@@ -12,6 +12,7 @@ from gateway.log_config import logger
 from gateway.models.identity import EmailAssertion, OIDCConnection, ProviderIdentity, oidc_identity_provider
 from gateway.services.oauth_service import provider_refused_the_code
 
+
 async def exchange_sso_code(
     client: StoredStateClient,
     *,
