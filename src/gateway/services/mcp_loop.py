@@ -356,6 +356,7 @@ class _ChatTotals:
     completion: int = 0
     cache_read: int = 0
     cache_write: int = 0
+    cache_write_5m: int = 0
     cache_write_1h: int = 0
     reasoning: int = 0
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -369,6 +370,8 @@ def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
     acc.completion += usage.completion_tokens or 0
     acc.cache_read += cache_read_tokens_of(usage)
     acc.cache_write += cache_write_tokens_of(usage)
+    ttl = getattr(usage.prompt_tokens_details, "cache_creation_token_details", None)
+    acc.cache_write_5m += getattr(ttl, "ephemeral_5m_input_tokens", None) or 0
     acc.cache_write_1h += cache_write_1h_tokens_of(usage)
     acc.reasoning += reasoning_tokens_of(usage)
 
@@ -390,9 +393,9 @@ def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatT
         details.cached_tokens = totals.cache_read
         if totals.cache_write or details.cache_write_tokens is not None:
             details.cache_write_tokens = totals.cache_write
-        if totals.cache_write_1h or details.cache_creation_token_details is not None:
+        if totals.cache_write_5m or totals.cache_write_1h or details.cache_creation_token_details is not None:
             details.cache_creation_token_details = CacheCreationTokenDetails(
-                ephemeral_5m_input_tokens=totals.cache_write - totals.cache_write_1h,
+                ephemeral_5m_input_tokens=totals.cache_write_5m,
                 ephemeral_1h_input_tokens=totals.cache_write_1h,
             )
     reasoning = usage.completion_tokens_details
