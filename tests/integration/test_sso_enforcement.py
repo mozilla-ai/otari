@@ -606,6 +606,28 @@ async def test_a_password_sign_in_reaches_no_enforcing_organization(async_db: As
     assert signed_in.session_token
 
 
+async def test_a_sign_in_that_reaches_nowhere_clears_the_stored_pointer(async_db: AsyncSession) -> None:
+    """Asserted against the row, not the response: a response saying ``None`` over a row still naming the
+    organization is what let every later request resolve scope to it."""
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await async_db.commit()
+    assert member.active_organization_id == organization.id
+
+    signed_in = await _identity_service(async_db).sign_in(member)
+    await async_db.commit()
+
+    assert signed_in.active_organization_id is None
+    stored = await async_db.get(User, member.id)
+    assert stored is not None
+    assert stored.active_organization_id is None
+
+
 async def test_a_passkey_sign_in_reaches_no_enforcing_organization(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True
@@ -1000,31 +1022,37 @@ async def test_saving_enforcement_again_revokes_a_member_whose_link_is_now_gone(
 # =============================================================================
 
 
-async def test_deleting_an_organization_revokes_a_session_it_moves_into_a_refusing_one(
+async def test_deleting_an_organization_leaves_nobody_acting_in_one_that_refuses_them(
     client: TestClient, async_db: AsyncSession
 ) -> None:
-    """Deleting an organization repoints whoever pointed at it, so the destination's refusal must reach them."""
+    """The deletion clears the pointer, so the enforcing organization is not somewhere it can land."""
     enforcing = await create_organization(async_db, slug="acme")
     enforcing.sso_required = True
     enforcing.sso_break_glass_waived = True
     async_db.add(enforcing)
     doomed = await create_organization(async_db, slug="doomed")
+    elsewhere = await create_organization(async_db, slug="elsewhere")
     owner = await _member_with_email(async_db, doomed, role="owner", email="owner@acme.example", full_name="Ada Owner")
     member = await _member_with_email(async_db, doomed, role="member", email="mo@acme.example", full_name="Mo Member")
-    for identity in (owner, member):
-        await OrganizationMemberRepository(async_db).create_membership(
-            organization_id=enforcing.id, user_id=identity.id, role="member"
-        )
-    await _dashboard_session(async_db, member)
-    token = await _dashboard_session(async_db, owner)
+    # The owner keeps somewhere to land; the member's only other organization is the enforcing one.
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=elsewhere.id, user_id=owner.id, role="member"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=enforcing.id, user_id=member.id, role="member"
+    )
+    member_token = await _dashboard_session(async_db, member)
+    owner_token = await _dashboard_session(async_db, owner)
     await async_db.commit()
-    client.cookies.set(SESSION_COOKIE_NAME, token)
-    assert await _live_session_count(async_db, member.id) == 1
 
-    response = client.delete(f"{API_ROOT}/organizations/me")
+    client.cookies.set(SESSION_COOKIE_NAME, owner_token)
+    deleted = client.delete(f"{API_ROOT}/organizations/me")
+    assert deleted.status_code == 200, deleted.text
 
-    assert response.status_code == 200, response.text
-    assert await _live_session_count(async_db, member.id) == 0
+    await async_db.refresh(member)
+    assert member.active_organization_id is None
+    client.cookies.set(SESSION_COOKIE_NAME, member_token)
+    assert client.get(f"{API_ROOT}/organizations/me").status_code == 404
 
 
 async def test_switching_into_an_enforcing_organization_is_refused_for_a_blocked_member(

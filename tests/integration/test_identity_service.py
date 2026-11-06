@@ -618,4 +618,5 @@ async def test_a_proven_address_that_lost_its_last_membership_signs_in_to_no_org
     assert signed_in.active_organization_id is None
     assert await _count(async_db, Organization) == organizations_before
     assert signed_in.account.full_name == "Ada"
-    assert signed_in.account.active_organization_id == former.id
+    # The row says what the response says: the sign-in reached no organization, so it names none.
+    assert signed_in.account.active_organization_id is None
