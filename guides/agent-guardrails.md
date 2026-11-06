@@ -49,7 +49,7 @@ uv tool install https://github.com/mozilla-ai/otari/releases/download/vX.Y.Z/ota
 ```
 
 A source checkout's virtualenv carries the same command. See
-[cli/README.md](https://github.com/mozilla-ai/otari/blob/e9a72e7c8e7bb1a9bfe79c82cb0643f098488954/cli/README.md) for the rest of that distribution.
+[cli/README.md](https://github.com/mozilla-ai/otari/blob/00942743479473980678c360f094086b4d105192/cli/README.md) for the rest of that distribution.
 
 Five commands apply here:
 
@@ -329,9 +329,9 @@ To run it on every pull request:
    the pull request's own code.
 
 Otari's own repository does this in
-[`.github/workflows/otari-guardrails-check.yml`](https://github.com/mozilla-ai/otari/blob/e9a72e7c8e7bb1a9bfe79c82cb0643f098488954/.github/workflows/otari-guardrails-check.yml)
+[`.github/workflows/otari-guardrails-check.yml`](https://github.com/mozilla-ai/otari/blob/00942743479473980678c360f094086b4d105192/.github/workflows/otari-guardrails-check.yml)
 and
-[`.github/workflows/otari-guardrails-judges.yml`](https://github.com/mozilla-ai/otari/blob/e9a72e7c8e7bb1a9bfe79c82cb0643f098488954/.github/workflows/otari-guardrails-judges.yml).
+[`.github/workflows/otari-guardrails-judges.yml`](https://github.com/mozilla-ai/otari/blob/00942743479473980678c360f094086b4d105192/.github/workflows/otari-guardrails-judges.yml).
 
 ## Reporting to Otari
 
