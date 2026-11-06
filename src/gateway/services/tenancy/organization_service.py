@@ -336,10 +336,8 @@ _READ_ONLY_DETAIL = "Viewers have read-only access to this workspace"
 async def _revocation_enforces_instead(_organization: Organization) -> bool:
     """A ``blocked`` predicate that refuses no organization, for a read that leaves enforcement to revocation.
 
-    NOTE: A caller passing this leaves a live session to be ended by revocation rather than refused
-    on each read, so any new way for a member to become blocked must revoke their sessions too.
-    Only a read may pass it. A caller that points somebody at an organization passes the real
-    enforcement instead, or it grants the access this predicate declines to check.
+    NOTE: Only a read may pass this. Any new way for a member to become blocked must revoke their
+    sessions, because nothing here refuses one.
     """
     return False
 
