@@ -324,7 +324,7 @@ describe("OrganizationSsoPage", () => {
       await screen.findByText(/3 members, 2 of whom sign in some other way/),
     ).toBeInTheDocument()
     expect(screen.getByText("Alex Doe")).toBeInTheDocument()
-    expect(screen.getByText(/and 1 others/)).toBeInTheDocument()
+    expect(screen.getByText(/and 1 other$/)).toBeInTheDocument()
     expect(
       screen.getByRole("checkbox", {
         name: "Require sign-in through this connection",
