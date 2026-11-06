@@ -469,7 +469,6 @@ GET /api/v1/organizations/me/sso                                # dashboard-only
 PUT /api/v1/organizations/me/sso                                 # dashboard-only
 POST /api/v1/organizations/me/sso/test                           # dashboard-only
 DELETE /api/v1/organizations/me/sso                              # dashboard-only
-DELETE /api/v1/organizations/me/sso/links/{user_id}              # dashboard-only
 POST /api/v1/organizations/me/member-invitations                # dashboard-only
 POST /api/v1/organizations/me/member-invitations/bulk           # dashboard-only
 DELETE /api/v1/organizations/me/member-invitations/{invitation_id} # dashboard-only
