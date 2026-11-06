@@ -29,6 +29,7 @@ from gateway.schemas.identity import (
     OIDCConnectionDomain,
     OIDCConnectionPublic,
     OIDCConnectionRequest,
+    OrganizationSsoEnforcementPublic,
     OrganizationSsoPreflightMemberPublic,
     OrganizationSsoPreflightPublic,
 )
@@ -361,6 +362,15 @@ class OIDCConnectionService:
                 return
             current.first_sign_in_at = datetime.now(UTC)
             self._connections.stage(current)
+
+    async def get_enforcement_for_user(self, *, user: User) -> OrganizationSsoEnforcementPublic:
+        """Return the caller's organization's current sign-in enforcement. Owners and admins only."""
+        organization = await self._managed_organization(user)
+        return OrganizationSsoEnforcementPublic(
+            required=organization.sso_required,
+            break_glass_user_id=organization.sso_break_glass_user_id,
+            break_glass_waived=organization.sso_break_glass_waived,
+        )
 
     async def preflight_sso_enforcement_for_user(self, *, user: User) -> OrganizationSsoPreflightPublic:
         """Report who the caller's organization's sign-in enforcement would affect. Owners and admins only.

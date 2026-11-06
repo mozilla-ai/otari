@@ -17490,6 +17490,41 @@
         "title": "OrganizationScopedBudgetsPublic",
         "type": "object"
       },
+      "OrganizationSsoEnforcementPublic": {
+        "description": "The caller's organization's current sign-in enforcement, as its admins see it.",
+        "properties": {
+          "break_glass_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One of the organization's own owners who keeps a non-SSO sign-in route, where the organization named one.",
+            "title": "Break Glass User Id"
+          },
+          "break_glass_waived": {
+            "description": "Whether the organization has explicitly waived naming a break-glass owner.",
+            "title": "Break Glass Waived",
+            "type": "boolean"
+          },
+          "required": {
+            "description": "Whether this organization requires sign-in through its own connection.",
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "required",
+          "break_glass_user_id",
+          "break_glass_waived"
+        ],
+        "title": "OrganizationSsoEnforcementPublic",
+        "type": "object"
+      },
       "OrganizationSsoEnforcementRequest": {
         "description": "What an organization administrator submits to require, or stop requiring, sign-in through its own connection.",
         "properties": {
@@ -17615,6 +17650,10 @@
             ],
             "description": "The organization's own connection, or null until one is saved."
           },
+          "enforcement": {
+            "$ref": "#/components/schemas/OrganizationSsoEnforcementPublic",
+            "description": "The organization's current sign-in enforcement. Independent of whether a connection exists."
+          },
           "redirect_uri": {
             "anyOf": [
               {
@@ -17630,7 +17669,8 @@
         },
         "required": [
           "redirect_uri",
-          "connection"
+          "connection",
+          "enforcement"
         ],
         "title": "OrganizationSsoPublic",
         "type": "object"

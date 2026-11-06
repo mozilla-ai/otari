@@ -16434,6 +16434,27 @@ export interface components {
             data: components["schemas"]["OrganizationScopedBudgetPublic"][];
         };
         /**
+         * OrganizationSsoEnforcementPublic
+         * @description The caller's organization's current sign-in enforcement, as its admins see it.
+         */
+        OrganizationSsoEnforcementPublic: {
+            /**
+             * Break Glass User Id
+             * @description One of the organization's own owners who keeps a non-SSO sign-in route, where the organization named one.
+             */
+            break_glass_user_id: string | null;
+            /**
+             * Break Glass Waived
+             * @description Whether the organization has explicitly waived naming a break-glass owner.
+             */
+            break_glass_waived: boolean;
+            /**
+             * Required
+             * @description Whether this organization requires sign-in through its own connection.
+             */
+            required: boolean;
+        };
+        /**
          * OrganizationSsoEnforcementRequest
          * @description What an organization administrator submits to require, or stop requiring, sign-in through its own connection.
          */
@@ -16513,6 +16534,8 @@ export interface components {
         OrganizationSsoPublic: {
             /** @description The organization's own connection, or null until one is saved. */
             connection: components["schemas"]["OIDCConnectionPublic"] | null;
+            /** @description The organization's current sign-in enforcement. Independent of whether a connection exists. */
+            enforcement: components["schemas"]["OrganizationSsoEnforcementPublic"];
             /**
              * Redirect Uri
              * @description The absolute callback address to register at the identity provider, whether or not a connection is saved yet. Null where this deployment has no public address of its own configured, because there is no address to register until it has one.

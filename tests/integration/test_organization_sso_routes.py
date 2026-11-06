@@ -302,6 +302,62 @@ def test_the_response_lists_each_verified_domain_and_its_expiry(
     assert domains["unproven.acme-domains.test"]["proof_expires_at"] is None
 
 
+def test_the_response_reports_enforcement_as_off_by_default(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforcement-default")
+        owner_token = _identity(
+            session, email="owner@acme-enforcement-default.test", organization_id=organization.id, role="owner"
+        )
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "GET", _ENDPOINT)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.json()["enforcement"] == {
+        "required": False,
+        "break_glass_user_id": None,
+        "break_glass_waived": False,
+    }
+
+
+def test_the_response_reflects_enforcement_once_it_is_set(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-enforcement-reflects")
+        owner_email = "owner@acme-enforcement-reflects.test"
+        owner_token = _identity(session, email=owner_email, organization_id=organization.id, role="owner")
+        session.add(_connection(organization.id, first_sign_in_at=datetime.now(UTC)))
+        session.commit()
+        # Naming the acting owner as the break-glass exception, rather than waiving it, so their
+        # own session survives the enforcement this call turns on and the follow-up read can use it.
+        owner_id = _owner_id(session, email=owner_email)
+    finally:
+        session.close()
+
+    put_response = _call(
+        client,
+        owner_token,
+        "PUT",
+        f"{_ENDPOINT}/enforcement",
+        json=_enforcement_body(break_glass_user_id=str(owner_id), break_glass_waived=False),
+    )
+    assert put_response.status_code == status.HTTP_204_NO_CONTENT, put_response.text
+
+    get_response = _call(client, owner_token, "GET", _ENDPOINT)
+    assert get_response.status_code == status.HTTP_200_OK, get_response.text
+    assert get_response.json()["enforcement"] == {
+        "required": True,
+        "break_glass_user_id": str(owner_id),
+        "break_glass_waived": False,
+    }
+
+
 def test_test_and_delete_refuse_404_with_no_connection_saved(
     client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
