@@ -372,16 +372,16 @@ in scope matches one of `require`'s phrases.
 | `require` | yes | Phrases, matched the way `command` matches them. Any one entry satisfies the gate. |
 
 ```yaml
-  - id: openapi-changed-needs-postman
+  - id: openapi-changed-needs-generator
     type: command_if_changed
     runs: [stop.session]
     enforcement: required
     when_changed: ["docs/public/openapi.json"]
-    require: ["make postman"]
+    require: ["scripts/generate_openapi.py"]
     message: >-
-      docs/public/openapi.json changed; regenerate it with
-      scripts/generate_openapi.py, then run `make postman` to keep the
-      Postman collection in sync (see AGENTS.md, "Generated Artifacts").
+      docs/public/openapi.json is generated. Run
+      `uv run python scripts/generate_openapi.py` rather than editing the
+      spec by hand (see AGENTS.md, "Generated Artifacts").
 ```
 
 - A required command that appears only inside a heredoc body does not satisfy

@@ -90,13 +90,10 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 - `tests/unit/test_url_safety.py` and `tests/unit/test_web_search_backend.py` need DNS, which fails with a different signature: the code under test resolves a hostname to an IP to decide whether an address is safe, so with no resolver it gets the hostname back and the failure reads `ValueError: 'example.com' does not appear to be an IPv4 or IPv6 address`. Those tests pass wherever DNS is available. Nothing about the address checks is wrong; confirm with `python -c "import socket; socket.gethostbyname('example.com')"` before treating one as a regression.
 
 ## Generated Artifacts
-- The Postman collection is generated **from** `docs/public/openapi.json`, so it goes stale
-  whenever the spec does, including for a change that only edits a route's
-  docstring (descriptions are carried into the collection). Regenerate both and commit
-  both: `uv run python scripts/generate_openapi.py`, then `make postman`. Note there is
-  no `make openapi` target; `make openapi-check` only validates. Verify with
-  `make openapi-check` and `make postman-check`. The same `openapi-spec` CI job runs both
-  checks, so missing this fails CI even when `openapi-check` passes.
+- `docs/public/openapi.json` is generated from the API routes and schemas, so it goes stale
+  whenever a route docstring changes. Regenerate it with
+  `uv run python scripts/generate_openapi.py`. Note there is no `make openapi` target;
+  `make openapi-check` only validates. The `openapi-spec` CI job runs that check.
 - **A new route also owes `scripts/sdk_codegen/sdk-endpoints.txt`**, which is a
   hand-maintained manifest rather than a generated file, and the one artifact in
   this list that a spec regeneration does not fix.
@@ -137,13 +134,12 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   mcp-owned schemas (`CallToolResult`, `TextContent`, `ImageContent`,
   `AudioContent`, `ResourceLink`, `EmbeddedResource`, `Annotations`,
   `BlobResourceContents`, `TextResourceContents`, `Icon`) live in
-  `docs/public/openapi.json` and travel from there into the Postman collection
-  and `web/src/client/schema.ts`. An mcp release that touches any of those
-  shapes therefore changes three committed files with drift checks over them.
-  That is why `pyproject.toml` pins mcp to one minor line: left open, a
-  `uv lock` run for an unrelated dependency would move those artifacts as a
-  side effect and fail CI on a diff that explained none of it. So a bump means
-  raising the ceiling *and* regenerating both public artifacts and the
+  `docs/public/openapi.json` and travel from there into `web/src/client/schema.ts`.
+  An mcp release that touches any of those shapes therefore changes two committed
+  files with drift checks over them. That is why `pyproject.toml` pins mcp to one
+  minor line: left open, a `uv lock` run for an unrelated dependency would move
+  those artifacts as a side effect and fail CI on a diff that explained none of it.
+  So a bump means raising the ceiling *and* regenerating the OpenAPI spec and the
   dashboard client in the same change. The native result is deliberate (a
   gateway-owned mirror model would silently drop any content block type a
   future mcp adds), so the cost is paid here rather than in the response shape.
