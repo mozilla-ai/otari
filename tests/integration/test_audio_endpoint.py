@@ -652,7 +652,7 @@ def test_speech_unpriced_records_no_charge_lines(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """An unpriced speech model is recorded with no cost, unknown rather than free, and carries no cost headers."""
+    """An unpriced speech model is recorded with no cost, unknown rather than free: there is no cost to report."""
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
         resp = client.post(
             f"{API_ROOT}/audio/speech",

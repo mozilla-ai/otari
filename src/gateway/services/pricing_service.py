@@ -1217,6 +1217,15 @@ def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricin
     return require_pricing and not has_completion_meter(pricing)
 
 
+def unbillable_rate_detail(model: str, *, unit: str, bills: str) -> str:
+    """The 402 body for a model whose rate is in a unit the endpoint cannot bill on: the unit, and what it bills."""
+    return (
+        f"Model '{model}' is priced per {unit}, which this request cannot be billed on, and require_pricing is on, "
+        f"so it cannot be served. This endpoint bills {bills} (POST {API_ROOT}/pricing, or the pricing section "
+        "of config.yml)."
+    )
+
+
 def no_pricing_error_detail(model: str, *, unit: str | None = None) -> str:
     """The 402 body for an unpriced model: what went wrong, why, and how to fix it.
 

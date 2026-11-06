@@ -333,6 +333,65 @@ def strict_client(postgres_url: str) -> Generator[TestClient]:
     yield from build_test_client(config)
 
 
+def test_a_stale_token_override_does_not_refuse_a_hosted_speech_request(
+    strict_client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The organization's own token rate prices nothing the deployment hosts, so the hosted character rate is judged."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _provision(strict_client, master)
+    session = db_session_factory()
+    try:
+        organization = Organization(name="Erin", slug="erin")
+        session.add(organization)
+        session.commit()
+        session.refresh(organization)
+        session.add(Workspace(name="Erin one", organization_id=organization.id))
+        session.commit()
+        tenant = _Tenant(
+            organization_id=organization.id,
+            owner=_session(session, email="erin@erin.test", organization_id=organization.id),
+            operator="",
+        )
+    finally:
+        session.close()
+    speech = "openai:tts-1"
+    assert _override(strict_client, tenant.owner, 0.6, speech).status_code == status.HTTP_201_CREATED
+    priced = strict_client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": speech, "input_price_per_million": 15, "output_price_per_million": 0, "unit": "character"},
+        headers=master,
+    )
+    assert priced.status_code == status.HTTP_200_OK, priced.text
+
+    async def _lists_tts(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=impl_name, models=[Model(id="tts-1", object="model", created=0, owned_by=impl_name)]
+        )
+
+    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _lists_tts)
+    _hosted_openai(strict_client, master)
+    [offered] = strict_client.get(f"{API_ROOT}/hosted-providers/openai/models", headers=master).json()["data"]
+    assert offered["model"] == "tts-1"
+    if not offered["enabled"]:
+        switched_on = strict_client.patch(
+            f"{API_ROOT}/hosted-providers/openai/models/{offered['id']}", json={"enabled": True}, headers=master
+        )
+        assert switched_on.status_code == status.HTTP_200_OK, switched_on.text
+
+    with patch("gateway.api.routes.audio.aspeech", new=AsyncMock(return_value=b"audio")):
+        response = strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": speech, "input": "Hello world", "voice": "alloy"},
+            headers=_api_key(strict_client, tenant),
+        )
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.headers["Otari-Pricing-Source"] == "deployment"
+    assert response.headers["Otari-Usage-Unit"] == "characters"
+    assert response.headers["Otari-Usage-Units"] == "11"
+    assert response.headers["Otari-Cost-USD"] == "0.000165"
+
+
 def test_a_zero_override_cannot_carry_an_unpriced_hosted_model_past_require_pricing(
     strict_client: TestClient, db_session_factory: Callable[[], Session]
 ) -> None:

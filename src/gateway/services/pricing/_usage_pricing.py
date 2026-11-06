@@ -34,7 +34,7 @@ from gateway.core.metered_pricing import (
 )
 from gateway.models.pricing import MAX_REPORTED_UNITS, UNIT_METERS, ModelPricing
 from gateway.services.pricing._charge import UsageCharge
-from gateway.services.pricing._slot_pricing import Quantities, price_slot, slot_rate
+from gateway.services.pricing._slot_pricing import Quantities, block_is_free, price_slot, slot_rate
 from gateway.types.price_unit import PriceUnit
 
 __all__ = [
@@ -264,13 +264,17 @@ def _charge_tokens(rate: ModelPricing, _: dict[str, int], tokens: BillableUsage 
 
 
 def _free(rate: ModelPricing, input_rate: Decimal) -> bool:
-    """Whether every price ``rate`` holds is zero: the base rates, the cache rates and each tier's."""
+    """Whether every price ``rate`` holds is zero: the base and cache rates, each tier's, and every slot of its block.
+
+    The columns are the text slot alone, so the block is read too: a rate whose
+    text is free but whose audio output is not prices an attempt that made audio.
+    """
     if input_rate != 0:
         return False
     others = [to_decimal(getattr(rate, name)) for name in RATE_FIELDS if name != "input_price_per_million"]
     for tier in getattr(rate, "pricing_tiers", None) or []:
         others.extend(to_decimal(tier.get(name)) for name in RATE_FIELDS)
-    return all(price is None or price == 0 for price in others)
+    return all(price is None or price == 0 for price in others) and block_is_free(getattr(rate, "rates", None))
 
 
 def _charge_requests(rate: ModelPricing, counts: dict[str, int], _: BillableUsage | None) -> UsageCharge | None:

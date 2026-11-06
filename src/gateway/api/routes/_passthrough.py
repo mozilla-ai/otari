@@ -131,6 +131,7 @@ from gateway.services.inference import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import (
+    ModelRefusal,
     is_model_allowed,
     model_not_allowed_detail,
     organization_key_refusal,
@@ -145,6 +146,7 @@ from gateway.services.pricing_service import (
     pricing_provenance,
     pricing_required_but_missing,
     resolve_model_pricing,
+    unbillable_rate_detail,
 )
 from gateway.services.provider_kwargs import (
     MissingCredential,
@@ -623,6 +625,45 @@ async def run_passthrough(
             ) from exc
         return served, charge
 
+    def _rate_refusal_detail(selector: str, rate: ModelPricing | None, default: str) -> str:
+        """``default``, or the detail naming the unit of ``rate`` where the endpoint says what it bills instead."""
+        if rate is None or billing.bills is None:
+            return default
+        return unbillable_rate_detail(selector, unit=rate.unit or "token", bills=billing.bills)
+
+    async def _hosted_rate(resolved: ResolvedProvider) -> ModelPricing | None:
+        """The rate a deployment-hosted dispatch of ``resolved`` settles at, or ``None`` when nothing hosts it.
+
+        Asked before refusing on the rate the organization resolves to, which may
+        be its own override under a key it no longer uses, and which prices
+        nothing the deployment hosts. The hosted dispatch below resolves and
+        judges that rate again, and answers for any failure of the port here.
+        """
+        if not lookup_pricing:
+            return None
+        try:
+            served = await serve_on_hosted_provider(
+                config,
+                model_provider_port_on(raw_request, db),
+                resolved,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                country_gate=country_gate_for(config, raw_request),
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        if served is None:
+            return None
+        found = await resolve_model_pricing(
+            db,
+            served.instance,
+            served.model,
+            use_defaults=pricing_use_defaults,
+            organization_id=organization_id,
+            deployment_paid=True,
+        )
+        return found.pricing if found is not None else None
+
     pricing: ModelPricing | None = None
     # ``pricing`` with where it came from, recorded on the row it prices.
     found_pricing: ResolvedPricing | None = None
@@ -703,6 +744,7 @@ async def run_passthrough(
             and not budget_exempt
             and config.require_pricing
             and not _can_price(pricing, billing)
+            and not _can_price(await _hosted_rate(resolved), billing)
         ):
             await refund_reservation(db, reservation)
             unpriced = await unpriced_model_refusal(
@@ -714,6 +756,11 @@ async def run_passthrough(
                 organization_id=organization_id,
             )
             if unpriced.code == PRICING_REQUIRED:
+                unpriced = ModelRefusal(
+                    code=unpriced.code,
+                    status_code=unpriced.status_code,
+                    detail=_rate_refusal_detail(model, pricing, unpriced.detail),
+                )
                 logger.warning(
                     "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
                     model,
@@ -821,11 +868,12 @@ async def run_passthrough(
                     "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
                     f"{resolved.instance}:{resolved.model}",
                 )
+                label = f"{resolved.instance}:{resolved.model}"
                 raise await _refuse(
                     reservation,
                     resolved,
                     status.HTTP_402_PAYMENT_REQUIRED,
-                    no_pricing_error_detail(f"{resolved.instance}:{resolved.model}"),
+                    _rate_refusal_detail(label, pricing, no_pricing_error_detail(label)),
                     **error_headers(PRICING_REQUIRED),
                 )
             if estimate is not None:

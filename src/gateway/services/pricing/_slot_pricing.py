@@ -9,8 +9,9 @@ another unit. The block is read through the reader every rate goes through, so
 an operator's price and a catalog price read alike.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from decimal import Decimal
+from typing import Any
 
 from gateway.core.metered_pricing import (
     Direction,
@@ -18,12 +19,13 @@ from gateway.core.metered_pricing import (
     charge_unit,
     quantize_cost,
     slot_price,
+    to_decimal,
     unit_rate,
     web_search_rate,
 )
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing._charge import UsageCharge
-from gateway.types.models_dev import parse_pricing
+from gateway.types.models_dev import ModelsDevCachePrices, ModelsDevPricing, parse_pricing
 from gateway.types.price_unit import PRICE_UNITS, PriceUnit
 
 # What an endpoint measured, in each unit it can measure.
@@ -57,6 +59,43 @@ def search_rate(rate: ModelPricing | None) -> UnitRate | None:
         return None
     pricing, _ = parse_pricing(rate.rates, units=PRICE_UNITS, path="rates")
     return web_search_rate(pricing)
+
+
+def block_is_free(rates: Mapping[str, Any] | None) -> bool:
+    """Whether every price a ``rates`` block holds is zero: each slot, its cache prices and its overrides.
+
+    An absent block holds no price, so it is free; the columns beside it decide.
+    """
+    if not rates:
+        return True
+    pricing, _ = parse_pricing(rates, units=PRICE_UNITS, path="rates")
+    return all(price is None or price == 0 for price in _block_prices(pricing))
+
+
+def _block_prices(pricing: ModelsDevPricing) -> Iterator[Decimal | None]:
+    slots = [price for modality in pricing.modalities.values() for price in (modality.input, modality.output)]
+    for slot in [*slots, pricing.web_search]:
+        if slot is None:
+            continue
+        yield to_decimal(slot.price)
+        yield to_decimal(slot.reasoning)
+        yield from _cache_prices(slot.cache)
+        yield from _cache_prices(slot.explicit_cache)
+        for override in slot.overrides:
+            yield to_decimal(override.price)
+            yield to_decimal(override.reasoning)
+            yield from _cache_prices(override.cache)
+            yield from _cache_prices(override.explicit_cache)
+
+
+def _cache_prices(cache: ModelsDevCachePrices | None) -> Iterator[Decimal | None]:
+    if cache is None:
+        return
+    yield to_decimal(cache.read)
+    yield to_decimal(cache.write)
+    yield to_decimal(cache.storage)
+    for _ttl, write in cache.write_ttls:
+        yield to_decimal(write)
 
 
 def estimate_slot_cost(

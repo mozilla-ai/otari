@@ -138,7 +138,9 @@ class PassthroughBilling:
     block it bills and which units it measures a quantity in, which is what the
     ``require_pricing`` gate checks a rate against. ``bills_on_completion``
     says the result is a job priced when it completes, so a start that prices
-    nothing is not a request served free.
+    nothing is not a request served free. ``bills`` says in words what the
+    endpoint bills, for the refusal of a rate in a unit it cannot bill on;
+    ``None`` keeps the generic refusal.
     """
 
     report: Callable[[Any], ReportedUsage]
@@ -147,6 +149,7 @@ class PassthroughBilling:
     slot: Slot | None = None
     measures: frozenset[PriceUnit] = frozenset()
     bills_on_completion: bool = False
+    bills: str | None = None
 
 
 def image_billing(size: str | None) -> PassthroughBilling:
@@ -171,6 +174,7 @@ def speech_billing(characters: int) -> PassthroughBilling:
         reports_tokens=False,
         slot=("text", "input"),
         measures=frozenset({"character"}),
+        bills="the characters of the text spoken and reports no tokens: price it per character or per request",
     )
 
 

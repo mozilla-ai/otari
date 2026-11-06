@@ -428,6 +428,10 @@ def test_require_pricing_refuses_a_token_rate_on_speech(strict_client: TestClien
         )
 
     assert response.status_code == 402, response.text
+    detail = response.json()["detail"]
+    assert detail.startswith("Model 'openai:tts-1' is priced per token, which this request cannot be billed on")
+    assert "price it per character or per request" in detail
+    assert "No pricing is configured" not in detail
     provider.assert_not_called()
     _settled(strict_client, master, 0.0)
 
