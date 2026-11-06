@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
+    CodeExecutionPortDep,
     WorkspaceCodeExecutionPoliciesDep,
     WorkspaceWebSearchPoliciesDep,
     get_config,
@@ -136,10 +137,12 @@ def _reason(configured: bool, workspace_allows: bool) -> ToolUnavailableReason |
     return None if workspace_allows else "workspace_disabled"
 
 
-def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[ManagedTool]:
+def _managed_tools(
+    config: GatewayConfig, switches: _WorkspaceSwitches, code_runtime: str | None = None
+) -> list[ManagedTool]:
     web_search = web_search_tool_definition()["function"]
     web_fetch = web_fetch_tool_definition()["function"]
-    code_execution = code_execution_tool_definition()["function"]
+    code_execution = code_execution_tool_definition(code_runtime)["function"]
     # The same question the request path asks, asked the same way: a hosted
     # provider needs no URL, so deriving this from sandbox_url would publish
     # "unavailable" for a deployment that runs code perfectly well.
@@ -188,6 +191,7 @@ async def list_tools(
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     web_policies: WorkspaceWebSearchPoliciesDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    code_execution_port: CodeExecutionPortDep,
 ) -> ToolsResponse:
     """List the tools Otari runs itself, with the declaration forms it accepts.
 
@@ -197,4 +201,5 @@ async def list_tools(
     """
     api_key, _ = auth
     switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies)
-    return ToolsResponse(data=_managed_tools(config, switches))
+    code_runtime = code_execution_port.runtime if code_execution_port is not None else None
+    return ToolsResponse(data=_managed_tools(config, switches, code_runtime=code_runtime))
