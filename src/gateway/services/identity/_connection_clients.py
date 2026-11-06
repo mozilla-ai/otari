@@ -33,7 +33,12 @@ from gateway.models.identity import OIDCConnection, oidc_flow_provider
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.oauth_service import DatabaseStateStore, pending_flow_provider, provider_refused_the_code
 from gateway.services.secret_box import decrypt_secret
-from gateway.services.web_retrieval_network import CheckedFederationTransport, Httpx2CompatTransport
+from gateway.services.web_retrieval_network import (
+    MAX_FEDERATION_FETCH_BYTES,
+    BoundedFederationTransport,
+    CheckedFederationTransport,
+    Httpx2CompatTransport,
+)
 
 # Requested beyond the ``openid`` scope every preset merges in, for the display fields apron-auth's
 # generic OIDC identity handler fills from the ID token and userinfo.
@@ -66,7 +71,10 @@ def _transport_factory_for(
     token_url = ServerMetadata.model_validate(metadata.document).token_url
 
     def factory(url: str) -> httpx.AsyncBaseTransport:
-        transport = CheckedFederationTransport(allow_private_hosts=allow_private_hosts)
+        transport = BoundedFederationTransport(
+            CheckedFederationTransport(allow_private_hosts=allow_private_hosts),
+            max_bytes=MAX_FEDERATION_FETCH_BYTES,
+        )
         if url != token_url:
             return transport
         # apron-auth's own TransportFactory type promises classic httpx; the token URL alone is

@@ -40,7 +40,9 @@ from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.url_safety import UnsafeURLError
 from gateway.services.web_retrieval_network import (
-    CheckedFederationTransport,
+    MAX_FEDERATION_FETCH_BYTES,
+    BoundedFederationTransport,
+    FederationResponseTooLargeError,
     Httpx2CompatTransport,
     RetrievalTargetError,
 )
@@ -305,8 +307,28 @@ def test_the_transport_factory_wraps_only_the_token_endpoint() -> None:
     userinfo_transport = factory(f"{_ISSUER}/userinfo")
 
     assert isinstance(token_transport, Httpx2CompatTransport)
-    assert isinstance(userinfo_transport, CheckedFederationTransport)
+    assert isinstance(userinfo_transport, BoundedFederationTransport)
     assert not isinstance(userinfo_transport, Httpx2CompatTransport)
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_past_the_byte_ceiling_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The signing key set and the userinfo document are capped, not the discovery document alone.
+
+    Exercises the factory's own product against an oversized body rather than asserting the
+    wrapper's type, so removing the cap fails this test instead of passing it.
+    """
+    oversized = b" " * (MAX_FEDERATION_FETCH_BYTES + 1)
+
+    async def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=oversized)
+
+    monkeypatch.setattr(_connection_clients, "CheckedFederationTransport", lambda **_kwargs: _StubTransport(respond))
+    factory = _connection_clients._transport_factory_for(_metadata(), allow_private_hosts=False)
+
+    async with httpx.AsyncClient(transport=factory(f"{_ISSUER}/userinfo")) as client:
+        with pytest.raises(FederationResponseTooLargeError):
+            await client.get(f"{_ISSUER}/userinfo")
 
 
 @pytest.mark.asyncio
