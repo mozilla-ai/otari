@@ -87,7 +87,7 @@ def _origin_bound_http_client(
 CLOSE_TIMEOUT_SECONDS = 10.0
 # How many withheld tool names a server's access note spells out before it counts the rest.
 _ACCESS_NOTE_MAX_NAMES = 20
-# The note is system text, so a withheld name enters it only if it cannot carry instructions; a server lists any string.
+# The note is system text, so a tool name enters it only if it cannot carry instructions; a server lists any string.
 _NOTE_SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 _CANCEL_GRACE_SECONDS = 1.0
 
@@ -329,7 +329,10 @@ class MCPClientPool:
         named = ", ".join(withheld[:_ACCESS_NOTE_MAX_NAMES])
         if len(withheld) > _ACCESS_NOTE_MAX_NAMES:
             named += f" and {len(withheld) - _ACCESS_NOTE_MAX_NAMES} more"
-        granted = ", ".join(t["function"]["name"] for t in server.tools) or "none of its tools"
+        granted = (
+            ", ".join(name for t in server.tools if _NOTE_SAFE_TOOL_NAME.fullmatch(name := t["function"]["name"]))
+            or "none of its tools"
+        )
         return (
             f"The user may use {granted} here. {named} {'exists' if len(withheld) == 1 else 'exist'} "
             f"but {'is' if len(withheld) == 1 else 'are'} not granted to the user: "
