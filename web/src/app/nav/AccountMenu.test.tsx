@@ -11,15 +11,14 @@ import { AppProviders } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
 
 // The badge seam, kept real unless a case sets a label: the cases about the
-// name and the rows see this build's monogram, and the one about the seam
-// sees what a build that draws something else there would.
+// name and the rows see this build's avatar, and the one about the seam sees
+// what a build that draws something else there would.
 const badge = vi.hoisted(() => ({ label: "" }))
 vi.mock("@/app/nav/overlayAccountBadge", async (importOriginal) => {
   const real =
     await importOriginal<typeof import("@/app/nav/overlayAccountBadge")>()
   return {
-    AccountBadge: (props: { initials: string }) =>
-      badge.label ? <span>EU</span> : <real.AccountBadge {...props} />,
+    AccountBadge: () => (badge.label ? <span>EU</span> : <real.AccountBadge />),
     useAccountBadgeLabel: () => badge.label,
   }
 })
@@ -252,7 +251,6 @@ describe("AccountMenu", () => {
     await renderMenu()
 
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument()
-    expect(screen.getByText("AL")).toBeInTheDocument()
     expect(screen.queryByText("Operator")).not.toBeInTheDocument()
   })
 
@@ -263,7 +261,6 @@ describe("AccountMenu", () => {
     await renderMenu()
 
     expect(await screen.findByText("Operator")).toBeInTheDocument()
-    expect(screen.getByText("OP")).toBeInTheDocument()
   })
 
   // A member added to the roster by address has no name until they claim the
@@ -279,15 +276,11 @@ describe("AccountMenu", () => {
     expect(
       await screen.findByText("ada.lovelace@example.com"),
     ).toBeInTheDocument()
-    // Off the local part, and split on its punctuation: the host names the
-    // deployment rather than the person.
-    expect(screen.getByText("AL")).toBeInTheDocument()
   })
 
-  // A name is split on spaces alone. The address path below splits punctuation
-  // too, and one rule for both would initial a hyphenated surname off its
-  // second half.
-  it("initials a hyphenated surname off the name it belongs to", async () => {
+  // Every identified person has an avatar from the first paint: the one
+  // their user id gives them until they pick another. No initials.
+  it("draws the person's avatar rather than their initials", async () => {
     mockCaller({
       user_id: "77777777-7777-7777-7777-777777777777",
       email: null,
@@ -295,8 +288,11 @@ describe("AccountMenu", () => {
     })
     await renderMenu()
 
-    expect(await screen.findByText("Ada Lovelace-Byron")).toBeInTheDocument()
-    expect(screen.getByText("AL")).toBeInTheDocument()
+    const trigger = await screen.findByRole("button", {
+      name: "Account: Ada Lovelace-Byron",
+    })
+    expect(trigger.querySelector("svg rect")).not.toBeNull()
+    expect(within(trigger).queryByText("AL")).not.toBeInTheDocument()
   })
 
   // The label is the visible half of #832's fix; this is the half a screen
@@ -312,23 +308,6 @@ describe("AccountMenu", () => {
     expect(
       await screen.findByRole("button", { name: "Account: Ada Lovelace" }),
     ).toBeInTheDocument()
-  })
-
-  // Initials are two characters, not two UTF-16 code units: a name outside the
-  // basic plane is two units per character, so indexing one would put half a
-  // surrogate pair in the avatar and draw the replacement mark.
-  it("takes initials by character, so a name outside the basic plane survives", async () => {
-    mockCaller({
-      user_id: "66666666-6666-6666-6666-666666666666",
-      email: null,
-      full_name: "\u{20BB7}\u7530 \u592a\u90ce",
-    })
-    await renderMenu()
-
-    expect(
-      await screen.findByText("\u{20BB7}\u7530 \u592a\u90ce"),
-    ).toBeInTheDocument()
-    expect(screen.getByText("\u{20BB7}\u592a")).toBeInTheDocument()
   })
 
   it("names nobody when the caller cannot be read", async () => {
