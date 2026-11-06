@@ -19,6 +19,7 @@ from gateway.core.config import GatewayConfig
 from gateway.schemas.identity import (
     OIDCConnectionPublic,
     OIDCConnectionRequest,
+    OrganizationSsoEnforcementPublic,
     OrganizationSsoEnforcementRequest,
     OrganizationSsoPreflightPublic,
     OrganizationSsoPublic,
@@ -35,8 +36,14 @@ router = APIRouter(
 )
 
 
-def _settings(config: GatewayConfig, connection: OIDCConnectionPublic | None) -> OrganizationSsoPublic:
-    return OrganizationSsoPublic(redirect_uri=_oauth_redirect_uri(config, "sso"), connection=connection)
+def _settings(
+    config: GatewayConfig,
+    connection: OIDCConnectionPublic | None,
+    enforcement: OrganizationSsoEnforcementPublic,
+) -> OrganizationSsoPublic:
+    return OrganizationSsoPublic(
+        redirect_uri=_oauth_redirect_uri(config, "sso"), connection=connection, enforcement=enforcement
+    )
 
 
 @router.get("")
@@ -50,7 +57,8 @@ async def get_organization_sso(
     ``connection`` is null until the organization saves one.
     """
     connection = await connections.get_for_user(user=identity)
-    return _settings(config, connection)
+    enforcement = await connections.get_enforcement_for_user(user=identity)
+    return _settings(config, connection, enforcement)
 
 
 @router.put("")
@@ -66,7 +74,8 @@ async def put_organization_sso(
     encrypted at rest and never served back.
     """
     connection = await connections.save_for_user(user=identity, request=request)
-    return _settings(config, connection)
+    enforcement = await connections.get_enforcement_for_user(user=identity)
+    return _settings(config, connection, enforcement)
 
 
 @router.post("/test")
@@ -80,7 +89,8 @@ async def test_organization_sso(
     Refused with 404 when the organization has not saved a connection yet.
     """
     connection = await connections.test_for_user(user=identity)
-    return _settings(config, connection)
+    enforcement = await connections.get_enforcement_for_user(user=identity)
+    return _settings(config, connection, enforcement)
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)

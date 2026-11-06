@@ -194,6 +194,19 @@ class OrganizationSsoEnforcementRequest(BaseModel):
     )
 
 
+class OrganizationSsoEnforcementPublic(BaseModel):
+    """The caller's organization's current sign-in enforcement, as its admins see it."""
+
+    required: bool = Field(description="Whether this organization requires sign-in through its own connection.")
+    break_glass_user_id: uuid.UUID | None = Field(
+        description="One of the organization's own owners who keeps a non-SSO sign-in route, where the "
+        "organization named one."
+    )
+    break_glass_waived: bool = Field(
+        description="Whether the organization has explicitly waived naming a break-glass owner."
+    )
+
+
 class OrganizationSsoPublic(BaseModel):
     """An organization's own OIDC connection, and what to register at the provider."""
 
@@ -205,6 +218,9 @@ class OrganizationSsoPublic(BaseModel):
     )
     connection: OIDCConnectionPublic | None = Field(
         description="The organization's own connection, or null until one is saved."
+    )
+    enforcement: OrganizationSsoEnforcementPublic = Field(
+        description="The organization's current sign-in enforcement. Independent of whether a connection exists."
     )
 
 
