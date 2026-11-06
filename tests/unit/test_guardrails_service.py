@@ -262,10 +262,10 @@ async def test_explicit_null_valid_is_inconclusive_not_flagged(monkeypatch: pyte
     """An explicit ``valid: null`` is a legitimate inconclusive verdict, not malformed."""
     _patch_transport(monkeypatch, _result_handler({"valid": None, "score": 0.5}))
     verdict = await run_input_guardrails(
-        [GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=_URL
+        [GuardrailConfig(profile="prompt-injection", mode="block", on_unavailable="monitor")], "x", default_url=_URL
     )
     assert verdict.blocked is False
-    assert verdict.results[0].valid is None
+    assert verdict.results[0].status == "inconclusive"
 
 
 @pytest.mark.asyncio

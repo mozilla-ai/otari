@@ -72,6 +72,11 @@ configured, malformed response) **fails closed**: the request is rejected with a
 `502` rather than forwarded unchecked. A `monitor` guardrail fails open, since it
 was never enforcing.
 
+A service that answers with no verdict (`valid: null`) has not evaluated the
+input either, so a `block` guardrail takes the same two paths for it: the
+default refuses with the same `502`, and `on_unavailable: monitor` serves the
+request and records the check as `inconclusive`.
+
 A mandated entry whose endpoint fails its safety check counts as unevaluable
 too, and takes the same two paths. That covers a host that has stopped
 resolving, so an organization's endpoint going away is an outage of that entry

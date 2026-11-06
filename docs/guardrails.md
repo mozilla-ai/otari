@@ -52,7 +52,7 @@ and a deployment you run uses its own address, such as
 `http://localhost:8000/api/v1`.
 
 `mode` picks between refusing and observing ([Modes](guardrails-reference.md#modes)),
-and `on_unavailable` decides what happens when the check cannot run
+and `on_unavailable` decides what happens when the check cannot run or gives no verdict
 ([When the guardrails service is unreachable](guardrails-reference.md#when-the-guardrails-service-is-unreachable)).
 A flagged input in `block` mode answers `403` with `guardrail_violation`; in
 `monitor` mode the request is served and the verdict comes back in the

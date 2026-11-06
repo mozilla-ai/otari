@@ -202,9 +202,9 @@ async def apply_input_guardrails(
 
     Service-failure handling depends on ``mode`` and ``on_unavailable`` (see
     :func:`gateway.services.guardrails.run_input_guardrails`): a ``block``
-    guardrail that can't be evaluated fails closed (``502``) unless it sets
-    ``on_unavailable="monitor"``; a ``monitor`` guardrail fails open (logged,
-    request proceeds).
+    guardrail that can't be evaluated or answers no verdict fails closed
+    (``502``) unless it sets ``on_unavailable="monitor"``; a ``monitor``
+    guardrail fails open (logged, request proceeds).
 
     Note:
         The header is set on the injected ``response``, so it reaches
