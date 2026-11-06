@@ -956,16 +956,14 @@ class OrganizationService:
         and a ``suspended`` one is somewhere they no longer may, so offering
         either as a destination would be offering a refusal. ``blocked`` hides
         an organization whose own SSO enforcement refuses the caller.
+
+        NOTE: ``blocked`` is applied before the page is cut, so ``count`` is the number of
+        destinations the caller actually has and a page is short only at the end of the list.
         """
-        rows, count = await self.members.get_by_user_with_organizations(
-            user.id,
-            status="active",
-            skip=skip,
-            limit=limit,
-        )
+        rows = await self.members.get_active_by_user_with_organizations(user.id)
         admitted = [row for row in rows if not await blocked(row[1])]
-        count -= len(rows) - len(admitted)
-        rows = admitted
+        count = len(admitted)
+        rows = admitted[skip : skip + limit]
         return CallerOrganizationMembershipsPublic(
             data=[
                 CallerOrganizationMembershipPublic(

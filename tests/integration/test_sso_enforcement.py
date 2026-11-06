@@ -838,6 +838,41 @@ async def test_memberships_listing_hides_an_organization_that_blocks_the_caller(
     assert slugs == {"other"}
 
 
+async def test_memberships_listing_counts_and_pages_what_is_left_after_a_refusal(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    """The refusal is applied before the page is cut, so the count is the caller's real choice of destinations."""
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    first = await create_organization(async_db, slug="first")
+    second = await create_organization(async_db, slug="second")
+    member = await _member_with_email(
+        async_db, enforcing, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    for organization in (first, second):
+        await OrganizationMemberRepository(async_db).create_membership(
+            organization_id=organization.id, user_id=member.id, role="member"
+        )
+    member.active_organization_id = first.id
+    async_db.add(member)
+    token = await _dashboard_session(async_db, member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    seen: set[str] = set()
+    for skip in (0, 1):
+        response = client.get(f"{API_ROOT}/organizations/me/memberships?skip={skip}&limit=1")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["count"] == 2
+        assert len(body["data"]) == 1
+        seen.add(body["data"][0]["organization"]["slug"])
+
+    assert seen == {"first", "second"}
+
+
 async def test_memberships_listing_includes_an_organization_the_caller_is_linked_into(
     client: TestClient, async_db: AsyncSession
 ) -> None:
