@@ -380,7 +380,7 @@ wheels = [
 
 [[package]]
 name = "apron-auth"
-version = "0.18.0"
+version = "0.20.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "authlib", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
@@ -388,9 +388,9 @@ dependencies = [
     { name = "joserfc", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(python_full_version < '3.15' and sys_platform == 'darwin') or (python_full_version < '3.15' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/17/ff/bed57028de7005b586e3afac28cb927d11125ef75e00b7d1db5bbfb608b1/apron_auth-0.18.0.tar.gz", hash = "sha256:96e64f65c2bdfd392ae5924cd2ad050a4c5c3ec9cb2292b3a5791260101dd315", size = 277991, upload-time = "2026-10-17T07:54:15.64Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/dd/1d53181b7df5ebdb8e31747e6a8a9d4e6ef1db09f8b9d91a1a5d51fa5433/apron_auth-0.20.0.tar.gz", hash = "sha256:662c5404898bb3964f4f94dcfa0dc2e096942b852b1adaf3a09f79f36dc105d0", size = 367575, upload-time = "2026-10-27T18:38:15.619Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/bb/879ed76f0ec954f235bbafd3e907a579676a9407a2f47f1c2b0d86a343fa/apron_auth-0.18.0-py3-none-any.whl", hash = "sha256:4b49fa63c698d506c83e83cdcde19de3961e2a6156013ffcd4b1aca8f03b5c64", size = 135722, upload-time = "2026-10-17T07:54:14.052Z" },
+    { url = "https://files.pythonhosted.org/packages/51/af/537fb5a278299a1263245de651cc902a7f8c44235160b4d86ad37da987b0/apron_auth-0.20.0-py3-none-any.whl", hash = "sha256:953cb755b4abfd6b4931caf9964c8e45832bbbb99b2e674fb2ec2024a8eb1cf0", size = 169744, upload-time = "2026-10-27T18:38:14.012Z" },
 ]
 
 [[package]]
@@ -1408,7 +1408,7 @@ requires-dist = [
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
     { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.46.0" },
     { name = "any-search", editable = "any-search" },
-    { name = "apron-auth", specifier = ">=0.18.0,<0.19.0" },
+    { name = "apron-auth", specifier = ">=0.20.0,<0.21.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "boto3", marker = "extra == 'kms'", specifier = ">=1.42.0" },
