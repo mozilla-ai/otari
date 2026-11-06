@@ -3,6 +3,8 @@ import type { ReactNode } from "react"
 import { Button } from "@/design-system/actions/Button"
 import { Dot } from "@/design-system/indicators/Dot"
 import { Section } from "@/design-system/layout/Section"
+import { welcomeGuideLink } from "@/shared/helpers/docs"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 function Step({
   n,
@@ -41,6 +43,7 @@ export function OnboardingPanel({
   isEnabling: boolean
   secretKeyConfigured: boolean
 }) {
+  const { href } = welcomeGuideLink(useDeployment())
   return (
     <Section
       className="border-y border-border py-5"
@@ -74,9 +77,10 @@ export function OnboardingPanel({
           {/* /welcome is served by the gateway itself, not by a client route, so this
                 stays a plain path anchor: a router Link would resolve to /#/welcome, which
                 the catch-all route sends back to the overview. It leaves the SPA, so open a
-                new tab and the operator keeps the dashboard (as the guide's links do). */}
+                new tab and the operator keeps the dashboard (as the guide's links do).
+                Where the deployment configures docs_url, the href is that instead. */}
           <a
-            href="/welcome"
+            href={href}
             target="_blank"
             rel="noreferrer"
             className="font-medium text-link hover:text-link-hover"
