@@ -19,7 +19,7 @@ provider account.
    yet.
 2. In Otari, open **Organization**, then **Providers**, then **Inference**.
 3. Click **Add provider key**, select the same provider, enter a distinct
-   **Name**, and paste the new key.
+   **Name**, paste the new key, and click **Add provider key** to save it.
 4. Make the new key the provider's default with **Make default provider** (its
    star icon).
 5. For each workspace that pins the old key, open it on **Workspaces**, select

@@ -24,7 +24,8 @@ pages.
 1. Open the **API keys** page and click **Create key**.
 2. Give the key a name. It can use every model your workspace can, unless you
    limit it under **Advanced**.
-3. Copy the key, which starts with `otk_`. It is shown only once.
+3. Click **Create key**, then copy the key, which starts with `otk_`. It is
+   shown only once.
 
 ![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
 
@@ -40,7 +41,8 @@ source control.
 ## 3. Pick a model
 
 Open the **Models** page, find a model with the filters (modality, provider,
-vendor, capabilities), open it, and click **Use this model** to copy its name. This
+vendor, capabilities), open it, and click **Use this model**. In the panel that
+opens, copy the model selector with the copy button beside it. This
 quickstart uses `deepseek/deepseek-v4-pro-0813`.
 
 ## 4. Send a request

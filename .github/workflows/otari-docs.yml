@@ -138,43 +138,56 @@ jobs:
           persist-credentials: false
           ref: ${{ steps.tag.outputs.tag }}
 
+      # Every step up to the capture is allowed to fail: the pull request that
+      # changed a page already ran these flows, so a failure here is a flake or
+      # an outage, and publishing with the committed images beats not
+      # publishing.
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        continue-on-error: true
         with:
           python-version: "3.14"
 
       - name: Install Python deps
+        continue-on-error: true
         run: uv sync --dev --frozen
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        continue-on-error: true
         with:
           package_json_file: web/package.json
 
+      # No package cache: this job can write to the repository, and a cache
+      # another workflow wrote could put code of its choosing in it.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        continue-on-error: true
         with:
           node-version: 'lts/*'
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          package-manager-cache: false
 
       - name: Install web deps
+        continue-on-error: true
         working-directory: web
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
+        continue-on-error: true
         working-directory: web
         run: pnpm exec playwright install --with-deps chromium
 
-      # Not fatal: the pull request that changed a page already ran these
-      # flows, so a failure here is a flake, and publishing with the committed
-      # images beats not publishing.
       - name: Capture the docs screenshots
         id: screenshots
         continue-on-error: true
         working-directory: web
         run: pnpm run docs:screenshots
 
-      - name: Report a failed capture
-        if: steps.screenshots.outcome == 'failure'
-        run: echo "::warning::The docs screenshots could not be captured, so the site publishes the committed ones."
+      # A capture that failed partway may have rewritten some images, so the
+      # committed set goes back in whole rather than mixed with new ones.
+      - name: Fall back to the committed screenshots
+        if: steps.screenshots.outcome != 'success'
+        run: |
+          # A tag from before the screenshots existed has none to restore.
+          if [ -d docs/assets/screenshots ]; then git checkout -- docs/assets/screenshots; fi
+          echo "::warning::The docs screenshots could not be captured, so the site publishes the committed ones."
 
       # Standard library only, so the runner's Python needs no project install.
       # NOTE: A release build runs that tag's own script, which may predate the
