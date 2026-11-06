@@ -105,12 +105,15 @@ def _reset_engine(database_url: str) -> Engine:
 
 
 def _build_reset_plan(database_url: str) -> _ResetPlan:
-    """Record the schema's tables, in foreign-key order, and whatever the migrations seeded into them."""
+    """Record the schema's tables, in an order safe to reinsert, and whatever the migrations seeded."""
     with _reset_engine(database_url).connect() as conn:
         metadata = MetaData()
         metadata.reflect(conn)
         # A seeded row in a child table can reference a seeded row in a parent table, so
         # reinsertion needs that same order. Table-name order gives no such guarantee.
+        # NOTE: ``organization`` and ``user`` reference each other, so no foreign-key order exists
+        # for that pair and SQLAlchemy warns and orders them by name, which seeds them in the
+        # direction they need.
         tables = [table.name for table in metadata.sorted_tables if table.name != "alembic_version"]
         seeds = tuple(
             (table, rows)
