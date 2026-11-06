@@ -19,6 +19,8 @@ track usage.
 [Launch blog](https://blog.mozilla.ai/otari-own-your-ai-stack/) ·
 [Discord](https://discord.gg/ZfZPfTdtSe)
 
+English · [简体中文](README.zh-CN.md)
+
 </div>
 
 > [!NOTE]

@@ -161,6 +161,11 @@ as its own GitBook space, so a new top-bar entry owes both files. A page's URL i
 entry, its `##` group and its file name, so moving or renaming a page changes its URL. A page for
 contributors rather than users belongs outside `docs/`, as `ARCHITECTURE.md` and `DOMAINS.md` do.
 
+`README.md` has a Simplified Chinese translation, `README.zh-CN.md`. A `README.md` change owes it
+the same sections, code blocks and link targets, which `tests/unit/test_readme_translations.py`
+compares and which need no Chinese to copy across. Its prose may lag: the comment on its first
+line names the commit it was translated from, so bump that only when the prose is retranslated.
+
 Some pages bind code rather than describe it:
 
 - [DOMAINS.md](DOMAINS.md), beside `ARCHITECTURE.md` because it is written for contributors,
