@@ -968,6 +968,33 @@ async def test_saving_enforcement_again_revokes_a_member_whose_link_is_now_gone(
 # =============================================================================
 
 
+async def test_deleting_an_organization_revokes_a_session_it_moves_into_a_refusing_one(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    """Deleting an organization repoints whoever pointed at it, so the destination's refusal must reach them."""
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    doomed = await create_organization(async_db, slug="doomed")
+    owner = await _member_with_email(async_db, doomed, role="owner", email="owner@acme.example", full_name="Ada Owner")
+    member = await _member_with_email(async_db, doomed, role="member", email="mo@acme.example", full_name="Mo Member")
+    for identity in (owner, member):
+        await OrganizationMemberRepository(async_db).create_membership(
+            organization_id=enforcing.id, user_id=identity.id, role="member"
+        )
+    await _dashboard_session(async_db, member)
+    token = await _dashboard_session(async_db, owner)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    assert await _live_session_count(async_db, member.id) == 1
+
+    response = client.delete(f"{API_ROOT}/organizations/me")
+
+    assert response.status_code == 200, response.text
+    assert await _live_session_count(async_db, member.id) == 0
+
+
 async def test_switching_into_an_enforcing_organization_is_refused_for_a_blocked_member(
     client: TestClient, async_db: AsyncSession
 ) -> None:

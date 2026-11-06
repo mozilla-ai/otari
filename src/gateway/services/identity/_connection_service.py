@@ -1,6 +1,7 @@
 """Manage an organization's own OpenID Connect sign-in connection."""
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -503,6 +504,38 @@ class OIDCConnectionService:
         }
         if blocked_ids:
             await self._sessions.delete_for_users(blocked_ids)
+
+    async def revoke_refused_sessions(self, *, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]) -> None:
+        """End the live session of every listed account ``organization_id`` refuses."""
+        if not user_ids:
+            return
+        wanted = set(user_ids)
+        async with self._uow:
+            organization = await self._organizations.organizations.get(organization_id)
+            if organization is None or not organization.sso_required:
+                return
+            connection = await self._connections.get_for_organization(organization_id)
+            provider = oidc_identity_provider(connection.resolved_issuer) if connection is not None else None
+            linked_ids = (
+                await self._links.linked_user_ids(provider=provider, user_ids=list(wanted))
+                if provider is not None
+                else set()
+            )
+            roster = await self._organizations.members.get_active_by_organization_with_users(organization_id)
+            refused = {
+                identity.id
+                for _, identity in roster
+                if identity.id in wanted
+                and sso_blocks_membership(
+                    organization=organization,
+                    user=identity,
+                    linked_providers=(
+                        frozenset({provider}) if provider is not None and identity.id in linked_ids else frozenset()
+                    ),
+                )
+            }
+            if refused:
+                await self._sessions.delete_for_users(refused)
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
         """Whether ``organization``'s own SSO enforcement refuses ``user`` from acting in it."""
