@@ -8882,7 +8882,10 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppTokenRequest */
+        /**
+         * AppTokenRequest
+         * @description Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.
+         */
         AppTokenRequest: {
             /** Client Id */
             client_id: string;

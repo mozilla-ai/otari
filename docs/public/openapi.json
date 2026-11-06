@@ -2113,7 +2113,7 @@
         "type": "object"
       },
       "AppTokenRequest": {
-        "additionalProperties": false,
+        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.",
         "properties": {
           "client_id": {
             "maxLength": 128,

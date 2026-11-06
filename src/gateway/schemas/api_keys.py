@@ -148,9 +148,11 @@ class OAuthErrorResponse(BaseModel):
 
 
 class AppAuthorizationParameters(BaseModel):
-    """Parameters shared by the authorization URL and explicit dashboard approval."""
+    """Parameters shared by the authorization URL and explicit dashboard approval.
 
-    model_config = ConfigDict(extra="forbid")
+    Unrecognized parameters are ignored, as RFC 6749 section 3.1 requires.
+    """
+
     client_id: str = Field(min_length=1, max_length=128)
     redirect_uri: str = Field(max_length=2048)
     state: str = Field(min_length=16, max_length=256, pattern=r"^[A-Za-z0-9._~+/=-]+$")
@@ -160,11 +162,13 @@ class AppAuthorizationParameters(BaseModel):
 
 
 class AppAuthorizationRequest(AppAuthorizationParameters):
+    model_config = ConfigDict(extra="forbid")
     workspace_id: uuid.UUID
 
 
 class AppTokenRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored."""
+
     grant_type: Literal["authorization_code"]
     client_id: str = Field(min_length=1, max_length=128)
     redirect_uri: str = Field(max_length=2048)

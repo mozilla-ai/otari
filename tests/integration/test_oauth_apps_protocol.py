@@ -9,7 +9,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.settings.api_keys import OAuthAppConfig
 from gateway.services.api_keys._oauth_apps import pkce_challenge
 
-from .test_oauth_apps import REDIRECT, VERIFIER, approve, code_from
+from .test_oauth_apps import REDIRECT, VERIFIER, approve, code_from, redeem
 from .test_oauth_apps import test_config as test_config
 from .test_organization_member_keys import _World
 from .test_organization_member_keys import world as world
@@ -78,3 +78,26 @@ def test_base64_state_survives_both_authorization_steps(client: TestClient, worl
     approved = approve(client, world, state=state)
     assert approved.status_code == 200, approved.text
     assert parse_qs(approved.json()["redirect_uri"].split("?", 1)[1])["state"] == [state]
+
+
+def test_authorization_ignores_unrecognized_parameters(client: TestClient) -> None:
+    """RFC 6749 section 3.1: a client library's ``scope`` or ``nonce`` must not refuse the request."""
+    response = client.get(
+        f"{API_ROOT}/oauth/apps/authorize",
+        params=_authorization(scope="openid", nonce="n" * 16),
+        follow_redirects=False,
+    )
+    assert response.status_code == 302, response.text
+    forwarded = parse_qs(response.headers["location"].split("?", 1)[1])
+    assert "scope" not in forwarded
+    assert "nonce" not in forwarded
+
+
+def test_token_exchange_ignores_unrecognized_parameters(client: TestClient, world: _World) -> None:
+    response = redeem(client, code_from(approve(client, world)), client_secret="", scope="openid")
+    assert response.status_code == 200, response.text
+
+
+def test_consent_still_refuses_unrecognized_fields(client: TestClient, world: _World) -> None:
+    response = approve(client, world, unexpected="value")
+    assert response.status_code == 422, response.text
