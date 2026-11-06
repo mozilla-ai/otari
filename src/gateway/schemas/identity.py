@@ -347,6 +347,7 @@ __all__ = [
     "OIDCConnectionDomain",
     "OIDCConnectionPublic",
     "OIDCConnectionRequest",
+    "OrganizationSsoEnforcementPublic",
     "OrganizationSsoEnforcementRequest",
     "OrganizationSsoPreflightMemberPublic",
     "OrganizationSsoPreflightPublic",
