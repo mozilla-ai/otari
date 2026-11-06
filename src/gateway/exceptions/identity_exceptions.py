@@ -496,6 +496,20 @@ class SsoBreakGlassRequiredError(TenancyValidationError):
         )
 
 
+class SsoBreakGlassRouteRequiredError(TenancyValidationError):
+    """The owner named to keep a non-SSO route has no way in that the connection does not provide.
+
+    An exemption for an account that cannot authenticate without the connection is no exemption, so
+    naming one would leave the organization believing it kept a route back that it does not have.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The owner named to keep a non-SSO route has no password, no passkey and no other "
+            "sign-in provider, so they could not sign in while this connection is unavailable."
+        )
+
+
 class CurrentPasswordIncorrectError(TenancyValidationError):
     """The current password given with a password change does not match.
 
@@ -733,6 +747,7 @@ __all__ = [
     "SignInAddressRequiredError",
     "SignInBlockedError",
     "SsoBreakGlassRequiredError",
+    "SsoBreakGlassRouteRequiredError",
     "TermsNotAcceptedError",
     "UnmodifiedPasswordError",
     "VerificationPasswordIncorrectError",

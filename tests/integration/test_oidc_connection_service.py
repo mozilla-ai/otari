@@ -103,6 +103,7 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         organizations=OrganizationService(db, membership_listener=None),
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
         allow_private_hosts=False,
+        passkey_rp_id="otari.test",
     )
 
 

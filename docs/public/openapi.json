@@ -43953,7 +43953,7 @@
     },
     "/api/v1/organizations/me/sso/enforcement": {
       "put": {
-        "description": "Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.\n\nRequiring sign-in is refused with 404 when the organization has not configured a connection yet,\nand with 400 before anybody has signed in through the connection, when it names no owner who keeps\nanother way in and waives none, or when the named account is not one of the organization's own\nowners. Turning enforcement off has none of these preconditions and always succeeds.",
+        "description": "Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.\n\nRequiring sign-in is refused with 404 when the organization has not configured a connection yet,\nand with 400 before anybody has signed in through the connection, when it names no owner who keeps\nanother way in and waives none, or when the account it names could not sign in while the\nconnection is unavailable. An account named at all must be one of the organization's own active\nowners, whether or not sign-in is being required. Turning enforcement off has no other\nprecondition.",
         "operationId": "organization-sso-put_organization_sso_enforcement",
         "requestBody": {
           "content": {

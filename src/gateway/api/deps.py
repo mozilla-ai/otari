@@ -1722,6 +1722,7 @@ def get_oidc_connection_service(
         organizations=organizations,
         domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
         allow_private_hosts=config.oidc_allow_private_hosts,
+        passkey_rp_id=config.webauthn_relying_party.rp_id if config.webauthn_relying_party else None,
     )
 
 

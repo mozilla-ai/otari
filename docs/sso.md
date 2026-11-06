@@ -71,11 +71,18 @@ belongs to another, non-enforcing organization still signs in to that one.
 Requiring sign-in is refused before anybody has signed in through the
 connection, since an organization cannot require a route nobody has proven
 works. It is also refused unless the request names one of the organization's
-own owners who keeps a non-SSO route, or explicitly waives that exception. An
-organization that waives it gives up its own way back in: if every sign-in
-through the provider ever fails, nobody in that organization can sign in
-until a deployment operator steps in. The deployment's master-key operator is
-never subject to any organization's enforcement.
+own owners who keeps a non-SSO route, or explicitly waives that exception.
+
+A non-SSO route is checked rather than taken on trust: the named owner must
+hold a password, a passkey registered with this deployment, or a sign-in link
+at a different provider. An owner whose only way in is this connection is
+refused, because exempting them from enforcement would not let them sign in
+while the connection is unavailable.
+
+An organization that waives the exception gives up its own way back in: if
+every sign-in through the provider ever fails, nobody in that organization can
+sign in until a deployment operator steps in. The deployment's master-key
+operator is never subject to any organization's enforcement.
 
 ## Network egress
 

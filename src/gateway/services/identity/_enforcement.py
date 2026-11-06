@@ -6,6 +6,7 @@ from gateway.models.identity import oidc_identity_provider
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.identity.oauth_identity_link_repository import OAuthIdentityLinkRepository
 from gateway.repositories.identity.oidc_connection_repository import OIDCConnectionRepository
+from gateway.repositories.identity.webauthn_credential_repository import WebAuthnCredentialRepository
 from gateway.services.tenancy import OrganizationService, sso_blocks_membership
 
 
@@ -25,6 +26,29 @@ async def has_link_to_organization(
         return False
     provider = oidc_identity_provider(connection.resolved_issuer)
     return await links.get_for_user(provider=provider, user_id=user_id) is not None
+
+
+async def has_route_without(
+    user: User,
+    *,
+    provider: str,
+    passkey_rp_id: str | None,
+    links: OAuthIdentityLinkRepository,
+    passkeys: WebAuthnCredentialRepository,
+) -> bool:
+    """Whether ``user`` can still sign in with ``provider`` unavailable.
+
+    A password and a passkey need no provider at all. A link at another provider needs that one
+    rather than this.
+
+    NOTE: ``passkey_rp_id`` is the relying party this deployment serves, and ``None`` where it
+    serves none, because a passkey registered under another is one no authenticator will offer.
+    """
+    if user.hashed_password is not None:
+        return True
+    if passkey_rp_id is not None and await passkeys.exists_for_user(user.id, rp_id=passkey_rp_id):
+        return True
+    return await links.exists_for_user_at_another_provider(provider=provider, user_id=user.id)
 
 
 async def sso_enforcement_refuses_every_membership(
@@ -52,4 +76,4 @@ async def sso_enforcement_refuses_every_membership(
     return True
 
 
-__all__ = ["has_link_to_organization", "sso_enforcement_refuses_every_membership"]
+__all__ = ["has_link_to_organization", "has_route_without", "sso_enforcement_refuses_every_membership"]
