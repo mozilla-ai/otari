@@ -160,8 +160,8 @@ class OrganizationGuardrailCreate(BaseModel):
     # A body that would actually be accepted, which the derived one is not: the
     # generator fills every string with "string", and this schema refuses that
     # for `url` (`CreateSearchToolRequest` carries one for the same reason).
-    # Generated samples reach a reader through the OpenAPI spec and the Postman
-    # collection, so an example that fails validation teaches the wrong shape.
+    # Generated samples reach a reader through the OpenAPI spec, so an example
+    # that fails validation teaches the wrong shape.
     model_config = ConfigDict(
         json_schema_extra={
             "example": {

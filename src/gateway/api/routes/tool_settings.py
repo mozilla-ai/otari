@@ -167,7 +167,7 @@ class UpdateToolSettingsRequest(BaseModel):
     """Change one or more tool settings. Omitted fields are left unchanged; an
     explicit ``null`` clears a field back to the configured env/YAML default."""
 
-    # A valid partial update, so the generated OpenAPI/Postman example is runnable
+    # A valid partial update, so the generated OpenAPI example is runnable
     # (omitted fields stay unchanged; the URL is well-formed and max_results >= 1).
     model_config = ConfigDict(
         json_schema_extra={"example": {"web_search_url": "http://searxng:8080", "web_search_max_results": 5}}
