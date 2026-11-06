@@ -4,14 +4,22 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationContext, OrganizationSso } from "@/client"
+import type {
+  OrganizationContext,
+  OrganizationMember,
+  OrganizationSso,
+  OrganizationSsoPreflight,
+} from "@/client"
 import { OrganizationSsoPage } from "@/features/organization/OrganizationSsoPage"
 import { formatDate } from "@/shared/helpers/format"
 import {
   oidcConnection,
   oidcConnectionDomain,
   organizationContext,
+  organizationMember,
   organizationSso,
+  organizationSsoPreflight,
+  organizationSsoPreflightMember,
 } from "@/tests/fixtures"
 
 interface Request {
@@ -30,12 +38,20 @@ function jsonResponse(body: unknown, status = 200): Response {
 interface MockOpts {
   sso?: OrganizationSso
   context?: OrganizationContext
+  members?: OrganizationMember[]
+  preflight?: OrganizationSsoPreflight
   /** What a save answers, so a test can drive the refusal path. */
   save?: () => Response
+  /** What setting enforcement answers, so a test can drive each of its refusals. */
+  enforcement?: () => Response
+  /** What removing a member's link answers. */
+  unlink?: () => Response
 }
 
 function mockApi(opts: MockOpts = {}) {
   let served = opts.sso ?? organizationSso()
+  const members = opts.members ?? []
+  const preflight = opts.preflight ?? organizationSsoPreflight()
   const requests: Request[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
@@ -48,6 +64,17 @@ function mockApi(opts: MockOpts = {}) {
 
     if (url.includes("/sso/test")) {
       return jsonResponse(served)
+    }
+    if (url.includes("/sso/preflight")) {
+      return jsonResponse(preflight)
+    }
+    if (url.includes("/sso/enforcement")) {
+      return opts.enforcement
+        ? opts.enforcement()
+        : jsonResponse(undefined, 204)
+    }
+    if (url.includes("/sso/links/")) {
+      return opts.unlink ? opts.unlink() : jsonResponse(undefined, 204)
     }
     if (url.includes("/sso")) {
       if (method === "GET") return jsonResponse(served)
@@ -70,6 +97,9 @@ function mockApi(opts: MockOpts = {}) {
         return jsonResponse(served)
       }
       if (method === "DELETE") return jsonResponse(undefined, 204)
+    }
+    if (url.includes("/organizations/me/members")) {
+      return jsonResponse({ data: members, count: members.length })
     }
     return jsonResponse(opts.context ?? organizationContext())
   })
@@ -312,6 +342,257 @@ describe("OrganizationSsoPage", () => {
       expect(requests.some((request) => request.method === "DELETE")).toBe(
         true,
       ),
+    )
+  })
+
+  it("shows the preflight count and the list before enforcement can be enabled", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      preflight: organizationSsoPreflight({
+        total_members: 3,
+        affected_count: 2,
+        affected_members: [
+          organizationSsoPreflightMember({
+            user_id: "11111111-aaaa-aaaa-aaaa-111111111111",
+            full_name: "Alex Doe",
+          }),
+        ],
+        affected_members_truncated: true,
+      }),
+    })
+    renderPage(<OrganizationSsoPage />)
+
+    expect(
+      await screen.findByText(/3 members, 2 of whom sign in some other way/),
+    ).toBeInTheDocument()
+    expect(screen.getByText("Alex Doe")).toBeInTheDocument()
+    expect(screen.getByText(/and 1 others/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    ).not.toBeChecked()
+  })
+
+  it("says API keys stay on the old account and must be rotated", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      preflight: organizationSsoPreflight({
+        total_members: 5,
+        affected_count: 2,
+        affected_members: [organizationSsoPreflightMember()],
+      }),
+    })
+    renderPage(<OrganizationSsoPage />)
+
+    expect(
+      await screen.findByText(
+        /Their API keys stay on the old account and cannot be moved, so they should issue new keys on the new account and revoke the old ones\./,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("names the owner who keeps a non-SSO route", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      members: [
+        organizationMember({
+          user_id: "22222222-bbbb-bbbb-bbbb-222222222222",
+          full_name: "Jane Owner",
+          role: "owner",
+          status: "active",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: /Owner who keeps a non-SSO route/ }),
+    )
+    await user.click(await screen.findByRole("option", { name: "Jane Owner" }))
+
+    expect(
+      await screen.findByText(/Jane Owner keeps a non-SSO route/),
+    ).toBeInTheDocument()
+  })
+
+  it("states what the organization gives up when it waives the exception", async () => {
+    mockApi({ sso: organizationSso({ connection: oidcConnection() }) })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "This organization keeps no non-SSO route",
+      }),
+    )
+
+    expect(
+      await screen.findByText(
+        /nobody in this organization can sign in until a deployment operator steps in/,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows the connection's own refusal when nobody has signed in through it yet", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      enforcement: () =>
+        jsonResponse(
+          {
+            detail:
+              "Nobody has signed in through this organization's connection yet, so there is nothing proven to require.",
+          },
+          400,
+        ),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save enforcement" }))
+
+    expect(
+      await screen.findByText(
+        "Nobody has signed in through this organization's connection yet, so there is nothing proven to require.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows its own refusal when neither an owner nor a waiver is named", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      enforcement: () =>
+        jsonResponse(
+          {
+            detail:
+              "Name one of this organization's owners to keep a non-SSO route, or waive that exception explicitly, before requiring sign-in through this connection.",
+          },
+          400,
+        ),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save enforcement" }))
+
+    expect(
+      await screen.findByText(
+        "Name one of this organization's owners to keep a non-SSO route, or waive that exception explicitly, before requiring sign-in through this connection.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows its own refusal when the named account is not an owner", async () => {
+    mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      members: [
+        organizationMember({
+          user_id: "33333333-cccc-cccc-cccc-333333333333",
+          full_name: "Jane Owner",
+          role: "owner",
+          status: "active",
+        }),
+      ],
+      enforcement: () =>
+        jsonResponse(
+          {
+            detail:
+              "Name one of this organization's owners to keep a non-SSO route, or waive that exception explicitly, before requiring sign-in through this connection.",
+          },
+          400,
+        ),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: /Owner who keeps a non-SSO route/ }),
+    )
+    await user.click(await screen.findByRole("option", { name: "Jane Owner" }))
+    await user.click(screen.getByRole("button", { name: "Save enforcement" }))
+
+    expect(
+      await screen.findByText(
+        "Name one of this organization's owners to keep a non-SSO route, or waive that exception explicitly, before requiring sign-in through this connection.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("removes a member's link only through the confirm dialog, with the stranded-keys warning", async () => {
+    const requests = mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+      members: [
+        organizationMember({
+          user_id: "44444444-dddd-dddd-dddd-444444444444",
+          full_name: "Pat Member",
+          role: "member",
+          status: "active",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(await screen.findByRole("button", { name: /Member/ }))
+    await user.click(await screen.findByRole("option", { name: "Pat Member" }))
+    await user.click(screen.getByRole("button", { name: "Remove link" }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText(
+        /next sign-in through this connection for Pat Member creates a new account/,
+      ),
+    ).toBeVisible()
+    expect(
+      within(dialog).getByText(/old account keeps its budgets and history/),
+    ).toBeVisible()
+    expect(
+      within(dialog).getByText(
+        /Their API keys stay on the old account and cannot be moved/,
+      ),
+    ).toBeVisible()
+    expect(within(dialog).getByText(/does not revoke access/)).toBeVisible()
+    expect(
+      requests.some((request) => request.url.includes("/sso/links/")),
+    ).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove link" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" && request.url.includes("/sso/links/"),
+        ),
+      ).toBe(true),
     )
   })
 })

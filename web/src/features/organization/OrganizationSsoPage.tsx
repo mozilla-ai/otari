@@ -4,6 +4,9 @@ import type {
   OidcConnection,
   OidcConnectionDomain,
   OidcConnectionRequest,
+  OrganizationMember,
+  OrganizationSsoEnforcement,
+  OrganizationSsoPreflight,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { CopyField } from "@/design-system/actions/CopyField"
@@ -21,9 +24,13 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import {
   useDeleteOrganizationSso,
+  useDeleteOrganizationSsoLink,
   useOrganizationContext,
+  useOrganizationMembers,
   useOrganizationSso,
+  useOrganizationSsoPreflight,
   useSaveOrganizationSso,
+  useSetOrganizationSsoEnforcement,
   useTestOrganizationSso,
 } from "@/shared/api/organizations"
 import { formatDate, formatRelative } from "@/shared/helpers/format"
@@ -305,6 +312,237 @@ function ConnectionSummary({
   )
 }
 
+/** A roster or preflight row's display name: the only two fields either shape promises. */
+function displayName(member: {
+  full_name?: string | null
+  email?: string | null
+}): string {
+  return member.full_name ?? member.email ?? "Unnamed member"
+}
+
+/** What an identity change strands on the old account. Read by the preflight warning and the
+    unlink confirmation alike, so the two describe the one fact in the same words. */
+function strandedKeysExplanation(): string {
+  return "Their API keys stay on the old account and cannot be moved, so they should issue new keys on the new account and revoke the old ones."
+}
+
+function preflightSummary(preflight: OrganizationSsoPreflight): string {
+  if (preflight.affected_count === 0) {
+    return `All ${preflight.total_members} active members already sign in through this connection.`
+  }
+  return (
+    `${preflight.total_members} members, ${preflight.affected_count} of whom sign in some other way. ` +
+    `Those ${preflight.affected_count} will get a new account the first time they use your provider. ` +
+    strandedKeysExplanation()
+  )
+}
+
+function PreflightPanel() {
+  const preflight = useOrganizationSsoPreflight()
+  const data = preflight.data
+  return (
+    <div className="flex flex-col gap-2">
+      <ErrorBanner error={preflight.error} />
+      {data ? (
+        <>
+          <p className="text-muted">{preflightSummary(data)}</p>
+          {data.affected_count > 0 ? (
+            <ul className="flex flex-col gap-1">
+              {data.affected_members.map((member) => (
+                <li key={member.user_id} className="text-caption">
+                  {displayName(member)}
+                </li>
+              ))}
+              {data.affected_members_truncated ? (
+                <li className="text-caption text-subtle">
+                  and {data.affected_count - data.affected_members.length}{" "}
+                  others
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function EnforcementSection({
+  enforcement,
+  owners,
+  onSaved,
+}: {
+  enforcement: OrganizationSsoEnforcement
+  owners: readonly OrganizationMember[]
+  onSaved: () => void
+}) {
+  const set = useSetOrganizationSsoEnforcement()
+  const [required, setRequired] = useState(enforcement.required)
+  const [breakGlassUserId, setBreakGlassUserId] = useState(
+    enforcement.break_glass_user_id ?? "",
+  )
+  const [breakGlassWaived, setBreakGlassWaived] = useState(
+    enforcement.break_glass_waived,
+  )
+
+  const chosenOwner = owners.find((owner) => owner.user_id === breakGlassUserId)
+
+  const submit = () => {
+    set.mutate(
+      {
+        required,
+        break_glass_user_id: breakGlassWaived ? null : breakGlassUserId || null,
+        break_glass_waived: breakGlassWaived,
+      },
+      { onSuccess: onSaved },
+    )
+  }
+
+  return (
+    <Section
+      className="border-b border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="flex flex-col gap-1">
+        <h2 className="text-title">Require sign-in</h2>
+        <p className="text-caption">
+          Every other way to act in this organization, including a live session,
+          is refused once this is on.
+        </p>
+      </div>
+      <PreflightPanel />
+      <Checkbox isSelected={required} onChange={setRequired}>
+        Require sign-in through this connection
+      </Checkbox>
+      {required ? (
+        <div className="flex flex-col gap-3">
+          <Select
+            label="Owner who keeps a non-SSO route"
+            value={breakGlassWaived ? "" : breakGlassUserId}
+            onChange={(value) => {
+              setBreakGlassUserId(value)
+              setBreakGlassWaived(false)
+            }}
+            options={owners.map((owner) => ({
+              value: owner.user_id ?? "",
+              label: displayName(owner),
+            }))}
+            placeholder="Choose an owner"
+            isDisabled={breakGlassWaived}
+            shouldReserveMessage={false}
+          />
+          {chosenOwner ? (
+            <p className="text-caption">
+              {displayName(chosenOwner)} keeps a non-SSO route and may still
+              sign in without your provider.
+            </p>
+          ) : null}
+          <Checkbox
+            isSelected={breakGlassWaived}
+            onChange={(waived) => {
+              setBreakGlassWaived(waived)
+              if (waived) setBreakGlassUserId("")
+            }}
+          >
+            This organization keeps no non-SSO route
+          </Checkbox>
+          {breakGlassWaived ? (
+            <p className="text-caption">
+              If sign-in through your provider ever fails, nobody in this
+              organization can sign in until a deployment operator steps in.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <ErrorBanner error={set.error} />
+      <div className="flex justify-end border-t border-border pt-4">
+        <Button variant="primary" onPress={submit} isPending={set.isPending}>
+          Save enforcement
+        </Button>
+      </div>
+    </Section>
+  )
+}
+
+/** The unlink confirmation's three facts, read from the one source the preflight warning also reads. */
+function unlinkWarning(name: string): string {
+  return (
+    `The next sign-in through this connection for ${name} creates a new account. ` +
+    "The old account keeps its budgets and history. " +
+    `${strandedKeysExplanation()} ` +
+    'This does not revoke access. "Remove member" is the control for that.'
+  )
+}
+
+function UnlinkSection({
+  members,
+}: {
+  members: readonly OrganizationMember[]
+}) {
+  const unlink = useDeleteOrganizationSsoLink()
+  const [selectedUserId, setSelectedUserId] = useState("")
+  const [isConfirming, setIsConfirming] = useState(false)
+  const candidate = members.find((member) => member.user_id === selectedUserId)
+
+  return (
+    <Section
+      className="border-b border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="flex flex-col gap-1">
+        <h2 className="text-title">Remove a sign-in link</h2>
+        <p className="text-caption">
+          Lets that member link afresh at their next sign-in. It removes a link
+          only. It does not delete an account or end a membership.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <Select
+          label="Member"
+          value={selectedUserId}
+          onChange={setSelectedUserId}
+          options={members
+            .filter((member) => Boolean(member.user_id))
+            .map((member) => ({
+              value: member.user_id as string,
+              label: displayName(member),
+            }))}
+          placeholder="Choose a member"
+          shouldReserveMessage={false}
+        />
+        <Button
+          variant="ghost"
+          className="shrink-0"
+          isDisabled={selectedUserId === ""}
+          onPress={() => {
+            unlink.reset()
+            setIsConfirming(true)
+          }}
+        >
+          Remove link
+        </Button>
+      </div>
+      <ConfirmDialog
+        isOpen={isConfirming}
+        onOpenChange={setIsConfirming}
+        heading="Remove this sign-in link"
+        body={candidate ? unlinkWarning(displayName(candidate)) : null}
+        confirmLabel="Remove link"
+        isPending={unlink.isPending}
+        error={unlink.error}
+        onConfirm={() =>
+          unlink.mutate(selectedUserId, {
+            onSuccess: () => {
+              setIsConfirming(false)
+              setSelectedUserId("")
+            },
+          })
+        }
+      />
+    </Section>
+  )
+}
+
 export function OrganizationSsoPage() {
   const context = useOrganizationContext()
   const canEdit = canManage(context.data)
@@ -313,8 +551,12 @@ export function OrganizationSsoPage() {
   const [isEditing, setIsEditing] = useState(false)
   const [formOpenCount, setFormOpenCount] = useState(0)
   const [isRemoving, setIsRemoving] = useState(false)
+  const [enforcementSavedCount, setEnforcementSavedCount] = useState(0)
 
   const connection = sso.data?.connection ?? null
+  const members = useOrganizationMembers(canEdit && connection !== null)
+  const activeMembers = members.data?.filter((m) => m.status === "active") ?? []
+  const activeOwners = activeMembers.filter((m) => m.role === "owner")
 
   const openForm = () => {
     setFormOpenCount((count) => count + 1)
@@ -384,6 +626,18 @@ export function OrganizationSsoPage() {
               </Button>
             </Section>
           )}
+
+          {connection && sso.data ? (
+            <>
+              <EnforcementSection
+                key={enforcementSavedCount}
+                enforcement={sso.data.enforcement}
+                owners={activeOwners}
+                onSaved={() => setEnforcementSavedCount((count) => count + 1)}
+              />
+              <UnlinkSection members={activeMembers} />
+            </>
+          ) : null}
         </>
       ) : null}
 
