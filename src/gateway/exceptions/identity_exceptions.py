@@ -413,6 +413,20 @@ class OIDCConnectionConflictError(TenancyConflictError):
         super().__init__("Another change to this organization's sign-in connection finished first. Try again.")
 
 
+class OIDCConnectionEnforcedError(TenancyValidationError):
+    """A connection is asked to be removed while its organization still requires sign-in through it.
+
+    Deleting it would leave the requirement in place with no connection left to satisfy it, locking
+    out every member the break-glass exception does not cover.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This organization still requires sign-in through its own connection. Turn that "
+            "requirement off before removing the connection."
+        )
+
+
 class OIDCConnectionNotFoundError(TenancyNotFoundError):
     """An organization has not configured its own sign-in connection."""
 
@@ -698,6 +712,7 @@ __all__ = [
     "OAuthProviderUnavailableError",
     "OAuthStateError",
     "OIDCConnectionConflictError",
+    "OIDCConnectionEnforcedError",
     "OIDCConnectionNotFoundError",
     "OIDCConnectionSecretRequiredError",
     "OIDCConnectionUnprovenError",

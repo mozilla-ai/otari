@@ -4414,7 +4414,8 @@ export interface paths {
          * Delete Organization Sso
          * @description Remove the caller's organization's own sign-in connection. Owners and admins only.
          *
-         *     Refused with 404 when the organization has not saved a connection yet.
+         *     Refused with 404 when the organization has not saved a connection yet, and with 400 while
+         *     the organization still requires sign-in through it: turn that requirement off first.
          */
         delete: operations["organization-sso-delete_organization_sso"];
         options?: never;
@@ -4434,10 +4435,10 @@ export interface paths {
          * Put Organization Sso Enforcement
          * @description Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.
          *
-         *     Refused with 404 when the organization has not configured a connection yet. Requiring sign-in is refused
-         *     with 400 before anybody has signed in through the connection, when it names no owner who keeps another
-         *     way in and waives none, or when the named account is not one of the organization's own owners. Turning
-         *     enforcement off has none of these preconditions.
+         *     Requiring sign-in is refused with 404 when the organization has not configured a connection yet,
+         *     and with 400 before anybody has signed in through the connection, when it names no owner who keeps
+         *     another way in and waives none, or when the named account is not one of the organization's own
+         *     owners. Turning enforcement off has none of these preconditions and always succeeds.
          */
         put: operations["organization-sso-put_organization_sso_enforcement"];
         post?: never;

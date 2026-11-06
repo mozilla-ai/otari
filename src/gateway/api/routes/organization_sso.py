@@ -102,7 +102,8 @@ async def delete_organization_sso(
 ) -> None:
     """Remove the caller's organization's own sign-in connection. Owners and admins only.
 
-    Refused with 404 when the organization has not saved a connection yet.
+    Refused with 404 when the organization has not saved a connection yet, and with 400 while
+    the organization still requires sign-in through it: turn that requirement off first.
     """
     await connections.delete_for_user(user=identity)
 
@@ -127,10 +128,10 @@ async def put_organization_sso_enforcement(
 ) -> None:
     """Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.
 
-    Refused with 404 when the organization has not configured a connection yet. Requiring sign-in is refused
-    with 400 before anybody has signed in through the connection, when it names no owner who keeps another
-    way in and waives none, or when the named account is not one of the organization's own owners. Turning
-    enforcement off has none of these preconditions.
+    Requiring sign-in is refused with 404 when the organization has not configured a connection yet,
+    and with 400 before anybody has signed in through the connection, when it names no owner who keeps
+    another way in and waives none, or when the named account is not one of the organization's own
+    owners. Turning enforcement off has none of these preconditions and always succeeds.
     """
     await connections.set_sso_enforcement_for_user(
         user=identity,
