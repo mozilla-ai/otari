@@ -31,10 +31,14 @@ from gateway.models.identity import (
     MailedLinkStatus,
     ProviderIdentity,
 )
-from gateway.models.tenancy import OrganizationDomainRole, User
+from gateway.models.tenancy import Organization, OrganizationDomainRole, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
+from gateway.services.identity._enforcement import (
+    has_link_to_organization,
+    sso_enforcement_refuses_every_membership,
+)
 from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
@@ -44,6 +48,7 @@ from gateway.services.tenancy import (
     generate_token,
     hash_token,
     render_password_reset_email,
+    sso_blocks_membership,
     unverified_identity_is_claimable,
 )
 
@@ -205,10 +210,19 @@ class IdentityService:
                 the blocklist lock until the session commits, so a block cannot commit between the two.
 
         """
+
+        async def sso_enforcement_blocks(organization: Organization) -> bool:
+            linked = await has_link_to_organization(
+                organization, account.id, connections=self._connections, links=self._links
+            )
+            return sso_blocks_membership(organization=organization, user=account, is_linked=linked)
+
         async with self._uow:
             # The shared lock before any row lock, so a block holding it exclusive cannot deadlock against this.
             await self._blocked_emails.lock_shared()
-            active_organization_id = await self._organizations.active_organization_id_for_sign_in(account)
+            active_organization_id = await self._organizations.active_organization_id_for_sign_in(
+                account, blocked=sso_enforcement_blocks
+            )
             now = datetime.now(UTC)
             # A write before the check, so on SQLite, where the lock is a no-op, this transaction holds the one
             # write lock when it reads the blocklist.
@@ -376,6 +390,12 @@ class IdentityService:
             raise PasswordLinkUnavailableError(
                 "No organization still has this unverified address as a member or invitee. "
                 "Add or invite it again first."
+            )
+        if await sso_enforcement_refuses_every_membership(
+            account, organizations=self._organizations, connections=self._connections, links=self._links
+        ):
+            raise PasswordLinkUnavailableError(
+                "Every organization this account belongs to requires sign-in through its own connection."
             )
 
     def _stage_reset_token(self, account: User, token: str) -> datetime:

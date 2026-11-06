@@ -370,6 +370,13 @@ export type OrganizationSso = Schemas["OrganizationSsoPublic"]
 export type OidcConnection = Schemas["OIDCConnectionPublic"]
 export type OidcConnectionDomain = Schemas["OIDCConnectionDomain"]
 export type OidcConnectionRequest = Schemas["OIDCConnectionRequest"]
+export type OrganizationSsoEnforcement =
+  Schemas["OrganizationSsoEnforcementPublic"]
+export type OrganizationSsoEnforcementRequest =
+  Schemas["OrganizationSsoEnforcementRequest"]
+export type OrganizationSsoPreflight = Schemas["OrganizationSsoPreflightPublic"]
+export type OrganizationSsoPreflightMember =
+  Schemas["OrganizationSsoPreflightMemberPublic"]
 
 // The providers this deployment serves on its own keys, for a request that
 // brings no credential of its own. Deployment-wide and operator-only, and keyed

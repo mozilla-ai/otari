@@ -9,22 +9,47 @@ from apron_auth import BrowserBoundAuthorization, StoredStateClient
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionConflictError,
+    OIDCConnectionEnforcedError,
     OIDCConnectionNotFoundError,
     OIDCConnectionSecretRequiredError,
+    OIDCConnectionUnprovenError,
     OIDCDiscoveryError,
+    SsoBreakGlassRequiredError,
+    SsoBreakGlassRouteRequiredError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDC_PROVIDER_PREFIX, OIDCConnection
+from gateway.models.identity import (
+    MAX_OIDC_ISSUER_LENGTH,
+    OIDC_PROVIDER_PREFIX,
+    OIDCConnection,
+    oidc_identity_provider,
+)
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, OrganizationDomain, User
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.tenancy import OrganizationDomainRepository
-from gateway.schemas.identity import OIDCConnectionDomain, OIDCConnectionPublic, OIDCConnectionRequest
+from gateway.schemas.identity import (
+    OIDCConnectionDomain,
+    OIDCConnectionPublic,
+    OIDCConnectionRequest,
+    OrganizationSsoEnforcementPublic,
+    OrganizationSsoPreflightMemberPublic,
+    OrganizationSsoPreflightPublic,
+)
 from gateway.services.identity._connection_clients import client_for, pending_flow_provider
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
+from gateway.services.identity._enforcement import (
+    has_link_to_organization,
+    has_route_without,
+    sso_enforcement_refuses_every_membership,
+)
 from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import OrganizationService, sso_blocks_membership
+
+# The preflight count is exact; the member list is a sample, so a large organization's
+# response stays bounded.
+_PREFLIGHT_SAMPLE_LIMIT = 50
 
 
 @dataclass(frozen=True)
@@ -85,12 +110,18 @@ class OIDCConnectionService:
         organizations: OrganizationService,
         domains: OrganizationDomainRepository,
         allow_private_hosts: bool,
+        passkey_rp_id: str | None,
     ) -> None:
         self._uow = uow
         self._connections = repositories.connections
+        self._links = repositories.links
+        self._passkeys = repositories.passkeys
+        self._sessions = repositories.sessions
+        self._users = repositories.users
         self._organizations = organizations
         self._domains = domains
         self._allow_private_hosts = allow_private_hosts
+        self._passkey_rp_id = passkey_rp_id
 
     async def _managed_organization(self, user: User) -> Organization:
         """The caller's active organization, with their authority to manage it proven.
@@ -119,6 +150,9 @@ class OIDCConnectionService:
         Discovery runs before any write, and only a successful discovery opens the transaction that
         stores it, so a refused issuer leaves an existing connection, its document, and its secret
         exactly as they were.
+
+        NOTE: Where the organization requires sign-in through this connection, storing it also
+        revokes the live session of every active member the stored issuer leaves with no link.
 
         Raises:
             OIDCConnectionConflictError: Another request changed this organization's connection while
@@ -157,6 +191,8 @@ class OIDCConnectionService:
             else:
                 self._overwrite(connection, request=request, discovered=discovered, secret=secret)
             domains = await self._domains.list_by_organization(organization.id)
+            if organization.sso_required:
+                await self._revoke_blocked_sessions(organization, connection)
             return self._to_public(connection, domains)
 
     async def test_for_user(self, *, user: User) -> OIDCConnectionPublic:
@@ -196,6 +232,8 @@ class OIDCConnectionService:
 
         Raises:
             OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+            OIDCConnectionEnforcedError: The organization still requires sign-in through this
+                connection.
         """
         organization = await self._managed_organization(user)
 
@@ -203,6 +241,8 @@ class OIDCConnectionService:
             connection = await self._connections.get_for_organization(organization.id)
             if connection is None:
                 raise OIDCConnectionNotFoundError
+            if organization.sso_required:
+                raise OIDCConnectionEnforcedError
             await self._connections.delete(connection)
 
     async def metadata_for_sign_in(self, connection: OIDCConnection) -> DiscoveredProvider:
@@ -331,6 +371,185 @@ class OIDCConnectionService:
                 return
             current.first_sign_in_at = datetime.now(UTC)
             self._connections.stage(current)
+
+    async def get_enforcement_for_user(self, *, user: User) -> OrganizationSsoEnforcementPublic:
+        """Return the caller's organization's current sign-in enforcement. Owners and admins only."""
+        organization = await self._managed_organization(user)
+        return OrganizationSsoEnforcementPublic(
+            required=organization.sso_required,
+            break_glass_user_id=organization.sso_break_glass_user_id,
+            break_glass_waived=organization.sso_break_glass_waived,
+        )
+
+    async def preflight_sso_enforcement_for_user(self, *, user: User) -> OrganizationSsoPreflightPublic:
+        """Report who the caller's organization's sign-in enforcement would affect. Owners and admins only.
+
+        An active member is affected when they hold no sign-in link to the connection: they would
+        get a new account the first time they use it, and any API key on their current account
+        would stay there rather than moving.
+
+        Raises:
+            OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+        """
+        organization = await self._managed_organization(user)
+
+        async with self._uow:
+            connection = await self._connections.get_for_organization(organization.id)
+            if connection is None:
+                raise OIDCConnectionNotFoundError
+            provider = oidc_identity_provider(connection.resolved_issuer)
+            total, affected_count = await self._organizations.members.count_active_members_by_link(
+                organization.id, provider=provider
+            )
+            sample = await self._organizations.members.list_active_members_without_link(
+                organization.id, provider=provider, limit=_PREFLIGHT_SAMPLE_LIMIT
+            )
+
+        return OrganizationSsoPreflightPublic(
+            total_members=total,
+            affected_count=affected_count,
+            affected_members=[
+                OrganizationSsoPreflightMemberPublic(
+                    user_id=member.user_id, email=member_user.email, full_name=member_user.full_name
+                )
+                for member, member_user in sample
+            ],
+            affected_members_truncated=affected_count > len(sample),
+        )
+
+    async def set_sso_enforcement_for_user(
+        self,
+        *,
+        user: User,
+        required: bool,
+        break_glass_user_id: uuid.UUID | None,
+        break_glass_waived: bool,
+    ) -> None:
+        """Set whether the caller's organization requires sign-in through its own connection. Owners and admins only.
+
+        Setting it to ``True`` additionally revokes the live session of every active member it
+        currently refuses. Turning it off has no precondition, so an organization can always
+        undo it, even with no connection configured.
+
+        Raises:
+            OIDCConnectionNotFoundError: ``required`` is set, and the organization has not
+                configured a connection yet.
+            OIDCConnectionUnprovenError: ``required`` is set before anybody has signed in through
+                the connection.
+            SsoBreakGlassRequiredError: An account is named that is not one of the organization's
+                own active owners, or ``required`` is set naming none and waiving none.
+            SsoBreakGlassRouteRequiredError: ``required`` is set naming an account that could not
+                sign in while the connection is unavailable.
+        """
+        organization = await self._managed_organization(user)
+
+        async with self._uow:
+            connection: OIDCConnection | None = None
+            if break_glass_user_id is not None:
+                await self._require_break_glass_owner(organization, break_glass_user_id)
+            if required:
+                connection = await self._require_connection_ready_for_enforcement(
+                    organization, break_glass_user_id=break_glass_user_id, break_glass_waived=break_glass_waived
+                )
+            await self._organizations.organizations.update_organization(
+                organization,
+                {
+                    "sso_required": required,
+                    "sso_break_glass_user_id": break_glass_user_id,
+                    "sso_break_glass_waived": break_glass_waived,
+                },
+            )
+            if connection is not None:
+                await self._revoke_blocked_sessions(organization, connection)
+
+    async def _require_connection_ready_for_enforcement(
+        self, organization: Organization, *, break_glass_user_id: uuid.UUID | None, break_glass_waived: bool
+    ) -> OIDCConnection:
+        """Return this organization's connection, proven fit to require sign-in through.
+
+        Raises:
+            OIDCConnectionNotFoundError: The organization has not configured a connection yet.
+            OIDCConnectionUnprovenError: Nobody has signed in through the connection yet.
+            SsoBreakGlassRequiredError: No owner is named to keep a non-SSO route and none is
+                waived, or the named account is not one of the organization's own owners.
+        """
+        connection = await self._connections.get_for_organization(organization.id)
+        if connection is None:
+            raise OIDCConnectionNotFoundError
+        if connection.first_sign_in_at is None:
+            raise OIDCConnectionUnprovenError
+        if break_glass_user_id is None and not break_glass_waived:
+            raise SsoBreakGlassRequiredError
+        if break_glass_user_id is not None:
+            await self._require_a_route_without_the_connection(break_glass_user_id, connection)
+        return connection
+
+    async def _require_a_route_without_the_connection(self, user_id: uuid.UUID, connection: OIDCConnection) -> None:
+        """Refuse an exempted owner who could not sign in while this connection is unavailable.
+
+        Raises:
+            SsoBreakGlassRouteRequiredError: The account holds no password, no passkey of this
+                deployment's and no link at another provider.
+        """
+        account = await self._users.get(user_id)
+        if account is None or not await has_route_without(
+            account,
+            provider=oidc_identity_provider(connection.resolved_issuer),
+            passkey_rp_id=self._passkey_rp_id,
+            links=self._links,
+            passkeys=self._passkeys,
+        ):
+            raise SsoBreakGlassRouteRequiredError
+
+    async def _require_break_glass_owner(self, organization: Organization, user_id: uuid.UUID) -> None:
+        """Refuse a break-glass account that is not one of this organization's own active owners.
+
+        Raises:
+            SsoBreakGlassRequiredError: The account is not an active owner here.
+        """
+        owner = await self._organizations.members.get_active_by_organization_and_user(organization.id, user_id)
+        if owner is None or owner.role != "owner":
+            raise SsoBreakGlassRequiredError
+
+    async def _revoke_blocked_sessions(self, organization: Organization, connection: OIDCConnection) -> None:
+        """End the live session of every active member this organization's enforcement now refuses."""
+        provider = oidc_identity_provider(connection.resolved_issuer)
+        roster = await self._organizations.members.get_active_by_organization_with_users(organization.id)
+        linked_ids = await self._links.linked_user_ids(
+            provider=provider, user_ids=[identity.id for _, identity in roster]
+        )
+        blocked_ids = {
+            identity.id
+            for _, identity in roster
+            if sso_blocks_membership(
+                organization=organization,
+                user=identity,
+                is_linked=identity.id in linked_ids,
+            )
+        }
+        if blocked_ids:
+            await self._sessions.delete_for_users(blocked_ids)
+
+    async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
+        """Whether ``organization``'s own SSO enforcement refuses ``user`` from acting in it.
+
+        An organization requiring nothing refuses nobody, which is answered off the row already in
+        hand rather than by reading its connection and the account's links.
+        """
+        if not organization.sso_required:
+            return False
+        async with self._uow:
+            linked = await has_link_to_organization(
+                organization, user.id, connections=self._connections, links=self._links
+            )
+        return sso_blocks_membership(organization=organization, user=user, is_linked=linked)
+
+    async def refuses_every_membership(self, *, user: User) -> bool:
+        """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
+        async with self._uow:
+            return await sso_enforcement_refuses_every_membership(
+                user, organizations=self._organizations, connections=self._connections, links=self._links
+            )
 
     async def _store_first(
         self,

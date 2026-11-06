@@ -380,6 +380,20 @@ class OIDCConnectionConflictError(TenancyConflictError):
         super().__init__("Another change to this organization's sign-in connection finished first. Try again.")
 
 
+class OIDCConnectionEnforcedError(TenancyValidationError):
+    """A connection is asked to be removed while its organization still requires sign-in through it.
+
+    Deleting it would leave the requirement in place with no connection left to satisfy it, locking
+    out every member the break-glass exception does not cover.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This organization still requires sign-in through its own connection. Turn that "
+            "requirement off before removing the connection."
+        )
+
+
 class OIDCConnectionNotFoundError(TenancyNotFoundError):
     """An organization has not configured its own sign-in connection."""
 
@@ -394,6 +408,18 @@ class OIDCConnectionSecretRequiredError(TenancyValidationError):
         super().__init__(
             "Enter the client secret. The stored one is kept only when the issuer and the client ID both "
             "stay the same, because a secret belongs to one client at one issuer."
+        )
+
+
+class OIDCConnectionUnprovenError(TenancyValidationError):
+    """Enforcement is asked for before this organization's connection has signed anybody in.
+
+    An administrator cannot require a route nobody has proven works.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Nobody has signed in through this organization's connection yet, so there is nothing proven to require."
         )
 
 
@@ -421,6 +447,34 @@ class OIDCSignInUnavailableError(TenancyNotFoundError):
 
     def __init__(self) -> None:
         super().__init__("No sign-in is available at this address")
+
+
+class SsoBreakGlassRequiredError(TenancyValidationError):
+    """Enforcement is asked for without naming an owner who keeps a non-SSO route, or waiving one.
+
+    An organization that wants no exception says so explicitly, so a request setting neither
+    cannot be a half-made decision.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Name one of this organization's owners to keep a non-SSO route, or waive that "
+            "exception explicitly, before requiring sign-in through this connection."
+        )
+
+
+class SsoBreakGlassRouteRequiredError(TenancyValidationError):
+    """The owner named to keep a non-SSO route has no way in that the connection does not provide.
+
+    An exemption for an account that cannot authenticate without the connection is no exemption, so
+    naming one would leave the organization believing it kept a route back that it does not have.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The owner named to keep a non-SSO route has no password, no passkey and no other "
+            "sign-in provider, so they could not sign in while this connection is unavailable."
+        )
 
 
 class CurrentPasswordIncorrectError(TenancyValidationError):
@@ -503,7 +557,7 @@ class EmailAlreadyInUseError(TenancyConflictError):
 
 
 class PasswordLinkUnavailableError(TenancyConflictError):
-    """An operator asked for a password link for an account that cannot use one."""
+    """An account cannot be given a usable password right now."""
 
 
 class InvalidEmailError(TenancyValidationError):
@@ -639,8 +693,10 @@ __all__ = [
     "OAuthProviderUnavailableError",
     "OAuthStateError",
     "OIDCConnectionConflictError",
+    "OIDCConnectionEnforcedError",
     "OIDCConnectionNotFoundError",
     "OIDCConnectionSecretRequiredError",
+    "OIDCConnectionUnprovenError",
     "OIDCDiscoveryError",
     "OIDCSignInUnavailableError",
     "PasskeyAlreadyRegisteredError",
@@ -657,6 +713,8 @@ __all__ = [
     "InvalidBlockedEmailEntryError",
     "SignInAddressRequiredError",
     "SignInBlockedError",
+    "SsoBreakGlassRequiredError",
+    "SsoBreakGlassRouteRequiredError",
     "TermsNotAcceptedError",
     "UnmodifiedPasswordError",
     "VerificationPasswordIncorrectError",

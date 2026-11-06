@@ -28,6 +28,8 @@ import type {
   OrganizationMember,
   OrganizationMembers,
   OrganizationSso,
+  OrganizationSsoEnforcementRequest,
+  OrganizationSsoPreflight,
   OrgProviderAvailableModels,
   OrgProviderKey,
   OrgProviderModel,
@@ -54,6 +56,7 @@ import {
   ORGANIZATION_PROVIDER_KEYS,
   ORGANIZATION_PROVIDER_MODELS,
   ORGANIZATION_SSO,
+  ORGANIZATION_SSO_PREFLIGHT,
   ORGANIZATIONS,
   WORKSPACES,
 } from "@/shared/api/queryKeys"
@@ -888,9 +891,9 @@ export function useDeleteOrganizationDomain() {
 // sign-in methods. `redirect_uri` is served alongside the connection, so the
 // one read also tells an admin what to register before saving anything.
 //
-// There is no partial update: saving replaces the whole connection, so the
-// client secret is required on every save, including one that changes nothing
-// else about it.
+// There is no partial update: saving replaces the whole connection. The client
+// secret may be left out to keep the stored one, which is refused unless the
+// issuer and the client ID are both unchanged.
 
 export function useOrganizationSso(enabled = true) {
   return useQuery({
@@ -901,10 +904,23 @@ export function useOrganizationSso(enabled = true) {
   })
 }
 
+// Returned rather than discarded, so a mutation settles only once the refetch has landed: a
+// caller that remounts on success would otherwise re-read the value it just replaced.
 function invalidateOrganizationSso(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
-  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO] })
+  return queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO] })
+}
+
+// Storing, removing or enforcing a connection each move who enforcement would affect. Testing one
+// moves nothing.
+function invalidateOrganizationSsoAndPreflight(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  return Promise.all([
+    invalidateOrganizationSso(queryClient),
+    queryClient.invalidateQueries({ queryKey: [ORGANIZATION_SSO_PREFLIGHT] }),
+  ])
 }
 
 export function useSaveOrganizationSso() {
@@ -915,7 +931,7 @@ export function useSaveOrganizationSso() {
         method: "PUT",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => invalidateOrganizationSso(queryClient),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
   })
 }
 
@@ -935,7 +951,32 @@ export function useDeleteOrganizationSso() {
   return useMutation({
     mutationFn: () =>
       apiFetch<void>("/organizations/me/sso", { method: "DELETE" }),
-    onSuccess: () => invalidateOrganizationSso(queryClient),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
+  })
+}
+
+// Who requiring sign-in through the connection would affect today: every
+// active member holding no sign-in link to it. Read before the enforcement
+// toggle is offered, and short-lived, since a member linking moves the count.
+export function useOrganizationSsoPreflight(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_SSO_PREFLIGHT],
+    queryFn: () =>
+      apiFetch<OrganizationSsoPreflight>("/organizations/me/sso/preflight"),
+    staleTime: 15_000,
+    enabled,
+  })
+}
+
+export function useSetOrganizationSsoEnforcement() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: OrganizationSsoEnforcementRequest) =>
+      apiFetch<void>("/organizations/me/sso/enforcement", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationSsoAndPreflight(queryClient),
   })
 }
 

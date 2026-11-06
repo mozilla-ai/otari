@@ -16,7 +16,14 @@ from fastapi import APIRouter, Depends, status
 
 from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_config, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.schemas.identity import OIDCConnectionPublic, OIDCConnectionRequest, OrganizationSsoPublic
+from gateway.schemas.identity import (
+    OIDCConnectionPublic,
+    OIDCConnectionRequest,
+    OrganizationSsoEnforcementPublic,
+    OrganizationSsoEnforcementRequest,
+    OrganizationSsoPreflightPublic,
+    OrganizationSsoPublic,
+)
 from gateway.services.oauth_service import redirect_uri as _oauth_redirect_uri
 
 # Master key on the router, as the rest of the ``/api/v1/organizations/me`` surface
@@ -29,8 +36,14 @@ router = APIRouter(
 )
 
 
-def _settings(config: GatewayConfig, connection: OIDCConnectionPublic | None) -> OrganizationSsoPublic:
-    return OrganizationSsoPublic(redirect_uri=_oauth_redirect_uri(config, "sso"), connection=connection)
+def _settings(
+    config: GatewayConfig,
+    connection: OIDCConnectionPublic | None,
+    enforcement: OrganizationSsoEnforcementPublic,
+) -> OrganizationSsoPublic:
+    return OrganizationSsoPublic(
+        redirect_uri=_oauth_redirect_uri(config, "sso"), connection=connection, enforcement=enforcement
+    )
 
 
 @router.get("")
@@ -44,7 +57,8 @@ async def get_organization_sso(
     ``connection`` is null until the organization saves one.
     """
     connection = await connections.get_for_user(user=identity)
-    return _settings(config, connection)
+    enforcement = await connections.get_enforcement_for_user(user=identity)
+    return _settings(config, connection, enforcement)
 
 
 @router.put("")
@@ -60,7 +74,8 @@ async def put_organization_sso(
     encrypted at rest and never served back.
     """
     connection = await connections.save_for_user(user=identity, request=request)
-    return _settings(config, connection)
+    enforcement = await connections.get_enforcement_for_user(user=identity)
+    return _settings(config, connection, enforcement)
 
 
 @router.post("/test")
@@ -74,7 +89,8 @@ async def test_organization_sso(
     Refused with 404 when the organization has not saved a connection yet.
     """
     connection = await connections.test_for_user(user=identity)
-    return _settings(config, connection)
+    enforcement = await connections.get_enforcement_for_user(user=identity)
+    return _settings(config, connection, enforcement)
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
@@ -84,6 +100,42 @@ async def delete_organization_sso(
 ) -> None:
     """Remove the caller's organization's own sign-in connection. Owners and admins only.
 
-    Refused with 404 when the organization has not saved a connection yet.
+    Refused with 404 when the organization has not saved a connection yet, and with 400 while
+    the organization still requires sign-in through it: turn that requirement off first.
     """
     await connections.delete_for_user(user=identity)
+
+
+@router.get("/preflight")
+async def get_organization_sso_preflight(
+    identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
+) -> OrganizationSsoPreflightPublic:
+    """Report who requiring sign-in through the caller's organization's own connection would affect.
+
+    Owners and admins only. Refused with 404 when the organization has not configured a connection yet.
+    """
+    return await connections.preflight_sso_enforcement_for_user(user=identity)
+
+
+@router.put("/enforcement", status_code=status.HTTP_204_NO_CONTENT)
+async def put_organization_sso_enforcement(
+    request: OrganizationSsoEnforcementRequest,
+    identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
+) -> None:
+    """Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.
+
+    Requiring sign-in is refused with 404 when the organization has not configured a connection yet,
+    and with 400 before anybody has signed in through the connection, when it names no owner who keeps
+    another way in and waives none, or when the account it names could not sign in while the
+    connection is unavailable. An account named at all must be one of the organization's own active
+    owners, whether or not sign-in is being required. Turning enforcement off has no other
+    precondition.
+    """
+    await connections.set_sso_enforcement_for_user(
+        user=identity,
+        required=request.required,
+        break_glass_user_id=request.break_glass_user_id,
+        break_glass_waived=request.break_glass_waived,
+    )

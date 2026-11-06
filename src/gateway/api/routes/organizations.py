@@ -36,6 +36,7 @@ from gateway.api.deps import (
     IdentityServiceDep,
     InvitationMailLimitDep,
     MembershipOrganizationServiceDep,
+    OIDCConnectionServiceDep,
     OrganizationDomainServiceDep,
     get_config,
     verify_master_key,
@@ -55,6 +56,7 @@ from gateway.models.tenancy import (
     CallerOrganizationMembershipsPublic,
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
+    Organization,
     OrganizationCreateRequest,
     OrganizationDomainCreateRequest,
     OrganizationDomainPublic,
@@ -134,9 +136,10 @@ async def create_organization(
 async def get_active_organization_context(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
 ) -> OrganizationMembershipContextPublic:
     """Get the caller's active organization and their standing in it."""
-    return await service.get_active_membership_context_for_user(current_identity)
+    return await service.get_active_membership_context_for_user(current_identity, sso_enforcement=connections)
 
 
 @router.patch("/me")
@@ -172,6 +175,7 @@ async def update_active_organization(
 async def delete_active_organization(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
 ) -> OrganizationMembershipContextPublic:
     """Delete the caller's active organization, if it has no usage, and move the caller out of it.
 
@@ -184,12 +188,13 @@ async def delete_active_organization(
     Answers with the caller's context in the organization they are moved to,
     their oldest other one.
     """
-    return await service.delete_active_organization_for_user(user=current_identity)
+    return await service.delete_active_organization_for_user(user=current_identity, sso_enforcement=connections)
 
 
 @router.get("/me/memberships")
 async def list_caller_organization_memberships(
     service: MembershipOrganizationServiceDep,
+    connections: OIDCConnectionServiceDep,
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
@@ -200,18 +205,24 @@ async def list_caller_organization_memberships(
     organizations: this is what an organization switcher renders, and one row
     carries ``is_active_organization`` so it can mark the current one. Not to be
     confused with ``GET /me/members``, which is the active organization's
-    roster.
+    roster. An organization whose own SSO enforcement refuses the caller is left off.
     """
+
+    async def blocked(organization: Organization) -> bool:
+        return await connections.blocks_membership(user=current_identity, organization=organization)
+
     return await service.list_organization_memberships_for_user(
         user=current_identity,
         skip=skip,
         limit=limit,
+        blocked=blocked,
     )
 
 
 @router.post("/me/switch")
 async def switch_active_organization(
     service: MembershipOrganizationServiceDep,
+    connections: OIDCConnectionServiceDep,
     current_identity: CurrentIdentity,
     body: SwitchActiveOrganizationRequest,
 ) -> OrganizationMembershipContextPublic:
@@ -221,11 +232,16 @@ async def switch_active_organization(
     This changes which organization every later request is scoped to, so
     workspaces, keys, budgets and usage all follow it. Answers 404 for an
     organization the caller holds no active membership in, whether or not it
-    exists.
+    exists, and for one whose own SSO enforcement refuses the caller.
     """
+
+    async def blocked(organization: Organization) -> bool:
+        return await connections.blocks_membership(user=current_identity, organization=organization)
+
     return await service.switch_active_organization_for_user(
         user=current_identity,
         organization_id=body.organization_id,
+        blocked=blocked,
     )
 
 

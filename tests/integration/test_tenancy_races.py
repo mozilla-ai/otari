@@ -107,6 +107,7 @@ from gateway.services.tenancy.workspace_activation_service import (
 from .tenancy_helpers import (
     NO_BLOCKED_ADDRESSES,
     NO_MAIL_LIMIT,
+    NO_SSO_ENFORCEMENT,
     NO_TERMS,
     MembershipWrites,
     budget_service,
@@ -287,6 +288,7 @@ async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
             session,
             identity,
             new_password="a-real-password",
+            sso_enforcement=NO_SSO_ENFORCEMENT,
             email="contested@example.com",
         )
         # `set_password` returns None, so the racer that got through reports a
@@ -1633,6 +1635,7 @@ async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
                     token=token,
                     new_password=f"racer-password-{index}",
                     blocked_addresses=NO_BLOCKED_ADDRESSES,
+                    sso_enforcement=NO_SSO_ENFORCEMENT,
                 )
                 return index
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion

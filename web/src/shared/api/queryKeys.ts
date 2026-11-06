@@ -139,6 +139,10 @@ export const ORGANIZATION_DOMAINS = "organization-domains"
 // The organization's own bring-your-own OIDC connection. Its own key: one page
 // reads it, and saving, testing or removing it has no bearing on anything else.
 export const ORGANIZATION_SSO = "organization-sso"
+// Who enabling that connection's enforcement would affect. A member linking
+// changes this count, so it invalidates independently of the connection
+// itself.
+export const ORGANIZATION_SSO_PREFLIGHT = "organization-sso-preflight"
 export const WORKSPACES = "workspaces"
 // The first-request setup guide's state. Its own key rather than a child of
 // WORKSPACES: the guide polls while it is on screen, and nesting it would make

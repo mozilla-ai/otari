@@ -3766,7 +3766,7 @@ export interface paths {
          *     organizations: this is what an organization switcher renders, and one row
          *     carries ``is_active_organization`` so it can mark the current one. Not to be
          *     confused with ``GET /me/members``, which is the active organization's
-         *     roster.
+         *     roster. An organization whose own SSO enforcement refuses the caller is left off.
          */
         get: operations["organizations-list_caller_organization_memberships"];
         put?: never;
@@ -4366,9 +4366,59 @@ export interface paths {
          * Delete Organization Sso
          * @description Remove the caller's organization's own sign-in connection. Owners and admins only.
          *
-         *     Refused with 404 when the organization has not saved a connection yet.
+         *     Refused with 404 when the organization has not saved a connection yet, and with 400 while
+         *     the organization still requires sign-in through it: turn that requirement off first.
          */
         delete: operations["organization-sso-delete_organization_sso"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/sso/enforcement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Organization Sso Enforcement
+         * @description Require, or stop requiring, sign-in through the caller's organization's own connection. Owners and admins only.
+         *
+         *     Requiring sign-in is refused with 404 when the organization has not configured a connection yet,
+         *     and with 400 before anybody has signed in through the connection, when it names no owner who keeps
+         *     another way in and waives none, or when the account it names could not sign in while the
+         *     connection is unavailable. An account named at all must be one of the organization's own active
+         *     owners, whether or not sign-in is being required. Turning enforcement off has no other
+         *     precondition.
+         */
+        put: operations["organization-sso-put_organization_sso_enforcement"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/sso/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Organization Sso Preflight
+         * @description Report who requiring sign-in through the caller's organization's own connection would affect.
+         *
+         *     Owners and admins only. Refused with 404 when the organization has not configured a connection yet.
+         */
+        get: operations["organization-sso-get_organization_sso_preflight"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4413,7 +4463,7 @@ export interface paths {
          *     This changes which organization every later request is scoped to, so
          *     workspaces, keys, budgets and usage all follow it. Answers 404 for an
          *     organization the caller holds no active membership in, whether or not it
-         *     exists.
+         *     exists, and for one whose own SSO enforcement refuses the caller.
          */
         post: operations["organizations-switch_active_organization"];
         delete?: never;
@@ -16119,12 +16169,108 @@ export interface components {
             data: components["schemas"]["OrganizationScopedBudgetPublic"][];
         };
         /**
+         * OrganizationSsoEnforcementPublic
+         * @description The caller's organization's current sign-in enforcement, as its admins see it.
+         */
+        OrganizationSsoEnforcementPublic: {
+            /**
+             * Break Glass User Id
+             * @description One of the organization's own owners who keeps a non-SSO sign-in route, where the organization named one.
+             */
+            break_glass_user_id: string | null;
+            /**
+             * Break Glass Waived
+             * @description Whether the organization has explicitly waived naming a break-glass owner.
+             */
+            break_glass_waived: boolean;
+            /**
+             * Required
+             * @description Whether this organization requires sign-in through its own connection.
+             */
+            required: boolean;
+        };
+        /**
+         * OrganizationSsoEnforcementRequest
+         * @description What an organization administrator submits to require, or stop requiring, sign-in through its own connection.
+         */
+        OrganizationSsoEnforcementRequest: {
+            /**
+             * Break Glass User Id
+             * @description One of the organization's own owners who keeps a non-SSO sign-in route when required is true.
+             */
+            break_glass_user_id?: string | null;
+            /**
+             * Break Glass Waived
+             * @description Whether the organization explicitly waives a break-glass owner when enforcement is required.
+             * @default false
+             */
+            break_glass_waived: boolean;
+            /**
+             * Required
+             * @description Whether this organization requires sign-in through its own connection.
+             */
+            required: boolean;
+        };
+        /**
+         * OrganizationSsoPreflightMemberPublic
+         * @description One active member who holds no sign-in link to the caller's organization's own connection.
+         */
+        OrganizationSsoPreflightMemberPublic: {
+            /**
+             * Email
+             * @description The member's sign-in address, or null for an identity with none.
+             */
+            email: string | null;
+            /**
+             * Full Name
+             * @description The member's display name, or null when none is set.
+             */
+            full_name: string | null;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /**
+         * OrganizationSsoPreflightPublic
+         * @description What requiring sign-in through the caller's organization's own connection would cost today.
+         *
+         *     ``affected_count`` is exact: every active member holding no sign-in link to this connection, who
+         *     would get a new account the first time they use it. ``affected_members`` samples those people,
+         *     bounded in size; ``affected_members_truncated`` says whether the sample leaves any out.
+         */
+        OrganizationSsoPreflightPublic: {
+            /**
+             * Affected Count
+             * @description How many active members hold no sign-in link to this connection.
+             */
+            affected_count: number;
+            /**
+             * Affected Members
+             * @description A sample of the affected members, for recognizing who they are.
+             */
+            affected_members: components["schemas"]["OrganizationSsoPreflightMemberPublic"][];
+            /**
+             * Affected Members Truncated
+             * @description Whether affected_members leaves out some of the members affected_count counts.
+             */
+            affected_members_truncated: boolean;
+            /**
+             * Total Members
+             * @description The organization's active membership count.
+             */
+            total_members: number;
+        };
+        /**
          * OrganizationSsoPublic
          * @description An organization's own OIDC connection, and what to register at the provider.
          */
         OrganizationSsoPublic: {
             /** @description The organization's own connection, or null until one is saved. */
             connection: components["schemas"]["OIDCConnectionPublic"] | null;
+            /** @description The organization's current sign-in enforcement. Independent of whether a connection exists. */
+            enforcement: components["schemas"]["OrganizationSsoEnforcementPublic"];
             /**
              * Redirect Uri
              * @description This deployment's fixed callback path. Register it at the identity provider, whether or not a connection is saved yet.
@@ -28637,6 +28783,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "organization-sso-put_organization_sso_enforcement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationSsoEnforcementRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-get_organization_sso_preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPreflightPublic"];
+                };
             };
         };
     };
