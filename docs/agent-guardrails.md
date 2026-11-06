@@ -302,7 +302,7 @@ If Claude Code's user settings file also registers the hook for every repository
 
 `otari hook setup` registers the hook in one repository only, and does not write a user-level entry. To make your gates apply in every repository:
 
-1. Add the entries `setup` writes (shown under [Registering it by hand](agent-guardrails-reference.md#registering-it-by-hand)) to `~/.claude/settings.json`, with the widest `PreToolUse` matcher, `Edit|Write|NotebookEdit|Read|Bash`, because one entry now serves the gates of every repository.
+1. Add the entries `setup` writes (shown under [Registering it by hand](agent-guardrails-reference.md#registering-it-by-hand)) to Claude Code's user settings file, with the widest `PreToolUse` matcher, `Edit|Write|NotebookEdit|Read|Bash`, because one entry now serves the gates of every repository. That file is `~/.claude/settings.json`, or `settings.json` in the directory `CLAUDE_CONFIG_DIR` names where you set that variable.
 2. Register the hook in one place only. Remove the per-repository entry from `.claude/settings.local.json`, or skip the user-level one on that machine; with both, the hook can run twice for each event.
 
 ## Recommendations
