@@ -1,6 +1,7 @@
 import { Link } from "@heroui/react"
 import { Button } from "@/design-system/actions/Button"
 import { Popover } from "@/design-system/overlays/Popover"
+import { welcomeGuideLink } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { PublicAuthLink } from "./PublicAuthLayout"
 
@@ -15,9 +16,9 @@ import { PublicAuthLink } from "./PublicAuthLayout"
  * beside the password box itself, so this popover carries it only for the
  * master-key box, where there is no password field to put it next to.
  *
- * The guide is the gateway's own `/welcome` page, which a deployment that
- * configures `docs_url` (otari.ai) does not serve at its origin, so there the
- * link goes to that documentation instead of a dead path.
+ * The guide link goes to the deployment's documentation where it configures
+ * `docs_url` (see `welcomeGuideLink`). The "master key" link in the note stays
+ * on `/welcome`: the master-key box is only offered where the gateway serves it.
  *
  * The trigger is a `Button` because a popover trigger has to be a react-aria
  * pressable, and reads as the text link beside it because both call sites put it
@@ -31,8 +32,7 @@ export function AuthHelp({
   offersRecovery: boolean
   credential?: "password" | "master-key"
 }) {
-  const { docs_url } = useDeployment()
-  const link = "text-link hover:text-link-hover"
+  const { href, label, target, rel } = welcomeGuideLink(useDeployment())
   return (
     <Popover
       label="Help"
@@ -51,13 +51,12 @@ export function AuthHelp({
           </PublicAuthLink>
         ) : null}
         <Link
-          href={docs_url ?? "/welcome"}
-          {...(docs_url
-            ? { target: "_blank", rel: "noopener noreferrer" }
-            : {})}
-          className={`inline-flex min-h-11 items-center text-sm font-medium ${link}`}
+          href={href}
+          target={target}
+          rel={rel}
+          className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
         >
-          {docs_url ? "Read the documentation" : "Open the welcome guide"}
+          {label}
         </Link>
         {credential ? (
           <p className="border-t border-border pt-3 text-caption">
@@ -66,13 +65,7 @@ export function AuthHelp({
             ) : (
               <>
                 Your{" "}
-                <a
-                  href={docs_url ?? "/welcome"}
-                  {...(docs_url
-                    ? { target: "_blank", rel: "noopener noreferrer" }
-                    : {})}
-                  className={link}
-                >
+                <a href="/welcome" className="text-link hover:text-link-hover">
                   master key
                 </a>{" "}
                 is sent once and exchanged for a session cookie. It is never
