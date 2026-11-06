@@ -136,9 +136,10 @@ async def create_organization(
 async def get_active_organization_context(
     service: MembershipOrganizationServiceDep,
     current_identity: CurrentIdentity,
+    connections: OIDCConnectionServiceDep,
 ) -> OrganizationMembershipContextPublic:
     """Get the caller's active organization and their standing in it."""
-    return await service.get_active_membership_context_for_user(current_identity)
+    return await service.get_active_membership_context_for_user(current_identity, sso_enforcement=connections)
 
 
 @router.patch("/me")

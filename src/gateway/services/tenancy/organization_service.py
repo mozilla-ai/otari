@@ -105,7 +105,7 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import BlockedAddresses, InvitationMailLimit
+from gateway.services.organizations import BlockedAddresses, InvitationMailLimit, SsoEnforcement
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -333,13 +333,24 @@ _CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
 _READ_ONLY_DETAIL = "Viewers have read-only access to this workspace"
 
 
-async def _never_blocks(_organization: Organization) -> bool:
-    """A ``blocked`` predicate that refuses no organization, for a caller that enforces no such rule here.
+async def _revocation_enforces_instead(_organization: Organization) -> bool:
+    """A ``blocked`` predicate that refuses no organization, for a read that leaves enforcement to revocation.
 
     NOTE: A caller passing this leaves a live session to be ended by revocation rather than refused
     on each read, so any new way for a member to become blocked must revoke their sessions too.
+    Only a read may pass it. A caller that points somebody at an organization passes the real
+    enforcement instead, or it grants the access this predicate declines to check.
     """
     return False
+
+
+def _blocks_for(user: User, enforcement: SsoEnforcement) -> Callable[[Organization], Awaitable[bool]]:
+    """Bind the enforcement question to one person, for a resolver that walks their organizations."""
+
+    async def blocks(organization: Organization) -> bool:
+        return await enforcement.blocks_membership(user=user, organization=organization)
+
+    return blocks
 
 
 class OrganizationService:
@@ -382,9 +393,9 @@ class OrganizationService:
         Reads only: it neither creates an organization nor writes the fallback
         back, so a page that reads the active organization changes nothing. The
         pointer itself is repaired where a session is minted
-        (``active_organization_id_for_sign_in``) and by ``get_active_or_bootstrap``.
+        (``active_organization_id_for_sign_in``).
         """
-        organization = await self._live_active_organization(user, blocked=_never_blocks)
+        organization = await self._live_active_organization(user, blocked=_revocation_enforces_instead)
         if organization is None:
             raise NotAuthorizedError(f"Identity {user.id} has no active membership in this organization")
         return organization
@@ -669,7 +680,7 @@ class OrganizationService:
             if membership.workspace_id in names
         ]
 
-    async def _resolve_active_organization(self, user: User) -> Organization:
+    async def _resolve_active_organization(self, user: User, *, sso_enforcement: SsoEnforcement) -> Organization:
         """Resolve the caller's organization, repairing a stale pointer if it can.
 
         The reachable stale case is a membership that was suspended after the
@@ -686,16 +697,24 @@ class OrganizationService:
         naming the one the pointer still holds.
         """
         stale_id = user.active_organization_id
-        organization = await self._live_active_organization(user, repair=True, blocked=_never_blocks)
+        organization = await self._live_active_organization(
+            user, repair=True, blocked=_blocks_for(user, sso_enforcement)
+        )
         if organization is None:
             raise NoActiveOrganizationError
         if organization.id != stale_id:
             await self.db.commit()
         return organization
 
-    async def get_active_membership_context_for_user(self, user: User) -> OrganizationMembershipContextPublic:
-        """Return the caller's organization and their standing in it."""
-        organization = await self._resolve_active_organization(user)
+    async def get_active_membership_context_for_user(
+        self, user: User, *, sso_enforcement: SsoEnforcement
+    ) -> OrganizationMembershipContextPublic:
+        """Return the caller's organization and their standing in it.
+
+        NOTE: This repairs a stale pointer, so it never points the caller at an organization whose
+        own enforcement refuses them.
+        """
+        organization = await self._resolve_active_organization(user, sso_enforcement=sso_enforcement)
         membership = await self._require_active_membership(user, organization)
         return await self._to_context(
             user=user,

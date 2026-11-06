@@ -73,6 +73,9 @@ class _NoSsoEnforcement:
     async def blocks_any_membership(self, *, user: User) -> bool:
         return False
 
+    async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
+        return False
+
 
 NO_SSO_ENFORCEMENT = _NoSsoEnforcement()
 

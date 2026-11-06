@@ -507,6 +507,39 @@ async def test_a_blocked_member_signs_in_and_sees_only_their_other_organization(
     assert signed_in.active_organization_id == other.id
 
 
+async def test_repairing_the_pointer_moves_a_refused_member_off_that_organization(
+    async_db: AsyncSession,
+) -> None:
+    """The context read repairs the pointer, so it must not leave somebody pointed at an organization refusing them.
+
+    The pointer starts on the enforcing organization with a live membership, which is what an
+    unenforced repair returns unchanged.
+    """
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    other = await create_organization(async_db, slug="other")
+    member = await _member_with_email(
+        async_db, enforcing, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=other.id, user_id=member.id, role="member"
+    )
+    await async_db.commit()
+    await _reloaded(async_db, enforcing)
+    await _reloaded(async_db, other)
+
+    context = await OrganizationService(async_db, membership_listener=None).get_active_membership_context_for_user(
+        member, sso_enforcement=_connection_service(async_db)
+    )
+
+    assert context.organization.id == other.id
+    repaired = await async_db.get(User, member.id)
+    assert repaired is not None
+    assert repaired.active_organization_id == other.id
+
+
 async def test_a_password_sign_in_reaches_no_enforcing_organization(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True

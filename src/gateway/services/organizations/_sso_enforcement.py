@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from gateway.models.tenancy import User
+from gateway.models.tenancy import Organization, User
 
 
 class SsoEnforcement(Protocol):
@@ -14,4 +14,8 @@ class SsoEnforcement(Protocol):
 
     async def blocks_any_membership(self, *, user: User) -> bool:
         """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
+        ...
+
+    async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
+        """Whether ``organization``'s own enforcement refuses ``user`` from acting in it."""
         ...
