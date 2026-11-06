@@ -2860,13 +2860,19 @@ def _policy_header(repo_name: str) -> str:
 
 
 def _starter_gates_yaml(repo_name: str) -> str:
-    """A two-gate starter policy, chosen to teach `runs` rather than to be useful.
+    """A four-gate starter policy, chosen to teach `runs` rather than to be useful.
 
     One gate of each shape a `runs` value can take: a command gate, which can
     only ever refuse a call before it happens, and a path gate naming both
     moments, which is what most real rules want. Between them a reader sees
     that the field is a real choice and that the two halves of an entry say
     different things.
+
+    The last two are a read gate and the command gate it needs beside it. A
+    read gate on its own sees the harness's read tool and nothing a shell
+    command reads, which `otari guardrails validate` warns about, so shipping
+    the read gate alone would hand every new repository a warning instead of
+    the pattern that answers it.
     """
     return _policy_header(repo_name) + (
         "  - id: no-force-push\n"
@@ -2894,6 +2900,35 @@ def _starter_gates_yaml(repo_name: str) -> str:
         "    message: >-\n"
         "      A .env file holds secrets and does not belong in the repo.\n"
         "      Keep it untracked and out of commits.\n"
+        "\n"
+        "  - id: no-reading-env-file\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.read_target]\n"
+        "    enforcement: advisory\n"
+        '    forbidden: [".env", "**/.env"]\n'
+        "    message: >-\n"
+        "      A .env file holds secrets. Do not read one.\n"
+        "\n"
+        "  - id: no-shell-access-to-env-file\n"
+        "    type: command\n"
+        # The pair the read gate above needs. A read gate sees the harness's
+        # read tool and nothing a shell command reads, and unlike a write
+        # nothing catches that afterwards, so the shell side is a gate of its
+        # own or it is not covered at all.
+        #
+        # One bare token rather than a list of readers, because a phrase's
+        # words must appear unbroken: `head .env` would miss `head -5 .env`,
+        # and the readers are unbounded anyway (`awk`, `xxd`, `source`,
+        # `python -c`). Naming the path catches every one of them, at the
+        # cost of also firing on a command that only mentions it.
+        "    runs: [pre_tool_use.command]\n"
+        "    enforcement: advisory\n"
+        "    accept_warnings: [single-token-phrase]\n"
+        '    forbidden: [".env"]\n'
+        "    message: >-\n"
+        "      A .env file holds secrets. Do not name one in a shell command:\n"
+        "      a shell read is invisible to the read gate and can print the\n"
+        "      value into the transcript.\n"
     )
 
 

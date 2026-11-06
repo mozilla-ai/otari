@@ -200,7 +200,7 @@ So `.env`, `./.env`, `/abs/path/.env`, `web/../.env`, a `.env` that is a link ou
 
 `required` is allowed here. What it does not cover:
 
-- **`Grep` and `Glob` are not gated.** They return matching lines and file names rather than whole contents, and grepping for one line is the mitigation a read gate's message should recommend.
+- **`Grep` and `Glob` are not gated.** They return matching lines and file names rather than whole contents, so they are a way past a read gate rather than a safe alternative to one: a match on a `.env` line spelled `KEY=secret` returns the value. A read gate's message should not recommend them. Where a secret path matters, pair the read gate with a [`command`](#command) gate naming the path, which is what the starter policy ships. That pair covers the read tool and the shell. `Grep` and `Glob` remain uncovered, because no gate source sees them.
 - **A shell read is invisible**: `cat .env`, `less .env`, `head -5 .env` and anything a script does internally go through `Bash`, which declares no path, and nothing catches them afterwards. Pair the gate with a [`command`](#command) gate.
 - **Codex has no read tool**, so this source is never collected there. Its reads go through the shell, where they are `pre_tool_use.command` evidence.
 
