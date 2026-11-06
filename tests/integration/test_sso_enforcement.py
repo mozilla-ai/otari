@@ -642,6 +642,35 @@ async def test_a_sign_in_that_reaches_nowhere_clears_the_stored_pointer(async_db
     assert stored.active_organization_id is None
 
 
+async def test_signing_in_again_reaches_no_endpoint_of_an_enforcing_organization(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    """Driven over HTTP against a roster read, because the bypass was in the scope every route resolves."""
+    organization = await create_organization(async_db, slug="acme")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    member = await _member_with_email(
+        async_db, organization, role="owner", email="mo@acme.example", full_name="Mo Member", password=True
+    )
+    await async_db.commit()
+
+    signed_in = await _identity_service(async_db).sign_in(member)
+    await async_db.commit()
+    assert signed_in.session_token
+    client.cookies.set(SESSION_COOKIE_NAME, signed_in.session_token)
+
+    assert client.get(f"{API_ROOT}/organizations/me/members").status_code == 403
+    assert client.get(f"{API_ROOT}/organizations/me/sso").status_code == 403
+    assert (
+        client.put(
+            f"{API_ROOT}/organizations/me/sso/enforcement",
+            json={"required": False, "break_glass_user_id": None, "break_glass_waived": True},
+        ).status_code
+        == 403
+    )
+
+
 async def test_a_passkey_sign_in_reaches_no_enforcing_organization(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True

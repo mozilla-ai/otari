@@ -333,15 +333,6 @@ _CONTRIBUTOR_ROLES = frozenset({"owner", "admin", "member"})
 _READ_ONLY_DETAIL = "Viewers have read-only access to this workspace"
 
 
-async def _revocation_enforces_instead(_organization: Organization) -> bool:
-    """A ``blocked`` predicate that refuses no organization, for a read that leaves enforcement to revocation.
-
-    NOTE: Only a read may pass this. Any new way for a member to become blocked must revoke their
-    sessions, because nothing here refuses one.
-    """
-    return False
-
-
 def _blocks_for(user: User, enforcement: SsoEnforcement) -> Callable[[Organization], Awaitable[bool]]:
     """Bind the enforcement question to one person, for a resolver that walks their organizations."""
 
@@ -386,17 +377,35 @@ class OrganizationService:
         return None if bootstrap is None else bootstrap.id
 
     async def get_active_organization_for_user(self, user: User) -> Organization:
-        """Return the organization the caller acts in, falling back to a live membership if the pointer is stale.
+        """Return the organization the caller acts in, or a live membership where the pointer is stale.
 
-        Reads only: it neither creates an organization nor writes the fallback
-        back, so a page that reads the active organization changes nothing. The
-        pointer itself is repaired where a session is minted
-        (``active_organization_id_for_sign_in``).
+        The pointer is taken as it stands, because whatever wrote it named an organization that
+        admits the caller or named none.
+
+        NOTE: A stale pointer falls back only to an organization that requires nothing of its own,
+        because whether an organization requiring its own connection admits this caller is a
+        question only the identity domain answers and this read cannot ask one. Somebody whose
+        every membership requires one is refused here and resolves a destination at their next
+        sign-in, which can ask.
+
+        Reads only, so a page that reads the active organization changes nothing.
         """
-        organization = await self._live_active_organization(user, blocked=_revocation_enforces_instead)
-        if organization is None:
-            raise NotAuthorizedError(f"Identity {user.id} has no active membership in this organization")
-        return organization
+        pointed_at = (
+            await self.organizations.get(user.active_organization_id)
+            if user.active_organization_id is not None
+            else None
+        )
+        if pointed_at is not None and await self._has_active_membership(user, pointed_at):
+            return pointed_at
+        for _membership, candidate in await self.members.get_active_by_user_with_organizations(user.id):
+            if candidate.sso_required:
+                continue
+            return candidate
+        raise NotAuthorizedError(f"Identity {user.id} has no active membership in this organization")
+
+    async def _has_active_membership(self, user: User, organization: Organization) -> bool:
+        """Whether the caller's membership of this organization is live."""
+        return await self.members.get_active_by_organization_and_user(organization.id, user.id) is not None
 
     async def _live_active_organization(
         self,
