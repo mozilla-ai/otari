@@ -208,6 +208,32 @@ class OrganizationSsoPublic(BaseModel):
     )
 
 
+class OrganizationSsoPreflightMemberPublic(BaseModel):
+    """One active member who holds no sign-in link to the caller's organization's own connection."""
+
+    user_id: uuid.UUID
+    email: str | None = Field(description="The member's sign-in address, or null for an identity with none.")
+    full_name: str | None = Field(description="The member's display name, or null when none is set.")
+
+
+class OrganizationSsoPreflightPublic(BaseModel):
+    """What requiring sign-in through the caller's organization's own connection would cost today.
+
+    ``affected_count`` is exact: every active member holding no sign-in link to this connection, who
+    would get a new account the first time they use it. ``affected_members`` samples those people,
+    bounded in size; ``affected_members_truncated`` says whether the sample leaves any out.
+    """
+
+    total_members: int = Field(description="The organization's active membership count.")
+    affected_count: int = Field(description="How many active members hold no sign-in link to this connection.")
+    affected_members: list[OrganizationSsoPreflightMemberPublic] = Field(
+        description="A sample of the affected members, for recognizing who they are."
+    )
+    affected_members_truncated: bool = Field(
+        description="Whether affected_members leaves out some of the members affected_count counts."
+    )
+
+
 class SsoLookupRequest(BaseModel):
     """An address to resolve an organization's own sign-in connection from."""
 
@@ -306,6 +332,8 @@ __all__ = [
     "OIDCConnectionPublic",
     "OIDCConnectionRequest",
     "OrganizationSsoEnforcementRequest",
+    "OrganizationSsoPreflightMemberPublic",
+    "OrganizationSsoPreflightPublic",
     "OrganizationSsoPublic",
     "PasswordLinkPublic",
     "SsoAuthorizeResponse",

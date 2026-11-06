@@ -74,13 +74,21 @@ def _identity(session: Session, *, email: str, organization_id: uuid.UUID, role:
     return token
 
 
-def _member(session: Session, *, organization_id: uuid.UUID, role: str = "member") -> User:
-    """Create an active member of ``organization_id`` with no dashboard session, and return the account."""
-    user = User(email=None, full_name="SSO Member", active_organization_id=organization_id)
+def _member(
+    session: Session,
+    *,
+    organization_id: uuid.UUID,
+    role: str = "member",
+    status: str = "active",
+    email: str | None = None,
+) -> User:
+    """Create a member of ``organization_id`` with no dashboard session, and return the account."""
+    full_name = "SSO Member" if email is None else email
+    user = User(email=email, full_name=full_name, active_organization_id=organization_id)
     session.add(user)
     session.commit()
     session.refresh(user)
-    session.add(OrganizationMember(organization_id=organization_id, user_id=user.id, role=role))
+    session.add(OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status=status))
     session.commit()
     return user
 
@@ -513,3 +521,186 @@ def test_enforcement_turns_off_with_no_precondition(
         assert stored.sso_required is False
     finally:
         session.close()
+
+
+def _owner_id(session: Session, *, email: str) -> uuid.UUID:
+    return session.scalars(select(User).where(col(User.email) == email)).one().id
+
+
+def test_preflight_refuses_404_with_no_connection_saved(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-preflight-unconfigured")
+        owner_token = _identity(
+            session, email="owner@acme-preflight-unconfigured.test", organization_id=organization.id, role="owner"
+        )
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight")
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
+def test_preflight_refuses_a_caller_who_is_only_a_member(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-preflight-member")
+        member_token = _identity(
+            session, email="member@acme-preflight-member.test", organization_id=organization.id, role="member"
+        )
+        session.add(_connection(organization.id))
+        session.commit()
+    finally:
+        session.close()
+
+    response = _call(client, member_token, "GET", f"{_ENDPOINT}/preflight")
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.text
+
+
+def test_the_count_excludes_a_member_already_linked_to_this_connection(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-preflight-linked")
+        owner_token = _identity(
+            session, email="owner@acme-preflight-linked.test", organization_id=organization.id, role="owner"
+        )
+        owner_id = _owner_id(session, email="owner@acme-preflight-linked.test")
+        session.add(_connection(organization.id))
+        session.commit()
+        _link(session, provider=oidc_identity_provider(_ISSUER), subject="owner-subject", user_id=owner_id)
+        linked = _member(session, organization_id=organization.id, email="linked@acme-preflight-linked.test")
+        _link(session, provider=oidc_identity_provider(_ISSUER), subject="linked-subject", user_id=linked.id)
+        _member(session, organization_id=organization.id, email="unlinked@acme-preflight-linked.test")
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight")
+    assert response.status_code == status.HTTP_200_OK, response.text
+
+    body = response.json()
+    assert body["total_members"] == 3
+    assert body["affected_count"] == 1
+    assert [entry["email"] for entry in body["affected_members"]] == ["unlinked@acme-preflight-linked.test"]
+    assert body["affected_members_truncated"] is False
+
+
+def test_the_count_excludes_a_suspended_member(client: TestClient, db_session_factory: Callable[[], Session]) -> None:
+    """A suspended member is not an active membership, so the denominator must not move for one."""
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-preflight-suspended")
+        owner_token = _identity(
+            session, email="owner@acme-preflight-suspended.test", organization_id=organization.id, role="owner"
+        )
+        owner_id = _owner_id(session, email="owner@acme-preflight-suspended.test")
+        session.add(_connection(organization.id))
+        session.commit()
+        _link(session, provider=oidc_identity_provider(_ISSUER), subject="owner-subject", user_id=owner_id)
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    before = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight").json()
+
+    session = db_session_factory()
+    try:
+        _member(session, organization_id=organization_id, status="suspended")
+    finally:
+        session.close()
+
+    after = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight").json()
+
+    assert after["total_members"] == before["total_members"]
+    assert after["affected_count"] == before["affected_count"]
+
+
+def test_the_count_excludes_an_invitee_who_has_not_accepted(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    """An invitation nobody has accepted is not an active membership, so the denominator must not move for one."""
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-preflight-invited")
+        owner_token = _identity(
+            session, email="owner@acme-preflight-invited.test", organization_id=organization.id, role="owner"
+        )
+        owner_id = _owner_id(session, email="owner@acme-preflight-invited.test")
+        session.add(_connection(organization.id))
+        session.commit()
+        _link(session, provider=oidc_identity_provider(_ISSUER), subject="owner-subject", user_id=owner_id)
+        organization_id = organization.id
+    finally:
+        session.close()
+
+    before = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight").json()
+
+    session = db_session_factory()
+    try:
+        _member(session, organization_id=organization_id, status="invited")
+    finally:
+        session.close()
+
+    after = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight").json()
+
+    assert after["total_members"] == before["total_members"]
+    assert after["affected_count"] == before["affected_count"]
+
+
+def test_an_empty_list_is_answered_as_an_empty_list(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-preflight-empty")
+        owner_token = _identity(
+            session, email="owner@acme-preflight-empty.test", organization_id=organization.id, role="owner"
+        )
+        owner_id = _owner_id(session, email="owner@acme-preflight-empty.test")
+        session.add(_connection(organization.id))
+        session.commit()
+        _link(session, provider=oidc_identity_provider(_ISSUER), subject="owner-subject", user_id=owner_id)
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight")
+    assert response.status_code == status.HTTP_200_OK, response.text
+
+    body = response.json()
+    assert body["affected_count"] == 0
+    assert body["affected_members"] == []
+    assert body["affected_members_truncated"] is False
+
+
+def test_the_list_is_capped_while_the_count_stays_exact_past_the_ceiling(
+    client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches both a list that ignores the ceiling and a count derived from the truncated list."""
+    monkeypatch.setattr("gateway.services.identity._connection_service._PREFLIGHT_SAMPLE_LIMIT", 2)
+    session = db_session_factory()
+    try:
+        organization = _organization(session, slug="acme-preflight-ceiling")
+        owner_token = _identity(
+            session, email="owner@acme-preflight-ceiling.test", organization_id=organization.id, role="owner"
+        )
+        owner_id = _owner_id(session, email="owner@acme-preflight-ceiling.test")
+        session.add(_connection(organization.id))
+        session.commit()
+        _link(session, provider=oidc_identity_provider(_ISSUER), subject="owner-subject", user_id=owner_id)
+        for index in range(3):
+            _member(session, organization_id=organization.id, email=f"unlinked-{index}@acme-preflight-ceiling.test")
+    finally:
+        session.close()
+
+    response = _call(client, owner_token, "GET", f"{_ENDPOINT}/preflight")
+    assert response.status_code == status.HTTP_200_OK, response.text
+
+    body = response.json()
+    assert body["affected_count"] == 3
+    assert len(body["affected_members"]) == 2
+    assert body["affected_members_truncated"] is True

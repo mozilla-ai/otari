@@ -4399,6 +4399,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/sso/links/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Organization Sso Link
+         * @description Remove a member's own sign-in link at the caller's organization's connection. Owners and admins only.
+         *
+         *     Refused with 404 for a member with no such link, including a user ID outside the caller's
+         *     organization.
+         */
+        delete: operations["organization-sso-delete_organization_sso_link"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/sso/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Organization Sso Preflight
+         * @description Report who requiring sign-in through the caller's organization's own connection would affect.
+         *
+         *     Owners and admins only. Refused with 404 when the organization has not configured a connection yet.
+         */
+        get: operations["organization-sso-get_organization_sso_preflight"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/sso/test": {
         parameters: {
             query?: never;
@@ -16164,6 +16209,57 @@ export interface components {
              * @description Whether this organization requires sign-in through its own connection.
              */
             required: boolean;
+        };
+        /**
+         * OrganizationSsoPreflightMemberPublic
+         * @description One active member who holds no sign-in link to the caller's organization's own connection.
+         */
+        OrganizationSsoPreflightMemberPublic: {
+            /**
+             * Email
+             * @description The member's sign-in address, or null for an identity with none.
+             */
+            email: string | null;
+            /**
+             * Full Name
+             * @description The member's display name, or null when none is set.
+             */
+            full_name: string | null;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /**
+         * OrganizationSsoPreflightPublic
+         * @description What requiring sign-in through the caller's organization's own connection would cost today.
+         *
+         *     ``affected_count`` is exact: every active member holding no sign-in link to this connection, who
+         *     would get a new account the first time they use it. ``affected_members`` samples those people,
+         *     bounded in size; ``affected_members_truncated`` says whether the sample leaves any out.
+         */
+        OrganizationSsoPreflightPublic: {
+            /**
+             * Affected Count
+             * @description How many active members hold no sign-in link to this connection.
+             */
+            affected_count: number;
+            /**
+             * Affected Members
+             * @description A sample of the affected members, for recognizing who they are.
+             */
+            affected_members: components["schemas"]["OrganizationSsoPreflightMemberPublic"][];
+            /**
+             * Affected Members Truncated
+             * @description Whether affected_members leaves out some of the members affected_count counts.
+             */
+            affected_members_truncated: boolean;
+            /**
+             * Total Members
+             * @description The organization's active membership count.
+             */
+            total_members: number;
         };
         /**
          * OrganizationSsoPublic
@@ -28714,6 +28810,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-delete_organization_sso_link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-sso-get_organization_sso_preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSsoPreflightPublic"];
                 };
             };
         };
