@@ -604,6 +604,52 @@ describe("sending a question", () => {
     expect(conversationId(2)).not.toBe(conversationId(0))
   })
 
+  it("starts a new conversation id in a compared column whose model changes", async () => {
+    mockApi({
+      catalog: catalogResponse([
+        ...CATALOG.models,
+        catalogModelSummary({
+          id: "gemini-2.5-pro",
+          vendor: "Google",
+          selector: "gemini-2.5-pro",
+          selectors: ["gemini:gemini-2.5-pro"],
+        }),
+      ]),
+    })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+    const conversationIds = () =>
+      stream.mock.calls.map((call) =>
+        new Headers(call[1]?.headers).get("Otari-Conversation-Id"),
+      )
+    const pickB = async (model: string) => {
+      await user.click(screen.getByRole("button", { name: "Model B" }))
+      await user.click(
+        await screen.findByRole("button", { name: new RegExp(`^${model}`) }),
+      )
+    }
+    const send = async (text: string) => {
+      await user.type(screen.getByLabelText("Message"), text)
+      await user.click(screen.getByRole("button", { name: "Send message" }))
+    }
+
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
+    await pickB("claude-sonnet-4")
+    await send("first")
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(2))
+    const before = conversationIds()
+
+    await pickB("gemini-2.5-pro")
+    await send("second")
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(4))
+
+    // A keeps its session; only B, whose model changed, starts a new one.
+    const after = conversationIds().slice(2)
+    expect(after.filter((id) => before.includes(id))).toHaveLength(1)
+  })
+
   it("offers no prompt capture where the deployment keeps no content", async () => {
     mockApi()
     renderPage()
