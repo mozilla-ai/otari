@@ -38,7 +38,7 @@ from gateway.services._tool_loop import (
     run_tool_loop_stream,
     tool_failure_detail,
 )
-from gateway.services.inference import require_choices
+from gateway.services.inference import is_usage_only_chunk, require_choices
 from gateway.services.providers import acompletion
 from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (
@@ -586,7 +586,10 @@ class _ChatToolLoopStrategy:
             state.template = event
         if state.first is None and event.choices:
             state.first = event
-        if not event.choices and event.usage is not None:
+        # The round's usage report: OpenAI's include_usage chunk (no choices) or any-llm's Bedrock
+        # chunk (usage on an empty choice). Either way it is deferred and folded into the loop's total,
+        # so a streamed tool loop on Bedrock is not billed for its last round alone (otari#2958).
+        if is_usage_only_chunk(event):
             state.usage_chunks.append(event)
             return StreamAction.DEFER, event
         chunk_is_terminal = False

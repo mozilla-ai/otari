@@ -1,0 +1,49 @@
+"""Which streamed chunk is the usage report and the cost carrier, across provider shapes."""
+
+from __future__ import annotations
+
+from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, CompletionUsage
+
+from gateway.services.inference import is_chat_stream_cost_carrier, is_usage_only_chunk
+
+_USAGE = CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+
+
+def _chunk(choices: list[ChunkChoice], usage: CompletionUsage | None = _USAGE) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id="c", choices=choices, created=0, model="m", object="chat.completion.chunk", usage=usage
+    )
+
+
+def _choice(*, content: str | None = None, finish: str | None = None, role: str | None = "assistant") -> ChunkChoice:
+    return ChunkChoice(delta=ChoiceDelta(role=role, content=content), finish_reason=finish, index=0)  # type: ignore[arg-type]
+
+
+def test_openai_include_usage_chunk_is_the_carrier() -> None:
+    chunk = _chunk([])
+    assert is_usage_only_chunk(chunk)
+    assert is_chat_stream_cost_carrier(chunk)
+
+
+def test_bedrock_usage_on_an_empty_choice_is_the_carrier() -> None:
+    chunk = _chunk([_choice()])
+    assert is_usage_only_chunk(chunk)
+    assert is_chat_stream_cost_carrier(chunk)
+
+
+def test_usage_on_the_finish_chunk_is_the_carrier_but_not_usage_only() -> None:
+    chunk = _chunk([_choice(finish="stop")])
+    assert not is_usage_only_chunk(chunk)
+    assert is_chat_stream_cost_carrier(chunk)
+
+
+def test_a_content_chunk_with_running_usage_is_neither() -> None:
+    chunk = _chunk([_choice(content="Hel")])
+    assert not is_usage_only_chunk(chunk)
+    assert not is_chat_stream_cost_carrier(chunk)
+
+
+def test_a_chunk_without_usage_is_neither() -> None:
+    chunk = _chunk([_choice()], usage=None)
+    assert not is_usage_only_chunk(chunk)
+    assert not is_chat_stream_cost_carrier(chunk)

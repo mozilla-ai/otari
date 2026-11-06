@@ -79,7 +79,7 @@ from gateway.services.inference._responses_bridge import (
     uses_chat_completions_bridge,
 )
 from gateway.services.inference._responses_input import strip_gateway_minted_items
-from gateway.services.inference._stream_cost import is_chat_stream_cost_carrier
+from gateway.services.inference._stream_cost import is_chat_stream_cost_carrier, is_usage_only_chunk
 from gateway.services.inference._sweeper import run_idempotency_sweeper
 from gateway.services.inference._upstream_errors import (
     EMPTY_COMPLETION_DETAIL,
@@ -158,6 +158,7 @@ __all__ = [
     "decision_provider_for",
     "end_user_identifier",
     "is_chat_stream_cost_carrier",
+    "is_usage_only_chunk",
     "keep_claim_alive",
     "messages_user_fields",
     "open_country_database",
