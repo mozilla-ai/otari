@@ -14,6 +14,7 @@ from gateway.api.routes import (
     auth_profile,
     auth_session,
     auth_signup,
+    auth_sso,
     auth_webauthn,
     batches,
     bootstrap,
@@ -144,6 +145,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # ceremony route that answers 503 still says passkeys exist here.
     auth_webauthn.router,
     auth_oauth.router,
+    auth_sso.router,
     organization_sso.router,
     embeddings.router,
     images.router,

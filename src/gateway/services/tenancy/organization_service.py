@@ -76,6 +76,7 @@ from gateway.models.tenancy import (
     MemberWorkspacePlacementPublic,
     Organization,
     OrganizationCreateRequest,
+    OrganizationDomainRole,
     OrganizationMember,
     OrganizationMemberRole,
     OrganizationMembershipContextPublic,
@@ -793,6 +794,32 @@ class OrganizationService:
                 return SignupRegistration(identity=winner, created=False)
             await self._found_own_tenancy(identity, organization, address=address)
             return SignupRegistration(identity=identity, created=True)
+
+    async def provision_sso_tenancy(
+        self, *, organization_id: uuid.UUID, full_name: str | None, default_role: OrganizationDomainRole
+    ) -> User:
+        """Create an address-less account as a member of one existing organization.
+
+        Unlike ``provision_signup_tenancy``, there is no address to match an existing account against,
+        so this always creates a new identity, and it creates no personal organization or workspace of
+        its own.
+
+        The writes run in a block of this service's Unit of Work, so they join a block the caller
+        already holds.
+        """
+        async with self._require_unit_of_work():
+            identity = await self.users.try_create(
+                email=None,
+                full_name=full_name,
+                active_organization_id=organization_id,
+            )
+            assert identity is not None  # NOTE: a NULL address never conflicts, so this always succeeds.
+            await self.members.create_membership(
+                organization_id=organization_id,
+                user_id=identity.id,
+                role=default_role,
+            )
+            return identity
 
     async def provision_tenancy_for_claim(
         self,

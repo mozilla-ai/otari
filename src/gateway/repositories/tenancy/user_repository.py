@@ -123,16 +123,18 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     async def try_create(
         self,
         *,
-        email: str,
+        email: str | None,
         full_name: str | None,
         active_organization_id: uuid.UUID,
     ) -> User | None:
         """Stage an identity for this address, or return None if an identity already holds it.
 
         A taken address leaves the transaction usable.
+
+        NOTE: A NULL address never conflicts in the unique index, so passing none always succeeds.
         """
         user = User(
-            email=email.strip().lower(),
+            email=email.strip().lower() if email is not None else None,
             full_name=full_name,
             active_organization_id=active_organization_id,
             default_organization_id=active_organization_id,

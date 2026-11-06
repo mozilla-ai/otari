@@ -14273,7 +14273,7 @@
           },
           "issuer": {
             "description": "The identity provider's issuer URL, as the organization's own claim.",
-            "maxLength": 255,
+            "maxLength": 250,
             "title": "Issuer",
             "type": "string"
           }
@@ -22717,6 +22717,167 @@
         "title": "SpanPublic",
         "type": "object"
       },
+      "SsoAuthorizeResponse": {
+        "description": "Where to send the browser, and the state to check when it comes back.",
+        "properties": {
+          "authorization_url": {
+            "description": "The identity provider's consent screen to navigate to.",
+            "title": "Authorization Url",
+            "type": "string"
+          },
+          "state": {
+            "description": "An opaque CSRF value to keep for the length of the redirect and send back with the authorization code. The response also sets an HttpOnly cookie that the callback requires, so the exchange can only be completed from the browser this call was made from.",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url",
+          "state"
+        ],
+        "title": "SsoAuthorizeResponse",
+        "type": "object"
+      },
+      "SsoCallbackRequest": {
+        "description": "The authorization code a provider handed the browser, for a sign-in through one organization's own connection.\n\nNo ``slug``: the pending authorization the ``state`` names already resolves to one connection,\nso a browser cannot redeem a code against a connection other than the one that minted the state.",
+        "properties": {
+          "code": {
+            "description": "The authorization code from the provider's redirect.",
+            "maxLength": 2048,
+            "title": "Code",
+            "type": "string"
+          },
+          "iss": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 'iss' from the provider's redirect (RFC 9207), where it sent one. Checked against this connection's issuer when its discovery document advertises the parameter; a provider that does not advertise it sends none.",
+            "title": "Iss"
+          },
+          "state": {
+            "description": "The 'state' from the provider's redirect, as issued by /authorize.",
+            "maxLength": 512,
+            "title": "State",
+            "type": "string"
+          },
+          "terms_accepted": {
+            "default": false,
+            "description": "Whether the person accepted this deployment's terms before going to the provider. Required where the bootstrap reports a terms_url and the sign-in is the first way in to an account nobody has claimed yet; ignored otherwise.",
+            "title": "Terms Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ],
+        "title": "SsoCallbackRequest",
+        "type": "object"
+      },
+      "SsoLookupRequest": {
+        "description": "An address to resolve an organization's own sign-in connection from.",
+        "properties": {
+          "email": {
+            "description": "The address to resolve an organization from.",
+            "maxLength": 255,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "SsoLookupRequest",
+        "type": "object"
+      },
+      "SsoLookupResponse": {
+        "description": "Whether an organization's own connection admits a sign-in at this address.\n\nAn unknown domain, one no organization has proven, and a proven one whose organization holds\nno enabled connection all answer alike: ``found`` is false and the other two fields are null,\nso the response cannot be read as a directory of which organizations use Otari.",
+        "properties": {
+          "found": {
+            "description": "Whether an organization's own connection admits a sign-in at this address.",
+            "title": "Found",
+            "type": "boolean"
+          },
+          "organization_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's own name, set only when found.",
+            "title": "Organization Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's slug, to start the sign-in with, set only when found.",
+            "title": "Slug"
+          }
+        },
+        "required": [
+          "found"
+        ],
+        "title": "SsoLookupResponse",
+        "type": "object"
+      },
+      "SsoSessionPublic": {
+        "description": "A dashboard session minted by signing in through an organization's own connection.",
+        "properties": {
+          "active_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization that identity is acting in, which scopes every tenancy surface. Null when it is an active member of none.",
+            "title": "Active Organization Id"
+          },
+          "expires_at": {
+            "description": "When the session cookie stops being accepted.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "password_removed": {
+            "default": false,
+            "description": "Whether this sign-in removed a password the account held: the first provider sign-in on an address nobody had proven removes the password set before then.",
+            "title": "Password Removed",
+            "type": "boolean"
+          },
+          "user_id": {
+            "description": "The identity this session speaks for.",
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at",
+          "user_id",
+          "active_organization_id"
+        ],
+        "title": "SsoSessionPublic",
+        "type": "object"
+      },
       "StoredCountryDatabasePublic": {
         "description": "The country file stored in the database, which every replica reads.",
         "properties": {
@@ -31072,6 +31233,157 @@
           }
         },
         "summary": "Signup",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/callback": {
+      "post": {
+        "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the organization's connection resolves to. A refusal is\ncounted as a failed sign-in, and a sign-in that creates the account, or is the first way in to\none, is reported to ``GrowthSignalPort`` once it has committed.\n\n**Maintenance mode freezes this.** A frozen deployment makes no outbound call and spends\nnobody's authorization code.",
+        "operationId": "auth-callback_sso",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoCallbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoSessionPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Callback Sso",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/lookup": {
+      "post": {
+        "description": "Say whether an organization's own connection admits a sign-in at this address.\n\nAn unknown domain, one no organization has proven, and a proven one whose organization holds\nno enabled connection all answer alike: ``found`` is false and nothing else is named.",
+        "operationId": "auth-lookup_sso",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoLookupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoLookupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Lookup Sso",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sso/{slug}/authorize": {
+      "get": {
+        "description": "Start a sign-in through the organization's own connection at ``slug``.\n\nAn unknown slug and a slug naming an organization with no enabled connection answer alike\n(404), so this surface cannot be read as a directory of which organizations use Otari.\n\nNOTE: This GET writes. It records a pending authorization and sets an HttpOnly cookie, both\nscoped to this router's own path.",
+        "operationId": "auth-authorize_sso",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoAuthorizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Authorize Sso",
         "tags": [
           "auth"
         ]

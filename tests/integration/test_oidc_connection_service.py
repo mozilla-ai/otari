@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from gateway.core.database import release_session
@@ -22,7 +23,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
-from gateway.models.identity import OIDCConnection
+from gateway.models.identity import MAX_OIDC_ISSUER_LENGTH, OIDCConnection, oidc_identity_provider
 from gateway.models.tenancy import DOMAIN_PROOF_TTL, Organization, User
 from gateway.repositories.identity import IdentityRepositories, OIDCConnectionRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
@@ -204,6 +205,29 @@ async def test_save_encrypts_the_client_secret_and_returns_only_last4(
     assert stored is not None
     assert stored.encrypted_client_secret != "s3cr3t-client-value"
     assert decrypt_secret(stored.encrypted_client_secret) == "s3cr3t-client-value"
+
+
+def test_the_issuer_ceiling_is_exactly_what_a_provider_value_can_hold() -> None:
+    """The submitted ceiling and the stored provider width are one fact, so neither can drift alone."""
+    assert oidc_identity_provider("i" * MAX_OIDC_ISSUER_LENGTH)
+    with pytest.raises(ValueError, match="too long to store"):
+        oidc_identity_provider("i" * (MAX_OIDC_ISSUER_LENGTH + 1))
+    with pytest.raises(ValidationError):
+        _request(issuer="https://sso.example.test/" + "a" * MAX_OIDC_ISSUER_LENGTH)
+
+
+async def test_save_refuses_a_discovered_issuer_too_long_to_name_a_provider(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stored issuer whose provider value will not fit refuses every later sign-in, so refuse it here."""
+    organization = await create_organization(async_db, slug="acme")
+    admin = await _admin(async_db, organization)
+
+    _stub_discovery(monkeypatch, resolved_issuer="https://sso.example.test/" + "a" * MAX_OIDC_ISSUER_LENGTH)
+    with pytest.raises(OIDCDiscoveryError):
+        await _connection_service(async_db).save_for_user(user=admin, request=_request())
+
+    assert await _stored(async_db, organization.id) is None
 
 
 async def test_save_stores_nothing_when_discovery_is_refused(

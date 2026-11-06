@@ -284,6 +284,11 @@ DELETE /api/v1/auth/webauthn/credentials/{credential_id}   # dashboard-only
 # dashboard uses rather than a token an SDK could hold.
 GET /api/v1/auth/oauth/{provider}/authorize         # dashboard-only
 POST /api/v1/auth/oauth/{provider}/callback         # dashboard-only
+# SSO sign-in through an organization's own OIDC connection (otari#879): the same browser
+# redirect and CSRF-state shape as the OAuth sign-in above, so it carries the same reasoning.
+POST /api/v1/auth/sso/lookup                        # dashboard-only
+GET /api/v1/auth/sso/{slug}/authorize               # dashboard-only
+POST /api/v1/auth/sso/callback                      # dashboard-only
 # OTLP ingest: OpenTelemetry collector receivers, not an SDK surface.
 POST /otlp/v1/logs                                  # otel ingest
 POST /otlp/v1/traces                                # otel ingest

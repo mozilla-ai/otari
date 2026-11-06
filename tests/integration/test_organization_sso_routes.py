@@ -17,7 +17,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.identity import OIDCConnection
+from gateway.models.identity import (
+    EmailAssertion,
+    OAuthIdentityLink,
+    OIDCConnection,
+)
 from gateway.models.tenancy import (
     DOMAIN_PROOF_TTL,
     DashboardSession,
@@ -32,6 +36,7 @@ from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
 _ENDPOINT = f"{API_ROOT}/organizations/me/sso"
 _ISSUER = "https://login.example.com"
+_OTHER_PROVIDER = "oidc:https://other-idp.example"
 _SECRET = "s3cr3t-client-value"
 
 
@@ -67,6 +72,30 @@ def _identity(session: Session, *, email: str, organization_id: uuid.UUID, role:
     )
     session.commit()
     return token
+
+
+def _member(session: Session, *, organization_id: uuid.UUID, role: str = "member") -> User:
+    """Create an active member of ``organization_id`` with no dashboard session, and return the account."""
+    user = User(email=None, full_name="SSO Member", active_organization_id=organization_id)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    session.add(OrganizationMember(organization_id=organization_id, user_id=user.id, role=role))
+    session.commit()
+    return user
+
+
+def _link(session: Session, *, provider: str, subject: str, user_id: uuid.UUID) -> OAuthIdentityLink:
+    link = OAuthIdentityLink(
+        provider=provider,
+        subject=subject,
+        user_id=user_id,
+        email_at_link=None,
+        email_assertion_at_link=EmailAssertion.UNASSERTED,
+    )
+    session.add(link)
+    session.commit()
+    return link
 
 
 def _connection(organization_id: uuid.UUID) -> OIDCConnection:

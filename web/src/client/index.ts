@@ -756,12 +756,20 @@ export type PlaygroundComparisonPreference =
 
 export type PlaygroundFavoriteModels = Schemas["PlaygroundFavoriteModelsPublic"]
 
-// The OAuth sign-in pair; see `src/gateway/api/routes/auth_oauth.py`. Named
-// here rather than hand-written at the call site so the authorization response
-// and the callback body cannot drift from the spec without a type error.
+// The OAuth sign-in pair. Named here rather than hand-written at the call site
+// so the authorization response and the callback body cannot drift from the
+// spec without a type error.
 export type OAuthAuthorizeResponse = Schemas["AuthorizeResponse"]
 export type OAuthCallbackRequest = Schemas["OAuthCallbackRequest"]
 export type OAuthSessionResponse = Schemas["OAuthSessionResponse"]
+
+// Signing in through an organization's own connection: a lookup by address,
+// an authorization redirect, and the callback that exchanges the code.
+export type SsoLookupRequest = Schemas["SsoLookupRequest"]
+export type SsoLookupResponse = Schemas["SsoLookupResponse"]
+export type SsoAuthorizeResponse = Schemas["SsoAuthorizeResponse"]
+export type SsoCallbackRequest = Schemas["SsoCallbackRequest"]
+export type SsoSessionPublic = Schemas["SsoSessionPublic"]
 
 export type * from "./local"
 
