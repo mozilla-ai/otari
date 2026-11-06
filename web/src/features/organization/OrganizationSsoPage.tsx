@@ -307,7 +307,6 @@ function ConnectionSummary({
   )
 }
 
-/** A roster or preflight row's display name: the only two fields either shape promises. */
 function displayName(member: {
   full_name?: string | null
   email?: string | null
@@ -315,8 +314,7 @@ function displayName(member: {
   return member.full_name ?? member.email ?? "Unnamed member"
 }
 
-/** What an identity change strands on the old account. Read by the preflight warning and the
-    unlink confirmation alike, so the two describe the one fact in the same words. */
+/** The one wording of what an identity change strands on the old account. */
 function strandedKeysExplanation(): string {
   return "Their API keys stay on the old account and cannot be moved, so they should issue new keys on the new account and revoke the old ones."
 }
@@ -459,7 +457,7 @@ function EnforcementSection({
   )
 }
 
-/** The unlink confirmation's three facts, read from the one source the preflight warning also reads. */
+/** What removing ``name``'s link costs them, in the three facts an administrator needs. */
 function unlinkWarning(name: string): string {
   return (
     `The next sign-in through this connection for ${name} creates a new account. ` +
