@@ -300,12 +300,71 @@ def claude_usage_events(
     return [event for event in events if event is not None]
 
 
+class ReadUsage(NamedTuple):
+    """A usage event read off an exported span, before an export's events are booked."""
+
+    source: str
+    event: ExternalUsageEvent
+    # The OTel trace and span id it was read from.
+    span_key: tuple[str, str]
+    # Whether its id is the response's own, which another span of the same call can carry.
+    names_response: bool = True
+
+
+def one_booking_per_response(
+    read: list[ReadUsage],
+) -> tuple[list[tuple[str, ExternalUsageEvent]], dict[tuple[str, str], tuple[str, str]]]:
+    """The usage events to book, one per response, and each one's span, keyed by its source and id.
+
+    Spans of one response would each book it. A Claude SDK or Claude API span's booking is
+    kept over any other, the one that splits out its 1-hour cache writes first; among the
+    rest, the one reporting the most tokens. An event whose id is not a response's is never
+    merged. A booking's span is the one it was read from, or for a Claude response the
+    first span it was read from, so its cost reaches that span's session.
+    """
+
+    def tokens(event: ExternalUsageEvent) -> int:
+        cache = 0 if event.cache_tokens_in_prompt else event.cache_read_tokens + event.cache_write_tokens
+        return event.input_tokens + event.output_tokens + cache
+
+    def rank(usage: ReadUsage) -> tuple[int, int]:
+        claude = usage.source == CLAUDE_SOURCE
+        return (usage.event.cache_write_1h_tokens if claude else 0, tokens(usage.event))
+
+    claude = {usage.event.source_event_id for usage in read if usage.source == CLAUDE_SOURCE}
+    best: dict[tuple[bool, str], int] = {}
+    first: dict[tuple[bool, str], tuple[str, str]] = {}
+    for index, usage in enumerate(read):
+        event_id = usage.event.source_event_id
+        from_claude = usage.source == CLAUDE_SOURCE
+        if not usage.names_response or (not from_claude and event_id in claude):
+            continue
+        group = (from_claude, event_id)
+        first.setdefault(group, usage.span_key)
+        kept = best.get(group)
+        if kept is None or rank(usage) > rank(read[kept]):
+            best[group] = index
+    pairs: list[tuple[str, ExternalUsageEvent]] = []
+    event_spans: dict[tuple[str, str], tuple[str, str]] = {}
+    for index, usage in enumerate(read):
+        group = (usage.source == CLAUDE_SOURCE, usage.event.source_event_id)
+        if not usage.names_response:
+            span_key = usage.span_key
+        elif best.get(group) == index:
+            span_key = first[group] if group[0] else usage.span_key
+        else:
+            continue
+        pairs.append((usage.source, usage.event))
+        event_spans.setdefault((usage.source, usage.event.source_event_id), span_key)
+    return pairs, event_spans
+
+
 @dataclass(frozen=True)
 class PricedEvent:
     """An imported event as it was priced, for the session it names to show what it cost."""
 
     source_event_id: str
-    session_label: str
+    session_label: str | None
     timestamp: datetime
     cost: Decimal
     source: str
@@ -715,7 +774,7 @@ async def ingest_external_events(
         pricing = _resolve_pricing(pricing_index, event.provider, event.model, event.timestamp)
         row = _build_row(request.source, target_user, event, pricing, api_key_id, usage_workspace_id)
         rows.append(row)
-        if priced is not None and row.cost is not None and event.session_label:
+        if priced is not None and row.cost is not None:
             priced.append(
                 PricedEvent(
                     event.source_event_id,
