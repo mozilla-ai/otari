@@ -67,9 +67,16 @@ function mockApi(opts: MockOpts = {}) {
       return jsonResponse(preflight)
     }
     if (url.includes("/sso/enforcement")) {
-      return opts.enforcement
-        ? opts.enforcement()
-        : jsonResponse(undefined, 204)
+      if (opts.enforcement) return opts.enforcement()
+      // The served connection reflects the write, so a later read sees what a real one would.
+      served = {
+        ...served,
+        enforcement: {
+          ...served.enforcement,
+          required: Boolean(JSON.parse(String(init?.body ?? "{}")).required),
+        },
+      }
+      return jsonResponse(undefined, 204)
     }
     if (url.includes("/sso")) {
       if (method === "GET") return jsonResponse(served)
@@ -415,6 +422,31 @@ describe("OrganizationSsoPage", () => {
     expect(
       await screen.findByText(/Jane Owner keeps a non-SSO route/),
     ).toBeInTheDocument()
+  })
+
+  it("re-reads who enforcement affects after saving it", async () => {
+    const requests = mockApi({
+      sso: organizationSso({ connection: oidcConnection() }),
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationSsoPage />)
+
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "Require sign-in through this connection",
+      }),
+    )
+    const before = requests.filter((request) =>
+      request.url.includes("/sso/preflight"),
+    ).length
+    await user.click(screen.getByRole("button", { name: "Save enforcement" }))
+
+    await waitFor(() => {
+      expect(
+        requests.filter((request) => request.url.includes("/sso/preflight"))
+          .length,
+      ).toBeGreaterThan(before)
+    })
   })
 
   it("states what the organization gives up when it waives the exception", async () => {
