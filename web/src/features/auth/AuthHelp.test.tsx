@@ -98,15 +98,16 @@ it("links to the configured documentation where the deployment has one", async (
   expect(screen.queryByRole("link", { name: /welcome guide/ })).toBeNull()
 })
 
-it("points the master-key note at the configured documentation too", async () => {
+// The master-key box is only offered where the gateway serves `/welcome`, and
+// the documentation root says nothing about the master key.
+it("keeps the master-key note on the welcome guide whatever docs_url says", async () => {
   await open(<AuthHelp offersRecovery={false} credential="master-key" />, {
     docs_url: "https://docs.example.com/",
   })
 
-  expect(screen.getByText(/master key/, { selector: "a" })).toHaveAttribute(
-    "href",
-    "https://docs.example.com/",
-  )
+  const note = screen.getByText(/master key/, { selector: "a" })
+  expect(note).toHaveAttribute("href", "/welcome")
+  expect(note).not.toHaveAttribute("target")
 })
 
 it("keeps the same-origin welcome guide where no documentation is configured", async () => {

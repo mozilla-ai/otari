@@ -10,6 +10,32 @@ export function documentationHref({
 }
 
 /**
+ * The link a page offers to the getting-started guide.
+ *
+ * `/welcome` is the gateway's own self-hosted quickstart. A deployment that
+ * configures `docs_url` (otari.ai) does not serve it at its origin, so there the
+ * guide is its documentation, which lives on another origin and so opens in a
+ * new tab. Unset, the same-origin `/welcome` stays as it was.
+ */
+export function welcomeGuideLink({
+  docs_url,
+}: Pick<DeploymentBootstrap, "docs_url">): {
+  href: string
+  label: string
+  target?: "_blank"
+  rel?: string
+} {
+  return docs_url
+    ? {
+        href: docs_url,
+        label: "Read the documentation",
+        target: "_blank",
+        rel: "noopener noreferrer",
+      }
+    : { href: "/welcome", label: "Open the welcome guide" }
+}
+
+/**
  * Where a repository document is rendered, for a link to one section of it.
  * GitHub serves every document at `main`, under the same filename.
  */
