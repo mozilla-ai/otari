@@ -146,6 +146,9 @@ class OIDCConnectionService:
         stores it, so a refused issuer leaves an existing connection, its document, and its secret
         exactly as they were.
 
+        NOTE: Where the organization requires sign-in through this connection, storing it also
+        revokes the live session of every active member the stored issuer leaves with no link.
+
         Raises:
             OIDCConnectionConflictError: Another request changed this organization's connection while
                 this one was storing it.
@@ -183,6 +186,8 @@ class OIDCConnectionService:
             else:
                 self._overwrite(connection, request=request, discovered=discovered, secret=secret)
             domains = await self._domains.for_organization(organization.id)
+            if organization.sso_required:
+                await self._revoke_blocked_sessions(organization, connection)
             return self._to_public(connection, domains)
 
     async def test_for_user(self, *, user: User) -> OIDCConnectionPublic:

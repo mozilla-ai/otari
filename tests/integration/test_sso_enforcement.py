@@ -29,8 +29,10 @@ from gateway.models.tenancy import DashboardSession, InviteOrganizationMemberReq
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
+from gateway.schemas.identity import OIDCConnectionRequest
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.identity import IdentityService, OIDCConnectionService
+from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.mail import Mailer
 from gateway.services.organizations import OrganizationClaimedDomains
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -506,6 +508,56 @@ async def test_a_blocked_member_signs_in_and_sees_only_their_other_organization(
     signed_in = await _identity_service(async_db).sign_in(member)
 
     assert signed_in.active_organization_id == other.id
+
+
+def _stub_discovery(monkeypatch: pytest.MonkeyPatch, *, resolved_issuer: str) -> None:
+    """Stand in for a successful discovery of ``resolved_issuer``, the one call that leaves the process."""
+
+    async def _discover(issuer: str, *, allow_private_hosts: bool) -> DiscoveredProvider:
+        return DiscoveredProvider(
+            resolved_issuer=resolved_issuer,
+            document={"issuer": resolved_issuer},
+            discovered_at=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr("gateway.services.identity._connection_service.discover_connection_metadata", _discover)
+
+
+async def test_repointing_an_enforcing_connection_revokes_a_member_it_now_blocks(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A link names the issuer it was made at, so storing a different one leaves a linked member with none."""
+    new_issuer = "https://new-sso.acme.example"
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    member = await _member_with_email(
+        async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await _link_member(async_db, member, connection)
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    await _dashboard_session(async_db, member)
+    await async_db.commit()
+    assert await _live_session_count(async_db, member.id) == 1
+
+    _stub_discovery(monkeypatch, resolved_issuer=new_issuer)
+    await _connection_service(async_db).save_for_user(
+        user=owner,
+        request=OIDCConnectionRequest(
+            issuer=new_issuer,
+            client_id="a-client-id",
+            client_secret="s3cr3t-client-value",
+            display_name="Acme SSO",
+            default_role="member",
+            enabled=True,
+        ),
+    )
+
+    assert await _live_session_count(async_db, member.id) == 0
 
 
 async def test_repairing_the_pointer_moves_a_refused_member_off_that_organization(
