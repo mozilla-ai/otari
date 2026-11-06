@@ -8,21 +8,28 @@ if TYPE_CHECKING:
     from any_llm.types.completion import ChatCompletionChunk
 
 
+def _is_blank(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
 def _is_empty_choice(choice: Any) -> bool:
-    """A choice that carries nothing: no finish reason and no content, tool call or refusal in its delta.
+    """A choice that carries nothing but a role: no finish reason and no payload at all.
 
     Bedrock's adapter puts the usage on such a choice: a chunk after the finish chunk whose only
-    choice has ``delta: {"role": "assistant"}`` and ``finish_reason: null``.
+    choice has ``delta: {"role": "assistant"}`` and ``finish_reason: null``. Every other field,
+    known or extra (content, tool calls, audio, logprobs, ...), makes the choice non-empty, so a
+    chunk that carries a payload next to its usage is never deferred and dropped as a usage report.
     """
     if choice.finish_reason is not None:
         return False
-    delta = getattr(choice, "delta", None)
-    if delta is None:
-        return True
-    return not any(
-        getattr(delta, field, None)
-        for field in ("content", "tool_calls", "function_call", "refusal", "reasoning", "reasoning_content")
-    )
+    rest = choice.model_dump(exclude_none=True) if hasattr(choice, "model_dump") else dict(vars(choice))
+    rest.pop("index", None)
+    rest.pop("finish_reason", None)
+    delta = rest.pop("delta", None) or {}
+    if not isinstance(delta, dict):
+        delta = delta.model_dump(exclude_none=True) if hasattr(delta, "model_dump") else dict(vars(delta))
+    delta.pop("role", None)
+    return all(_is_blank(value) for value in (*delta.values(), *rest.values()))
 
 
 def is_usage_only_chunk(chunk: ChatCompletionChunk) -> bool:

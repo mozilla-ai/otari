@@ -47,3 +47,23 @@ def test_a_chunk_without_usage_is_neither() -> None:
     chunk = _chunk([_choice()], usage=None)
     assert not is_usage_only_chunk(chunk)
     assert not is_chat_stream_cost_carrier(chunk)
+
+
+def test_a_usage_chunk_with_any_other_payload_is_not_usage_only() -> None:
+    """An OpenAI-compatible endpoint may put audio, or a field this code does not know, next to the usage.
+    That chunk carries a payload, so it must reach the client rather than be deferred as a usage report."""
+    audio = ChunkChoice.model_validate(
+        {"delta": {"role": "assistant", "audio": {"id": "a1", "data": "AAA"}}, "finish_reason": None, "index": 0}
+    )
+    unknown = ChunkChoice.model_validate(
+        {"delta": {"role": "assistant", "some_new_field": "x"}, "finish_reason": None, "index": 0}
+    )
+    for choice in (audio, unknown):
+        chunk = _chunk([choice])
+        assert not is_usage_only_chunk(chunk)
+        assert not is_chat_stream_cost_carrier(chunk)
+
+
+def test_an_empty_content_string_still_counts_as_an_empty_choice() -> None:
+    chunk = _chunk([_choice(content="")])
+    assert is_usage_only_chunk(chunk)
