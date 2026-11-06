@@ -8,6 +8,7 @@ from gateway.models.identity import (
     MAX_SUBJECT_LENGTH,
     EmailAssertion,
     ProviderIdentity,
+    oidc_identity_provider,
 )
 
 
@@ -69,3 +70,8 @@ def test_provider_identity_refuses_a_provider_over_255_characters() -> None:
             full_name=None,
             email_verified=EmailAssertion.UNASSERTED,
         )
+
+
+def test_oidc_identity_provider_refuses_an_issuer_that_would_not_fit() -> None:
+    with pytest.raises(ValueError):
+        oidc_identity_provider("https://" + "a" * 260)

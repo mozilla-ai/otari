@@ -1427,6 +1427,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
         "baseline": (),
     },
+    "gateway.models.identity.OIDCConnection": {
+        "repository": "gateway/repositories/identity/oidc_connection_repository.py",
+        "baseline": (),
+    },
     "gateway.models.inference.BatchRecord": {
         "repository": None,
         "baseline": ("gateway/services/batch_service.py",),

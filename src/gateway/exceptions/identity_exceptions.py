@@ -373,6 +373,44 @@ class OAuthIdentityLinkConflictError(TenancyConflictError):
         super().__init__(f"Another sign-in with that {provider} account finished first. Sign in again.")
 
 
+class OIDCConnectionConflictError(TenancyConflictError):
+    """Another request stored this organization's own sign-in connection first."""
+
+    def __init__(self) -> None:
+        super().__init__("Another change to this organization's sign-in connection finished first. Try again.")
+
+
+class OIDCConnectionNotFoundError(TenancyNotFoundError):
+    """An organization has not configured its own sign-in connection."""
+
+    def __init__(self) -> None:
+        super().__init__("This organization has not configured its own sign-in connection yet")
+
+
+class OIDCConnectionSecretRequiredError(TenancyValidationError):
+    """A submitted connection left the client secret out where the stored one cannot stand in."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Enter the client secret. The stored one is kept only when the issuer and the client ID both "
+            "stay the same, because a secret belongs to one client at one issuer."
+        )
+
+
+class OIDCDiscoveryError(TenancyValidationError):
+    """An organization's own OpenID Connect issuer could not be read into a usable configuration.
+
+    The message names the issuer field alone. It carries no host, no status code, and no provider
+    or transport text, because the issuer is an address the deployment did not choose and a refusal
+    must not describe the attempt back to whoever can read it.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This deployment could not read the issuer's OpenID configuration. Check the issuer address and try again."
+        )
+
+
 class CurrentPasswordIncorrectError(TenancyValidationError):
     """The current password given with a password change does not match.
 
@@ -588,6 +626,10 @@ __all__ = [
     "OAuthNotConfiguredError",
     "OAuthProviderUnavailableError",
     "OAuthStateError",
+    "OIDCConnectionConflictError",
+    "OIDCConnectionNotFoundError",
+    "OIDCConnectionSecretRequiredError",
+    "OIDCDiscoveryError",
     "PasskeyAlreadyRegisteredError",
     "PasskeyCeremonyError",
     "PasskeyLimitReachedError",
