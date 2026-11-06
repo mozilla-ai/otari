@@ -2920,13 +2920,15 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
 
     Returns True if a new entry was appended, False if otari hook was already
     registered here, whatever flags or executable path that entry named, and
-    its registration was reused. An entry holding sibling hook commands keeps
-    its own matcher and otari's hook item moves to an entry of its own,
-    because a matcher covers every command in its entry and narrowing one
-    here would narrow it for the siblings too. Only that item's `command` is
-    written, so another field on it survives either way. Every other key in
-    the file, including other hooks and permissions and other events, is
-    preserved untouched.
+    those registrations were reused. Every otari hook item in the event is
+    rewritten, not just the first, because Claude Code runs every entry whose
+    matcher matches and one left behind would keep enforcing what the others
+    no longer do. An entry holding sibling hook commands keeps its own matcher
+    and otari's hook item moves to an entry of its own, because a matcher
+    covers every command in its entry and narrowing one here would narrow it
+    for the siblings too. Only that item's `command` is written, so another
+    field on it survives either way. Every other key in the file, including
+    other hooks and permissions and other events, is preserved untouched.
     """
     if settings_path.is_file():
         try:
@@ -2944,32 +2946,35 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     entries = hooks_section.setdefault(event, [])
     if not isinstance(entries, list):
         raise click.ClickException(f'{settings_path}\'s "hooks.{event}" must be a JSON array.')
+
+    def entry_for(hook_item: dict[str, object]) -> dict[str, object]:
+        new_entry: dict[str, object] = {"hooks": [hook_item]}
+        return {"matcher": matcher, **new_entry} if matcher is not None else new_entry
+
     updated = False
-    split_item: dict[str, object] | None = None
+    split_items: list[dict[str, object]] = []
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
             continue
-        for index, hook_item in enumerate(entry["hooks"]):
+        # Reversed, because splitting pops the item this index names.
+        for index in reversed(range(len(entry["hooks"]))):
+            hook_item = entry["hooks"][index]
             existing_command = hook_item.get("command") if isinstance(hook_item, dict) else None
             if not isinstance(existing_command, str) or _otari_hook_argv(existing_command) is None:
                 continue
             if matcher is not None and len(entry["hooks"]) > 1:
                 split_item = entry["hooks"].pop(index)
                 split_item["command"] = command
+                split_items.append(split_item)
             else:
                 if matcher is not None:
                     entry["matcher"] = matcher
                 hook_item["command"] = command
             updated = True
-            break
-        if updated:
-            break
 
-    if not updated or split_item is not None:
-        new_entry: dict[str, object] = {"hooks": [split_item or {"type": "command", "command": command}]}
-        if matcher is not None:
-            new_entry = {"matcher": matcher, **new_entry}
-        entries.append(new_entry)
+    entries.extend(entry_for(item) for item in split_items)
+    if not updated:
+        entries.append(entry_for({"type": "command", "command": command}))
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
