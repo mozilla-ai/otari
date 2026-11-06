@@ -1892,7 +1892,7 @@ class OrganizationService:
         if password is not None:
             if not await self._invitation_may_set_password(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
-            if sso_blocks_membership(organization=organization, user=invitee, linked_providers=frozenset()):
+            if sso_blocks_membership(organization=organization, user=invitee, is_linked=False):
                 raise InvitationPasswordNotAcceptedError("sign in through this organization's own connection")
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
@@ -2592,11 +2592,11 @@ class OrganizationService:
         )
 
 
-def sso_blocks_membership(*, organization: Organization, user: User, linked_providers: frozenset[str]) -> bool:
+def sso_blocks_membership(*, organization: Organization, user: User, is_linked: bool) -> bool:
     """Whether this organization's SSO enforcement refuses this person from acting in it.
 
-    ``linked_providers`` is empty unless the person already holds a sign-in link to this
-    organization's own connection.
+    ``is_linked`` is whether the person already holds a sign-in link to this organization's own
+    connection.
 
     NOTE: Never true for the deployment's own master-key operator or for the organization's
     chosen break-glass exception.
@@ -2607,7 +2607,7 @@ def sso_blocks_membership(*, organization: Organization, user: User, linked_prov
         return False
     if organization.sso_break_glass_user_id == user.id:
         return False
-    return not linked_providers
+    return not is_linked
 
 
 __all__ = [

@@ -9,24 +9,22 @@ from gateway.repositories.identity.oidc_connection_repository import OIDCConnect
 from gateway.services.tenancy import OrganizationService, sso_blocks_membership
 
 
-async def linked_providers_for_organization(
+async def has_link_to_organization(
     organization: Organization,
     user_id: uuid.UUID,
     *,
     connections: OIDCConnectionRepository,
     links: OAuthIdentityLinkRepository,
-) -> frozenset[str]:
-    """Return the provider naming a sign-in link ``user_id`` already holds to ``organization``'s own connection.
+) -> bool:
+    """Whether ``user_id`` already holds a sign-in link to ``organization``'s own connection.
 
-    Empty where the organization has no connection, or the account holds no link to it.
+    False where the organization has no connection, as well as where the account holds no link.
     """
     connection = await connections.get_for_organization(organization.id)
     if connection is None:
-        return frozenset()
+        return False
     provider = oidc_identity_provider(connection.resolved_issuer)
-    if await links.get_for_user(provider=provider, user_id=user_id) is None:
-        return frozenset()
-    return frozenset({provider})
+    return await links.get_for_user(provider=provider, user_id=user_id) is not None
 
 
 async def sso_enforcement_blocks_any_membership(
@@ -41,10 +39,10 @@ async def sso_enforcement_blocks_any_membership(
         organization = await organizations.organizations.get(membership.organization_id)
         if organization is None:
             continue
-        linked = await linked_providers_for_organization(organization, user.id, connections=connections, links=links)
-        if sso_blocks_membership(organization=organization, user=user, linked_providers=linked):
+        linked = await has_link_to_organization(organization, user.id, connections=connections, links=links)
+        if sso_blocks_membership(organization=organization, user=user, is_linked=linked):
             return True
     return False
 
 
-__all__ = ["linked_providers_for_organization", "sso_enforcement_blocks_any_membership"]
+__all__ = ["has_link_to_organization", "sso_enforcement_blocks_any_membership"]

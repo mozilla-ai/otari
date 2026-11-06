@@ -37,7 +37,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityR
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
 from gateway.services.identity._enforcement import (
-    linked_providers_for_organization,
+    has_link_to_organization,
     sso_enforcement_blocks_any_membership,
 )
 from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
@@ -214,10 +214,10 @@ class IdentityService:
         """
 
         async def sso_enforcement_blocks(organization: Organization) -> bool:
-            linked = await linked_providers_for_organization(
+            linked = await has_link_to_organization(
                 organization, account.id, connections=self._connections, links=self._links
             )
-            return sso_blocks_membership(organization=organization, user=account, linked_providers=linked)
+            return sso_blocks_membership(organization=organization, user=account, is_linked=linked)
 
         async with self._uow:
             # The shared lock before any row lock, so a block holding it exclusive cannot deadlock against this.

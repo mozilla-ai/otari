@@ -198,7 +198,7 @@ async def test_enforcement_blocks_a_member_with_no_link_for_this_connection(asyn
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
 
-    assert sso_blocks_membership(organization=organization, user=member, linked_providers=frozenset()) is True
+    assert sso_blocks_membership(organization=organization, user=member, is_linked=False) is True
 
 
 async def test_enforcement_does_not_block_the_break_glass_owner(async_db: AsyncSession) -> None:
@@ -211,7 +211,7 @@ async def test_enforcement_does_not_block_the_break_glass_owner(async_db: AsyncS
     async_db.add(organization)
     await async_db.flush()
 
-    assert sso_blocks_membership(organization=organization, user=owner, linked_providers=frozenset()) is False
+    assert sso_blocks_membership(organization=organization, user=owner, is_linked=False) is False
 
 
 async def test_enforcement_does_not_block_the_master_key_operator(async_db: AsyncSession) -> None:
@@ -226,8 +226,8 @@ async def test_enforcement_does_not_block_the_master_key_operator(async_db: Asyn
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
 
-    assert sso_blocks_membership(organization=organization, user=operator, linked_providers=frozenset()) is False
-    assert sso_blocks_membership(organization=organization, user=member, linked_providers=frozenset()) is True
+    assert sso_blocks_membership(organization=organization, user=operator, is_linked=False) is False
+    assert sso_blocks_membership(organization=organization, user=member, is_linked=False) is True
 
 
 async def test_enforcement_does_not_block_a_member_linked_to_this_connection(async_db: AsyncSession) -> None:
@@ -240,10 +240,7 @@ async def test_enforcement_does_not_block_a_member_linked_to_this_connection(asy
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
 
-    assert (
-        sso_blocks_membership(organization=organization, user=member, linked_providers=frozenset({"oidc:acme"}))
-        is False
-    )
+    assert sso_blocks_membership(organization=organization, user=member, is_linked=True) is False
 
 
 async def test_enforcement_blocks_nobody_while_turned_off(async_db: AsyncSession) -> None:
@@ -252,7 +249,7 @@ async def test_enforcement_blocks_nobody_while_turned_off(async_db: AsyncSession
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
     )
 
-    assert sso_blocks_membership(organization=organization, user=member, linked_providers=frozenset()) is False
+    assert sso_blocks_membership(organization=organization, user=member, is_linked=False) is False
 
 
 # =============================================================================
