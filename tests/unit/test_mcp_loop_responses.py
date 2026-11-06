@@ -1208,6 +1208,7 @@ async def test_stream_counts_every_rounds_input(monkeypatch: pytest.MonkeyPatch)
     usage = cast(Any, events[-1]).response.usage
     assert usage.input_tokens == 4100
     assert usage.input_tokens_details.cached_tokens == 3800
+    assert usage.total_tokens == 4108
 
 
 @pytest.mark.asyncio
