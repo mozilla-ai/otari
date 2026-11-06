@@ -157,7 +157,7 @@ page in the same PR when behavior moves. Nothing fails when a docs page goes sta
 unlike the artifacts above, so a reader finds the drift rather than CI.
 
 The GitBook site publishes the pages [docs/SUMMARY.md](docs/SUMMARY.md) lists, on each
-release (`otari-docs.yml`, see [RELEASE.md](RELEASE.md)). A new page under `docs/` therefore owes
+release, and a preview of `main` on each push that changes them (`otari-docs.yml`, see [RELEASE.md](RELEASE.md)). A new page under `docs/` therefore owes
 a `SUMMARY.md` entry, and `tests/unit/test_gitbook_site.py` fails until it has one. Each `#`
 heading of `SUMMARY.md` is one entry of the site's top bar (Otari, Guides, Self-Hosting,
 Reference), which [docs/gitbook-docs.yaml](docs/gitbook-docs.yaml) declares; the build writes each
