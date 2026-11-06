@@ -34,6 +34,7 @@ from gateway.models.tenancy import (
 )
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.identity._discovery import DiscoveredProvider
+from gateway.services.password_service import hash_password
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
 _ENDPOINT = f"{API_ROOT}/organizations/me/sso"
@@ -56,9 +57,17 @@ def _organization(session: Session, *, slug: str) -> Organization:
     return organization
 
 
-def _identity(session: Session, *, email: str, organization_id: uuid.UUID, role: str) -> str:
-    """Create a member of ``organization_id`` with a live dashboard session, and return its cookie token."""
-    user = User(email=email, full_name=email.split("@")[0].title(), active_organization_id=organization_id)
+def _identity(session: Session, *, email: str, organization_id: uuid.UUID, role: str, password: bool = False) -> str:
+    """Create a member of ``organization_id`` with a live dashboard session, and return its cookie token.
+
+    ``password`` gives them a route in of their own, which an organization's break-glass owner needs.
+    """
+    user = User(
+        email=email,
+        full_name=email.split("@")[0].title(),
+        active_organization_id=organization_id,
+        hashed_password=hash_password("correct-horse-battery-staple") if password else None,
+    )
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -297,7 +306,9 @@ def test_the_response_reflects_enforcement_once_it_is_set(
     try:
         organization = _organization(session, slug="acme-enforcement-reflects")
         owner_email = "owner@acme-enforcement-reflects.test"
-        owner_token = _identity(session, email=owner_email, organization_id=organization.id, role="owner")
+        owner_token = _identity(
+            session, email=owner_email, organization_id=organization.id, role="owner", password=True
+        )
         session.add(_connection(organization.id, first_sign_in_at=datetime.now(UTC)))
         session.commit()
         # Naming the acting owner as the break-glass exception, rather than waiving it, so their

@@ -4389,8 +4389,10 @@ export interface paths {
          *
          *     Requiring sign-in is refused with 404 when the organization has not configured a connection yet,
          *     and with 400 before anybody has signed in through the connection, when it names no owner who keeps
-         *     another way in and waives none, or when the named account is not one of the organization's own
-         *     owners. Turning enforcement off has none of these preconditions and always succeeds.
+         *     another way in and waives none, or when the account it names could not sign in while the
+         *     connection is unavailable. An account named at all must be one of the organization's own active
+         *     owners, whether or not sign-in is being required. Turning enforcement off has no other
+         *     precondition.
          */
         put: operations["organization-sso-put_organization_sso_enforcement"];
         post?: never;

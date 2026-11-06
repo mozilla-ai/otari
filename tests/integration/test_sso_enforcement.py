@@ -22,10 +22,17 @@ from gateway.exceptions.identity_exceptions import (
     OIDCConnectionUnprovenError,
     PasswordLinkUnavailableError,
     SsoBreakGlassRequiredError,
+    SsoBreakGlassRouteRequiredError,
 )
 from gateway.exceptions.organizations_exceptions import InvitationPasswordNotAcceptedError, NotAuthorizedError
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, OIDCConnection, oidc_identity_provider
-from gateway.models.tenancy import DashboardSession, InviteOrganizationMemberRequest, Organization, User
+from gateway.models.tenancy import (
+    DashboardSession,
+    InviteOrganizationMemberRequest,
+    Organization,
+    User,
+    WebAuthnCredential,
+)
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
@@ -34,6 +41,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.identity import IdentityService, OIDCConnectionService
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.mail import Mailer
+from gateway.services.password_service import hash_password
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
@@ -72,6 +80,7 @@ def _connection_service(db: AsyncSession) -> OIDCConnectionService:
         organizations=OrganizationService(db, membership_listener=None),
         domains=OrganizationDomainRepository(uow),
         allow_private_hosts=False,
+        passkey_rp_id="otari.test",
     )
 
 
@@ -98,11 +107,16 @@ async def _add_connection(
 
 
 async def _member_with_email(
-    db: AsyncSession, organization: Organization, *, role: str, email: str, full_name: str
+    db: AsyncSession, organization: Organization, *, role: str, email: str, full_name: str, password: bool = False
 ) -> User:
+    """Create a member of ``organization``, optionally holding a password as a route in of their own."""
     user = await UserRepository(db).create_local_identity(
         email=email, full_name=full_name, active_organization_id=organization.id
     )
+    if password:
+        user.hashed_password = hash_password("correct-horse-battery-staple")
+        db.add(user)
+        await db.flush()
     await OrganizationMemberRepository(db).create_membership(
         organization_id=organization.id, user_id=user.id, role=role
     )
@@ -319,7 +333,7 @@ async def test_enforcement_is_permitted_with_an_explicit_waiver(async_db: AsyncS
 async def test_enforcement_is_permitted_with_a_break_glass_owner_exception(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(
-        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+        async_db, organization, role="owner", password=True, email="owner@acme.example", full_name="Ada Owner"
     )
     await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
 
@@ -380,7 +394,7 @@ async def test_disabling_enforcement_succeeds_once_its_connection_is_gone(async_
     """An organization must always have a way to turn enforcement off, even with no connection left."""
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(
-        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+        async_db, organization, role="owner", password=True, email="owner@acme.example", full_name="Ada Owner"
     )
     connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
     await async_db.commit()
@@ -421,7 +435,7 @@ async def test_enforcement_cannot_be_set_by_a_caller_who_cannot_manage_the_organ
 async def test_deleting_an_enforced_connection_is_refused(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(
-        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+        async_db, organization, role="owner", password=True, email="owner@acme.example", full_name="Ada Owner"
     )
     connection = await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
     await async_db.commit()
@@ -448,7 +462,7 @@ async def test_disabling_enforcement_recovers_the_lockout_a_deleted_connection_w
     """
     organization = await create_organization(async_db, slug="acme")
     owner = await _member_with_email(
-        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+        async_db, organization, role="owner", password=True, email="owner@acme.example", full_name="Ada Owner"
     )
     member = await _member_with_email(
         async_db, organization, role="member", email="mo@acme.example", full_name="Mo Member"
@@ -673,6 +687,51 @@ async def test_the_deployment_operator_reaches_an_enforcing_organization(async_d
     signed_in = await _identity_service(async_db).sign_in(operator)
 
     assert signed_in.active_organization_id == organization.id
+
+
+async def test_enforcement_is_refused_when_the_named_owner_could_not_sign_in_without_it(
+    async_db: AsyncSession,
+) -> None:
+    """An exemption for an account that cannot authenticate without the connection is no exemption."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    with pytest.raises(SsoBreakGlassRouteRequiredError):
+        await _connection_service(async_db).set_sso_enforcement_for_user(
+            user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+        )
+
+    assert (await _reloaded(async_db, organization)).sso_required is False
+
+
+async def test_enforcement_is_permitted_where_the_named_owner_keeps_a_passkey(async_db: AsyncSession) -> None:
+    """A passkey needs no provider, so it is a route in while the connection is unavailable."""
+    organization = await create_organization(async_db, slug="acme")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="owner@acme.example", full_name="Ada Owner"
+    )
+    async_db.add(
+        WebAuthnCredential(
+            user_id=owner.id,
+            name="Ada's key",
+            rp_id="otari.test",
+            credential_id="a-credential",
+            public_key="a-public-key",
+            sign_count=0,
+        )
+    )
+    await _add_connection(async_db, organization.id, first_sign_in_at=datetime.now(UTC))
+    await async_db.commit()
+
+    await _connection_service(async_db).set_sso_enforcement_for_user(
+        user=owner, required=True, break_glass_user_id=owner.id, break_glass_waived=False
+    )
+
+    assert (await _reloaded(async_db, organization)).sso_required is True
 
 
 async def test_one_tenant_enforcement_does_not_lock_a_person_out_of_another(async_db: AsyncSession) -> None:

@@ -15,6 +15,7 @@ from gateway.exceptions.identity_exceptions import (
     OIDCConnectionUnprovenError,
     OIDCDiscoveryError,
     SsoBreakGlassRequiredError,
+    SsoBreakGlassRouteRequiredError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
@@ -39,6 +40,7 @@ from gateway.services.identity._connection_clients import client_for, pending_fl
 from gateway.services.identity._discovery import DISCOVERY_TTL, DiscoveredProvider, discover_connection_metadata
 from gateway.services.identity._enforcement import (
     has_link_to_organization,
+    has_route_without,
     sso_enforcement_refuses_every_membership,
 )
 from gateway.services.identity._membership import organization_for_email_domain
@@ -108,14 +110,18 @@ class OIDCConnectionService:
         organizations: OrganizationService,
         domains: OrganizationDomainRepository,
         allow_private_hosts: bool,
+        passkey_rp_id: str | None,
     ) -> None:
         self._uow = uow
         self._connections = repositories.connections
         self._links = repositories.links
+        self._passkeys = repositories.passkeys
         self._sessions = repositories.sessions
+        self._users = repositories.users
         self._organizations = organizations
         self._domains = domains
         self._allow_private_hosts = allow_private_hosts
+        self._passkey_rp_id = passkey_rp_id
 
     async def _managed_organization(self, user: User) -> Organization:
         """The caller's active organization, with their authority to manage it proven.
@@ -432,6 +438,8 @@ class OIDCConnectionService:
                 the connection.
             SsoBreakGlassRequiredError: An account is named that is not one of the organization's
                 own active owners, or ``required`` is set naming none and waiving none.
+            SsoBreakGlassRouteRequiredError: ``required`` is set naming an account that could not
+                sign in while the connection is unavailable.
         """
         organization = await self._managed_organization(user)
 
@@ -472,7 +480,26 @@ class OIDCConnectionService:
             raise OIDCConnectionUnprovenError
         if break_glass_user_id is None and not break_glass_waived:
             raise SsoBreakGlassRequiredError
+        if break_glass_user_id is not None:
+            await self._require_a_route_without_the_connection(break_glass_user_id, connection)
         return connection
+
+    async def _require_a_route_without_the_connection(self, user_id: uuid.UUID, connection: OIDCConnection) -> None:
+        """Refuse an exempted owner who could not sign in while this connection is unavailable.
+
+        Raises:
+            SsoBreakGlassRouteRequiredError: The account holds no password, no passkey of this
+                deployment's and no link at another provider.
+        """
+        account = await self._users.get(user_id)
+        if account is None or not await has_route_without(
+            account,
+            provider=oidc_identity_provider(connection.resolved_issuer),
+            passkey_rp_id=self._passkey_rp_id,
+            links=self._links,
+            passkeys=self._passkeys,
+        ):
+            raise SsoBreakGlassRouteRequiredError
 
     async def _require_break_glass_owner(self, organization: Organization, user_id: uuid.UUID) -> None:
         """Refuse a break-glass account that is not one of this organization's own active owners.
