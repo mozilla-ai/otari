@@ -280,7 +280,7 @@ async def run_tool_loop(
     1. ``exit_before_split``: format-level terminal check that runs before any
        tool accounting (chat: no choices, or finish_reason is not
        ``tool_calls``). When it fires, nothing is executed even if the result
-       carries gateway-owned calls.
+       carries gateway-owned calls. They are filtered out as in step 3.
     2. Foreign tools present: mixed batches execute the owned subset for its
        side effects and filter it from the returned result, so the caller only
        sees calls it can dispatch itself. Note the ordering divergence kept
@@ -289,7 +289,8 @@ async def run_tool_loop(
        the model stopped for another reason, while chat never reaches this
        branch unless finish_reason was ``tool_calls``.
     3. Nothing owned, or ``exit_after_split`` (messages: stop_reason is not
-       ``tool_use``): return the result as the final answer.
+       ``tool_use``): return the result as the final answer, without the owned
+       calls of a round the model stopped short, as the streaming loop does.
     4. Otherwise execute the owned calls, extend the transcript, and iterate.
 
     ``on_first_response`` is invoked once, right after the first upstream call
@@ -325,18 +326,19 @@ async def run_tool_loop(
                 on_first_response()
         strategy.accumulate_usage(acc, result)
 
-        if strategy.exit_before_split(result):
-            strategy.fold_usage(result, acc)
-            return result
-
+        stopped = strategy.exit_before_split(result)
         owned, has_foreign = strategy.split_owned(result, pool)
-        if has_foreign:
+        if has_foreign and not stopped:
             if owned:
                 await strategy.execute_owned(pool, owned, acc)
                 strategy.filter_owned(result, owned, pool)
             strategy.fold_usage(result, acc)
             return result
-        if not owned or strategy.exit_after_split(result):
+        if stopped or not owned or strategy.exit_after_split(result):
+            if owned:
+                # The model stopped before finishing these calls (a token limit, say), so
+                # the gateway does not run them, and the caller never declared the tools.
+                strategy.filter_owned(result, owned, pool)
             strategy.fold_usage(result, acc)
             return result
 

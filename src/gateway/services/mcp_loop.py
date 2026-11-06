@@ -508,6 +508,9 @@ class _ChatToolLoopStrategy:
         return not result.choices or result.choices[0].finish_reason != "tool_calls"
 
     def split_owned(self, result: ChatCompletion, pool: ToolBackend) -> tuple[list[Any], bool]:
+        """The gateway's calls in the first choice, and whether the caller's own calls sit beside them."""
+        if not result.choices:
+            return [], False
         sdk_calls = result.choices[0].message.tool_calls or []
         # Duck-type the SDK tool-call: any object with a `.function` attribute is a
         # function tool-call. We avoid `isinstance` here because `acompletion`'s
@@ -531,15 +534,12 @@ class _ChatToolLoopStrategy:
         return await self._run_into(pool, owned, acc)
 
     def filter_owned(self, result: ChatCompletion, owned: list[Any], pool: ToolBackend) -> None:
-        # Mixed batch: the MCP-owned subset was executed internally so its
-        # work isn't wasted; filter those calls out of the returned completion
-        # so the caller only sees tool_calls it can itself dispatch. The
-        # conversation continues client-side; if the caller wants to keep
-        # using the gateway's MCP tools they'll send the foreign-tool results
-        # back on the next request.
+        """Drop the gateway's calls from the answer, so the caller only sees calls it can dispatch."""
         choice = result.choices[0]
         sdk_calls = choice.message.tool_calls or []
-        foreign_sdk_calls = [tc for tc in sdk_calls if hasattr(tc, "function") and not pool.owns_tool(tc.function.name)]
+        foreign_sdk_calls = [
+            tc for tc in sdk_calls if not (hasattr(tc, "function") and pool.owns_tool(tc.function.name))
+        ]
         try:
             choice.message.tool_calls = foreign_sdk_calls or None
         except (AttributeError, TypeError):
