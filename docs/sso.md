@@ -34,9 +34,8 @@ email address, so API keys, budgets, and usage stay on whichever account
 already held them: an identity change never moves them to a new account.
 
 Where the organization already holds another account for the address a
-connection's first sign-in claims, the new account's first visit to the
-dashboard carries a message saying so and naming no other account's details.
-The two accounts are never merged automatically.
+connection's first sign-in claims, the two accounts are never merged
+automatically and neither one is told about the other.
 
 **API keys are rotated, not moved.** A key stranded on an older account stays
 usable from that account; there is no operation that transfers a key to
