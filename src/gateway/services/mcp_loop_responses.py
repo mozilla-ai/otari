@@ -420,7 +420,10 @@ class _ResponsesToolLoopStrategy:
         return _split_function_calls(list(result.output or []), pool)
 
     def exit_after_split(self, result: Response) -> bool:
-        return False
+        # The provider said why the round stopped short (the token limit, a content
+        # filter), so a call's arguments may be cut. Not ``status``: any-llm's Gemini
+        # adapter reports a round that asks for a function call as ``incomplete`` too.
+        return result.incomplete_details is not None
 
     async def execute_owned(
         self, pool: ToolBackend, owned: list[Any], acc: dict[str, Any] | None = None
