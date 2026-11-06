@@ -139,11 +139,6 @@ class UsageSetPriceResult(BaseModel):
     unchanged: int = 0
 
 
-def usage_in(workspaces: Select[uuid.UUID]) -> ColumnElement[bool]:
-    """Match the usage rows of these workspaces: the scope of the operator's usage reads."""
-    return UsageLog.workspace_id.in_(workspaces)
-
-
 def _selection_conditions(
     selection: UsageSelection, *, workspace_ids: Collection[uuid.UUID] | Select[uuid.UUID]
 ) -> list[ColumnElement[bool]]:
