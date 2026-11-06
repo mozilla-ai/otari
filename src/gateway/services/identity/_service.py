@@ -37,7 +37,7 @@ from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
 from gateway.services.identity._enforcement import (
     has_link_to_organization,
-    sso_enforcement_blocks_any_membership,
+    sso_enforcement_refuses_every_membership,
 )
 from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
 from gateway.services.mail import Mailer
@@ -391,11 +391,11 @@ class IdentityService:
                 "No organization still has this unverified address as a member or invitee. "
                 "Add or invite it again first."
             )
-        if await sso_enforcement_blocks_any_membership(
+        if await sso_enforcement_refuses_every_membership(
             account, organizations=self._organizations, connections=self._connections, links=self._links
         ):
             raise PasswordLinkUnavailableError(
-                "An organization this account belongs to requires sign-in through its own connection."
+                "Every organization this account belongs to requires sign-in through its own connection."
             )
 
     def _stage_reset_token(self, account: User, token: str) -> datetime:

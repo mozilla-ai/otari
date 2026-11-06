@@ -211,9 +211,9 @@ async def set_password(
     opened, say) would still work, letting whoever holds it undo the change.
     """
     validate_new_password(new_password)
-    if await sso_enforcement.blocks_any_membership(user=identity):
+    if await sso_enforcement.refuses_every_membership(user=identity):
         raise PasswordLinkUnavailableError(
-            "An organization this account belongs to requires sign-in through its own connection."
+            "Every organization this account belongs to requires sign-in through its own connection."
         )
     vouches_for_the_address = email is not None or identity.hashed_password is None
     if email is not None:
@@ -689,7 +689,7 @@ async def request_password_reset(
         identity is None
         or not identity.is_active
         or not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup)
-        or await sso_enforcement.blocks_any_membership(user=identity)
+        or await sso_enforcement.refuses_every_membership(user=identity)
     ):
         await verify_absent_password_async(_TIMING_EQUALIZER)
         return
@@ -775,7 +775,7 @@ async def reset_password(
     pending = await users.get_by_reset_token_hash(hash_token(token))
     if pending is not None and pending.email is not None and await blocked_addresses.blocked_among([pending.email]):
         raise ResetTokenInvalidError
-    if pending is not None and await sso_enforcement.blocks_any_membership(user=pending):
+    if pending is not None and await sso_enforcement.refuses_every_membership(user=pending):
         raise ResetTokenInvalidError
     identity = await _locked_reset_identity(users, organizations, token=token, open_signup=config.open_signup)
     validate_new_password(new_password)

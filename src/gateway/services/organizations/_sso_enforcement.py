@@ -12,8 +12,8 @@ class SsoEnforcement(Protocol):
     it before staging any write, or inside a block already open on that Unit of Work.
     """
 
-    async def blocks_any_membership(self, *, user: User) -> bool:
-        """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
+    async def refuses_every_membership(self, *, user: User) -> bool:
+        """Whether every organization ``user`` actively belongs to refuses them a way in outside its connection."""
         ...
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:

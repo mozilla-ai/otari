@@ -27,22 +27,29 @@ async def has_link_to_organization(
     return await links.get_for_user(provider=provider, user_id=user_id) is not None
 
 
-async def sso_enforcement_blocks_any_membership(
+async def sso_enforcement_refuses_every_membership(
     user: User,
     *,
     organizations: OrganizationService,
     connections: OIDCConnectionRepository,
     links: OAuthIdentityLinkRepository,
 ) -> bool:
-    """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""
-    for membership in await organizations.members.get_by_user(user.id, active_only=True):
+    """Whether every organization ``user`` actively belongs to refuses them a way in outside its own connection.
+
+    False where the account belongs to no organization, so an account outside every organization is
+    refused nothing.
+    """
+    memberships = await organizations.members.get_by_user(user.id, active_only=True)
+    if not memberships:
+        return False
+    for membership in memberships:
         organization = await organizations.organizations.get(membership.organization_id)
         if organization is None or not organization.sso_required:
-            continue
+            return False
         linked = await has_link_to_organization(organization, user.id, connections=connections, links=links)
-        if sso_blocks_membership(organization=organization, user=user, is_linked=linked):
-            return True
-    return False
+        if not sso_blocks_membership(organization=organization, user=user, is_linked=linked):
+            return False
+    return True
 
 
-__all__ = ["has_link_to_organization", "sso_enforcement_blocks_any_membership"]
+__all__ = ["has_link_to_organization", "sso_enforcement_refuses_every_membership"]

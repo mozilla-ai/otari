@@ -768,6 +768,35 @@ async def test_setting_a_dashboard_password_is_refused_for_a_member_of_an_enforc
     assert member.hashed_password is None
 
 
+async def test_setting_a_dashboard_password_is_allowed_where_another_organization_admits_them(
+    client: TestClient, async_db: AsyncSession
+) -> None:
+    """Enforcement attaches to a membership, so one organization's setting does not take the password
+    that signs the person into another."""
+    enforcing = await create_organization(async_db, slug="acme")
+    enforcing.sso_required = True
+    enforcing.sso_break_glass_waived = True
+    async_db.add(enforcing)
+    other = await create_organization(async_db, slug="other")
+    member = await _member_with_email(
+        async_db, enforcing, role="member", email="mo@acme.example", full_name="Mo Member"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=other.id, user_id=member.id, role="member"
+    )
+    member.active_organization_id = other.id
+    async_db.add(member)
+    token = await _dashboard_session(async_db, member)
+    await async_db.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+
+    response = client.put(f"{API_ROOT}/auth/password", json={"new_password": "correct-horse-battery-staple"})
+
+    assert response.status_code == 200, response.text
+    await async_db.refresh(member)
+    assert member.hashed_password is not None
+
+
 async def test_requesting_a_password_reset_cannot_be_told_apart_from_an_unknown_address(
     client: TestClient,
     async_db: AsyncSession,
