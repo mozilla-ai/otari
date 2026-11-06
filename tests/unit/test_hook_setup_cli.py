@@ -95,7 +95,7 @@ def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> No
     assert entry["hooks"][0]["command"] == f"{_FAKE_OTARI_PATH} hook --harness claude-code"
 
 
-def test_accepting_the_starter_policy_writes_one_and_its_command_gate_adds_bash(repo: Path) -> None:
+def test_accepting_the_starter_policy_writes_one_and_its_gates_widen_the_matcher(repo: Path) -> None:
     """The single file, the smaller of the two shapes to start with."""
     result = _invoke(input="y\n")
     assert result.exit_code == 0, result.output
@@ -104,7 +104,24 @@ def test_accepting_the_starter_policy_writes_one_and_its_command_gate_adds_bash(
     assert not (repo / hook_cli.GUARDRAIL_DIR).is_dir()
     assert "command" in gates_file.read_text(encoding="utf-8")
     settings = _read_settings(repo)
-    assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Bash"
+    assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read|Bash"
+
+
+def test_the_starter_policy_gates_a_shell_read_of_the_env_file(repo: Path) -> None:
+    """A read gate alone sees the Read tool, so the starter pairs it with a command gate."""
+    assert _invoke(input="y\n").exit_code == 0
+    body = (repo / hook_cli.GUARDRAIL_FILE).read_text(encoding="utf-8")
+    assert "pre_tool_use.read_target" in body
+    assert "pre_tool_use.command" in body
+    assert body.count(".env") >= 2
+
+
+def test_the_starter_policy_validates_with_no_unaccepted_warning(repo: Path) -> None:
+    """The starter has to demonstrate the pairing it ships, not trip the warning that asks for it."""
+    assert _invoke(input="y\n").exit_code == 0
+    result = CliRunner().invoke(hook_cli.guardrails, ["validate", "--strict"])
+    assert result.exit_code == 0, result.output
+    assert "shell-read-unseen" not in result.output
 
 
 def test_an_existing_path_only_policy_keeps_bash_out_of_the_matcher(repo: Path) -> None:

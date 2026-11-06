@@ -81,7 +81,7 @@ otari hook setup
 
 This writes a `PreToolUse` entry and a `Stop` entry into `.claude/settings.local.json`, both naming this install's own `otari hook --harness claude-code`. Restart Claude Code if a gate does not fire in the session `setup` ran in.
 
-When the repository has no guardrail yet, `setup` offers to write a starter `.otari/guardrails.yml` first, so there is something to check rather than a hook that always passes. The starter carries one `command` gate refusing `git push --force` and one `path` gate keeping `.env` out of the tree, both `advisory`.
+When the repository has no guardrail yet, `setup` offers to write a starter `.otari/guardrails.yml` first, so there is something to check rather than a hook that always passes. The starter carries four `advisory` gates: a `command` gate refusing `git push --force`, a `path` gate keeping `.env` out of the tree, and a `path` gate refusing to read a `.env` paired with the `command` gate that covers its shell side. That last pair is there because a read gate alone sees your harness's read tool and nothing a shell command reads, and unlike a write nothing catches that afterwards; see [Reads have no second moment](#reads-have-no-second-moment).
 
 Re-running `setup` updates both entries in place and leaves every other hook and permission in the file untouched. Re-run it when the guardrail gains its first `command` gate or its first gate naming `pre_tool_use.read_target`, so the `PreToolUse` matcher picks up the tool that gate needs. An ordinary `path` gate needs no re-run. What `setup` writes is shown under [Registering it by hand](agent-guardrails-reference.md#registering-it-by-hand).
 
